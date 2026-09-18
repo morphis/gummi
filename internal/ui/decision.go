@@ -469,6 +469,13 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// gate earlier, over the answer set stageActions reorders to
 		// match.
 		if critiqueUnsettled(in) {
+			// A goal's review is answered by its conductor, so the card's
+			// sentence — which invites a reader to cross or send back —
+			// describes a decision the rows beneath it do not offer. Say
+			// whose the answer was and what is left instead.
+			if r.F.IsGoal() && r.F.Stage == domain.StageImplement {
+				return "the goal's review asked for changes its cards did not answer — decide how it finishes."
+			}
 			return string(r.F.Stage) + " " + critiqueVerdict(in) + " — choose what happens next."
 		}
 		return string(r.F.Stage) + " is ready for your decision."

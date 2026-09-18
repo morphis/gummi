@@ -35,6 +35,51 @@ func TestDecide(t *testing.T) {
 			},
 			want: Outcome{Action: RaiseGate, Stage: domain.StagePlan, Reason: "critique-pass"},
 		},
+		// --- a goal's own review --------------------------------------
+		// A goal's review is answered by its conductor, never by a stage
+		// and never by a reader, so where a card parks a goal hands over.
+		{
+			name: "a goal's review asking for changes still reworks while its cards can act",
+			in: Input{
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindGoal,
+				Verdict: verdict.Changes, Corrective: 0, CorrectiveMax: 3, WorkStage: workStage,
+			},
+			want: Outcome{Action: BounceToWork, Stage: domain.StageImplement, Reason: "critique-changes", Burns: true},
+		},
+		{
+			name: "a settled goal's review hands over instead of reworking a finished conductor",
+			in: Input{
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindGoal,
+				Verdict: verdict.Changes, Corrective: 0, CorrectiveMax: 3, WorkStage: workStage,
+				GoalSettled: true,
+			},
+			want: Outcome{Action: HandOver, Stage: domain.StageImplement, Reason: "goal-review-unactionable"},
+		},
+		{
+			name: "a goal that spent its rounds hands over instead of parking in an inbox",
+			in: Input{
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindGoal,
+				Verdict: verdict.Changes, Corrective: 3, CorrectiveMax: 3, WorkStage: workStage,
+			},
+			want: Outcome{Action: HandOver, Stage: domain.StageImplement, Reason: "goal-review-cap"},
+		},
+		{
+			name: "a goal's review with no clear verdict hands over too",
+			in: Input{
+				Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindGoal,
+				Verdict: verdict.Unclear, Corrective: 0, CorrectiveMax: 3, WorkStage: workStage,
+			},
+			want: Outcome{Action: HandOver, Stage: domain.StageImplement, Reason: "goal-review-unclear"},
+		},
+		{
+			name: "a goal's PLAN critique still stops for a person — the plan is the one conversation",
+			in: Input{
+				Stage: domain.StagePlan, Forward: domain.StageImplement, Kind: domain.KindGoal,
+				Verdict: verdict.Changes, Corrective: 3, CorrectiveMax: 3, WorkStage: workStage,
+				GoalSettled: true,
+			},
+			want: Outcome{Action: Park, Stage: domain.StagePlan, Reason: "critique-changes-cap"},
+		},
 		{
 			name: "critique changes under cap reworks the SAME stage and burns",
 			in: Input{

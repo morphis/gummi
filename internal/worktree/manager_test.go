@@ -767,3 +767,118 @@ func TestNestedManagerRoots(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 }
+
+// TestForkDriftNamesTheBranchItForkedFrom: drift has two causes and the
+// message owes a reader the right one. A card adopted out of a goal forked
+// from the goal branch, whose commits main has never seen — nothing
+// happened to main, so the reflog remedy would send a reader hunting for a
+// rewind that never occurred.
+func TestForkDriftNamesTheBranchItForkedFrom(t *testing.T) {
+	rewound := &ForkDriftError{FeatureID: "BG-001", Branch: "bug/x", Recorded: "abc1234", MainHead: "def5678"}
+	if got := rewound.Error(); !strings.Contains(got, "reflog") {
+		t.Fatalf("a rewound main keeps its remedy: %q", got)
+	}
+	moved := &ForkDriftError{FeatureID: "FD-004", Branch: "feat/y", Recorded: "abc1234", MainHead: "def5678",
+		ForkedFrom: "goal/ship-it"}
+	got := moved.Error()
+	if strings.Contains(got, "reflog") {
+		t.Fatalf("nothing happened to main here — no reflog advice: %q", got)
+	}
+	if !strings.Contains(got, "goal/ship-it") || !strings.Contains(got, "Land goal/ship-it first") {
+		t.Fatalf("it names the branch it forked from and the remedy that works: %q", got)
+	}
+}
+
+// TestRebaseResolvingFinishesWhatItCanAndAbortsWhatItCannot: a goal has
+// two places a merge conflict happens — main into the goal branch, and a
+// card onto the goal branch as it lands — and only the first was cheap.
+// The second aborted and sent a verified card back through a whole
+// implement stage to replay a rebase. A resolver gets the conflict where
+// it stopped; anything it cannot finish falls back to exactly the old
+// behaviour, so asking costs a caller nothing.
+func TestRebaseResolvingFinishesWhatItCanAndAbortsWhatItCannot(t *testing.T) {
+	setup := func(t *testing.T) (*Manager, *domain.Feature, string) {
+		t.Helper()
+		root := newRepo(t)
+		m := newManager(t, root)
+		f := feature(11, "Resolving")
+		p, err := m.Create(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeFile(t, p, "README.md", "the card's version\n")
+		mustGit(t, p, "add", ".")
+		mustGit(t, p, "commit", "-q", "-m", "card edit")
+		writeFile(t, root, "README.md", "the base's version\n")
+		mustGit(t, root, "add", ".")
+		mustGit(t, root, "commit", "-q", "-m", "base edit")
+		return m, f, p
+	}
+
+	// a resolver that does the job: the rebase runs through
+	m, f, p := setup(t)
+	called := 0
+	err := m.RebaseOnMainResolving(ctx, f, func(_ context.Context, dir string, files []string) error {
+		called++
+		if len(files) != 1 || files[0] != "README.md" {
+			t.Fatalf("the resolver is handed the conflicted files, got %v", files)
+		}
+		writeFile(t, dir, "README.md", "both sides\n")
+		mustGit(t, dir, "add", "README.md")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("a resolved rebase completes: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("the resolver ran %d times, want 1", called)
+	}
+	body, rerr := os.ReadFile(filepath.Join(p, "README.md"))
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(body) != "both sides\n" {
+		t.Fatalf("the resolution is what landed: %q", body)
+	}
+	if rebaseInProgressAt(t, p) {
+		t.Fatal("nothing is left mid-rebase")
+	}
+	if out := mustGit(t, p, "status", "--porcelain"); out != "" {
+		t.Fatalf("the worktree is clean: %q", out)
+	}
+
+	// a resolver that cannot: the old behaviour, exactly
+	m, f, p = setup(t)
+	err = m.RebaseOnMainResolving(ctx, f, func(context.Context, string, []string) error {
+		return errors.New("no idea")
+	})
+	var ce *RebaseConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *RebaseConflictError, got %T: %v", err, err)
+	}
+	if len(ce.Files) != 1 || ce.Files[0] != "README.md" {
+		t.Fatalf("it still names the conflicted files: %v", ce.Files)
+	}
+	if rebaseInProgressAt(t, p) {
+		t.Fatal("a rebase that cannot be resolved is aborted, never left in progress")
+	}
+	if out := mustGit(t, p, "status", "--porcelain"); out != "" {
+		t.Fatalf("and the worktree is clean: %q", out)
+	}
+}
+
+// rebaseInProgressAt reports whether p is sitting mid-rebase (.git is a
+// file in a worktree, so ask git where the state would live).
+func rebaseInProgressAt(t *testing.T, p string) bool {
+	t.Helper()
+	for _, name := range []string{"rebase-merge", "rebase-apply"} {
+		dir := mustGit(t, p, "rev-parse", "--git-path", name)
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(p, dir)
+		}
+		if _, err := os.Stat(dir); err == nil {
+			return true
+		}
+	}
+	return false
+}

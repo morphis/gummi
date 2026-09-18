@@ -15,8 +15,10 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/gatepolicy"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -463,5 +465,119 @@ func TestTheGoalPageOpensItsCards(t *testing.T) {
 	}
 	if m.cardOpen || m.goalReturn != "" || m.sel != 1 {
 		t.Fatalf("esc leaves the card and selects the goal: open=%v return=%q sel=%d", m.cardOpen, m.goalReturn, m.sel)
+	}
+}
+
+// TestAGoalsReviewEndsOnItsReportNotInYourInbox: this loop had no goal arm
+// at all. A goal's own review asking for changes nothing can make burned
+// the rework rounds against a conductor that had already finished and then
+// raised an escalation — parking the goal in the inbox behind a picker
+// with no row that answers one. gatepolicy now returns HandOver for it and
+// this is the arm that carries it out: the reason is recorded as what made
+// the result partial, the goal moves on to its verify, and nothing reaches
+// the inbox.
+func TestAGoalsReviewEndsOnItsReportNotInYourInbox(t *testing.T) {
+	m, _, store, g := goalWorkspace(t) // a goal at its conducted implement stage
+	ctx := context.Background()
+
+	out := gatepolicy.Outcome{Action: gatepolicy.HandOver, Stage: domain.StageImplement, Reason: "goal-review-cap"}
+	m = pump(t, m, m.goalReviewUnactionable(g.ID, out))
+
+	got, err := store.GetFeature(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Goal.Partial == "" {
+		t.Fatal("the review's ending is what makes the result partial")
+	}
+	if !strings.Contains(got.Goal.Partial, "could not make") {
+		t.Fatalf("the reason names which ending it was: %q", got.Goal.Partial)
+	}
+	if got.Stage != domain.StageVerify {
+		t.Fatalf("the goal goes on to its verify and its hand-over, got %s", got.Stage)
+	}
+	if _, queued := m.inbox.get(g.ID); queued {
+		t.Fatal("a goal's review must never park it in the inbox — its one stop is the hand-over")
+	}
+}
+
+// TestAGoalsReviewNeverParks guards the invariant the arm above exists to
+// keep: whatever its review says, a goal at its review is handed over or
+// reworked, never parked for a reader. Park is a card's ending.
+func TestAGoalsReviewNeverParks(t *testing.T) {
+	for _, v := range []verdict.Verdict{verdict.Pass, verdict.Changes, verdict.Unclear} {
+		for _, settled := range []bool{false, true} {
+			for _, round := range []int{0, 3} {
+				out := gatepolicy.Decide(gatepolicy.Input{
+					Stage: domain.StageImplement, Forward: domain.StageVerify, Kind: domain.KindGoal,
+					Verdict: v, Corrective: round, CorrectiveMax: 3,
+					WorkStage: domain.StageImplement, GoalSettled: settled,
+				})
+				if out.Action == gatepolicy.Park {
+					t.Fatalf("a goal's review parked (verdict %v, settled %v, round %d): %s", v, settled, round, out.Reason)
+				}
+			}
+		}
+	}
+}
+
+// TestAStoppedGoalIsNotOfferedAStop: "stop the goal" promises that
+// verified work lands and the rest is dropped — acts only a running
+// conductor performs. The arm used to return it whatever the goal was
+// doing, including to a goal whose conductor had already given up, where
+// it was also the recommendation. A stopped goal gets its endings instead.
+func TestAStoppedGoalIsNotOfferedAStop(t *testing.T) {
+	ids := func(acts []nextAction) []string {
+		var out []string
+		for _, a := range acts {
+			out = append(out, a.id)
+		}
+		return out
+	}
+	has := func(acts []nextAction, id string) bool {
+		for _, a := range acts {
+			if a.id == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	conducting := nextInput{stage: domain.StageImplement, kind: domain.KindGoal}
+	if got := nextActions(conducting); !has(got, "goalstop") {
+		t.Fatalf("a conducting goal keeps its stop: %v", ids(got))
+	}
+
+	// a finished session of its own is what the conductor reads as busy
+	// and refuses to tick behind — the goal is not conducting anything
+	stopped := nextInput{stage: domain.StageImplement, kind: domain.KindGoal, sess: engine.StateDone}
+	got := nextActions(stopped)
+	if has(got, "goalstop") {
+		t.Fatalf("a goal that is not conducting must not be offered a stop: %v", ids(got))
+	}
+	for _, want := range []string{"advance", "bounce", "goalpage"} {
+		if !has(got, want) {
+			t.Fatalf("a stopped goal is offered %q: %v", want, ids(got))
+		}
+	}
+	if got[0].id != "advance" {
+		t.Fatalf("the recommendation is the act that finishes it, got %q", got[0].id)
+	}
+
+	// and so is an attention item: the goal stopped for a reader
+	if got := nextActions(nextInput{stage: domain.StageImplement, kind: domain.KindGoal, attn: attnGate}); has(got, "goalstop") {
+		t.Fatalf("a goal stopped for you must not be offered a stop: %v", ids(got))
+	}
+}
+
+// TestAGoalsReviewGateSaysWhoseAnswerItIs: the head over the picker used
+// to be the card's ("implement critique asked for changes — choose what
+// happens next"), inviting a decision whose rows a goal never carries.
+func TestAGoalsReviewGateSaysWhoseAnswerItIs(t *testing.T) {
+	r := featureRow{F: domain.Feature{ID: "GL-001", Kind: domain.KindGoal, Stage: domain.StageImplement}}
+	in := nextInput{stage: domain.StageImplement, kind: domain.KindGoal, sess: engine.StateDone, verdict: verdictChanges, exited: true}
+	got := decisionQuestion(decisionGate, r, in)
+	if !strings.Contains(got, "its cards") {
+		t.Fatalf("a goal's review gate names whose answer it was: %q", got)
 	}
 }

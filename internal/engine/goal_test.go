@@ -620,3 +620,186 @@ func TestDroppedButReplacedCardLeavesTheGoalWhole(t *testing.T) {
 		t.Fatalf("a replaced card leaves the goal whole, got partial %q", got.Goal.Partial)
 	}
 }
+
+// TestTheGoalsReviewIsToldWhatTheGoalSettled: a goal that dropped the only
+// card serving a done-when item has already decided that item is out of
+// reach. Its review must be told, because the review's own contract makes
+// an unmet item a blocking finding — and a blocking finding sends the goal
+// back to a lead with no card left to send it to, which is the loop that
+// burns the rework cap and hands the goal to a human. The scope note and
+// the report's partial reason come from one derivation, so they can never
+// name different items.
+func TestTheGoalsReviewIsToldWhatTheGoalSettled(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	doc := strings.Replace(testGoalDoc, "  depends_on: [local cache for export]\n", "", 1)
+	g := goalAtPlan(t, store, wt, doc, 6000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	view, err := e.GoalView(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goalReviewScope(view); got != "" {
+		t.Fatalf("a goal that gave nothing up tells its review nothing:\n%s", got)
+	}
+
+	cards := goalCards(t, store, g.ID)
+	docs, ok := view.Card(cards[1].ID)
+	if !ok {
+		t.Fatalf("%s is not a card of %s", cards[1].ID, g.ID)
+	}
+	if err := e.goalDrop(ctx, view.Goal, docs.Feature, "the goal is wrapping up: no budget left", "lead"); err != nil {
+		t.Fatal(err)
+	}
+	view, err = e.GoalView(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := goalReviewScope(view)
+	for _, want := range []string{
+		"DW-2",                       // the item that lost its card
+		"the docs mention the cache", // in the reader's own words
+		"Out of scope",
+		"NOT blocking",
+		string(docs.Feature.ID), // the card that was dropped
+		"no budget left",        // and why
+	} {
+		if !strings.Contains(scope, want) {
+			t.Fatalf("the review's scope note must carry %q:\n%s", want, scope)
+		}
+	}
+	if got := goalPartialReason(view); !strings.Contains(got, "DW-2") {
+		t.Fatalf("the report's partial reason comes from the same derivation, got %q", got)
+	}
+}
+
+// TestStoppingAGoalBehindItsOwnReviewStillFinishesIt: a finished session
+// of the goal's own — its review, left registered so a reader can read it
+// — is what goalView reports as Reviewing, and Decide returns no actions
+// at all while that is true. Stopping the goal then stamped a wrap-up
+// nothing would carry out: no verified card landed, nothing was dropped,
+// and the goal never came back partial, while the board said "wrapping
+// up". The stop drops the finished session so its own wrap-up has a
+// conductor to run it.
+func TestStoppingAGoalBehindItsOwnReviewStillFinishesIt(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v", res.Status, err)
+	}
+	tick(t, e, g.ID)
+
+	// the goal's own review, run to completion and left registered
+	cur, err := store.GetFeature(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RunCritique(cur, ""); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(10 * time.Second)
+	for {
+		s := e.Get(g.ID)
+		if s != nil && !s.Live() {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the goal's review never finished")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// the conductor is switched off behind it: this is the state the stop
+	// used to be offered in, and silently do nothing in
+	if view, verr := e.GoalView(ctx, g.ID); verr != nil {
+		t.Fatal(verr)
+	} else if !view.Input.Reviewing {
+		t.Fatal("a registered session is what the conductor reads as reviewing")
+	} else if acts := goalpolicy.Decide(view.Input); len(acts) != 0 {
+		t.Fatalf("nothing is conducted while it reviews: %v", acts)
+	}
+
+	if err := e.StopGoal(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if s := e.Get(g.ID); s != nil {
+		t.Fatal("the stop drops the finished review so its wrap-up has a conductor")
+	}
+	if r := tick(t, e, g.ID); !r.Finished && len(r.Actions) == 0 {
+		t.Fatal("a stopped goal must actually finish, not sit stamped as wrapping up")
+	}
+	got, _ := store.GetFeature(ctx, g.ID)
+	if got.Goal.Partial == "" {
+		t.Fatal("and comes back partial, as the stop promised")
+	}
+}
+
+// TestAdoptingACardWhoseBranchCannotMoveChangesNothing: a card in a goal
+// forks from the goal branch, so its recorded fork point is a commit main
+// has never seen. The adoption used to reopen the card, clear its goal and
+// only then try to move the branch — and report success when that move
+// failed, handing back a card on the open board still anchored to the goal
+// branch. Every later drift check reads that as main having been rewritten
+// under it, and the board refuses to drive it. A move that cannot be made
+// is now a refusal that leaves the card exactly as it was.
+func TestAdoptingACardWhoseBranchCannotMoveChangesNothing(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	root := wt.Root()
+
+	doc := strings.Replace(testGoalDoc, "  depends_on: [local cache for export]\n", "", 1)
+	g := goalAtPlan(t, store, wt, doc, 4000)
+	// the goal branch carries a file main has never seen
+	goalDir := filepath.Join(root, g.WorktreePath())
+	if err := os.WriteFile(filepath.Join(goalDir, "shared.txt"), []byte("from the goal\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, goalDir, "add", "-A")
+	gitIn(t, goalDir, "commit", "-q", "-m", "goal scaffolding")
+
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	cards := goalCards(t, store, g.ID)
+	card := cards[0]
+	// its own commit edits the goal branch's file, so replaying it onto
+	// main — which does not have the file at all — cannot apply
+	gm, err := e.pool.ManagerFor(ctx, &card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cardDir, err := gm.Create(ctx, &card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cardDir, "shared.txt"), []byte("from the card\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, cardDir, "add", "-A")
+	gitIn(t, cardDir, "commit", "-q", "-m", "card work")
+
+	view, _ := e.GoalView(ctx, g.ID)
+	gc, _ := view.Card(card.ID)
+	if err := e.goalDrop(ctx, view.Goal, gc.Feature, "no budget left", "lead"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.Adopt(ctx, card.ID, "user"); err == nil {
+		t.Fatal("adopting a card whose branch cannot leave the goal branch must be refused")
+	} else if !strings.Contains(err.Error(), string(g.ID)) {
+		t.Fatalf("the refusal names the goal to land first: %v", err)
+	}
+	got, err := store.GetFeature(ctx, card.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.InGoal() || !got.GoalDropped() {
+		t.Fatalf("a refused adoption leaves the card in its goal: %+v", got)
+	}
+	if got.Stage != domain.StageDone {
+		t.Fatalf("and leaves it closed, adoptable again once the goal has landed: stage %s", got.Stage)
+	}
+}

@@ -40,6 +40,19 @@ const (
 	// a cap hit, an environment blocker, or anything else no further
 	// automatic round can resolve.
 	Park
+	// HandOver ends a goal's own review loop: record why the result is
+	// partial and take the goal on to its verify and its hand-over,
+	// rather than spending rounds on a request nothing can act on or
+	// parking a goal in a human's inbox.
+	//
+	// It exists because Park is the wrong ending for a goal. A card that
+	// parks has an implementer behind it and a person who can read the
+	// findings and decide; a goal at its review has a conductor that has
+	// already finished, so parking it stops the one loop that could have
+	// produced an answer and offers a reader a decision the board has no
+	// rows for. A goal's stops belong on its report — "ready for you" is
+	// the one stop of a running goal that reaches a person.
+	HandOver
 )
 
 // String names an Action for log lines and test failure output.
@@ -53,6 +66,8 @@ func (a Action) String() string {
 		return "raise-gate"
 	case Park:
 		return "park"
+	case HandOver:
+		return "hand-over"
 	default:
 		return "unknown"
 	}
@@ -137,6 +152,16 @@ type Input struct {
 	// caller supplies it (workflow.WorkStage(kind)) rather than
 	// gatepolicy importing internal/workflow to compute it.
 	WorkStage domain.Stage
+	// GoalSettled reports that the goal has nothing left that could make
+	// the changes its own review is asking for: it has wrapped up, so
+	// nothing new starts, or it has already recorded done-when items it
+	// gave up on because every card serving them was dropped.
+	//
+	// Both callers read it off the goal card alone
+	// (Goal.WrappingUp() || Goal.Partial != ""), so neither needs a store
+	// round-trip to decide, and neither can hold a different idea of when
+	// a goal's review has stopped being actionable.
+	GoalSettled bool
 	// VerifyMayBounce gates whether a failed verify under the corrective
 	// cap may auto-bounce to WorkStage instead of escalating to a human.
 	// It exists so the rule table can state that row once, in code and
@@ -218,13 +243,39 @@ func decideCritique(in Input) Outcome {
 		}
 		return Outcome{Action: Advance, Stage: in.Forward, Reason: "critique-pass"}
 	case verdict.Changes:
+		// A goal's review is answered by its conductor, not by a stage
+		// and not by a reader. Where a card would park, a goal hands
+		// over: a settled goal has no card left to make the change, and a
+		// goal that has spent its rounds has proved the same thing the
+		// expensive way. Both endings put the findings on the report,
+		// which is where a person meets them.
+		if goalReview(in) {
+			switch {
+			case in.GoalSettled:
+				return Outcome{Action: HandOver, Stage: in.Stage, Reason: "goal-review-unactionable"}
+			case in.Corrective >= in.CorrectiveMax:
+				return Outcome{Action: HandOver, Stage: in.Stage, Reason: "goal-review-cap"}
+			}
+		}
 		if in.Corrective >= in.CorrectiveMax {
 			return Outcome{Action: Park, Stage: in.Stage, Reason: "critique-changes-cap"}
 		}
 		return Outcome{Action: BounceToWork, Stage: in.Stage, Reason: "critique-changes", Burns: true}
 	default:
+		if goalReview(in) {
+			// the same rule one verdict over: a reviewer that produced no
+			// verdict is not a decision a goal's reader has rows to make
+			// either, so it lands on the report rather than in an inbox.
+			return Outcome{Action: HandOver, Stage: in.Stage, Reason: "goal-review-unclear"}
+		}
 		return Outcome{Action: Park, Stage: in.Stage, Reason: "critique-unclear"}
 	}
+}
+
+// goalReview reports the one critique a conductor answers rather than a
+// stage: a goal's review of its own combined branch.
+func goalReview(in Input) bool {
+	return in.Kind == domain.KindGoal && in.Stage == domain.StageImplement
 }
 
 // decideVerify resolves a finished verify session. Blocked is kept fully

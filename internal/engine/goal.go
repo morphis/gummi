@@ -552,7 +552,9 @@ func (e *Engine) goalDrop(ctx context.Context, goal, card domain.Feature, reason
 	if !card.GoalAttached {
 		return e.goalCloseDropped(ctx, card)
 	}
-	return e.goalDetach(ctx, goal, card)
+	// the goal is finished with it: better on the board with a branch to
+	// rebase than held inside a goal that has ended
+	return e.goalDetach(ctx, goal, card, false)
 }
 
 // goalCloseDropped ends a card the goal created and then dropped. It
@@ -571,22 +573,43 @@ func (e *Engine) goalCloseDropped(ctx context.Context, card domain.Feature) erro
 }
 
 // goalDetach returns an attached card to the open board.
-func (e *Engine) goalDetach(ctx context.Context, goal, card domain.Feature) error {
+func (e *Engine) goalDetach(ctx context.Context, goal, card domain.Feature, mustMove bool) error {
 	gm, gerr := e.pool.ManagerFor(ctx, &card)
 	fork := ""
 	if gerr == nil {
 		fork, _ = gm.ForkPoint(ctx, &card)
 	}
+	// The branch moves home BEFORE the card leaves the goal, and with
+	// mustMove a move that fails leaves the card where it was.
+	//
+	// A card in a goal forks from the goal branch, so its recorded fork
+	// point is a commit that main has never seen. Clearing the goal first
+	// and then letting the move fail produced a card on the open board
+	// still anchored there — which every later drift check reads as main
+	// having been rewritten under it, and which the board then refuses to
+	// drive. The adoption looked like it had worked. Cards whose worktree
+	// path is the same under either manager (both resolve it from the
+	// workspace root) make the order free to choose.
+	home := card
+	home.GoalID, home.GoalAttached, home.GoalDroppedAt = "", false, time.Time{}
+	detail := "back on the board with its work kept"
+	moveErr := gerr
+	if main, err := e.pool.ManagerForName(ctx, card.Repo); err == nil {
+		moveErr = main.RebaseOnto(ctx, &home, fork)
+	} else if moveErr == nil {
+		moveErr = err
+	}
+	if moveErr != nil {
+		if mustMove {
+			return fmt.Errorf("%s stays in %s: its branch cannot move off the goal branch (%w) — land %s first, then take it back",
+				card.ID, goal.ID, moveErr, goal.ID)
+		}
+		detail = "back on the board; moving its branch onto main failed (" + moveErr.Error() + ") — rebase it before working on it"
+	}
 	if err := e.cfg.Store.ClearGoal(ctx, card.ID); err != nil {
 		return err
 	}
-	card.GoalID, card.GoalAttached, card.GoalDroppedAt = "", false, time.Time{}
-	detail := "back on the board with its work kept"
-	if main, err := e.pool.ManagerFor(ctx, &card); err == nil {
-		if merr := main.RebaseOnto(ctx, &card, fork); merr != nil {
-			detail = "back on the board; moving its branch onto main failed (" + merr.Error() + ") — rebase it before working on it"
-		}
-	}
+	card = home
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDetached, Card: card.ID, Detail: detail, By: ActorGoal})
 	// An attached card that is released reappears on the board mid-stage
 	// with no session and nothing saying where it has been — and if the
@@ -685,7 +708,17 @@ func (e *Engine) goalLand(ctx context.Context, goal, card domain.Feature) ([]Goa
 	}
 	if !rebased {
 		head, _ := gm.MainHead(ctx)
-		if err := gm.RebaseOnMain(ctx, &card); err != nil {
+		// A conflict here is the goal's own doing — another of its cards
+		// landed while this one was being verified — so it resolves it
+		// with the same bounded session its catch-up uses, and falls back
+		// to the bounce only when that cannot. The card is verified
+		// already; sending it back through a fresh implement, its
+		// critique and its verify to replay a rebase was the expensive
+		// answer to the frequent case.
+		resolve := func(rctx context.Context, dir string, files []string) error {
+			return e.resolveGoalRebase(rctx, goal, card, dir, files)
+		}
+		if err := gm.RebaseOnMainResolving(ctx, &card, resolve); err != nil {
 			var rc *worktree.RebaseConflictError
 			if errors.As(err, &rc) {
 				st, berr := e.goalBounce(ctx, goal, card, fmt.Sprintf(
@@ -847,11 +880,19 @@ func (e *Engine) goalCatchUpTree(ctx context.Context, goal domain.Feature, t wor
 // branch — the implement stage's critique pass, which from here runs
 // through the driving loop like any card's.
 func (e *Engine) goalFinish(ctx context.Context, goal domain.Feature, reason string) error {
+	// One read for both halves of the same fact: which items lost every
+	// card serving them makes the goal partial, AND is what the review
+	// must be told before it judges the branch.
+	view, verr := e.goalView(ctx, goal)
 	if !goal.Goal.WrappingUp() {
 		// dropped cards make a goal partial only when an agreed item lost
 		// every card that served it: a card the lead replaced left nothing
 		// of the goal unmet
-		reason = e.goalPartialReason(ctx, goal)
+		if verr == nil {
+			reason = goalPartialReason(view)
+		} else {
+			reason = ""
+		}
 	}
 	if err := e.cfg.Store.SetGoalPartial(ctx, goal.ID, reason); err != nil {
 		return err
@@ -865,19 +906,78 @@ func (e *Engine) goalFinish(ctx context.Context, goal domain.Feature, reason str
 	if err != nil {
 		return err
 	}
-	return e.RunCritique(cur, "")
+	scope := ""
+	if verr == nil {
+		scope = goalReviewScope(view)
+	}
+	return e.RunCritique(cur, scope)
 }
 
-// goalPartialReason names the done-when items whose every serving card was
-// dropped, "" when each item still has a card that landed or is running.
-func (e *Engine) goalPartialReason(ctx context.Context, goal domain.Feature) string {
-	view, err := e.goalView(ctx, goal)
-	if err != nil {
+// goalReviewScope is what the goal's review is told before it judges the
+// combined branch: which done-when items the goal's own decisions put out
+// of reach, and which cards were dropped.
+//
+// Without it the review is asked a question whose answer the goal already
+// knows. Its contract says to name every done-when item the diff does not
+// meet and to make each one a blocking finding — so a goal that dropped a
+// card (which is what running out of budget MEANS) is guaranteed a
+// `changes` verdict naming work nothing can do. The rework goes to a
+// conductor that has finished, the diff comes back unrevised, and the
+// critique re-finds the same item until the round cap. Naming the settled
+// scope up front costs one paragraph and removes the whole loop: the
+// review then judges the work that was attempted, and `changes` goes back
+// to meaning something the lead can act on.
+func goalReviewScope(v GoalView) string {
+	lost := goalLostItems(v)
+	var dropped []GoalCard
+	for _, c := range v.Cards {
+		if c.State == goalpolicy.Dropped {
+			dropped = append(dropped, c)
+		}
+	}
+	if len(lost) == 0 && len(dropped) == 0 {
 		return ""
 	}
+	says := map[string]string{}
+	for _, d := range v.DoneWhen {
+		says[d.ID] = d.Says
+	}
+	var b strings.Builder
+	b.WriteString("What this goal settled before the review. These are decisions already taken, not findings for you to make.\n")
+	if len(lost) > 0 {
+		b.WriteString("\nOut of scope — every card serving these done-when items was dropped, so the combined branch cannot meet them:\n")
+		for _, id := range lost {
+			b.WriteString("  " + id)
+			if s := says[id]; s != "" {
+				b.WriteString(" — " + s)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("Record each as not met with that reason. They are NOT blocking findings and must not set your verdict to changes: no card remains that could make the change.\n")
+	}
+	if len(dropped) > 0 {
+		b.WriteString("\nDropped cards, whose work is not on the branch:\n")
+		for _, c := range dropped {
+			line := "  " + string(c.Feature.ID) + " — " + c.Feature.Title
+			if c.Reason != "" {
+				line += " (" + c.Reason + ")"
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+	b.WriteString("\nJudge the work that was attempted: whether it meets the items still in scope, whether the cards fit together, and whether the Limits were respected.")
+	return b.String()
+}
+
+// goalLostItems names the done-when items whose every serving card was
+// dropped — the items the goal's own decisions put out of reach. It is
+// the one derivation behind both what makes a goal partial and what its
+// review is told is out of scope, so the report and the reviewer can
+// never disagree about which items were given up on.
+func goalLostItems(v GoalView) []string {
 	alive := map[string]bool{}
 	served := map[string]bool{}
-	for _, c := range view.Cards {
+	for _, c := range v.Cards {
 		for _, s := range c.Serves {
 			served[s] = true
 			if c.State != goalpolicy.Dropped {
@@ -886,11 +986,18 @@ func (e *Engine) goalPartialReason(ctx context.Context, goal domain.Feature) str
 		}
 	}
 	var lost []string
-	for _, d := range view.DoneWhen {
+	for _, d := range v.DoneWhen {
 		if served[d.ID] && !alive[d.ID] {
 			lost = append(lost, d.ID)
 		}
 	}
+	return lost
+}
+
+// goalPartialReason is goalLostItems as the report's one-line reason, ""
+// when each item still has a card that landed or is running.
+func goalPartialReason(v GoalView) string {
+	lost := goalLostItems(v)
 	if len(lost) == 0 {
 		return ""
 	}
@@ -1277,6 +1384,17 @@ func (e *Engine) StopGoal(ctx context.Context, goalID domain.FeatureID) error {
 	}
 	if err := e.goalWrapUp(ctx, goalID, "you stopped the goal", "user"); err != nil {
 		return err
+	}
+	// A finished session of the goal's own — its review, left registered
+	// so a reader can still read it — is what goalView reports as
+	// Reviewing, and Decide returns no actions at all while that is true.
+	// Stamping a wrap-up behind one recorded an intention nothing would
+	// carry out: no verified card landed, nothing was dropped, and the
+	// goal never came back partial, while the board said "wrapping up".
+	// The transcript is persisted, so dropping the finished session costs
+	// the reader nothing and gives the wrap-up a conductor to run it.
+	if s := e.Get(goalID); s != nil && !s.Live() {
+		e.Drop(goalID)
 	}
 	e.send(Event{Feature: goalID, Stage: goal.Stage, Kind: EventGoal})
 	return nil

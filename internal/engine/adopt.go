@@ -21,16 +21,16 @@ import (
 //
 // It is the inverse of the drop, step for step:
 //
-//  1. Reopen the stage the close took the card out of, read from the
+//  1. Move its branch off the goal branch and take it out of the goal,
+//     which is what an attached card's release already does (goalDetach).
+//     The branch keeps everything it had written. Here the move must
+//     succeed: unlike a release, an adoption is someone asking to drive
+//     the card now, and a branch left forked from the goal branch is one
+//     every drift check refuses.
+//  2. Reopen the stage the close took the card out of, read from the
 //     closing transition rather than guessed (state.ReopenGoalDropped).
 //     `done` stays terminal in the workflow — the drop did not walk the
 //     graph on the way in, and this does not add an edge to it.
-//  2. Take it out of the goal and move its branch onto main, which is
-//     exactly what an attached card's release already does (goalDetach).
-//     The branch keeps everything it had written; a failed rebase is
-//     reported in the detach line rather than failing the adoption, since
-//     a card on the board with a branch to rebase is strictly better than
-//     a card still inside a goal that is finished with it.
 //
 // The goal's log records it, so the goal's own report still accounts for
 // the card it dropped and what became of it afterwards.
@@ -55,14 +55,21 @@ func (e *Engine) Adopt(ctx context.Context, id domain.FeatureID, actor string) (
 			goal = g
 		}
 	}
+	// The branch moves home first, and mustMove makes a move that cannot
+	// be made a refusal. An adoption is someone asking to drive this card
+	// now: handing back a card whose branch still forks from the goal
+	// branch hands back one the board will not run, because every drift
+	// check reads that fork as main having been rewritten under it. The
+	// reopen comes after, so a refusal leaves the card exactly as it was
+	// — closed, in its goal, adoptable again once the goal has landed.
+	if err := e.goalDetach(ctx, goal, f, true); err != nil {
+		return domain.Feature{}, err
+	}
 	back, err := e.cfg.Store.ReopenGoalDropped(ctx, id, actor, e.now())
 	if err != nil {
 		return domain.Feature{}, err
 	}
 	f.Stage = back
-	if err := e.goalDetach(ctx, goal, f); err != nil {
-		return domain.Feature{}, err
-	}
 	// The card's OWN log, not just the goal's. A card that reappears on
 	// the board mid-stage with no session and no explanation is the
 	// silent half of the same problem: the goal's log is where the goal's

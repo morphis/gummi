@@ -829,6 +829,22 @@ func stageActions(in nextInput) []nextAction {
 
 	case domain.StageImplement:
 		if in.kind == domain.KindGoal {
+			// A goal that has stopped is offered its endings, not a stop.
+			// "Stop the goal" promises that verified work lands and the
+			// rest is dropped — acts only a running conductor performs —
+			// and this arm used to offer it whatever the goal was doing,
+			// including to a goal whose conductor had already given up.
+			// The row was then the recommendation, and taking it stamped a
+			// wrap-up nothing would carry out.
+			if goalStopped(in) {
+				return []nextAction{
+					nextStep("advance", "g", "take it to verify",
+						"cross the gate — its done-when checks run and it comes back as your hand-over"),
+					sendBackStep("bounce", "b", "send it back to its cards — your line goes to its lead"),
+					nextStep("goalpage", "P", "open the goal page",
+						"the done-when list, the cards (enter watches one), the budget and the lead's log"),
+				}
+			}
 			// a goal's implement stage is conducted: nothing to run by
 			// hand, and typing into the composer is a note to its lead
 			return []nextAction{
@@ -1047,6 +1063,19 @@ func closedActions(in nextInput) []nextAction {
 // pending ask keep the full answer set": it replaces it.
 func answerIt() nextAction {
 	return nextStep("run", "enter", "answer it", "the agent asked a question and is blocked on your reply")
+}
+
+// goalStopped reports a goal whose conductor is not conducting: it has
+// stopped for a reader (an attention item), or a finished session of its
+// own is registered against it — which is exactly what the conductor
+// reads as "reviewing" and refuses to tick behind
+// (engine.goalView's Reviewing, goalpolicy.Decide's first line).
+//
+// It is the goal's half of the judgement stopHere makes for a card, and
+// exists for the same reason: an action that has already happened, or
+// that nothing would carry out, is not an answer to offer.
+func goalStopped(in nextInput) bool {
+	return in.attn != "" || (in.sess != "" && !in.live)
 }
 
 // stopHere is the "stop here" answer, or nothing when there is nothing

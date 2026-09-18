@@ -271,6 +271,7 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		Corrective:    m.round(id, kind),
 		CorrectiveMax: maxRounds,
 		WorkStage:     domain.StageImplement,
+		GoalSettled:   snap.Feature.GoalSettled(),
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
@@ -327,6 +328,18 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		}
 		m.setRound(id, kind, 0)
 		return m.autoStep(id, out.Stage, "critique passed → "+string(out.Stage), "review")
+	case gatepolicy.HandOver:
+		// A goal's own review asked for changes nothing can make. This
+		// loop used to have no goal arm at all: the rounds burned against
+		// a conductor that had finished, and the cap handed the goal to a
+		// reader whose picker has no row that answers it. gatepolicy owns
+		// the rule now, so this loop and the driver end a goal the same
+		// way — on its report, which is where a person meets a goal.
+		if err := rounds.Reset(context.Background(), m.roundStore, id, kind); err != nil {
+			return m.writeHalt(id, err)
+		}
+		m.setRound(id, kind, 0)
+		return m.goalReviewUnactionable(id, out)
 	case gatepolicy.BounceToWork:
 		// persist the burned round before it lands in the fast path, so a
 		// mid-loop resume observes it.

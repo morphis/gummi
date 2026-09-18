@@ -108,8 +108,15 @@ combined diff of the goal branch against main and the results of the
 goal's checks. Review the combined change against the goal doc — not
 one card at a time, which each card's own review already did:
   objective   — does the combined change do what the Objective and the
-                done-when items say? Name each item the diff does not
-                meet, quoting it.
+                done-when items IN SCOPE say? Name each item the diff
+                does not meet, quoting it.
+
+When the kickoff names items as out of scope, the goal has already
+given up on them: every card serving them was dropped and none remains
+to make the change. Record each as not met with that reason, and do NOT
+make it a blocking finding — a blocking finding sends the goal back to
+a lead that has no card to send it to. Your verdict is about the work
+that was attempted.
   fit         — do the cards fit together: duplicated helpers, choices
                 that contradict each other, half-finished paths one card
                 started and another abandoned, leftovers of dropped cards

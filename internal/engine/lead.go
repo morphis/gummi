@@ -1275,6 +1275,35 @@ func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, v
 // resolve the conflicted files and nothing else. gummi — not the session —
 // concludes the merge, and only when no path is left unmerged.
 func (e *Engine) resolveGoalCatchUp(ctx context.Context, goal domain.Feature, tree worktree.GoalTree, files []string) error {
+	hint := "You are resolving a merge of main into a goal branch. The merge is already in progress in your working directory. " +
+		"Resolve the conflict markers in the conflicted files so both sides' intent survives, `git add` each resolved file, and stop. " +
+		"Do not commit, do not abort the merge, and do not change anything else."
+	if err := e.resolveConflicts(ctx, goal, tree.Dir, hint, files); err != nil {
+		return err
+	}
+	return tree.ConcludeMerge(ctx)
+}
+
+// resolveGoalRebase is the same bounded session one conflict site over:
+// a card's own commits being replayed onto the goal branch as it lands,
+// which the landing used to answer by sending the card back to a full
+// implement stage — a fresh write, its critique and its verify — to
+// replay a rebase. The card is already verified; what it needs is the
+// conflict resolved, not to be built again.
+func (e *Engine) resolveGoalRebase(ctx context.Context, goal, card domain.Feature, dir string, files []string) error {
+	hint := "You are resolving a rebase of one card's branch onto the goal branch it lands on. The rebase is already in progress in your working directory " +
+		"and has stopped on a conflicting commit. Resolve the conflict markers so both sides' intent survives — the goal branch's side is work that has " +
+		"already landed from another card, and this branch's side is " + string(card.ID) + "'s own — then `git add` each resolved file and stop. " +
+		"Do not commit, do not continue or abort the rebase, and do not change anything else."
+	return e.resolveConflicts(ctx, goal, dir, hint, files)
+}
+
+// resolveConflicts runs one bounded, synchronous implementer session in
+// dir to resolve the conflicts of an operation already in progress there.
+// It is booked to the goal's own budget like a lead turn, and never
+// concludes the operation itself — the caller owns that, because only the
+// caller knows whether the thing in progress is a merge or a rebase.
+func (e *Engine) resolveConflicts(ctx context.Context, goal domain.Feature, dir, hint string, files []string) error {
 	rc, backend := e.resolveRole(goal.Profile, agent.RoleImplementer)
 	ag := e.agentFor(backend)
 	if ag == nil {
@@ -1287,15 +1316,12 @@ func (e *Engine) resolveGoalCatchUp(ctx context.Context, goal domain.Feature, tr
 	if view.Ledger.OwnBudget() < e.turnReserve() {
 		return errors.New("the goal has no budget left to resolve conflicts")
 	}
-	workDir := tree.Dir
 	tctx, cancel := context.WithTimeout(ctx, leadTurnTimeout)
 	defer cancel()
 	sess, err := ag.NewSession(tctx, agent.SessionOpts{
-		WorkDir: workDir, Role: agent.RoleImplementer, Model: rc.Model, Provider: rc.Provider, Think: rc.Think,
+		WorkDir: dir, Role: agent.RoleImplementer, Model: rc.Model, Provider: rc.Provider, Think: rc.Think,
 		Permission: e.cfg.Permission, MaxCredits: min(view.Ledger.OwnBudget(), 200) * capHeadroom,
-		SystemHints: []string{"You are resolving a merge of main into a goal branch. The merge is already in progress in your working directory. " +
-			"Resolve the conflict markers in the conflicted files so both sides' intent survives, `git add` each resolved file, and stop. " +
-			"Do not commit, do not abort the merge, and do not change anything else."},
+		SystemHints: []string{hint},
 	})
 	if err != nil {
 		return err
@@ -1304,18 +1330,17 @@ func (e *Engine) resolveGoalCatchUp(ctx context.Context, goal domain.Feature, tr
 	if err := sess.Send(tctx, "Resolve the conflicts in: "+strings.Join(files, ", ")); err != nil {
 		return err
 	}
-drain:
 	for {
 		select {
 		case ev, ok := <-sess.Events():
 			if !ok {
-				break drain
+				return nil
 			}
 			switch ev.Kind {
 			case agent.EventUsage:
 				e.recordLeadUsage(goal.ID, ev.Usage)
 			case agent.EventIdle, agent.EventBudgetExhausted:
-				break drain
+				return nil
 			case agent.EventError:
 				return ev.Err
 			}
@@ -1323,7 +1348,6 @@ drain:
 			return tctx.Err()
 		}
 	}
-	return tree.ConcludeMerge(ctx)
 }
 
 // --- a tool endpoint for MCP backends --------------------------------------

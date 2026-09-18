@@ -606,6 +606,19 @@ func (f *Feature) Conducted() bool {
 	return f.InGoal() && !f.GoalDropped() && f.Stage != StageDone
 }
 
+// GoalSettled reports a goal that has nothing left which could make the
+// changes its own review asks for: it has wrapped up, so nothing new
+// starts, or it has already recorded done-when items it gave up on
+// because every card serving them was dropped.
+//
+// It is read off the card alone so both driving loops answer it the same
+// way without a store round-trip, and so neither can hold its own idea of
+// when a goal's review has stopped being actionable
+// (gatepolicy.Input.GoalSettled).
+func (f *Feature) GoalSettled() bool {
+	return f.IsGoal() && (f.Goal.WrappingUp() || f.Goal.Partial != "")
+}
+
 // GateMode returns the feature's gate-approval mode with the empty
 // default resolved, the same job kind() does for Kind. Every read of
 // GateApproval that branches on the mode must go through this: the field

@@ -876,6 +876,79 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 	return nil
 }
 
+// ResolveConflicts is handed an in-progress rebase's conflicted files to
+// resolve in dir. It must resolve and `git add` each one and return; it
+// must not commit, continue, or abort the rebase itself.
+type ResolveConflicts func(ctx context.Context, dir string, files []string) error
+
+// maxRebaseSteps bounds how many commits a resolving rebase will work
+// through. A card's branch carries a handful of commits, so a rebase that
+// keeps stopping past this is not making progress and is better aborted
+// than left running an agent per step.
+const maxRebaseSteps = 12
+
+// RebaseOnMainResolving rebases the feature branch onto its base like
+// RebaseOnMain, but hands a rebase that stops on conflicts to resolve
+// rather than aborting on the spot — continuing through as many commits
+// as conflict, and aborting (so the worktree is never left mid-rebase)
+// only when resolving stops working.
+//
+// It exists because a goal has two places a merge conflict can happen and
+// only one of them was cheap. Catching the goal branch up with main hands
+// its conflicts to a bounded side session; a card's rebase onto the goal
+// branch at landing time aborted and sent the card back to a full
+// implement stage, which then re-ran its critique and its verify — the
+// expensive path for the frequent case, since with more than one lane
+// every card after the first lands onto a branch that moved, and cards a
+// goal decomposed out of one area touch the same files by construction.
+//
+// The fallback is exactly the old behaviour: on any deviation the rebase
+// is aborted and a *RebaseConflictError naming the conflicted files comes
+// back, so a caller that cannot resolve loses nothing by asking.
+func (m *Manager) RebaseOnMainResolving(ctx context.Context, f *domain.Feature, resolve ResolveConflicts) error {
+	if resolve == nil {
+		return m.RebaseOnMain(ctx, f)
+	}
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return err
+	}
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", m.baseRev(ctx, f))
+	if err != nil {
+		return err
+	}
+	if _, rerr := runGit(ctx, p, "rebase", mainHead); rerr == nil {
+		return nil
+	} else if !m.rebaseInProgress(ctx, p) {
+		return fmt.Errorf("rebase of %s did not start: %w", f.ID, rerr)
+	}
+	for step := 0; step < maxRebaseSteps && m.rebaseInProgress(ctx, p); step++ {
+		files := m.conflictedFiles(ctx, p)
+		if len(files) == 0 {
+			break // stopped for something resolving conflicts cannot fix
+		}
+		if resolve(ctx, p, files) != nil {
+			break
+		}
+		if left := m.conflictedFiles(ctx, p); len(left) > 0 {
+			break // it did not finish the job; do not commit a half-merge
+		}
+		// core.editor=true: --continue would otherwise open an editor on
+		// the replayed commit's message, which no unattended caller has.
+		if _, cerr := runGit(ctx, p, "-c", "core.editor=true", "rebase", "--continue"); cerr != nil && !m.rebaseInProgress(ctx, p) {
+			break
+		}
+	}
+	if !m.rebaseInProgress(ctx, p) {
+		return nil
+	}
+	conflicts := m.conflictedFiles(ctx, p)
+	if _, abortErr := runGit(ctx, p, "rebase", "--abort"); abortErr != nil {
+		return fmt.Errorf("rebase failed AND abort failed, worktree %s needs manual attention: %v", p, abortErr)
+	}
+	return &RebaseConflictError{Files: conflicts}
+}
+
 // ReanchorOnMain re-stamps the feature's recorded fork point to main's
 // current HEAD — the recovery that clears fork drift. It is guarded by
 // RebasedOnBase: the base tip must already be in the branch's history, so the
@@ -1122,9 +1195,22 @@ type ForkDriftError struct {
 	Recorded string
 	// MainHead is main's current HEAD — the commit main now points at.
 	MainHead string
+	// ForkedFrom is a branch that still carries the recorded fork, when
+	// one was found: the card forked from THAT and the base moved out
+	// from under it, rather than main being rewritten. Empty when no such
+	// branch exists, which is the rewound-main case the remedy assumes.
+	ForkedFrom string
 }
 
 func (e *ForkDriftError) Error() string {
+	if e.ForkedFrom != "" {
+		// A card adopted out of a goal is the common way to get here: it
+		// forked from the goal branch, whose commits main has never seen.
+		// Nothing happened to main, so the reflog advice below would send
+		// a reader hunting for a rewind that never occurred.
+		return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is not in main's history because the branch forked from %s, which has not landed; main points at %s. Land %s first, or rebase this branch onto main and re-anchor it (r in the board)",
+			e.FeatureID, e.Branch, e.Recorded, e.ForkedFrom, e.MainHead, e.ForkedFrom)
+	}
 	return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is no longer in main's history; main now points at %s (likely a rebase, amend, or reset on main). %s",
 		e.FeatureID, e.Branch, e.Recorded, e.MainHead, ForkDriftRemedy)
 }
@@ -1187,7 +1273,32 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	if err != nil {
 		return err
 	}
-	return &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead}
+	return &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead,
+		ForkedFrom: m.branchCarrying(ctx, recorded, f.BranchName())}
+}
+
+// branchCarrying names a local branch that still has sha in its history,
+// other than the card's own — the branch the card actually forked from.
+//
+// Drift has two causes and the message owes a reader the right one. Main
+// being rewritten is the one the remedy was written for; the other is the
+// base moving out from under a card, which is what a card adopted out of
+// a goal always looks like: its fork is a commit on the goal branch, and
+// main has never seen it. Best effort — a name makes the sentence
+// specific, and its absence only falls back to the original wording.
+func (m *Manager) branchCarrying(ctx context.Context, sha, own string) string {
+	out, err := runGit(ctx, m.repo, "branch", "--contains", sha, "--format=%(refname:short)")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "* "))
+		if name == "" || name == own {
+			continue
+		}
+		return name
+	}
+	return ""
 }
 
 // assertNoForkDriftAgainstBase is AssertNoForkDrift with the live

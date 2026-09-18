@@ -1273,6 +1273,7 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		Corrective:    d.round(f.ID, kind),
 		CorrectiveMax: max,
 		WorkStage:     domain.StageImplement,
+		GoalSettled:   f.GoalSettled(),
 	})
 	switch out.Action {
 	case gatepolicy.RaiseGate:
@@ -1300,19 +1301,18 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		}
 		d.setRound(f.ID, kind, 0)
 		return d.stepTo(ctx, f.ID, out.Stage)
-	case gatepolicy.BounceToWork:
-		// A goal that has wrapped up has nothing left to rework with: its
-		// verified cards have landed and the rest are dropped, so the
-		// rework round goes to a conductor that is already finished, and
-		// the critique runs again and says the same thing. On the lxd
-		// autopilot drive that loop burned all three rounds and 212.9
-		// credits re-finding the same two items — one of them the work of
-		// the very card the wrap-up had dropped — and then escalated,
-		// while 330 credits sat unspent. The findings are real and belong
-		// on the hand-over, not in a retry nothing can act on.
-		if f.IsGoal() && f.Stage == domain.StageImplement && f.Goal.WrappingUp() {
-			return d.goalReviewUnactionable(ctx, f)
+	case gatepolicy.HandOver:
+		// A goal's review asked for changes nothing can make — it has
+		// wrapped up or has already given an item up, or it has spent its
+		// rounds proving the same thing. The request belongs on the
+		// hand-over, not in a retry. gatepolicy owns which of those it
+		// was; this arm only carries it out.
+		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {
+			return Outcome{}, err
 		}
+		d.setRound(f.ID, kind, 0)
+		return d.goalReviewUnactionable(ctx, f, out.Reason)
+	case gatepolicy.BounceToWork:
 		if err := rounds.Bump(ctx, d.roundStore, f.ID, kind); err != nil {
 			return Outcome{}, err
 		}

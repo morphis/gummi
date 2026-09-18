@@ -302,6 +302,57 @@ func (m *Shell) goalReady(id domain.FeatureID) tea.Cmd {
 	}, m.loadRows)
 }
 
+// goalReviewUnactionable ends a goal's own review loop on this board, the
+// counterpart of the driver's arm of the same name. The review asked for
+// changes the goal cannot make — it has wrapped up or already gave an
+// item up, or it spent its rework rounds proving the same thing — so the
+// request is recorded as what makes the result partial and the goal goes
+// on to its verify and its hand-over.
+//
+// This is what the loop used to be missing entirely: the rounds burned
+// against a conductor that had finished, and the cap raised an escalation
+// on a card whose picker has no row that answers one. A goal's stops
+// belong on its report.
+func (m *Shell) goalReviewUnactionable(id domain.FeatureID, out gatepolicy.Outcome) tea.Cmd {
+	store := m.store
+	why := goalReviewPartial(out.Reason)
+	// One command, not a sequence: the reason must be recorded before the
+	// step that moves the goal, so a reader who arrives between them never
+	// sees a goal at verify with nothing saying why it is partial. The
+	// step is autoStep's, which also drops the finished review session —
+	// the one that would otherwise leave the conductor reading itself as
+	// busy.
+	step := m.autoStep(id, domain.StageVerify, "review not actionable ("+out.Reason+") → verify", "review")
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		if f.Goal.Partial == "" {
+			if serr := store.SetGoalPartial(ctx, id, why); serr != nil {
+				return noticeMsg{text: sanitize(serr.Error()), isErr: true}
+			}
+		}
+		return step()
+	}
+}
+
+// goalReviewPartial is the sentence a hand-over carries when the goal's
+// own review is what made it partial. The driver has the same table; a
+// goal that ends on one loop and is read on the other must say the same
+// thing.
+func goalReviewPartial(reason string) string {
+	switch reason {
+	case "goal-review-cap":
+		return "its review kept asking for changes its cards could not make"
+	case "goal-review-unclear":
+		return "its review finished with no clear verdict"
+	default:
+		return "its review asked for changes with no card left to make them"
+	}
+}
+
 // goalVerifyOutcome routes a goal's finished verify: a pass is ready for
 // you, anything else goes through goalVerifyNotPassed.
 func (m *Shell) goalVerifyOutcome(id domain.FeatureID, out gatepolicy.Outcome) tea.Cmd {
