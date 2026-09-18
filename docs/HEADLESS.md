@@ -326,9 +326,11 @@ stream carries a `goal` event for each step and a `card_verified` event for
 each card; a card's `card_verified` is not the goal's own `verified`.
 
 **Budget.** The envelope is the goal's whole budget and a hard ceiling. Each
-card gets an envelope out of it; a landed or dropped card returns what it
-did not spend; the lead's turns count; nothing is ever raised past the
-ceiling. A reserve is held back for the goal's own review and verify. When
+card starts on the lesser of its planned estimate and an even share, and what
+is left over is not handed out until a card proves it needs it: a card that
+runs out is raised from what is available. A landed or dropped card returns
+what it did not spend; the lead's turns count; nothing is ever raised past
+the ceiling. A reserve is held back for the goal's own review and verify. When
 the budget runs down to it, the goal wraps up: verified cards land, the rest
 are dropped, and it comes back partial.
 

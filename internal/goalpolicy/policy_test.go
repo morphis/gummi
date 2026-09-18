@@ -209,19 +209,37 @@ func TestLedger(t *testing.T) {
 	}
 }
 
-func TestSplitEnvelopes(t *testing.T) {
-	got, err := SplitEnvelopes([]int{600, 0, 0}, 2000)
-	if err != nil || got[0] != 600 || got[1] != 700 || got[2] != 700 {
+// TestStartEnvelopes: a card starts at the lesser of its estimate and an
+// even share, and what is left over is not handed out at all — it stays in
+// the pool for the raises the conductor makes on evidence.
+func TestStartEnvelopes(t *testing.T) {
+	// under its share keeps its estimate; the rest start at the share,
+	// and 2000 − (600 + 666 + 666) stays unallocated
+	got, err := StartEnvelopes([]int{600, 0, 0}, 2000)
+	if err != nil || got[0] != 600 || got[1] != 666 || got[2] != 666 {
 		t.Fatalf("got %v, %v", got, err)
 	}
-	got, err = SplitEnvelopes([]int{1500, 1500}, 2000)
-	if err != nil || got[0] != 1000 || got[1] != 1000 {
-		t.Fatalf("overflow scales down: %v, %v", got, err)
+	// the case that used to hand one card the budget: a big estimate
+	// starts at its share, not at what it guessed
+	got, err = StartEnvelopes([]int{390, 440, 1120}, 1470)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := SplitEnvelopes([]int{0, 0, 0}, 300); err == nil {
+	if got[0] != 390 || got[1] != 440 || got[2] != 490 {
+		t.Fatalf("a big estimate starts at its share: %v", got)
+	}
+	if total := got[0] + got[1] + got[2]; float64(total) >= 1470 {
+		t.Fatalf("the rest stays in the pool to raise from, allocated %d of 1470", total)
+	}
+	// every card over its share: an even start, nothing committed beyond it
+	got, err = StartEnvelopes([]int{1500, 1500}, 2000)
+	if err != nil || got[0] != 1000 || got[1] != 1000 {
+		t.Fatalf("even shares: %v, %v", got, err)
+	}
+	if _, err := StartEnvelopes([]int{0, 0, 0}, 300); err == nil {
 		t.Fatalf("a pool that cannot fund MinEnvelope per card is refused")
 	}
-	if got, err := SplitEnvelopes(nil, 0); err != nil || len(got) != 0 {
+	if got, err := StartEnvelopes(nil, 0); err != nil || len(got) != 0 {
 		t.Fatalf("no cards is fine: %v %v", got, err)
 	}
 }

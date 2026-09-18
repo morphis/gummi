@@ -177,9 +177,18 @@ func TestGoalRunsItsCardsOnTheGoalBranch(t *testing.T) {
 	if cache.GateMode() != domain.GateAutopilot || cache.Budget.Envelope != 600 {
 		t.Fatalf("cache card = %+v", cache)
 	}
-	// (4000 − 600 reserve) × 90% headroom − 600 for the first card = 2460
-	if docs.Budget.Envelope != 2460 {
-		t.Fatalf("docs card envelope = %d, want the rest of the pool", docs.Budget.Envelope)
+	// pool = (4000 − 600 reserve) × 90% headroom = 3060, shared two ways.
+	// The cache card asked for 600 and gets it; the docs card has no
+	// estimate and starts at its share — NOT at the rest of the pool. The
+	// difference stays unallocated, which is what the conductor raises
+	// from when a card proves it needs more.
+	if docs.Budget.Envelope != 1530 {
+		t.Fatalf("docs card envelope = %d, want its share", docs.Budget.Envelope)
+	}
+	if view, verr := e.GoalView(ctx, g.ID); verr != nil {
+		t.Fatal(verr)
+	} else if view.Ledger.Available < 900 {
+		t.Fatalf("minting leaves room to raise from, available = %.0f", view.Ledger.Available)
 	}
 	if deps, _ := store.ListDependencies(ctx, docs.ID); len(deps) != 1 || deps[0] != cache.ID {
 		t.Fatalf("docs deps = %v", deps)
@@ -355,15 +364,17 @@ func TestGoalBudgetIsAHardCeiling(t *testing.T) {
 	}
 	view, _ := e.GoalView(ctx, g.ID)
 	cache := view.Cards[0]
-	// 340 is left to give: 4000 − 600 − 2460 − 600 reserve
-	if err := e.goalRaise(ctx, view.Goal, cache, 1000, "test", "lead"); err == nil || !strings.Contains(err.Error(), "left to give") {
+	// 1270 is left to give: 4000 − (600 + 1530 started) − 600 reserve. The
+	// pool holding more back than it used to does not soften the ceiling:
+	// a raise past what is left is still refused.
+	if err := e.goalRaise(ctx, view.Goal, cache, 2000, "test", "lead"); err == nil || !strings.Contains(err.Error(), "left to give") {
 		t.Fatalf("a raise past the goal budget must be refused, got %v", err)
 	}
 	if err := e.RaiseGoalBudget(ctx, g.ID, 4500); err != nil {
 		t.Fatal(err)
 	}
 	view, _ = e.GoalView(ctx, g.ID)
-	if err := e.goalRaise(ctx, view.Goal, view.Cards[0], 1000, "test", "lead"); err != nil {
+	if err := e.goalRaise(ctx, view.Goal, view.Cards[0], 2000, "test", "lead"); err != nil {
 		t.Fatalf("with budget raised the card can be raised: %v", err)
 	}
 	if err := e.RaiseGoalBudget(ctx, g.ID, 100); err == nil {

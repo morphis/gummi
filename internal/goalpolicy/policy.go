@@ -456,14 +456,33 @@ func hasDrop(acts []Action, id domain.FeatureID) bool {
 	return false
 }
 
-// SplitEnvelopes sizes the envelopes of cards about to be minted. want
-// holds each row's requested envelope (0 = let the goal split). Requested
-// envelopes are kept; the rest share what is left of pool evenly. When the
-// total overflows pool, every envelope is scaled down in proportion. A
-// card never gets less than domain.MinEnvelope — when the pool cannot give
-// every card that much, it refuses: a goal that cannot fund its own card
-// list has to be re-planned or given more budget, not started starved.
-func SplitEnvelopes(want []int, pool float64) ([]int, error) {
+// StartEnvelopes sizes the envelopes cards are MINTED at. want holds each
+// row's estimate from the plan (0 = no estimate given). A card starts at
+// the lesser of its estimate and an even share of pool, never below
+// domain.MinEnvelope; whatever is left over is not handed out at all. When
+// the pool cannot give every card MinEnvelope it refuses: a goal that
+// cannot fund its own card list has to be re-planned or given more budget,
+// not started starved.
+//
+// It used to hand out the whole pool up front, in proportion to the
+// plan's estimates. An estimate is the one number in a goal plan that
+// nothing grounds — the architect is guessing what work it has not done
+// yet will cost — and committing the budget to it made the guess
+// load-bearing. A card that has not started holds its whole envelope
+// against the ledger (Card.Held), so one overestimated card took the
+// goal's room to give with it: on a real drive one card was handed 65% of
+// the budget before it ran a single turn, spent half of that, and was
+// dropped for want of the credits its two cheap siblings were sitting on
+// and never used. The goal then reviewed itself against the work it had
+// just defunded.
+//
+// Sizing the START instead leaves the difference in the pool, where the
+// raise machinery already spends it on evidence: a card that exhausts
+// gets a lead turn and then a raise from what is available, and a card
+// that lands or is dropped returns what it did not spend. The estimate
+// stays in the goal doc as what the plan expected, which is what an
+// estimate can honestly be.
+func StartEnvelopes(want []int, pool float64) ([]int, error) {
 	out := make([]int, len(want))
 	if len(want) == 0 {
 		return out, nil
@@ -471,38 +490,19 @@ func SplitEnvelopes(want []int, pool float64) ([]int, error) {
 	if pool < float64(domain.MinEnvelope*len(want)) {
 		return nil, fmt.Errorf("the goal budget leaves %.0f credits for %d cards, less than %d each", pool, len(want), domain.MinEnvelope)
 	}
-	fixed, unset := 0, 0
-	for _, w := range want {
-		if w > 0 {
-			fixed += w
-		} else {
-			unset++
-		}
-	}
-	share := 0.0
-	if unset > 0 {
-		share = (pool - float64(fixed)) / float64(unset)
-		if share < float64(domain.MinEnvelope) {
-			share = float64(domain.MinEnvelope)
-		}
-	}
-	total := 0.0
+	share := pool / float64(len(want))
 	for i, w := range want {
-		if w > 0 {
-			out[i] = w
-		} else {
-			out[i] = int(share)
+		start := share
+		if w > 0 && float64(w) < share {
+			// under its share: the estimate is the whole ask, and the
+			// difference stays in the pool rather than padding a card
+			// that did not ask for it
+			start = float64(w)
 		}
-		total += float64(out[i])
-	}
-	if total > pool {
-		scale := pool / total
-		for i := range out {
-			out[i] = int(float64(out[i]) * scale)
-			if out[i] < domain.MinEnvelope {
-				out[i] = domain.MinEnvelope
-			}
+		if start < float64(domain.MinEnvelope) {
+			start = float64(domain.MinEnvelope)
 		}
+		out[i] = int(start)
 	}
 	return out, nil
 }

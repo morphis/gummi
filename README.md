@@ -253,8 +253,10 @@ todo → plan ─────────────▶ implement ────�
   re-plans stuck and exhausted cards, and records a **decision for review**
   for every call a user of the result would notice. None of it reaches
   your inbox.
-- **The budget is a hard ceiling.** The lead splits it across the cards and
-  can raise a card from what is left, never past the ceiling. A reserve is
+- **The budget is a hard ceiling.** Each card starts on what its plan
+  estimated, capped at an even share, and the rest stays unspoken for: the
+  lead raises a card from what is left when it proves it needs more, never
+  past the ceiling. A reserve is
   held back so the goal always finishes cleanly: when the budget runs down
   to it, verified work lands, the rest is dropped, and the goal comes back
   **partial**.

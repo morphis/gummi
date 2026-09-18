@@ -1095,7 +1095,7 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 		return "the goal has no budget"
 	}
 	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows))
-	if _, err := goalpolicy.SplitEnvelopes(want, pool); err != nil && len(want) > 0 {
+	if _, err := goalpolicy.StartEnvelopes(want, pool); err != nil && len(want) > 0 {
 		return err.Error()
 	}
 	return ""
@@ -1196,7 +1196,7 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		}
 	}
 	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows))
-	envs, err := goalpolicy.SplitEnvelopes(want, pool)
+	envs, err := goalpolicy.StartEnvelopes(want, pool)
 	if err != nil && len(want) > 0 {
 		return err
 	}
