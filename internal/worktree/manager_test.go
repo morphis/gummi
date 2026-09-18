@@ -882,3 +882,43 @@ func rebaseInProgressAt(t *testing.T, p string) bool {
 	}
 	return false
 }
+
+// TestCreateRecoversFromStaleWorktreeRegistration: a checkout removed out
+// of band leaves git's registration behind at that path, and git refuses a
+// fresh worktree there ("missing but already registered") until it is
+// pruned. Nothing retries its way out of that, so Create prunes once and
+// tries again rather than handing the refusal to the caller.
+func TestCreateRecoversFromStaleWorktreeRegistration(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(3, "Adapt charmed openshell for microcloud")
+
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The leftover: the directory vanishes without git hearing about it,
+	// and the branch goes too, so Create's branch guard passes and the
+	// stale registration is the only thing standing in the way. The ref is
+	// dropped with update-ref because `branch -D` is itself blocked by the
+	// registration — which is the same knot unregisterStaleWorktree exists
+	// to cut on the delete path.
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "update-ref", "-d", "refs/heads/"+f.BranchName())
+
+	p2, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatalf("Create over a stale registration: %v", err)
+	}
+	if p2 != p {
+		t.Fatalf("recreated at %s, want %s", p2, p)
+	}
+	if ok, err := m.Exists(ctx, f); err != nil || !ok {
+		t.Fatalf("worktree absent after recovery: ok=%v err=%v", ok, err)
+	}
+	if paths, err := m.List(ctx); err != nil || len(paths) != 1 {
+		t.Fatalf("worktree list after recovery: %v, %v", paths, err)
+	}
+}

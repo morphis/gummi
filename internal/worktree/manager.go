@@ -372,8 +372,39 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	// The base is named explicitly rather than left implicit: `worktree
 	// add -b` without a commit-ish forks from whatever HEAD carries, which
 	// is right only for a card that named no base.
-	if _, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p, base); err != nil {
-		return "", err
+	add := func() error {
+		_, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p, base)
+		return err
+	}
+	if err := add(); err != nil {
+		// A directory removed out of band leaves admin metadata registered
+		// at that path, and git refuses a fresh checkout there for as long
+		// as it stays — so the next card to be handed this path inherits a
+		// refusal it cannot clear by retrying. Prune and retry once, on the
+		// failure path only, for the same reason EnsureScratch does: this
+		// is the common creation path and a prune on it is work for a case
+		// that almost never holds. The os.Stat guard above already
+		// established the directory is absent, so the prune can only drop
+		// registrations whose checkout is gone — never a live one.
+		if _, perr := runGit(ctx, m.repo, "worktree", "prune"); perr != nil {
+			return "", err
+		}
+		// `worktree add -b` creates the branch before it fails on the path,
+		// so the attempt that just failed can have left the ref behind and
+		// the retry would trip over it ("a branch named X already exists").
+		// The guard above established the branch did not exist when Create
+		// began, so a ref here came from that attempt and is ours to drop —
+		// and it is dropped after the prune, since a stale registration
+		// pins the branch against deletion. Deleting it can only lose the
+		// empty fork the failed add just made.
+		if ok, gerr := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); gerr == nil && ok {
+			if _, derr := runGit(ctx, m.repo, "branch", "-D", "--", branch); derr != nil {
+				return "", err
+			}
+		}
+		if err := add(); err != nil {
+			return "", err
+		}
 	}
 	// The checkout tracks whatever HEAD carries, including .gummi content
 	// the launch untracking only removed from main's index. Untrack it
