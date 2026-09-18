@@ -89,14 +89,21 @@ const ParkReasonQuit = "quit"
 // is every other way a card lands in the needs-attention queue (a failed
 // run, an exhausted envelope, a gate raised for review).
 //
-// Only ParkReasonQuit is load-bearing: QuitStopped looks for exactly it,
-// and any other reason reads as a park nobody should silently undo. The
-// rest exist so a card's history can answer "why did this stop" rather
-// than leaving the run's end unexplained.
+// ParkReasonQuit is load-bearing: QuitStopped looks for exactly it, and
+// any other reason reads as a park nobody should silently undo. The rest
+// exist so a card's history can answer "why did this stop" rather than
+// leaving the run's end unexplained.
 const (
 	ParkReasonGaveUp   = "gave-up"
 	ParkReasonNeedsYou = "needs-you"
 )
+
+// ParkReasonBlocked is the second load-bearing reason: the card's verify
+// said the environment cannot run its verification plan. It is a
+// statement about the environment and not about the work, and a goal
+// reads exactly this value to tell a card to wait for from a card to give
+// up on — the sentence beside it is for people and is free to change.
+const ParkReasonBlocked = "blocked"
 
 // ParkPayload is the JSON shape of an EventPark event's Payload. The
 // reason lives here rather than in the status column deliberately:

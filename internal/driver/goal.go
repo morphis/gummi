@@ -369,6 +369,16 @@ func (d *Driver) goalVerifyNotPassed(ctx context.Context, f domain.Feature, reas
 	return Outcome{}, nil
 }
 
+// goalVerifyBlocked stops a goal whose own verify said the environment
+// cannot run its checks. Nothing was judged, so nothing is sent back, no
+// rework round is spent and the goal is not partial: it stays at verify,
+// and the same resume runs its verify again.
+func (d *Driver) goalVerifyBlocked(ctx context.Context, f domain.Feature) Outcome {
+	reason := "the goal's verify could not run in this environment — see the goal doc's Verification plan; nothing was judged and nothing was sent back"
+	d.logPark(f, state.ParkReasonBlocked, reason)
+	return d.goalStalled(ctx, f, reason)
+}
+
 // goalDoneEvent is the headless hand-over of a goal ready for you.
 type goalDoneEvent struct {
 	Met       int                `json:"done_when_met"`
@@ -408,6 +418,13 @@ func (d *Driver) resumeGoal(ctx context.Context, f domain.Feature, in ResumeInpu
 			return Outcome{}, true, err
 		}
 		d.out.emit(envelopeRaisedEvent{Event: "envelope", ID: string(f.ID), From: from, To: d.opts.Envelope})
+	}
+	if f.Stage == domain.StageImplement {
+		// someone is here: a card that stopped to wait for its environment
+		// is worth another verify now, and only now
+		if err := d.eng.GoalResumed(ctx, f.ID); err != nil {
+			return Outcome{}, true, err
+		}
 	}
 	switch {
 	case in.Note != nil:

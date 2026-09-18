@@ -43,7 +43,8 @@ const (
 	GoalFound        = "found"         // a backlog card filed along the way
 	GoalLeadTurn     = "lead-turn"     // the lead took a turn
 	GoalLeadFailed   = "lead-failed"   // a lead turn failed
-	GoalStalled      = "stalled"       // the agent backend could not serve the goal; nothing was dropped
+	GoalStalled      = "stalled"       // the goal stopped on something it can only wait for — the agent backend, or (Card set) a card's environment; nothing was dropped
+	GoalResumed      = "resumed"       // you picked a goal back up that had stopped to wait for an environment
 	GoalCaughtUp     = "caught-up"     // the goal branch caught up with main
 	GoalTidied       = "tidied"        // the goal tree was put back after a check run changed tracked files
 	GoalCatchUpFail  = "catch-up-failed"

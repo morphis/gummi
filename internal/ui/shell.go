@@ -900,17 +900,28 @@ func exhaustedActivity(activity []string) bool {
 // can take — and it is recorded as one, the same seam the driver's
 // escalations raise through.
 func (m *Shell) raiseEscalation(id domain.FeatureID, text string) {
+	m.raiseEscalationAs(id, state.ParkReasonGaveUp, text)
+}
+
+// raiseBlocked is the escalation of a verify the environment could not
+// run. The park carries state.ParkReasonBlocked, which is what lets a goal
+// wait for such a card instead of giving up on it.
+func (m *Shell) raiseBlocked(id domain.FeatureID, text string) {
+	m.raiseEscalationAs(id, state.ParkReasonBlocked, text)
+}
+
+func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
 	// a goal card's stop is its goal's to handle: record it where the goal
 	// reads it and wake the goal, but never queue it for you
 	if g := m.goalOf(id); g != "" {
-		m.logPark(id, state.ParkReasonGaveUp, text)
+		m.logPark(id, reason, text)
 		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
 		m.queueGoalTick(g)
 		return
 	}
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.notifier.Alert(string(id) + ": " + text)
-		m.logPark(id, state.ParkReasonGaveUp, text)
+		m.logPark(id, reason, text)
 		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
 	}
 }

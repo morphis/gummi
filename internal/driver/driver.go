@@ -1246,10 +1246,11 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
 		out := gatepolicy.Decide(gatepolicy.Input{
-			Stage:     domain.StageVerify,
-			Kind:      f.Kind,
-			Verdict:   v,
-			WorkStage: domain.StageImplement,
+			Stage:       domain.StageVerify,
+			Kind:        f.Kind,
+			Verdict:     v,
+			Environment: verdict.BlockedByEnvironment(snap),
+			WorkStage:   domain.StageImplement,
 			// verify never auto-bounces here: a failed verify always
 			// escalates today (gatepolicy documents the eligible-to-bounce
 			// rule as dormant; this keeps it switched off).
@@ -1260,11 +1261,19 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 			// stop at the verified branch: Advance reports NeedsMerge (branch
 			// ahead) or transitions to Done (nothing to land). Never merges.
 			return d.crossGate(ctx, f)
+		case out.Reason == gatepolicy.ReasonNoEnvironment && f.IsGoal():
+			// Before the rework path, not after it: a verify that could
+			// not run judged nothing, and sending the goal back to its
+			// cards over it spends a rework round on work nobody found
+			// fault with. Two of those used to end a goal partial.
+			return d.goalVerifyBlocked(ctx, f), nil
 		case f.IsGoal():
 			// a goal's verify that did not pass goes back to its cards, or —
 			// partial already, or out of rework rounds — stops ready for you
 			// with what was not met on the report
 			return d.goalVerifyNotPassed(ctx, f, out.Reason)
+		case out.Reason == gatepolicy.ReasonNoEnvironment:
+			return d.blockedEscalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
 		case out.Reason == "verify-blocked":
 			return d.escalation(f, "verify BLOCKED — the environment cannot run the verification plan; see the artifact"), nil
 		case out.Reason == "verify-fail":
@@ -2121,6 +2130,19 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
 }
 
+// blockedEscalation is an escalation whose cause is the environment: the
+// park carries state.ParkReasonBlocked, the one value a goal reads to tell
+// a card to wait for from a card to give up on.
+func (d *Driver) blockedEscalation(f domain.Feature, reason string) Outcome {
+	d.logPark(f, state.ParkReasonBlocked, reason)
+	d.openDecision(f, escalationDecisionKind(f), reason)
+	d.out.emit(escalationEvent{
+		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
+		Next: d.resumeCmd(string(f.ID)),
+	})
+	return Outcome{Status: StatusEscalation, ID: string(f.ID)}
+}
+
 // bounceEscalation is the escalation flavor used when the human's follow-up
 // is to rewind review/verify back to implement/fix — a review cap-hit or a
 // verify-fail. The `next` field names `--bounce` so a caller driving the
@@ -2485,8 +2507,16 @@ func (d *Driver) resumeFinishedVerify(ctx context.Context, f domain.Feature) (Ou
 	if snap.Feature.Stage != domain.StageVerify || snap.State != engine.StateDone {
 		return Outcome{}, false, nil
 	}
-	if verdict.SessionVerdict(snap) == verdict.Unclear {
+	switch v := verdict.SessionVerdict(snap); {
+	case v == verdict.Unclear:
 		return Outcome{}, false, nil // nothing was decided: verify again
+	case v == verdict.Blocked && verdict.BlockedByEnvironment(snap):
+		// Nothing was decided here either. A pass or a fail is a verdict
+		// the card earned; "the environment cannot run this" is a fact
+		// about a moment, and the only reason anyone resumes a card that
+		// stopped on it is that the moment has passed. Honouring it made
+		// the resume a way to be told the same thing again for free.
+		return Outcome{}, false, nil
 	}
 	out, err := d.applyVerdict(ctx, f)
 	return out, true, err

@@ -1081,3 +1081,101 @@ func TestASendBackLiftsAWrapUpForGood(t *testing.T) {
 		}
 	}
 }
+
+// A card whose verify said the environment cannot run its plan was read
+// as stuck: two lead turns, then dropped with its branch, and the goal
+// reported partial over work nobody had found fault with. It is kept, the
+// goal says what it is waiting on, and only a person's return retries it.
+func TestACardItsEnvironmentCouldNotVerifyIsKeptAndWaitedFor(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	card := goalCards(t, store, g.ID)[0]
+	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
+		if _, err := store.Transition(ctx, card.ID, st, state.ActorAutopilot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	enterStage(t, store, card.ID, domain.StageVerify, "gen-1")
+	if err := store.AppendPark(ctx, card.ID, domain.StageVerify, state.ParkReasonBlocked, "verify BLOCKED — no cluster to deploy to", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := e.GoalView(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gc, _ := view.Card(card.ID); gc.State != goalpolicy.Blocked || gc.Retry {
+		t.Fatalf("the card is blocked and there is no reason to retry yet: %+v", gc)
+	}
+
+	var res GoalTickResult
+	for i := 0; i < 4; i++ { // no lead resolves here, so the first tick already stalls
+		res = tick(t, e, g.ID)
+		for _, a := range res.Actions {
+			if a.Kind == goalpolicy.Drop || a.Kind == goalpolicy.WrapUp || a.Kind == goalpolicy.Finish {
+				t.Fatalf("waiting on an environment drops nothing and ends nothing: %v", a)
+			}
+		}
+	}
+	if res.StalledOn != card.ID || !strings.Contains(res.Stalled, "no cluster to deploy to") {
+		t.Fatalf("the goal says which card it waits on and why: %+v", res)
+	}
+	if got, _ := store.GetFeature(ctx, card.ID); got.GoalDropped() {
+		t.Fatal("the card keeps its place")
+	}
+	log, _ := store.GoalLog(ctx, g.ID)
+	stalls := 0
+	for _, en := range log {
+		if en.Action == state.GoalStalled {
+			stalls++
+		}
+	}
+	if stalls != 1 {
+		t.Fatalf("said once, not once a tick: %d", stalls)
+	}
+
+	// a stall on a card's environment is not a backend outage: the lead
+	// is not held off by it
+	view, _ = e.GoalView(ctx, g.ID)
+	if view.Input.LeadOutage != "" {
+		t.Fatalf("read as an outage: %q", view.Input.LeadOutage)
+	}
+
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.WaitingOn == "" || rep.DoneWhen[0].Status != DoneWhenBlocked {
+		t.Fatalf("the hand-over says waiting, not lost: %q %+v", rep.WaitingOn, rep.DoneWhen[0])
+	}
+	if body := RenderGoalReport(rep); !strings.Contains(body, "Waiting on an environment") || !strings.Contains(body, "gummi resume") {
+		t.Fatalf("the rendered report says so and how to continue:\n%s", body)
+	}
+
+	// someone comes back: the card is worth one more verify
+	if err := e.GoalResumed(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	res = tick(t, e, g.ID)
+	if len(res.Start) != 1 || res.Start[0].ID != card.ID || !strings.Contains(res.Start[0].Note, "no cluster to deploy to") {
+		t.Fatalf("picked back up, the card's verify is tried again: %+v", res)
+	}
+	// and a second resume with nothing stalled since records nothing
+	if err := e.GoalResumed(ctx, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	log, _ = store.GoalLog(ctx, g.ID)
+	resumed := 0
+	for _, en := range log {
+		if en.Action == state.GoalResumed {
+			resumed++
+		}
+	}
+	if resumed != 1 {
+		t.Fatalf("resumed entries: %d", resumed)
+	}
+}

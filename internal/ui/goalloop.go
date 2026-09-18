@@ -129,6 +129,14 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 			// what the board can do, and the goal picks itself back up on
 			// the next tick after the backend returns.
 			m.notice = noticeMsg{text: string(msg.goal) + ": waiting on the agent backend — " + sanitize(msg.res.Stalled), isErr: true, id: msg.goal}
+			if msg.res.StalledOn != "" {
+				// Not the backend: a card's environment. The goal kept the
+				// card and will not retry on its own, because a retry is a
+				// verify session — a note to the goal is what says someone
+				// has been there.
+				m.notice = noticeMsg{text: string(msg.goal) + ": waiting on an environment — " + sanitize(msg.res.Stalled) +
+					" · tell the goal when it is fixed", isErr: true, id: msg.goal}
+			}
 		}
 		for _, st := range msg.res.Start {
 			cmds = append(cmds, m.goalStartCmd(st))
@@ -399,6 +407,15 @@ func goalReviewPartial(reason string) string {
 func (m *Shell) goalVerifyOutcome(id domain.FeatureID, out gatepolicy.Outcome) tea.Cmd {
 	if out.Action == gatepolicy.RaiseGate {
 		return m.goalReady(id)
+	}
+	if out.Reason == gatepolicy.ReasonNoEnvironment {
+		// A verify that could not run judged nothing. It is not sent back
+		// to its cards and spends no rework round — two of those used to
+		// end a goal partial over work nobody had found fault with — and
+		// it is the goal's own stop, so it reaches you.
+		m.raiseBlocked(id, "the goal's verify could not run in this environment — what is missing is in its Verification plan. "+
+			"Nothing was judged and nothing was sent back; fix the environment and run its verify again")
+		return nil
 	}
 	return m.goalVerifyNotPassed(id, out.Reason)
 }

@@ -278,3 +278,14 @@ func TestDecide(t *testing.T) {
 		})
 	}
 }
+
+func TestABlockedVerifySaysWhoseWordItWas(t *testing.T) {
+	in := Input{Stage: domain.StageVerify, Verdict: verdict.Blocked}
+	if out := Decide(in); out.Action != Park || out.Reason != "verify-blocked" {
+		t.Fatalf("a floored pass parks as before: %+v", out)
+	}
+	in.Environment = true
+	if out := Decide(in); out.Action != Park || out.Reason != ReasonNoEnvironment || out.Burns {
+		t.Fatalf("the verifier's own block parks under its own reason and burns nothing: %+v", out)
+	}
+}

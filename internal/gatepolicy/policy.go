@@ -116,6 +116,11 @@ type Input struct {
 	Kind domain.Kind
 	// Verdict is the parsed outcome of the finished session.
 	Verdict verdict.Verdict
+	// Environment reports that a Blocked verdict is the verifier's own
+	// statement that this machine cannot run the plan
+	// (verdict.BlockedByEnvironment), rather than gummi's floor under a
+	// pass it refused. Only the first is something to wait for.
+	Environment bool
 	// Corrective is the count of corrective rounds already spent in the
 	// current review/verify loop (the shared review↔fix↔verify budget —
 	// see MaxRounds(domain.RoundKindReview)).
@@ -278,6 +283,13 @@ func goalReview(in Input) bool {
 	return in.Kind == domain.KindGoal && in.Stage == domain.StageImplement
 }
 
+// ReasonNoEnvironment is the park reason of a verify whose own verdict was
+// that this machine cannot run the verification plan. It is kept apart
+// from "verify-blocked", which also covers a pass gummi floored: both
+// park, but one is a card to wait for and the other a card to fix, and a
+// goal has to know which.
+const ReasonNoEnvironment = "verify-no-environment"
+
 // decideVerify resolves a finished verify session. Blocked is kept fully
 // separate from Fail: it means the environment can't run the
 // verification plan, not that the work is wrong, so it always parks and
@@ -294,6 +306,9 @@ func decideVerify(in Input) Outcome {
 	case verdict.Pass:
 		return Outcome{Action: RaiseGate, Stage: in.Stage, Reason: "verify-pass"}
 	case verdict.Blocked:
+		if in.Environment {
+			return Outcome{Action: Park, Stage: in.Stage, Reason: ReasonNoEnvironment}
+		}
 		return Outcome{Action: Park, Stage: in.Stage, Reason: "verify-blocked"}
 	case verdict.Fail, verdict.Changes:
 		if in.VerifyMayBounce && in.Corrective < in.CorrectiveMax {

@@ -20,11 +20,17 @@
 //     up when it is not.
 //  6. A stuck card (escalated, failed, blocked on a dropped dependency)
 //     goes to the lead up to twice; then it is dropped.
+//     6a. A blocked card — one whose verify said the environment cannot run
+//     its verification plan — goes to the lead once and is never dropped
+//     for it: it waits, and is started again when there is a reason to
+//     think the environment changed.
 //  7. Pending lead wake reasons (kickoff, your notes, a rework note) run a
 //     lead turn.
 //  8. Waiting cards whose dependencies have landed start, up to the lanes.
 //  9. When nothing is left to run, land or decide, the goal finishes: its
 //     review of the combined branch starts.
+//  10. When nothing can move and a blocked card is why, the goal stalls:
+//     it stops, drops nothing, and says what it is waiting on.
 package goalpolicy
 
 import (
@@ -55,10 +61,18 @@ const (
 	// Stuck: stopped at a decision the autopilot could not take (a critique
 	// or verify cap, an unclear verdict, a failed run, a sandbox refusal).
 	Stuck
+	// Blocked: its verify said the environment cannot run its verification
+	// plan. That is a statement about the environment, not about the work:
+	// gatepolicy keeps it apart from a failed verify so that it "never
+	// burns a corrective round against a problem no retry fixes", and the
+	// goal keeps it apart from Stuck for the same reason. Read as stuck it
+	// cost two lead turns and then the card's branch — the quota outage
+	// that was read as the lead failing, one noun over.
+	Blocked
 )
 
 func (s CardState) String() string {
-	return [...]string{"waiting", "running", "verified", "landed", "dropped", "exhausted", "stuck"}[s]
+	return [...]string{"waiting", "running", "verified", "landed", "dropped", "exhausted", "stuck", "blocked"}[s]
 }
 
 // Card is one goal card in a snapshot.
@@ -76,8 +90,14 @@ type Card struct {
 	// LeadTries counts lead turns that have already seen this card's
 	// current problem and left it as it was.
 	LeadTries int
-	// Reason says why a Stuck card is stuck.
+	// Reason says why a Stuck card is stuck, or what a Blocked one is
+	// waiting on.
 	Reason string
+	// Retry marks a Blocked card there is a reason to try again: something
+	// happened since it stopped that may have changed its environment. A
+	// retry is a verify session and costs what one costs, so the goal
+	// never retries on a timer.
+	Retry bool
 }
 
 // Input is a goal snapshot.
@@ -142,6 +162,10 @@ const (
 	// Stall stops the goal because its agent backend could not serve it —
 	// a provider quota, a rate limit, an overload. Reason is the
 	// backend's own words, which generally say when it will serve again.
+	//
+	// Card is set when what cannot serve the goal is a card's environment
+	// rather than the agent backend: every card that could move is
+	// blocked, and Card is the first of them.
 	//
 	// It is the answer to a lead that is not failing at its job but
 	// cannot run at all, and it drops nothing: MaxLeadFailures exists for
@@ -319,7 +343,7 @@ func Decide(in Input) []Action {
 	if wrap {
 		for _, c := range cards {
 			switch c.State {
-			case Waiting, Running, Exhausted, Stuck:
+			case Waiting, Running, Exhausted, Stuck, Blocked:
 				out = append(out, Action{Kind: Drop, Card: c.ID, Reason: "the goal is wrapping up: " + wrapReason})
 				state[c.ID] = Dropped
 			}
@@ -384,6 +408,15 @@ func Decide(in Input) []Action {
 				}
 				out = append(out, Action{Kind: Drop, Card: c.ID, Reason: "stuck and not recoverable: " + c.Reason})
 				state[c.ID] = Dropped
+			case Blocked:
+				// One look, because the lead can sometimes do something
+				// about it — a step that belongs under [CI-only], a plan
+				// that asks for more than it needs. Never a second, and
+				// never a drop: more turns cannot make an environment
+				// appear, they can only be spent on its absence.
+				if in.LeadAvailable && c.LeadTries == 0 && !c.Retry {
+					addLead(fmt.Sprintf("%s cannot be verified in this environment: %s", c.ID, c.Reason))
+				}
 			}
 		}
 	}
@@ -393,7 +426,7 @@ func Decide(in Input) []Action {
 		// one of its causes: that stops and asks (NeedBudget) instead of
 		// choosing work to abandon.
 		for _, c := range cards {
-			if st := state[c.ID]; st == Waiting || st == Running || st == Exhausted || st == Stuck {
+			if st := state[c.ID]; st == Waiting || st == Running || st == Exhausted || st == Stuck || st == Blocked {
 				if !hasDrop(out, c.ID) {
 					out = append(out, Action{Kind: Drop, Card: c.ID, Reason: "the goal is wrapping up: " + wrapReason})
 				}
@@ -444,15 +477,30 @@ func Decide(in Input) []Action {
 			if running >= lanes {
 				break
 			}
-			if state[c.ID] != Waiting || c.TakenOver {
+			if c.TakenOver {
 				continue
 			}
-			if !depsLanded(c, state) {
+			switch {
+			case state[c.ID] == Waiting && depsLanded(c, state):
+			case state[c.ID] == Blocked && c.Retry:
+			default:
 				continue
 			}
 			out = append(out, Action{Kind: Start, Card: c.ID})
 			state[c.ID] = Running
 			running++
+		}
+	}
+
+	// Nothing to do and nothing in flight, and a blocked card is why: the
+	// goal stops and says what it is waiting on. It drops nothing, which
+	// is the whole difference from the wrap-up this used to end in.
+	if !wrap && len(out) == 0 && len(leadReasons) == 0 && count(state, Running) == 0 {
+		for _, c := range cards {
+			if state[c.ID] == Blocked {
+				return []Action{{Kind: Stall, Card: c.ID,
+					Reason: fmt.Sprintf("%s cannot be verified in this environment: %s", c.ID, c.Reason)}}
+			}
 		}
 	}
 

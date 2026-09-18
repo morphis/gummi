@@ -411,6 +411,15 @@ card the owner did not attach, or work around a sandbox refusal by
 widening what a card may do — plan around
 it, or mark the item it blocks not met.
 
+A card reported as one that "cannot be verified in this environment" is
+not a card that failed. Its verify said the machine it ran on cannot run
+its verification plan, which is no opinion on the work. You are shown it
+once. Send it back only if its plan asks the environment for something
+the item does not need (a step that belongs under [CI-only], a service
+the check could do without); otherwise leave it exactly as it is — the
+goal keeps it, waits, and says what it is waiting on. Do not drop it and
+do not mark its item not met: nothing has been found wrong.
+
 Record a decision for review for every call a user of the result would
 notice — behaviour, interface, user-visible naming, a dependency added, a
 data format — and for anything that trades against a done-when item,

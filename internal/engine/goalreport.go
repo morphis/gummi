@@ -33,6 +33,11 @@ const (
 	// two would report a result as final while a top-up would still
 	// finish it.
 	DoneWhenWaiting = "waiting on budget"
+	// DoneWhenBlocked: not met yet either, and for a reason that is not
+	// the work's — a card serving it verified into an environment that
+	// could not run its plan, and the goal kept the card. "Not met" here
+	// would report the environment's absence as the goal's failure.
+	DoneWhenBlocked = "waiting on an environment"
 )
 
 // DoneWhenStatus is one done-when item at the hand-over.
@@ -97,16 +102,21 @@ type GoalReport struct {
 	// Unlike Partial, which says the result is incomplete and final, this
 	// says it is unfinished and resumable: raise the envelope and send it
 	// back and the card carries on from where it stopped.
-	NeedsBudget GoalNeedsBudget  `json:"needs_budget,omitempty"`
-	WrappingUp  bool             `json:"wrapping_up,omitempty"`
-	Budget      GoalReportBudget `json:"budget"`
-	Lanes       int              `json:"lanes"`
-	DoneWhen    []DoneWhenStatus `json:"done_when"`
-	Repos       []GoalReportRepo `json:"repos,omitempty"`
-	Cards       []GoalReportCard `json:"cards"`
-	Decisions   []GoalLogLine    `json:"decisions,omitempty"`
-	Declined    []GoalLogLine    `json:"declined_findings,omitempty"`
-	Found       []GoalLogLine    `json:"found_along_the_way,omitempty"`
+	NeedsBudget GoalNeedsBudget `json:"needs_budget,omitempty"`
+	// WaitingOn is set when a card of the goal is waiting for an
+	// environment that could not run its verification plan: the sentence
+	// that says which card and what it lacked. Like NeedsBudget it says
+	// unfinished and resumable, never final.
+	WaitingOn  string           `json:"waiting_on,omitempty"`
+	WrappingUp bool             `json:"wrapping_up,omitempty"`
+	Budget     GoalReportBudget `json:"budget"`
+	Lanes      int              `json:"lanes"`
+	DoneWhen   []DoneWhenStatus `json:"done_when"`
+	Repos      []GoalReportRepo `json:"repos,omitempty"`
+	Cards      []GoalReportCard `json:"cards"`
+	Decisions  []GoalLogLine    `json:"decisions,omitempty"`
+	Declined   []GoalLogLine    `json:"declined_findings,omitempty"`
+	Found      []GoalLogLine    `json:"found_along_the_way,omitempty"`
 	// Unread lists notes that reached the goal after its last lead turn.
 	// A note is delivered to the conductor, which reads it at implement —
 	// so one that arrives while the goal is reviewing, verifying or
@@ -184,6 +194,14 @@ func buildGoalReport(v GoalView) GoalReport {
 		Ready:      g.Stage == domain.StageVerify && !g.VerifiedAt.IsZero(),
 		WrappingUp: g.Goal.WrappingUp(), Lanes: g.Goal.LaneCount(),
 		NeedsBudget: v.NeedsBudget,
+	}
+	if g.Stage == domain.StageImplement {
+		for _, c := range v.Cards {
+			if c.State == goalpolicy.Blocked {
+				r.WaitingOn = fmt.Sprintf("%s cannot be verified in this environment: %s", c.Feature.ID, c.Reason)
+				break
+			}
+		}
 	}
 	r.Budget = GoalReportBudget{
 		Envelope: v.Ledger.Envelope, Own: v.Ledger.Own, Given: v.Ledger.Given,
@@ -318,6 +336,14 @@ func buildGoalReport(v GoalView) GoalReport {
 				}
 			}
 		}
+		if st.Status != DoneWhenMet && st.Status != DoneWhenWaiting {
+			for _, c := range servedBy[d.ID] {
+				if c.State == goalpolicy.Blocked {
+					st.Status, st.Evidence = DoneWhenBlocked, string(c.Feature.ID)+": "+c.Reason
+					break
+				}
+			}
+		}
 		if why, ok := notMet[d.ID]; ok {
 			st.Status, st.Evidence = DoneWhenNotMet, why
 		}
@@ -348,10 +374,15 @@ func RenderGoalReport(r GoalReport) string {
 		// Not "ready": work remains and a top-up continues it. Saying
 		// ready here would report an unfinished result as a finished one.
 		state = "waiting for you — " + r.NeedsBudget.Reason
+	case r.WaitingOn != "":
+		state = "waiting on an environment — " + r.WaitingOn
 	case r.Partial != "":
 		state = "ready for you — partial: " + r.Partial
 	}
 	fmt.Fprintf(&b, "%s. %d of %d done-when items met.\n\n", capitalize(state), met, total)
+	if r.WaitingOn != "" && !r.NeedsBudget.Waiting() {
+		fmt.Fprintf(&b, "Nothing was dropped and nothing was judged. Once the environment can run the card's verification plan, pick the goal back up and it verifies the card again:\n\n```sh\ngummi resume %s --autonomous\n```\n\n", r.ID)
+	}
 	if r.NeedsBudget.Waiting() {
 		fmt.Fprintf(&b, "Raise the goal's envelope and send it back, and %s carries on from where it stopped:\n\n```sh\ngummi resume %s --envelope <more than %d>\n```\n\n",
 			r.NeedsBudget.Card, r.ID, r.Budget.Envelope)
@@ -365,6 +396,8 @@ func RenderGoalReport(r GoalReport) string {
 			mark = "✓"
 		case DoneWhenUnknown:
 			mark = "?"
+		case DoneWhenWaiting, DoneWhenBlocked:
+			mark = "…"
 		}
 		fmt.Fprintf(&b, "- %s %s — %s (%s)", mark, d.ID, d.Says, d.Status)
 		if d.Evidence != "" {

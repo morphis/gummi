@@ -93,6 +93,7 @@ type GoalCard struct {
 	Findings  int                // open reviewer findings on a verified card
 	LeadTries int
 	TakenOver bool
+	Retry     bool     // a blocked card there is a reason to try again
 	Serves    []string // done-when ids, from the goal doc's card row
 }
 
@@ -192,7 +193,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	attachSpent := map[domain.FeatureID]int{}
 	dropReason := map[domain.FeatureID]string{}
 	leadSeen := map[domain.FeatureID][]int64{}
-	var lastLeadOK, lastLeadAny int64
+	var lastLeadOK, lastLeadAny, retrySince int64
 	failures := 0
 	outage, stalled := "", ""
 	var stalledAt time.Time
@@ -247,8 +248,17 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			outage = ""
 			failures++
 		case state.GoalStalled:
+			if en.Card != "" {
+				// stopped on a card's environment, not on the backend: the
+				// lead can run, and nothing here is an outage to wait out
+				continue
+			}
 			// the goal has already stopped on this outage and said so
 			outage, stalled, stalledAt = "", en.Detail, en.At
+		case state.GoalNote, state.GoalResumed:
+			// a person acted: whatever a blocked card was waiting for may
+			// be there now
+			retrySince = en.Seq
 		}
 		if en.Action == state.GoalAttached {
 			attachSpent[en.Card] = en.From
@@ -292,6 +302,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		if gc.State == goalpolicy.Verified {
 			gc.Findings = e.openReviewerFindings(&c)
 		}
+		gc.Retry = gc.State == goalpolicy.Blocked && retrySince > marks.Park.Seq
 		// lead turns that saw this card since it last crossed a stage: a
 		// send-back or a restart is the lead acting on the same problem, not
 		// the card getting past it, so neither resets the count — otherwise
@@ -325,7 +336,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		in.Cards = append(in.Cards, goalpolicy.Card{
 			ID: gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
 			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings,
-			LeadTries: gc.LeadTries, Reason: gc.Reason,
+			LeadTries: gc.LeadTries, Reason: gc.Reason, Retry: gc.Retry,
 		})
 	}
 	v.Ledger = goalpolicy.ComputeLedger(in)
@@ -408,6 +419,14 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 			// a quit stopped it; nothing resumes itself after a quit without
 			// being asked, so the goal waits for that resume
 			return goalpolicy.Running, ""
+		}
+		if reason == state.ParkReasonBlocked {
+			// the environment could not run its verification plan: no
+			// verdict on the work, so nothing to give up on
+			if detail == "" {
+				detail = "the environment cannot run its verification plan"
+			}
+			return goalpolicy.Blocked, detail
 		}
 		if detail == "" {
 			detail = "stopped at a decision"
@@ -497,6 +516,9 @@ type GoalTickResult struct {
 	// was dropped: the driving loop reports it and stops, and picking the
 	// goal back up once the backend is available carries on.
 	Stalled string
+	// StalledOn names the card whose environment the goal is waiting for,
+	// when that and not the backend is what Stalled is about.
+	StalledOn domain.FeatureID
 }
 
 // GoalNeedsBudget is a goal's standing request for more budget: which
@@ -583,8 +605,8 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		}
 		return nil
 	case goalpolicy.Stall:
-		e.goalStall(ctx, goal.ID, a.Reason)
-		res.Stalled = a.Reason
+		e.goalStall(ctx, goal.ID, a.Card, a.Reason)
+		res.Stalled, res.StalledOn = a.Reason, a.Card
 		return nil
 	case goalpolicy.Lead:
 		starts, err := e.runLeadTurn(ctx, view, a.Reasons)
@@ -597,8 +619,12 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 	case goalpolicy.Start:
 		gc, _ := view.Card(a.Card)
 		note := ""
-		if gc.State == goalpolicy.Stuck {
+		switch gc.State {
+		case goalpolicy.Stuck:
 			note = "The goal restarted this card after it stopped: " + gc.Reason
+		case goalpolicy.Blocked:
+			note = "This card's verify could not run in the environment it had (" + gc.Reason +
+				"). Someone has been at the goal since, so try the verification plan again; if it still cannot run, say so with VERDICT: blocked."
 		}
 		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalStarted, Card: a.Card, By: ActorGoal})
 		res.Start = append(res.Start, GoalStart{ID: a.Card, Note: note})
@@ -949,7 +975,7 @@ func (e *Engine) logLeadFailure(ctx context.Context, goal domain.FeatureID, card
 // could not serve it. Unlike a wrap-up it drops nothing: every card keeps
 // its branch, its spend and its place, and the next tick after the
 // backend returns carries on.
-func (e *Engine) goalStall(ctx context.Context, goal domain.FeatureID, reason string) {
+func (e *Engine) goalStall(ctx context.Context, goal, card domain.FeatureID, reason string) {
 	log, err := e.cfg.Store.GoalLog(ctx, goal)
 	if err == nil {
 		for i := len(log) - 1; i >= 0; i-- {
@@ -963,7 +989,33 @@ func (e *Engine) goalStall(ctx context.Context, goal domain.FeatureID, reason st
 			}
 		}
 	}
-	e.goalLog(ctx, goal, state.GoalPayload{Action: state.GoalStalled, Detail: reason, By: ActorGoal})
+	e.goalLog(ctx, goal, state.GoalPayload{Action: state.GoalStalled, Card: card, Detail: reason, By: ActorGoal})
+}
+
+// GoalResumed records that a person picked a stopped goal back up. It is
+// what tells the conductor a card waiting on its environment is worth
+// another verify: retrying costs a session, so the goal never does it on
+// a timer, only when someone has been there since the card stopped. A goal
+// that was not waiting on an environment records nothing.
+func (e *Engine) GoalResumed(ctx context.Context, goalID domain.FeatureID) error {
+	log, err := e.cfg.Store.GoalLog(ctx, goalID)
+	if err != nil {
+		return err
+	}
+	for i := len(log) - 1; i >= 0; i-- {
+		switch log[i].Action {
+		case state.GoalResumed:
+			return nil
+		case state.GoalStalled:
+			if log[i].Card == "" {
+				return nil
+			}
+			e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: "user",
+				Detail: "picked back up after waiting on " + string(log[i].Card) + "'s environment"})
+			return nil
+		}
+	}
+	return nil
 }
 
 // tidyGoalTree puts a goal tree's tracked files back the way its branch

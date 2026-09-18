@@ -379,3 +379,69 @@ func TestAnOutageStopsTheGoalWithoutDroppingItsWork(t *testing.T) {
 		t.Error("a lead that keeps failing still wraps the goal up")
 	}
 }
+
+// A verify that said the environment cannot run the plan is no opinion on
+// the work. Read as stuck, the card cost two lead turns and then its
+// branch.
+func TestABlockedCardIsNeverDroppedForIt(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.Cards = []Card{
+		{ID: "FD-002", State: Blocked, Envelope: 500, Spent: 300, Reason: "no docker here"},
+		{ID: "FD-003", State: Running, Envelope: 500},
+	}
+	if got, want := acts(in), "lead [FD-002 cannot be verified in this environment: no docker here]"; got != want {
+		t.Fatalf("the lead gets one look: got %q, want %q", got, want)
+	}
+	in.Cards[0].LeadTries = 1
+	if got := acts(in); got != "" {
+		t.Fatalf("a blocked card waits while other work runs, got %q", got)
+	}
+	in.Cards[0].LeadTries = 5
+	if got := acts(in); strings.Contains(got, "drop") {
+		t.Fatalf("no number of lead turns drops a blocked card, got %q", got)
+	}
+}
+
+func TestAGoalWithOnlyBlockedWorkStallsAndKeepsIt(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.Cards = []Card{
+		{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300},
+		{ID: "FD-003", State: Blocked, Envelope: 500, Spent: 300, LeadTries: 1, Reason: "no docker here"},
+		{ID: "FD-004", State: Waiting, Envelope: 500, DependsOn: []domain.FeatureID{"FD-003"}},
+	}
+	got := Decide(in)
+	if len(got) != 1 || got[0].Kind != Stall || got[0].Card != "FD-003" {
+		t.Fatalf("got %v, want one stall naming FD-003", got)
+	}
+	if !strings.Contains(got[0].Reason, "no docker here") {
+		t.Fatalf("the stall says what it waits on, got %q", got[0].Reason)
+	}
+	// something in flight: not stalled yet
+	in.Cards[2] = Card{ID: "FD-004", State: Running, Envelope: 500}
+	if got := acts(in); got != "" {
+		t.Fatalf("a goal with a card running is not stalled, got %q", got)
+	}
+}
+
+func TestABlockedCardIsRetriedOnlyWhenThereIsAReason(t *testing.T) {
+	in := base()
+	in.Cards = []Card{{ID: "FD-002", State: Blocked, Envelope: 500, LeadTries: 1, Reason: "no docker here", Retry: true}}
+	if got, want := acts(in), "start FD-002"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Cards[0].TakenOver = true
+	if got := acts(in); strings.Contains(got, "start") {
+		t.Fatalf("a taken-over card is never started by the goal, got %q", got)
+	}
+}
+
+func TestWrappingUpDropsABlockedCardLikeAnyOther(t *testing.T) {
+	in := base()
+	in.WrapUp, in.WrapReason = true, "you stopped it"
+	in.Cards = []Card{{ID: "FD-002", State: Blocked, Envelope: 500, Reason: "no docker here"}}
+	if got := acts(in); !strings.Contains(got, "drop FD-002") || !strings.Contains(got, "finish") {
+		t.Fatalf("got %q", got)
+	}
+}

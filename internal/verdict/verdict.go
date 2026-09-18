@@ -132,6 +132,23 @@ func SessionVerdict(snap engine.Snapshot) Verdict {
 	return raw
 }
 
+// BlockedByEnvironment reports that a session's Blocked verdict is the
+// verifier's own: it said this machine cannot run the verification plan.
+//
+// Blocked means two different things and only one of them is about the
+// environment. The other is gummi's floor — a pass it refused because a
+// check failed, a promise is not on the branch, or a live check was left
+// out — and that is a statement about the work, which wants what a failed
+// verify wants. They reach every caller as the same Verdict, so whoever
+// has to tell "wait for it" from "fix it" asks here.
+func BlockedByEnvironment(snap engine.Snapshot) bool {
+	raw := FromTool(snap.Verdict)
+	if raw == Unclear {
+		raw = Parse(LastAssistant(snap))
+	}
+	return raw == Blocked && snap.VerdictFloor != "fail"
+}
+
 // LastAssistant returns the content of the most recent assistant message
 // in a snapshot's transcript, or "".
 func LastAssistant(snap engine.Snapshot) string {

@@ -91,10 +91,11 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		return nil
 	}
 	out := gatepolicy.Decide(gatepolicy.Input{
-		Stage:     domain.StageVerify,
-		Kind:      id.Kind(),
-		Verdict:   sessionVerdict(s.Snapshot()),
-		WorkStage: domain.StageImplement,
+		Stage:       domain.StageVerify,
+		Kind:        id.Kind(),
+		Verdict:     sessionVerdict(s.Snapshot()),
+		Environment: verdict.BlockedByEnvironment(s.Snapshot()),
+		WorkStage:   domain.StageImplement,
 		// verify never auto-bounces here: a failed verify always escalates
 		// to a human today (gatepolicy documents the eligible-to-bounce
 		// rule as dormant; this keeps it switched off).
@@ -128,6 +129,9 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		// can hand the scribe what verify just reported (engine/predraft.go).
 		stamp = tea.Batch(m.markVerified(id), m.loadExcusedChecks(id),
 			m.predraftLandingMessage(id, verdict.LastAssistant(s.Snapshot())))
+	case out.Reason == gatepolicy.ReasonNoEnvironment:
+		m.raiseBlocked(id, "verify BLOCKED — this machine can't run the verification plan; "+
+			"what it lacks is in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
 	case out.Reason == "verify-blocked":
 		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
 			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")

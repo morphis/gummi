@@ -2599,6 +2599,40 @@ The repair is a decision for review with the agreed command as its
 alternative, and a check run that passes after an item was marked not met
 settles the item.
 
+### 17.4a What a goal waits for
+
+Three things stop a goal without ending anything, and they share one rule:
+*which work to abandon is not the goal's decision, and waiting is not
+abandoning.* The budget (`NeedBudget`), the agent backend (`Stall`), and —
+the same shape one noun over — the **environment**.
+
+A verify may end `VERDICT: blocked`: this machine cannot run the
+verification plan. `gatepolicy` has always kept that apart from a failed
+verify so that it "never burns a corrective round against a problem no
+retry fixes"; a goal used to lose the distinction one layer up, reading the
+park as `Stuck` — two lead turns, then the card's branch — and sending its
+own blocked verify back to its cards as rework. Now:
+
+- The park carries `state.ParkReasonBlocked`, the one value a goal reads
+  (`goalCardState`) to tell a card to wait for from a card to give up on.
+  Only the verifier's **own** word earns it (`verdict.BlockedByEnvironment`,
+  `gatepolicy.ReasonNoEnvironment`): a pass gummi floored to blocked — a
+  failed check, a promise not on the branch — is about the work and stays
+  `verify-blocked`, handled as a stuck card.
+- `goalpolicy.Blocked` holds no lane, goes to the lead **once** (it may
+  belong under `[CI-only]`), and is never dropped for it. When nothing else
+  can move, `Decide` returns `Stall` naming the card; the hand-over reads
+  *waiting on an environment*, and the items it serves say the same rather
+  than *not met*.
+- A retry is a verify session, so there is no timer. `Card.Retry` is set
+  when a person has been at the goal since the card parked — a note, or a
+  resume of a goal that stalled on it (`Engine.GoalResumed`) — and then the
+  card starts again with a note saying why. A resume at verify re-runs a
+  verdict that was the environment's (`resumeFinishedVerify` honours only
+  verdicts a card *earned*).
+- The goal's own blocked verify stops at verify, whole, with no rework
+  round spent; in the board it is the goal's one stop that reaches you.
+
 ### 17.5 Silence and the hand-over
 
 A goal card's stops (escalations, failures, exhausted envelopes) are

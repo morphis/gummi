@@ -146,3 +146,22 @@ func TestSessionVerdictFloor(t *testing.T) {
 		})
 	}
 }
+
+// Blocked reaches every caller as one verdict and means two things. Only
+// the verifier's own is about the environment; a pass gummi floored is
+// about the work.
+func TestBlockedByEnvironmentIsTheVerifiersOwnWord(t *testing.T) {
+	said := engine.Snapshot{Transcript: []engine.Message{{Author: engine.AuthorAssistant, Content: "no cluster here\nVERDICT: blocked"}}}
+	if !BlockedByEnvironment(said) {
+		t.Fatal("the verifier said this machine cannot run the plan")
+	}
+	floored := engine.Snapshot{VerdictFloor: "blocked",
+		Transcript: []engine.Message{{Author: engine.AuthorAssistant, Content: "all good\nVERDICT: pass"}}}
+	if SessionVerdict(floored) != Blocked || BlockedByEnvironment(floored) {
+		t.Fatal("a pass gummi refused reads Blocked, and is not the environment's doing")
+	}
+	said.VerdictFloor = "fail"
+	if BlockedByEnvironment(said) {
+		t.Fatal("a fail floor is true on every machine")
+	}
+}

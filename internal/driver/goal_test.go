@@ -265,3 +265,52 @@ func TestAGoalDecisionReachesAGoalAnotherProcessIsDriving(t *testing.T) {
 		t.Errorf("the conductor has no note to read: %+v", log)
 	}
 }
+
+// A goal's own verify that says the environment cannot run the checks
+// judged nothing. It used to take the rework path — the f.IsGoal() arm
+// came first — which spent a corrective round and sent the goal back to
+// cards nobody had found fault with; two of them ended a goal partial. It
+// stops where it is instead, and the same resume runs the verify again.
+func TestAGoalVerifyTheEnvironmentCouldNotRunJudgesNothing(t *testing.T) {
+	h := goalHarness(t)
+	inner := h.fake.Responder
+	blocked := true
+	h.fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		f, err := h.store.GetFeature(context.Background(), cardOfSession(opts))
+		if err == nil && f.IsGoal() && f.Stage == domain.StageVerify && opts.Role == agent.RoleReviewer && blocked {
+			h.draftRequiredSections(f)
+			return toolVerdict(opts.Model, "blocked")
+		}
+		return inner(opts, msg)
+	}
+	ctx := context.Background()
+	d := h.driver(Options{Envelope: 6000, Autonomous: true, GoalDoc: driverGoalDoc})
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.Drive(ctx, g)
+	if err != nil || out.Status != StatusStalled {
+		t.Fatalf("status %s err %v\n%s", out.Status, err, h.buf.String())
+	}
+	got, _ := h.store.GetFeature(ctx, g.ID)
+	if got.Stage != domain.StageVerify || got.Goal.Partial != "" || !got.VerifiedAt.IsZero() {
+		t.Fatalf("the goal stays at verify, whole and unverified: stage %s partial %q", got.Stage, got.Goal.Partial)
+	}
+	for _, ev := range h.events() {
+		if ev["result"] == "reworking" {
+			t.Fatalf("nothing was judged, so nothing goes back to the cards:\n%s", h.buf.String())
+		}
+	}
+
+	blocked = false
+	d2 := h.driver(Options{Envelope: 6000, Autonomous: true})
+	out, err = d2.Resume(ctx, g.ID, ResumeInput{})
+	if err != nil || out.Status != StatusVerified {
+		t.Fatalf("resume: status %s err %v\n%s", out.Status, err, h.buf.String())
+	}
+	got, _ = h.store.GetFeature(ctx, g.ID)
+	if got.Goal.Partial != "" {
+		t.Fatalf("a verify that could run found nothing wrong: partial %q", got.Goal.Partial)
+	}
+}
