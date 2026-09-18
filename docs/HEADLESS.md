@@ -233,7 +233,7 @@ leaves the branch exactly where it is:
 
 ```sh
 gummi handoff FD-042
-{"event":"handed off","id":"FD-042","branch":"gummi/FD-042-json-export"}
+{"event":"handed off","id":"FD-042","branch":"feat/json-export"}
 ```
 
 It commits a final checkpoint first (the branch is the deliverable, so

@@ -162,6 +162,23 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err := requireRepo(in.RequireRepo, in.Repo); err != nil {
 		return domain.Feature{}, err
 	}
+	// The branch name a card gets no longer carries its id, so two cards
+	// whose titles slugify the same would want the same ref. Refuse here,
+	// before a sequence number is spent and before a card exists that
+	// could never cut its branch — and say what to do about it, since the
+	// fix is a word in the title and nothing else.
+	//
+	// Research cards are exempt: they never cut a branch.
+	if in.Kind != domain.KindResearch {
+		probe := domain.Feature{Kind: in.Kind, Slug: slug, BranchScheme: domain.DefaultBranchScheme}
+		branch := probe.BranchName()
+		if owner, taken, terr := store.BranchTaken(ctx, in.Repo, branch, ""); terr != nil {
+			return domain.Feature{}, terr
+		} else if taken {
+			return domain.Feature{}, fmt.Errorf(
+				"%s already uses the branch %s — retitle this card so it gets a different one", owner, branch)
+		}
+	}
 	num, err := store.MintFeatureNum(ctx, ws.SeqFile())
 	if err != nil {
 		return domain.Feature{}, err

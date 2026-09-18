@@ -65,6 +65,33 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 			return nil, err
 		}
 	}
+	// And the branch each one would cut must be free, both of the cards
+	// already in the store and of the other proposals in this batch.
+	// Ingest is the path most likely to hit this: one document decomposed
+	// into a dozen cards can easily name two of them similarly enough to
+	// slugify the same, and a whole batch that half-mints is worse than
+	// one that refuses.
+	batch := map[string]int{}
+	for i, p := range res.Proposals {
+		if kinds[i] == domain.KindResearch {
+			continue
+		}
+		probe := domain.Feature{Kind: kinds[i], Slug: slugs[i], BranchScheme: domain.DefaultBranchScheme}
+		branch := probe.BranchName()
+		if first, dup := batch[branch]; dup {
+			return nil, fmt.Errorf("proposals %q and %q both want the branch %s — retitle one of them",
+				res.Proposals[first].Title, p.Title, branch)
+		}
+		batch[branch] = i
+		owner, taken, terr := e.cfg.Store.BranchTaken(ctx, opts.Repo, branch, "")
+		if terr != nil {
+			return nil, terr
+		}
+		if taken {
+			return nil, fmt.Errorf("%s already uses the branch %s that %q wants — retitle it",
+				owner, branch, p.Title)
+		}
+	}
 
 	// Pass 1: mint an ID/slug for every proposal, and index by title so
 	// depends_on can render as "FD-002 slug" instead of a bare title. A

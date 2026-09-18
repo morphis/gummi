@@ -344,7 +344,14 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	if ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
 		return "", err
 	} else if ok {
-		return "", fmt.Errorf("branch %s already exists (leftover from an earlier worktree?); delete it first: git branch -D %s", branch, branch)
+		// Two causes now, and the message names both: a leftover from an
+		// earlier worktree of this same card, or another card whose title
+		// slugified to the same label — the branch spelling carries no
+		// card id, so that is a real collision rather than a curiosity.
+		// The mint-time BranchTaken check catches the second for cards
+		// gummi created; this is the backstop for a ref that arrived by
+		// any other route.
+		return "", fmt.Errorf("branch %s already exists — a leftover from an earlier worktree of %s (delete it: git branch -D %s), or another card's branch with the same label", branch, f.ID, branch)
 	}
 	if err := os.MkdirAll(m.worktreesDir(), 0o750); err != nil {
 		return "", err

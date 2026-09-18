@@ -87,6 +87,28 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 		}
 		slugs[i] = s
 	}
+	// The branch each bug would cut must be free too — of the store and
+	// of the rest of this batch. A GitHub import is a batch of titles
+	// nobody wrote with branch names in mind, so two issues that slugify
+	// the same are a normal occurrence rather than an edge case.
+	batch := map[string]int{}
+	for i, p := range props {
+		probe := domain.Feature{Kind: domain.KindBug, Slug: slugs[i], BranchScheme: domain.DefaultBranchScheme}
+		branch := probe.BranchName()
+		if first, dup := batch[branch]; dup {
+			return nil, fmt.Errorf("bugs %q and %q both want the branch %s — retitle one of them",
+				props[first].Title, p.Title, branch)
+		}
+		batch[branch] = i
+		owner, taken, terr := e.cfg.Store.BranchTaken(ctx, opts.Repo, branch, "")
+		if terr != nil {
+			return nil, terr
+		}
+		if taken {
+			return nil, fmt.Errorf("%s already uses the branch %s that %q wants — retitle it",
+				owner, branch, p.Title)
+		}
+	}
 
 	var created []domain.Feature
 	now := e.now()

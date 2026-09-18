@@ -15,8 +15,8 @@ step burns frontier-model tokens whether it needs them or not, and nothing
 stops an agent from skipping the spec or shipping unreviewed work.
 
 gummi replaces the pile of terminals with one board. Every piece of work
-is a card. Every card gets its own git worktree and branch (`feat/FD-042-slug`,
-`bug/BG-007-slug`) and walks the
+is a card. Every card gets its own git worktree and branch (`feat/dark-mode`,
+`bug/flaky-login`) and walks the
 same fixed workflow. Every stage is done by an agent whose model you
 choose. gummi's job ends at a **verified branch**. Landing it on main is
 your keypress, always.
@@ -417,6 +417,15 @@ the whole setup, and it creates the stack. The board then shows the chain:
   1 ⬤ FD-101  token parser     ⛁1/3 ← main      PR#412
   2 ◐ FD-104  evaluate rules   ⛁2/3 ← FD-101
   3 ◐ FD-103  cli surface      ⛁3/3 ← FD-104
+```
+
+Their branches are `feat/token-parser`, `feat/evaluate-rules`,
+`feat/cli-surface` — the kind of work and the label. Two cards of one kind
+in one repo cannot share a label, and gummi says so when you create the
+second rather than when it tries to cut the branch:
+
+```
+BG-001 already uses the branch bug/flaky-login — retitle this card so it gets a different one
 ```
 
 All three run at the same time: **a stack orders landing, never work.**

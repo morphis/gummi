@@ -455,3 +455,54 @@ func TestPullRequestRefPresenters(t *testing.T) {
 		t.Errorf("json.Marshal(StatusPayload()) = %s, want %s", got, want)
 	}
 }
+
+// The per-kind branch spelling is the kind of work and the label, with no
+// card id: `bug/token-parser`. The id lives on in the worktree path, which
+// is what keeps two cards' checkouts apart.
+func TestBranchNameKindScheme(t *testing.T) {
+	for _, tc := range []struct {
+		kind Kind
+		id   string
+		num  int
+		want string
+	}{
+		{KindFeature, "FD-042", 42, "feat/dark-mode"},
+		{KindBug, "BG-007", 7, "bug/dark-mode"},
+		{KindGoal, "GL-004", 4, "goal/dark-mode"},
+	} {
+		f := Feature{ID: FeatureID(tc.id), Num: tc.num, Kind: tc.kind,
+			Slug: "dark-mode", BranchScheme: BranchSchemeKind}
+		if got := f.BranchName(); got != tc.want {
+			t.Errorf("%s BranchName() = %q, want %q", tc.kind, got, tc.want)
+		}
+		if got := f.WorktreePath(); got != ".gummi/worktrees/"+tc.id {
+			t.Errorf("%s WorktreePath() = %q, want it keyed by id", tc.kind, got)
+		}
+	}
+}
+
+// A card minted under the original scheme keeps its old branch for life:
+// that ref already exists in checkouts this process cannot see, so
+// changing the default must never rename it.
+func TestBranchNameLegacySchemeIsStable(t *testing.T) {
+	f := Feature{ID: "FD-042", Num: 42, Slug: "dark-mode"} // empty scheme
+	if got, want := f.BranchName(), "gummi/FD-042-dark-mode"; got != want {
+		t.Errorf("BranchName() = %q, want the legacy spelling %q", got, want)
+	}
+}
+
+// Two cards of the same kind and slug want the same branch — which is the
+// collision the mint-time check exists to refuse, and the reason the id
+// could not simply be dropped.
+func TestBranchNameCollidesOnEqualSlugs(t *testing.T) {
+	a := Feature{ID: "BG-001", Num: 1, Kind: KindBug, Slug: "flaky-login", BranchScheme: BranchSchemeKind}
+	b := Feature{ID: "BG-009", Num: 9, Kind: KindBug, Slug: "flaky-login", BranchScheme: BranchSchemeKind}
+	if a.BranchName() != b.BranchName() {
+		t.Fatal("two same-kind, same-slug cards should want the same branch; the collision check is what prevents it")
+	}
+	// Different kinds do not collide: the prefix separates them.
+	c := Feature{ID: "FD-009", Num: 9, Kind: KindFeature, Slug: "flaky-login", BranchScheme: BranchSchemeKind}
+	if a.BranchName() == c.BranchName() {
+		t.Error("a bug and a feature with the same slug should not share a branch")
+	}
+}

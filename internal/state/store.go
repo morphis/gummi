@@ -1577,6 +1577,45 @@ func (s *Store) DeleteFeature(ctx context.Context, id domain.FeatureID) error {
 	return nil
 }
 
+// BranchTaken reports the card that already owns branch in repo, and
+// whether there is one. `excluding` is skipped, so a card can be asked
+// about its own name.
+//
+// It exists because the per-kind branch spelling carries no card id
+// (`bug/token-parser`, not `bug/BG-001-token-parser`), and the id was
+// what made two cards' branch names structurally distinct. Two titles
+// that slugify the same — easily done, since Slugify truncates at 40
+// characters — would otherwise mint a second card that could never cut
+// its branch, and would only say so at its first stage run.
+//
+// Scoped to one repository, because that is the scope a branch name
+// collides in: the same slug in two configured repos is two different
+// refs. Research cards are skipped — they never cut a branch.
+func (s *Store) BranchTaken(ctx context.Context, repo, branch string, excluding domain.FeatureID) (domain.FeatureID, bool, error) {
+	if branch == "" {
+		return "", false, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+featureCols+` FROM features WHERE repo = ? ORDER BY num`, repo)
+	if err != nil {
+		return "", false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		f, serr := scanFeature(rows)
+		if serr != nil {
+			return "", false, serr
+		}
+		if f.ID == excluding || f.Kind == domain.KindResearch {
+			continue
+		}
+		if f.BranchName() == branch {
+			return f.ID, true, nil
+		}
+	}
+	return "", false, rows.Err()
+}
+
 // Transition moves a feature to a new stage, enforcing the workflow's
 // legal-transition table and appending to the audit trail, atomically.
 func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.Stage, actor string) (domain.Feature, error) {

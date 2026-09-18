@@ -499,3 +499,79 @@ func TestMintDropsAModeOnANonResearchKind(t *testing.T) {
 		t.Errorf("a bug card kept mode %q", f.Mode)
 	}
 }
+
+// A newly minted card gets the per-kind branch spelling — the kind of
+// work and the label, no card id.
+func TestMintUsesTheKindBranchScheme(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{
+		Kind: domain.KindBug, Description: "flaky login test", Envelope: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.BranchName(), "bug/flaky-login-test"; got != want {
+		t.Errorf("BranchName() = %q, want %q", got, want)
+	}
+	if f.BranchScheme != domain.DefaultBranchScheme {
+		t.Errorf("BranchScheme = %q, want the current default stored on the card", f.BranchScheme)
+	}
+}
+
+// The branch spelling carries no id, so two cards whose titles slugify
+// the same want the same ref. That is refused at mint — before a sequence
+// number is spent, and before a card exists that could never cut its
+// branch.
+func TestMintRefusesACollidingBranch(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	first, err := Mint(context.Background(), store, ws, Input{
+		Kind: domain.KindBug, Description: "flaky login test", Envelope: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := readSeq(t, ws.SeqFile())
+
+	// A different title that slugifies identically.
+	_, err = Mint(context.Background(), store, ws, Input{
+		Kind: domain.KindBug, Description: "Flaky login test!", Envelope: 100,
+	})
+	if err == nil {
+		t.Fatal("a second card wanting the same branch should be refused")
+	}
+	if !strings.Contains(err.Error(), string(first.ID)) {
+		t.Errorf("error %q should name the card that owns the branch", err)
+	}
+	if !strings.Contains(err.Error(), "bug/flaky-login-test") {
+		t.Errorf("error %q should name the branch", err)
+	}
+	if got := readSeq(t, ws.SeqFile()); got != seq {
+		t.Errorf("seq advanced on a refused mint: %s -> %s", seq, got)
+	}
+}
+
+// The prefix separates the kinds, so a feature and a bug may share a
+// label — and a research card never collides at all, having no branch.
+func TestMintAllowsSameLabelAcrossKinds(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	ctx := context.Background()
+	if _, err := Mint(ctx, store, ws, Input{
+		Kind: domain.KindBug, Description: "rate limits", Envelope: 100,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Mint(ctx, store, ws, Input{
+		Kind: domain.KindFeature, Description: "rate limits", Envelope: 100,
+	})
+	if err != nil {
+		t.Fatalf("a feature should be free to share a bug's label: %v", err)
+	}
+	if got := f.BranchName(); got != "feat/rate-limits" {
+		t.Errorf("BranchName() = %q, want feat/rate-limits", got)
+	}
+	if _, rerr := Mint(ctx, store, ws, Input{
+		Kind: domain.KindResearch, Description: "rate limits", Envelope: 100,
+	}); rerr != nil {
+		t.Errorf("a research card has no branch and must never collide: %v", rerr)
+	}
+}

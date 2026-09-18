@@ -54,7 +54,7 @@ queue visible and make context-switching between features cheap.
 | **Role** | A named agent capability slot: `architect`, `implementer`, `reviewer`, `scribe`. Workflows reference roles, never concrete models. |
 | **Profile** | Maps roles → concrete agent configs (adapter, model, provider/BYOK env, permission level). Selected per feature. `premium`, `thrifty`, `local-heavy`, ... |
 | **Session** | One live agent conversation bound to a feature + stage. Can be attached (focused in TUI), running in background, or paused. |
-| **Worktree** | Git worktree per card: `.gummi/worktrees/FD-042/`, branch `gummi/FD-042-dark-mode`. Created on the card's first stage run and kept for its whole life; removed after merge. A research card never gets one. |
+| **Worktree** | Git worktree per card: `.gummi/worktrees/FD-042/`, branch `feat/dark-mode` (§18.6). Created on the card's first stage run and kept for its whole life; removed after merge. A research card never gets one. |
 
 ### Why roles indirect between workflow and profile
 
@@ -424,7 +424,7 @@ envelope that is gummi's real spend limiter.
 ### 4.3 Worktree manager
 
 - `gummi` runs from the main checkout; each feature gets
-  `git worktree add .gummi/worktrees/FD-042 -b gummi/FD-042-slug`.
+  `git worktree add .gummi/worktrees/FD-042 -b feat/<slug> <base>`.
   Worktrees are nested by design — `gummi init` writes the ignore rules
   (`.gummi/worktrees/`, `.gummi/scratch/`, `.gummi/state/`) so the repo
   stays clean.
@@ -717,7 +717,7 @@ design system.
 │  TODO                 │   FD-042 · Dark mode toggle              [thrifty]       │
 │   ○ FD-051 rate limits│   ────────────────────────────────────────────────       │
 │                       │   Stage: Implement (autonomous)        ⣾ running         │
-│  IN PROGRESS          │   Branch: gummi/FD-042-dark-mode   +412 −38 · 9 files    │
+│  IN PROGRESS          │   Branch: feat/dark-mode           +412 −38 · 9 files    │
 │  ▸● FD-042 dark mode ⣾│                                                          │
 │   ● FD-047 csv export⏸│   ┌ activity ────────────────────────────────────┐       │
 │   ✉ FD-049 auth fix  ?│   │ ✓ edited internal/theme/palette.go           │       │
@@ -2650,3 +2650,29 @@ on one surface is the defect this keymap's own comments keep recording.
 - **Renaming existing branches.** A card minted under the original
   `gummi/<ID>-<slug>` scheme keeps it for life (`Feature.BranchScheme`),
   because its branch already exists in checkouts gummi cannot see.
+
+### 18.6 The branch spelling
+
+A new card's branch is the kind of work and the label: `bug/flaky-login`,
+`feat/dark-mode`, `goal/auth-rework`. `Feature.BranchName` is the one
+place it is constructed and nothing anywhere parses one back, so the
+spelling was free to change — worktrees are found by path, branches by
+this derived name, and drifted cards by walking store rows.
+
+The card id is deliberately absent, and that costs something worth naming.
+It was doing two jobs in the old spelling: identifying the card, which the
+slug already does in the words a reviewer reads, and guaranteeing
+uniqueness, which it did for free. Uniqueness is therefore **checked
+rather than structural** now — `Store.BranchTaken`, asked at every mint
+(`cardmint.Mint`, `Materialize`, `MaterializeBugs`) before a sequence
+number is spent, with the batch paths also checking their own proposals
+against each other. `worktree.Create`'s already-exists refusal stays as
+the backstop for a ref that arrived by some other route, and names both
+possible causes.
+
+Two cards may still share a label across kinds (the prefix separates
+them) and across repositories (a branch name collides only within one
+checkout). The worktree path is still keyed by id
+(`.gummi/worktrees/FD-042`), which is what keeps two cards' checkouts
+apart regardless of their labels. Research cards are exempt from the whole
+question: they never cut a branch.

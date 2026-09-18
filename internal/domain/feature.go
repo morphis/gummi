@@ -671,10 +671,22 @@ func (f *Feature) Ending(landedOnBase bool) Ending {
 // Which spelling a card gets is its stored BranchScheme, not the current
 // default: a card minted under the original scheme keeps
 // `gummi/FD-042-slug` for life, because its branch already exists in
-// checkouts this process cannot see. New cards get the per-kind spelling.
+// checkouts this process cannot see. New cards get the per-kind spelling,
+// `bug/token-parser` — the kind of work and the label, and nothing else.
+//
+// The card id is deliberately absent from the new spelling. It was doing
+// two jobs there: naming the card, which the slug already does in the
+// words a reviewer reads, and guaranteeing uniqueness, which it did for
+// free. Dropping it gives up the second, so uniqueness is now checked
+// rather than structural: BranchTaken is asked at mint, before a card
+// exists that could never cut a branch, and worktree.Create's
+// already-exists refusal remains the backstop for a name git acquired by
+// some other route. The worktree path is still keyed by id
+// (.gummi/worktrees/FD-042), so two cards may safely share a slug as
+// long as they are in different repositories.
 func (f *Feature) BranchName() string {
 	if f.BranchScheme == BranchSchemeKind {
-		return f.kind().branchPrefix() + "/" + string(f.ID) + "-" + f.Slug
+		return f.kind().branchPrefix() + "/" + f.Slug
 	}
 	return "gummi/" + string(f.ID) + "-" + f.Slug
 }
