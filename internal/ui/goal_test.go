@@ -88,9 +88,12 @@ func TestBoardFoldsGoalCardsUnderTheirGoal(t *testing.T) {
 }
 
 func TestGoalStageActions(t *testing.T) {
+	// The page leads: the first row is the one `enter` takes, and a
+	// running goal is a healthy card with nothing to decide — the reflex
+	// keystroke on it used to drop its unfinished work and end it partial.
 	run := stageActions(nextInput{stage: domain.StageImplement, kind: domain.KindGoal})
-	if len(run) != 2 || run[0].id != "goalstop" || run[1].id != "goalpage" {
-		t.Fatalf("a running goal offers stop and its page: %+v", run)
+	if len(run) != 2 || run[0].id != "goalpage" || run[1].id != "goalstop" {
+		t.Fatalf("a running goal offers its page, then stop: %+v", run)
 	}
 	ready := stageActions(nextInput{stage: domain.StageVerify, kind: domain.KindGoal, attn: attnGate, verdict: verdictPass})
 	var ids []string
