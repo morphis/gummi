@@ -2812,7 +2812,10 @@ tested.
   that asked for it, and the substrate is held exactly as long as something
   is really using it: a runner that dies lets go (and its run reads
   inconclusive, never failed), and a gummi that dies does not take a running
-  experiment's exclusivity down with it.
+  experiment's exclusivity down with it. On Linux a phase's command is
+  killed with its runner (a parent-death signal), so a deploy cannot outlive
+  the lease that covered it and go on working a substrate the next holder
+  believes it has to itself.
 - **The judge is not the work's to edit.** Experiments are operator config
   from outside every worktree, as env probes are. A goal may well change the
   harness it is tested on — that is part of the work — but the definition of
@@ -2829,6 +2832,18 @@ that cannot be believed is not something more turns can fix, and each
 further run would be substrate time spent learning the same thing. The first
 run of an experiment for a goal proves the rig (`control`) first; later ones
 do not pay for it again.
+
+Two **controls** make a pass worth handing over, and they are the rule a
+repaired check is already held to — *it must fail on main* — applied to a
+run. The **positive control** (`control:`) proves the rig against its own
+reference on a freshly reset substrate; a rig that fails it judges nothing.
+The **negative control** is the same experiment on the trunk, made once per
+goal when its heads first pass: an experiment that has only ever been seen
+to pass has not been seen to be able to fail. It never blocks. What it says
+goes into each item's evidence — *also holding on the trunk, so it is not
+this goal's work that made it true*, or *not holding on the trunk* — because
+a pass is worth exactly what the same run says about the trunk, and for an
+item about part of a matrix the first of those is often the honest answer.
 
 The goal's verify makes no run. It reads what the runs say about the branch
 as it is, as results beside its commands' — so the verdict floor, the

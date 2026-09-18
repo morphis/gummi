@@ -464,7 +464,12 @@ func TestSettledWorkIsProvenBeforeTheGoalFinishes(t *testing.T) {
 	if got := acts(in); got != "" {
 		t.Fatalf("so is a substrate someone else has, got %q", got)
 	}
+	// it passes — but has it ever been seen to fail? once, on the trunk
 	in.Experiments[0] = Experiment{Name: "matrix", Proven: true}
+	if got, want := acts(in), "run matrix: negative-control"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Experiments[0].TrunkChecked = true
 	if got, want := acts(in), "finish"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

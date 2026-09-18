@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -386,7 +387,7 @@ func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env [
 		w = io.MultiWriter(w, log)
 	}
 	c.Stdout, c.Stderr = w, w
-	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	c.SysProcAttr = phaseProcAttr()
 	c.Cancel = func() error {
 		if c.Process != nil {
 			_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
@@ -394,7 +395,13 @@ func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env [
 		return nil
 	}
 	c.WaitDelay = 2 * time.Second
+	// A parent-death signal is tied to the THREAD that started the child,
+	// not the process, so the goroutine stays on its thread for the
+	// command's life: otherwise the runtime retiring an idle thread would
+	// kill a healthy command.
+	runtime.LockOSThread()
 	err := c.Run()
+	runtime.UnlockOSThread()
 	out := buf.String()
 	if rctx.Err() != nil {
 		return out, -1, fmt.Errorf("timed out after %s", timeout)

@@ -179,6 +179,13 @@ type Experiment struct {
 	ControlFailed bool
 	// Held: someone else has the substrate right now.
 	Held bool
+	// TrunkChecked: a conclusive run on the trunk exists — the negative
+	// control. An experiment that has only ever been seen to pass has not
+	// been seen to be able to fail, and a pass from it says less than it
+	// looks: the item may have held before the goal did anything, or the
+	// experiment may not observe it at all. It is the rule a repaired
+	// check is held to (it must fail on main), applied to a run.
+	TrunkChecked bool
 	// LandedSince counts the cards landed on the goal's heads since the
 	// newest conclusive run (all of them, before the first).
 	LandedSince int
@@ -944,6 +951,11 @@ func proveFirst(in Input) (acts []Action, wait bool) {
 			// failed run into a card while that still costs a card; after
 			// the goal's verify it costs a rework round as well.
 			return []Action{{Kind: Lead, Reasons: []string{x.FailedWhy}}}, true
+		case x.Proven && !x.Failed && !x.TrunkChecked && in.Substrate.CanProve():
+			// it passes; has it ever been seen to fail? One run on the
+			// trunk, once per goal, before a pass is handed over as proof.
+			acts = append(acts, Action{Kind: Run, Experiment: x.Name, Reason: "negative-control"})
+			wait = true
 		case x.Proven:
 		case x.ControlFailed:
 			return []Action{{Kind: Stall, Experiment: x.Name,

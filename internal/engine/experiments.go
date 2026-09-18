@@ -317,6 +317,9 @@ type GoalExperiment struct {
 	ControlFailed bool
 	Runs          []experiment.Result
 
+	// Trunk is the newest conclusive run on the trunk — the negative
+	// control — nil when none has been made.
+	Trunk *experiment.Result
 	// Green is the frontier: every assertion that has held in some
 	// conclusive run of the goal's heads, at any point. It should only
 	// grow. Regressed is what is in it and does not hold in Evidence.
@@ -513,6 +516,21 @@ func (e *Engine) readLiveProof(ctx context.Context, gc *GoalCard, runs []experim
 	}
 }
 
+// trunkGaveUp reports that the goal has tried its negative control as often
+// as it tries anything that judges nothing, and stops asking: a pass handed
+// over without one says so (the item's evidence carries no trunk line)
+// rather than the goal spending the runs it holds back on a rig that will
+// not answer.
+func trunkGaveUp(x GoalExperiment) bool {
+	n := 0
+	for _, r := range x.Runs {
+		if r.ExpectFail && r.State != experiment.StateRunning && !r.Outcome.Conclusive() {
+			n++
+		}
+	}
+	return n >= goalpolicy.MaxInconclusive
+}
+
 // regressionWhy is the sentence a lead is woken with.
 func (x GoalExperiment) regressionWhy() string {
 	what := strings.Join(x.Regressed, ", ")
@@ -588,7 +606,11 @@ func (e *Engine) goalExperiments(ctx context.Context, goal domain.Feature, items
 			}
 			x.Runs = append(x.Runs, r)
 			if r.ExpectFail {
-				continue // a control is about the trunk, not about the goal
+				// a control is about the trunk, not about the goal
+				if r.Outcome.Conclusive() {
+					x.Trunk = &runs[i]
+				}
+				continue
 			}
 			if r.State == experiment.StateRunning {
 				x.Running = &runs[i]
@@ -639,6 +661,15 @@ func experimentCheckResults(items []domain.DoneWhen, xs []GoalExperiment) []goal
 			held, ok := x.Evidence.Holds(it.Assertions)
 			res.Run, res.Known, res.Held = x.Evidence, ok, held
 			res.Detail = describeEvidence(*x.Evidence, it.Assertions)
+			if held && x.Trunk != nil {
+				// honest over optimistic: a pass is worth what the same run
+				// says about the trunk
+				if onTrunk, tok := x.Trunk.Holds(it.Assertions); tok && onTrunk {
+					res.Detail += " — NOTE: run " + x.Trunk.ID + " shows this holding on the trunk too, so it is not this goal's work that made it true"
+				} else if tok {
+					res.Detail += " — and run " + x.Trunk.ID + " shows it NOT holding on the trunk"
+				}
+			}
 			if !ok {
 				res.Detail = "run " + x.Evidence.ID + " passed without reporting " + strings.Join(it.Assertions, ", ")
 			}

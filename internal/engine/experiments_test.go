@@ -108,10 +108,28 @@ func TestAGoalProvesItsExperimentItemsBeforeItFinishes(t *testing.T) {
 		t.Fatalf("the hand-over says how far the rig can be believed:\n%s", body)
 	}
 
+	// It passes. Before that is handed over as proof, the same experiment
+	// is seen to be able to fail: once, on the trunk, which has no cache.
+	res = tick(t, e, g.ID)
+	if len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run || res.Actions[0].Reason != PurposeNegativeControl || res.Finished {
+		t.Fatalf("%v", res.Actions)
+	}
+	view, _ = e.GoalView(ctx, g.ID)
+	if tr := view.Experiments[0].Trunk; tr == nil || tr.Outcome != experiment.Fail || !tr.ExpectFail {
+		t.Fatalf("the trunk fails it, as it should: %+v", tr)
+	}
+	if view.Experiments[0].Evidence == nil || view.Experiments[0].Evidence.ID != runs[0].ID {
+		t.Fatal("a run about the trunk is not evidence about the goal")
+	}
+	rep, _ = e.GoalReport(ctx, g.ID)
+	if !strings.Contains(rep.DoneWhen[0].Evidence, "NOT holding on the trunk") || !strings.Contains(rep.DoneWhen[1].Evidence, "holding on the trunk too") {
+		t.Fatalf("a pass is worth what the same run says about the trunk — DW-1 is the goal's doing, DW-2's assertion held anyway:\n%s\n%s",
+			rep.DoneWhen[0].Evidence, rep.DoneWhen[1].Evidence)
+	}
 	if res = tick(t, e, g.ID); !res.Finished {
 		t.Fatalf("proven, it finishes: %v", res.Actions)
 	}
-	if got := e.ExperimentRuns(g.ID); len(got) != 1 {
+	if got := e.ExperimentRuns(g.ID); len(got) != 2 {
 		t.Fatalf("and does not pay for the same evidence twice: %d runs", len(got))
 	}
 }

@@ -508,6 +508,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		px := goalpolicy.Experiment{
 			Name: x.Name, Problem: x.Problem, Running: x.Running != nil, Proven: x.Evidence != nil,
 			Inconclusive: x.Inconclusive, Why: x.LastReason, ControlFailed: x.ControlFailed,
+			TrunkChecked: x.Trunk != nil || trunkGaveUp(x),
 		}
 		if x.Evidence != nil && x.Evidence.Outcome == experiment.Fail {
 			px.Failed, px.LeadSaw = true, lastLeadAt.After(x.Evidence.Ended)
@@ -950,6 +951,8 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 	case goalpolicy.Run:
 		start := ExperimentStart{Name: a.Experiment, Purpose: a.Reason, Control: e.needsControl(goal.ID, a.Experiment)}
 		switch a.Reason {
+		case PurposeNegativeControl:
+			start.Trunk, start.Control = true, false
 		case PurposeBisect:
 			for _, x := range view.Experiments {
 				if x.Name == a.Experiment && a.Landing >= 0 && a.Landing < len(x.Suspects) {
