@@ -118,6 +118,16 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 	if cached, ok := e.cachedChecks(repoRoot); ok {
 		return e.recordChecks(specPath, spec.RenderDiscoveredChecks(cached))
 	}
+	// Two cards of one goal cross their plan gates together, and the
+	// survey takes minutes: without this they both miss the cache, both
+	// pay a scribe, and the repo ends up with two answers. The second one
+	// waits here and then reads the first one's.
+	mu := e.discoveryLock(repoRoot)
+	mu.Lock()
+	defer mu.Unlock()
+	if cached, ok := e.cachedChecks(repoRoot); ok {
+		return e.recordChecks(specPath, spec.RenderDiscoveredChecks(cached))
+	}
 
 	sess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:         workDir,

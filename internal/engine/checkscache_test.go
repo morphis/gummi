@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -203,5 +204,57 @@ func TestChecksCachePicksTheSameEntryEveryTime(t *testing.T) {
 	if first[0].Cmd != "go test ./..." {
 		t.Errorf("reused %q, want the root nearest the workspace (%q)",
 			first[0].Cmd, "go test ./...")
+	}
+}
+
+// The measured miss. A repository's own .gitignore can hide a file the
+// fingerprint reads — yq ignores `test*.yml`, which covers its own
+// .github/workflows/test-yq.yml — and a fresh worktree does not have it.
+// Hashing what git does not track therefore made the workspace root and
+// every worktree of it disagree by construction, so the goal card that
+// should have reused its workspace's survey paid for a second one.
+func TestChecksFingerprintIgnoresWhatGitDoesNotTrack(t *testing.T) {
+	root := t.TempDir()
+	gitInit(t, root)
+	write(t, filepath.Join(root, "go.mod"), "module x\n")
+	write(t, filepath.Join(root, "Makefile"), "test:\n\tgo test ./...\n")
+	write(t, filepath.Join(root, ".gitignore"), "test*.yml\n")
+	if err := os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, ".github", "workflows", "ci.yml"), "jobs: {}\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "repo")
+
+	tracked := checksFingerprint(root)
+	if tracked == "" {
+		t.Fatal("a repo with a Makefile has no fingerprint")
+	}
+	// the repo's own ignore rule hides this one from git, and from any
+	// worktree checked out of it
+	write(t, filepath.Join(root, ".github", "workflows", "test-it.yml"), "jobs: {}\n")
+	if got := checksFingerprint(root); got != tracked {
+		t.Error("a file git does not track changed what the repo is fingerprinted as")
+	}
+
+	tree := filepath.Join(t.TempDir(), "wt")
+	git(t, root, "worktree", "add", "-q", "-b", "goal/x", tree)
+	if got := checksFingerprint(tree); got != tracked {
+		t.Errorf("a worktree of the repo fingerprints differently from the repo:\n %s\n %s", got, tracked)
+	}
+}
+
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+	git(t, dir, "init", "-q", "-b", "main")
+	git(t, dir, "config", "user.email", "t@example.com")
+	git(t, dir, "config", "user.name", "t")
+}
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }

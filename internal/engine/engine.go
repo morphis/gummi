@@ -413,6 +413,13 @@ type Engine struct {
 	goalLocksMu sync.Mutex
 	goalLocks   map[domain.FeatureID]*sync.Mutex
 
+	// discoverLocks serializes check discovery per repository root
+	// (checkscache.go's discoveryLock), so two cards crossing their plan
+	// gates at once survey the repo once between them instead of each
+	// paying for the same answer.
+	discoverLocksMu sync.Mutex
+	discoverLocks   map[string]*sync.Mutex
+
 	// stackLocks serializes the restack walk per stack (stack.go's
 	// stackLock), so two ticks never replay two members at once.
 	stackLocksMu sync.Mutex

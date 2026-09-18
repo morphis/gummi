@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
@@ -99,6 +101,7 @@ func checksFingerprint(root string) string {
 		}
 		paths = append(paths, matches...)
 	}
+	paths = trackedOnly(root, paths)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -119,6 +122,64 @@ func checksFingerprint(root string) string {
 		h.Write([]byte{0})
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// trackedOnly keeps the paths git tracks, and everything when root is not
+// a git repository (a test fixture, a directory someone pointed gummi at).
+//
+// Only tracked files can decide reuse. A card's worktree is a fresh
+// checkout: it holds the repository's tracked files and none of the
+// operator's own — an ignored CLAUDE.md, a .github/workflows/test-*.yml
+// the repo's own .gitignore hides — which the workspace root does hold.
+// Hashing those made the workspace root and every worktree of it disagree
+// by construction, so the fingerprint that exists to let a goal's card
+// reuse its workspace's survey could never match. It was not the path
+// keying that missed on the measured drive; it was this.
+func trackedOnly(root string, paths []string) []string {
+	rel := make([]string, 0, len(paths))
+	for _, p := range paths {
+		r, err := filepath.Rel(root, p)
+		if err != nil {
+			return paths
+		}
+		rel = append(rel, filepath.ToSlash(r))
+	}
+	args := append([]string{"-C", root, "ls-files", "-z", "--"}, rel...)
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return paths // not a repository, or no git: hash what is there
+	}
+	tracked := map[string]bool{}
+	for _, name := range strings.Split(string(out), "\x00") {
+		if name != "" {
+			tracked[name] = true
+		}
+	}
+	kept := paths[:0]
+	for i, p := range paths {
+		if tracked[rel[i]] {
+			kept = append(kept, p)
+		}
+	}
+	return kept
+}
+
+// discoveryLock serializes discovery per repository root: the survey takes
+// minutes, and two cards starting together would otherwise each run one —
+// two answers, two bills, and two definitions of green for one repo. The
+// second waits and then finds the first one's answer in the cache.
+func (e *Engine) discoveryLock(root string) *sync.Mutex {
+	e.discoverLocksMu.Lock()
+	defer e.discoverLocksMu.Unlock()
+	if e.discoverLocks == nil {
+		e.discoverLocks = map[string]*sync.Mutex{}
+	}
+	m := e.discoverLocks[root]
+	if m == nil {
+		m = &sync.Mutex{}
+		e.discoverLocks[root] = m
+	}
+	return m
 }
 
 // loadChecksCache reads the whole cache, keyed by repository root. A
