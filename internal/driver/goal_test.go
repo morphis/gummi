@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 const driverGoalDoc = "# goal\n\n" +
@@ -215,5 +216,52 @@ func TestDriveGoalThatCannotMeetAnItemEndsPartial(t *testing.T) {
 	gd, _ := goalDone["goal"].(map[string]any)
 	if gd == nil || gd["done_when_met"].(float64) != 1 || gd["partial"] == "" {
 		t.Fatalf("hand-over = %v", goalDone)
+	}
+}
+
+// --goal-note, --wrap-up and --reverse exist to reach a goal WHILE it
+// runs, and a running goal is exactly the card whose lock another process
+// holds — so the CLI hands the decision over instead of refusing on the
+// only card it applies to, and this invocation drives nothing.
+func TestAGoalDecisionReachesAGoalAnotherProcessIsDriving(t *testing.T) {
+	h := goalHarness(t)
+	ctx := context.Background()
+	d := h.driver(Options{Envelope: 4000, Autonomous: true, GoalDoc: driverGoalDoc, Until: domain.StagePlan})
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Drive(ctx, g); err != nil {
+		t.Fatalf("drive to the plan stop: %v\n%s", err, h.buf.String())
+	}
+	before, _ := h.store.GetFeature(ctx, g.ID)
+
+	note := "the hex path is broken too"
+	out, err := h.driver(Options{}).Resume(ctx, g.ID, ResumeInput{Note: &note, Deliver: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != StatusNoted {
+		t.Fatalf("status = %s, want noted\n%s", out.Status, h.buf.String())
+	}
+	if out.Status.ExitCode() != 0 {
+		t.Errorf("a delivered decision exits %d; finding the goal running is its success case", out.Status.ExitCode())
+	}
+	if !strings.Contains(h.buf.String(), `"event":"noted"`) {
+		t.Errorf("no noted event on the stream: %s", h.buf.String())
+	}
+	after, _ := h.store.GetFeature(ctx, g.ID)
+	if after.Stage != before.Stage {
+		t.Errorf("delivering a note drove the goal from %s to %s", before.Stage, after.Stage)
+	}
+	log, _ := h.store.GoalLog(ctx, g.ID)
+	var sawNote bool
+	for _, en := range log {
+		if en.Action == state.GoalNote && en.Detail == note {
+			sawNote = true
+		}
+	}
+	if !sawNote {
+		t.Errorf("the conductor has no note to read: %+v", log)
 	}
 }

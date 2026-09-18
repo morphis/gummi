@@ -101,6 +101,15 @@ type stageEvent struct {
 	Result string `json:"result,omitempty"`
 }
 
+// notedEvent reports a goal decision handed to a goal another process is
+// conducting: the row is written, that conductor acts on it, and this
+// invocation drove nothing.
+type notedEvent struct {
+	Event string `json:"event"`
+	ID    string `json:"id"`
+	What  string `json:"what"`
+}
+
 type gateEvent struct {
 	Event    string `json:"event"`
 	ID       string `json:"id"`

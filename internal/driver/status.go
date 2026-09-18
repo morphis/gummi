@@ -53,6 +53,12 @@ const (
 	// StatusSaid: --say reported what a line would do and stopped without
 	// acting. Exit 0: nothing happened, and that was the point.
 	StatusSaid Status = "said"
+	// StatusNoted: a goal-only decision — a note, a wrap-up, a reversal —
+	// was handed to a goal another process is conducting. It is recorded
+	// for that conductor and this invocation drove nothing. Exit 0: the
+	// three verbs exist to reach a goal WHILE it runs, so finding it
+	// running is their success case, not their failure.
+	StatusNoted Status = "noted"
 )
 
 // ExitCode is the process exit status for a terminal Status. verified is 0;
@@ -60,7 +66,7 @@ const (
 // codes so a caller can branch on them.
 func (s Status) ExitCode() int {
 	switch s {
-	case StatusVerified, StatusStopped, StatusSaid:
+	case StatusVerified, StatusStopped, StatusSaid, StatusNoted:
 		return 0
 	case StatusError:
 		return 1

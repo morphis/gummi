@@ -158,6 +158,7 @@ branches on:
 | `0` | `verified` | verified branch ready. Report it and stop |
 | `0` | `stopped` | `--until` reached its stop. `resume --approve` to continue |
 | `0` | `said` | `--say` reported a reading and acted on nothing |
+| `0` | `noted` | a goal decision (`--goal-note`, `--wrap-up`, `--reverse`) was handed to a goal another process is driving; it acts on it, this call drove nothing |
 | `2` | `question` | a delegated question or a design gate. `resume --answer`, `--approve` or `--request-changes` |
 | `3` | `blocked` | open `%%` or diff threads block a gate (resolve them, or `resume --request-changes`), an unmet dependency blocks the coding stage (`blocking_deps` on the event: wait for it to land, or `gummi deps rm`), or the plan's own promises are unmet at the verify→done gate (`reason` names them: an invariant verify never answered or answered fail, or a golden whose quoted input appears nowhere on the branch) |
 | `4` | `escalation` | a rerun or critique cap, or an unclear verdict. Report to a human; resumable |
@@ -199,6 +200,13 @@ A goal takes three more, one at a time:
   its cards. Add `--request-changes "<why>"` to say why.
 - `--wrap-up` tells a running goal to finish now: nothing new starts,
   verified cards land, the rest is dropped, and it comes back partial.
+
+All three are for a goal that is running, which is a goal another process
+is driving: each writes one row the conductor reads on its next tick and
+drives nothing itself, so it is delivered while that process keeps the
+card lock and the call exits `noted` (0). Run against a goal nobody is
+driving, the same command delivers the decision and then drives the goal
+on, as any resume does.
 
 On a goal that is ready for you, `--request-changes "<notes>"` sends it back
 to its cards with the notes, and `--envelope N` raises its budget — the one

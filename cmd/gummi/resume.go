@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -86,6 +87,16 @@ func runResume(args []string) error {
 			return d.Resume(ctx, f.ID, in)
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
+		if errors.Is(err, state.ErrLocked) && in.GoalDecision() {
+			// --goal-note, --wrap-up and --reverse exist to reach a goal
+			// WHILE it runs, and a running goal is exactly the card whose
+			// lock is held. Each writes one row the conductor reads on its
+			// next tick and drives nothing itself, so a busy lock is the
+			// case they are for: hand the decision over and report it,
+			// instead of refusing on the only card they apply to.
+			in.Deliver = true
+			return d.Resume(ctx, f.ID, in)
+		}
 		if err != nil {
 			return driver.Outcome{}, err
 		}

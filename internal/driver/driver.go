@@ -245,6 +245,33 @@ type ResumeInput struct {
 	Note    *string
 	Reverse *string
 	WrapUp  bool
+	// Deliver reports that this resume may only hand its goal decision
+	// over: another process holds the card lock and is conducting the
+	// goal, so the decision is recorded for that conductor to read on its
+	// next tick and nothing is driven here. The CLI sets it when the lock
+	// is busy; a free lock drives as usual.
+	Deliver bool
+}
+
+// goalDecisionName names the decision for the `noted` event.
+func (in ResumeInput) goalDecisionName() string {
+	switch {
+	case in.Note != nil:
+		return "note"
+	case in.WrapUp:
+		return "wrap-up"
+	case in.Reverse != nil:
+		return "reverse " + *in.Reverse
+	}
+	return ""
+}
+
+// GoalDecision reports that this resume carries a goal-only decision —
+// the three verbs whose whole point is to reach a goal WHILE it runs.
+// They write a row the conductor reads and drive nothing themselves,
+// which is what lets them be delivered without the card lock.
+func (in ResumeInput) GoalDecision() bool {
+	return in.Note != nil || in.Reverse != nil || in.WrapUp
 }
 
 // Resume rehydrates the engine's persisted sessions, applies the caller's
@@ -313,6 +340,13 @@ func (d *Driver) Resume(ctx context.Context, id domain.FeatureID, in ResumeInput
 				return d.fail(ctx, string(id), err)
 			}
 			return out, nil
+		}
+		if in.Deliver {
+			// another process is conducting this goal: the decision is
+			// recorded and that conductor acts on it. Driving it here
+			// would be a second driver on the same cards.
+			d.out.emit(notedEvent{Event: "noted", ID: string(id), What: in.goalDecisionName()})
+			return Outcome{Status: StatusNoted, ID: string(id)}, nil
 		}
 		return d.drive(ctx, id)
 	}
