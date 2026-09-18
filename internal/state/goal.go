@@ -58,6 +58,12 @@ const (
 	GoalRework       = "rework"      // work the goal owes: a review's changes, a failed verify, your send-back
 	GoalChecks       = "checks"      // the goal's verify-stage check results (Detail is JSON)
 	GoalNeedBudget   = "need-budget" // the goal stopped on a card it cannot fund; To is what that card needs
+	// GoalSubstrateBudget: the goal's substrate budget was agreed (at the
+	// plan gate) or raised (by a person); To is runs, Minutes is minutes.
+	GoalSubstrateBudget = "substrate-budget"
+	// GoalNeedSubstrate: the goal stopped on a run it cannot afford; Item
+	// is the experiment.
+	GoalNeedSubstrate = "need-substrate"
 )
 
 // GoalPayload is the JSON shape of an EventGoal event. Only the fields an
@@ -81,6 +87,8 @@ type GoalPayload struct {
 	// Ref points at what an entry answers: the decision a reversal
 	// reverses ("D-3"), the finding a decline declines.
 	Ref string `json:"ref,omitempty"`
+	// Minutes carries the minutes half of a substrate budget.
+	Minutes int `json:"minutes,omitempty"`
 	// By is who acted: "lead", "goal" (the conductor's own rule), or
 	// "user".
 	By string `json:"by,omitempty"`

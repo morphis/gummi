@@ -509,3 +509,50 @@ func TestRunsThatKeepJudgingNothingStallTheGoal(t *testing.T) {
 		t.Fatalf("a rig that fails its own control stops the goal at once: %v", got)
 	}
 }
+
+// The substrate budget is a second ceiling, and its reserve belongs to the
+// runs the goal needs in order to be judged.
+func TestTheSubstrateBudgetKeepsARunForBeingJudged(t *testing.T) {
+	b := SubstrateBudget{Runs: 10, Minutes: 600, RunsSpent: 7, MinutesSpent: 280, TypicalMinutes: 40}
+	if !b.CanExplore() || !b.CanProve() {
+		t.Fatal("three runs left: one to explore with, two held back")
+	}
+	b.RunsSpent = 8
+	if b.CanExplore() || !b.CanProve() {
+		t.Fatal("what is left is the reserve: a run the goal merely wants is refused, one it needs is not")
+	}
+	b.RunsSpent = 10
+	if b.CanProve() {
+		t.Fatal("the ceiling is a ceiling")
+	}
+	// minutes run out independently of runs
+	b = SubstrateBudget{Runs: 100, Minutes: 120, RunsSpent: 2, MinutesSpent: 90, TypicalMinutes: 45}
+	if b.CanExplore() || b.CanProve() {
+		t.Fatalf("30 minutes left cannot hold a 45-minute run")
+	}
+	// a budget in one dimension only, a small one, and none at all
+	if b = (SubstrateBudget{Minutes: 120, MinutesSpent: 10, TypicalMinutes: 10}); !b.CanExplore() {
+		t.Fatal("runs are not what bounds a goal that agreed only minutes")
+	}
+	if b = (SubstrateBudget{Runs: 2, RunsSpent: 1}); b.CanExplore() || !b.CanProve() {
+		t.Fatal("a two-run budget keeps one of them")
+	}
+	if b = (SubstrateBudget{}); !b.CanExplore() || !b.CanProve() || b.Agreed() {
+		t.Fatal("no budget agreed bounds nothing")
+	}
+}
+
+func TestAGoalThatCannotAffordItsProofAsksInsteadOfGoingWithout(t *testing.T) {
+	in := base()
+	in.Cards = []Card{{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300}}
+	in.Experiments = []Experiment{{Name: "matrix"}}
+	in.Substrate = SubstrateBudget{Runs: 4, RunsSpent: 4}
+	got := Decide(in)
+	if len(got) != 1 || got[0].Kind != NeedSubstrate || got[0].Experiment != "matrix" {
+		t.Fatalf("got %v", got)
+	}
+	in.Substrate.Runs = 8
+	if got, want := acts(in), "run matrix: verify"; got != want {
+		t.Fatalf("raised, it carries on: got %q, want %q", got, want)
+	}
+}

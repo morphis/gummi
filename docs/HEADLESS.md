@@ -352,6 +352,14 @@ branch and its spend, so raising the envelope continues it:
 gummi resume GL-004 --envelope 6000     # more budget, and it carries on
 ```
 
+A goal proved by an experiment has a second ceiling — substrate runs and
+minutes — and hitting it ends the same way: `exhausted`, nothing dropped, the
+hand-over's `needs_substrate` saying which run it cannot afford.
+
+```sh
+gummi resume GL-004 --runs 40 --minutes 1800   # more substrate, and it makes the run
+```
+
 A wrap-up you ask for (`--wrap-up`) still drops what is unfinished: that is
 what finishing now means.
 

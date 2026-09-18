@@ -131,6 +131,77 @@ type Experiment struct {
 	Held bool
 }
 
+// SubstrateBudget is a goal's second ledger: the experiment runs it may
+// make and the minutes it may hold a substrate for. It is kept apart from
+// the credit ledger on purpose. An exchange rate between a cluster's
+// minutes and a model's tokens would be the fiction the per-stage credit
+// shares were (DESIGN §5.1), and it would let a goal buy verification by
+// starving its agents, or agents by starving its proof. Each is a ceiling
+// only a person raises.
+type SubstrateBudget struct {
+	Runs    int // the ceiling on runs; 0 with Minutes 0 means none was agreed
+	Minutes int // the ceiling on substrate minutes; 0 = not bounded by time
+	// RunsSpent counts the runs that took the substrate, conclusive or not
+	// — a run that judged nothing still used it. MinutesSpent is how long
+	// they held it.
+	RunsSpent    int
+	MinutesSpent float64
+	// TypicalMinutes is what one run has cost so far, 0 before any has.
+	TypicalMinutes float64
+}
+
+// ReserveRuns is how many runs a goal holds back for being judged: the
+// proof of its final heads, and that proof once more after a rework round.
+// Everything a goal does to find out EARLY is bought from what is left
+// above it, so that no amount of finding out early can spend the run the
+// hand-over needs.
+const ReserveRuns = 2
+
+// Agreed reports that the goal has a substrate budget at all.
+func (b SubstrateBudget) Agreed() bool { return b.Runs > 0 || b.Minutes > 0 }
+
+func (b SubstrateBudget) reserve() (runs int, minutes float64) {
+	runs = ReserveRuns
+	if b.Runs > 0 && b.Runs/2 < runs {
+		runs = b.Runs / 2 // a small budget keeps half of itself, not more than it has
+	}
+	return runs, float64(runs) * b.TypicalMinutes
+}
+
+// left is what remains under the ceilings, reserve included. A dimension
+// with no ceiling is never what runs out.
+func (b SubstrateBudget) left() (runs int, minutes float64) {
+	runs, minutes = math.MaxInt32, math.MaxFloat64
+	if b.Runs > 0 {
+		runs = b.Runs - b.RunsSpent
+	}
+	if b.Minutes > 0 {
+		minutes = float64(b.Minutes) - b.MinutesSpent
+	}
+	return runs, minutes
+}
+
+// CanProve reports whether the goal can afford a run it needs in order to
+// be judged. It may spend the reserve: that is what the reserve is for.
+func (b SubstrateBudget) CanProve() bool {
+	if !b.Agreed() {
+		return true
+	}
+	runs, minutes := b.left()
+	return runs >= 1 && minutes >= b.TypicalMinutes && minutes > 0
+}
+
+// CanExplore reports whether the goal can afford a run it merely wants —
+// an integration run, a bisect step — without touching the reserve.
+func (b SubstrateBudget) CanExplore() bool {
+	if !b.Agreed() {
+		return true
+	}
+	runs, minutes := b.left()
+	rr, rm := b.reserve()
+	return runs-rr >= 1 && minutes-rm >= b.TypicalMinutes && minutes-rm > 0
+}
+
 // MaxInconclusive is how many runs in a row may judge nothing before the
 // goal stops making them. Each is substrate time spent learning only that
 // the substrate is not to be trusted, and the third says what the first
@@ -165,6 +236,9 @@ type Input struct {
 	Reviewing bool
 	// Experiments lists the experiments the goal's items are proved by.
 	Experiments []Experiment
+	// Substrate is the goal's substrate budget and what its runs have
+	// spent of it.
+	Substrate SubstrateBudget
 }
 
 // MaxLeadFailures is how many lead turns in a row may fail before the goal
@@ -230,10 +304,15 @@ const (
 	// Run makes a run of the experiment named in Experiment, for the
 	// purpose in Reason.
 	Run
+	// NeedSubstrate stops the goal and asks for more substrate budget: it
+	// cannot afford the run of Experiment it needs in order to be judged.
+	// NeedBudget's twin, for the same reason — which proof to go without is
+	// no more the goal's decision than which work to abandon.
+	NeedSubstrate
 )
 
 func (k Kind) String() string {
-	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget", "run"}[k]
+	return [...]string{"wrap-up", "drop", "land", "raise", "lead", "start", "finish", "shrink", "stall", "need-budget", "run", "need-substrate"}[k]
 }
 
 // MinCardEnvelope is the smallest envelope worth giving a card. Below it a
@@ -597,6 +676,10 @@ func proveFirst(in Input) (acts []Action, wait bool) {
 		case x.Inconclusive >= MaxInconclusive:
 			return []Action{{Kind: Stall, Experiment: x.Name,
 				Reason: fmt.Sprintf("%s judged nothing %d times running, most recently: %s", x.Name, x.Inconclusive, x.Why)}}, true
+		case !in.Substrate.CanProve():
+			return []Action{{Kind: NeedSubstrate, Experiment: x.Name,
+				Reason: fmt.Sprintf("the goal has spent %d of %d runs and %.0f of %d substrate minutes, and cannot afford the run of %s it has to make to be judged",
+					in.Substrate.RunsSpent, in.Substrate.Runs, in.Substrate.MinutesSpent, in.Substrate.Minutes, x.Name)}}, true
 		default:
 			acts = append(acts, Action{Kind: Run, Experiment: x.Name, Reason: "verify"})
 			wait = true

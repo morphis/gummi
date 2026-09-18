@@ -2577,6 +2577,33 @@ least 100) belongs to the goal's own review and verify. `available < 0`
 wraps the goal up. Only a person raises the ceiling, and a raise lifts a
 wrap-up the budget forced.
 
+**The second ledger.** Credits buy agent turns. A goal proved by an
+experiment (§17.8) spends something credits cannot buy — time on
+infrastructure there is one of — so it has a second budget, agreed in the
+same block of the same doc: `runs:` and/or `minutes:`. The gate refuses an
+experiment item without one.
+
+```
+spent      = the runs on disk that took the substrate, and how long they held it
+held back  = ReserveRuns (2) runs, and that many typical runs' minutes
+CanProve   = something is left under the ceilings          (may spend what is held back)
+CanExplore = something is left above what is held back
+```
+
+It is deliberately **not** converted into credits. An exchange rate between
+a cluster's minutes and a model's tokens would be the fiction §5.1's
+per-stage shares were, and it would let a goal buy verification by starving
+its agents, or agents by starving its proof. Spend is derived from the run
+records, never stored: a run another gummi made, or one that finished while
+nobody was looking, counts the moment it is read. What is held back belongs
+to the runs the goal needs **in order to be judged** — the proof of its
+final heads, and that proof again after a rework round — so that nothing a
+goal does to find out early can spend the run its hand-over needs. When it
+cannot afford that run it stops and asks (`NeedSubstrate`, `NeedBudget`'s
+twin): which proof to go without is no more the goal's decision than which
+work to abandon. `gummi resume GL-NNN --runs N --minutes M` raises it, and
+like the envelope it only ever goes up.
+
 ### 17.4 The lead
 
 A lead turn is a short synchronous session on `agent.RoleLead` (falling

@@ -168,6 +168,41 @@ func ParseDoneWhen(content string) (items []domain.DoneWhen, found bool, err err
 // goalBlock is the gummi-goal block's shape.
 type goalBlock struct {
 	Lanes int `yaml:"lanes"`
+	// Runs and Minutes are the goal's substrate budget: how many experiment
+	// runs it may make, and how long it may hold a substrate for. Credits
+	// buy agent turns; these buy the one thing credits cannot — time on
+	// infrastructure there is one of.
+	Runs    int `yaml:"runs"`
+	Minutes int `yaml:"minutes"`
+	// IntegrateEvery is how many landings may pile up on the goal branch
+	// before the goal stops waiting for a quiet substrate and proves them.
+	IntegrateEvery int `yaml:"integrate_every"`
+}
+
+// GoalSubstrateBudget is the substrate budget a goal doc agrees.
+type GoalSubstrateBudget struct {
+	Runs, Minutes int
+}
+
+// Agreed reports that the doc names a budget at all.
+func (b GoalSubstrateBudget) Agreed() bool { return b.Runs > 0 || b.Minutes > 0 }
+
+// ParseGoalSubstrate reads the substrate budget and the integration
+// cadence from the goal doc's gummi-goal block; zero values when it names
+// none.
+func ParseGoalSubstrate(content string) (GoalSubstrateBudget, int, error) {
+	body, ok := fenceBody(content, GoalSectionBudget, goalFenceRe)
+	if !ok {
+		return GoalSubstrateBudget{}, 0, nil
+	}
+	var g goalBlock
+	if err := yaml.Unmarshal([]byte(body), &g); err != nil {
+		return GoalSubstrateBudget{}, 0, fmt.Errorf("the gummi-goal block does not parse: %w", err)
+	}
+	if g.Runs < 0 || g.Minutes < 0 || g.IntegrateEvery < 0 {
+		return GoalSubstrateBudget{}, 0, fmt.Errorf("the gummi-goal block's runs, minutes and integrate_every must not be negative")
+	}
+	return GoalSubstrateBudget{Runs: g.Runs, Minutes: g.Minutes}, g.IntegrateEvery, nil
 }
 
 // ParseGoalLanes reads the lane count from the goal doc's gummi-goal

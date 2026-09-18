@@ -462,6 +462,8 @@ func bindResumeFlags(cmd *cobra.Command) {
 	f.String("goal-note", "", "goals: add a note to a running goal; its lead reads it on its next turn")
 	f.String("reverse", "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why")
 	f.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped")
+	f.Int("runs", 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)")
+	f.Int("minutes", 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)")
 	f.String("answer", "", "answer a delegated ask_user question")
 	f.Int("envelope", 0, "raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)")
 	f.Bool("approve", false, "approve a design gate handed back by --gate-approval=attended")

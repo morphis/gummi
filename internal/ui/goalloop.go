@@ -145,6 +145,10 @@ func (m *Shell) updateGoal(msg tea.Msg) (tea.Cmd, bool) {
 					" · tell the goal when it is fixed", isErr: true, id: msg.goal}
 			}
 		}
+		if need := msg.res.NeedsSubstrate; need.Waiting() {
+			m.notice = noticeMsg{text: string(msg.goal) + ": out of substrate budget — " + sanitize(need.Reason) +
+				" · raise it with `gummi resume " + string(msg.goal) + " --runs N --minutes M`", isErr: true, id: msg.goal}
+		}
 		for _, st := range msg.res.Start {
 			cmds = append(cmds, m.goalStartCmd(st))
 		}

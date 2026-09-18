@@ -489,6 +489,12 @@ func (e *Engine) goalExperimentNames(goal domain.Feature) []string {
 	if err != nil {
 		return nil
 	}
+	return experimentNames(items)
+}
+
+// experimentNames lists the experiments items name, in the order they first
+// appear.
+func experimentNames(items []domain.DoneWhen) []string {
 	var names []string
 	seen := map[string]bool{}
 	for _, it := range items {

@@ -130,6 +130,10 @@ type GoalView struct {
 	// Experiments lists the experiments the goal's items are proved by,
 	// read against the heads the goal has now.
 	Experiments []GoalExperiment
+	// Substrate is the goal's substrate budget and what its runs have spent.
+	Substrate goalpolicy.SubstrateBudget
+	// NeedsSubstrate is the goal's standing request for more of it.
+	NeedsSubstrate GoalNeedsSubstrate
 }
 
 // Card returns the goal card with id, and whether it belongs to the goal.
@@ -373,6 +377,9 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	if goal.Stage == domain.StageImplement || goal.Stage == domain.StageVerify {
 		v.Experiments = e.goalExperiments(ctx, goal, v.DoneWhen, visitedAt.UnixNano())
 	}
+	v.Substrate = substrateBudgetFrom(v.Log, e.ExperimentRuns(goal.ID), e.now())
+	v.NeedsSubstrate = needsSubstrateFrom(v.Log)
+	in.Substrate = v.Substrate
 	for _, x := range v.Experiments {
 		px := goalpolicy.Experiment{
 			Name: x.Name, Problem: x.Problem, Running: x.Running != nil, Proven: x.Evidence != nil,
@@ -616,6 +623,67 @@ type GoalTickResult struct {
 	// StalledExperiment names the experiment whose evidence the goal has
 	// stopped being able to believe, when that is what Stalled is about.
 	StalledExperiment string
+	// NeedsSubstrate is set when the tick stopped the goal on a run it
+	// cannot afford.
+	NeedsSubstrate GoalNeedsSubstrate
+}
+
+// GoalNeedsSubstrate is a goal's standing request for more substrate
+// budget: the run it cannot afford, and the sentence saying why.
+type GoalNeedsSubstrate struct {
+	Experiment string `json:"experiment,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// Waiting reports whether the goal is stopped on a substrate question.
+func (n GoalNeedsSubstrate) Waiting() bool { return n.Experiment != "" }
+
+// needsSubstrateFrom derives the standing request from the log: the newest
+// one not answered by a raise of the substrate budget since.
+func needsSubstrateFrom(log []state.GoalEntry) GoalNeedsSubstrate {
+	var out GoalNeedsSubstrate
+	for _, en := range log {
+		switch en.Action {
+		case state.GoalNeedSubstrate:
+			out = GoalNeedsSubstrate{Experiment: en.Item, Reason: en.Detail}
+		case state.GoalSubstrateBudget:
+			out = GoalNeedsSubstrate{}
+		}
+	}
+	return out
+}
+
+// substrateBudgetFrom reads the goal's substrate ledger: the ceilings from
+// the newest budget entry in its log, and what has been spent from the runs
+// on disk. Spend is derived, never stored — a run that another gummi made,
+// or that finished while nobody was looking, counts the moment it is read.
+func substrateBudgetFrom(log []state.GoalEntry, runs []experiment.Result, now time.Time) goalpolicy.SubstrateBudget {
+	var b goalpolicy.SubstrateBudget
+	for _, en := range log {
+		if en.Action == state.GoalSubstrateBudget {
+			b.Runs, b.Minutes = en.To, en.Minutes
+		}
+	}
+	var finished int
+	var finishedMinutes float64
+	for _, r := range runs {
+		switch {
+		case r.State == experiment.StateRunning:
+			b.RunsSpent++
+			b.MinutesSpent += now.Sub(r.Started).Minutes()
+		case r.Outcome == experiment.NotRun:
+			// it never took the substrate
+		default:
+			b.RunsSpent++
+			b.MinutesSpent += r.Seconds / 60
+			finished++
+			finishedMinutes += r.Seconds / 60
+		}
+	}
+	if finished > 0 {
+		b.TypicalMinutes = finishedMinutes / float64(finished)
+	}
+	return b
 }
 
 // GoalNeedsBudget is a goal's standing request for more budget: which
@@ -705,6 +773,13 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		e.goalStall(ctx, goal.ID, a.Card, a.Experiment, a.Reason)
 		res.Stalled, res.StalledOn, res.StalledExperiment = a.Reason, a.Card, a.Experiment
 		return nil
+	case goalpolicy.NeedSubstrate:
+		res.NeedsSubstrate = GoalNeedsSubstrate{Experiment: a.Experiment, Reason: a.Reason}
+		if last := needsSubstrateFrom(view.Log); last.Experiment != a.Experiment {
+			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalNeedSubstrate, Item: a.Experiment, Detail: a.Reason, By: ActorGoal})
+			e.send(Event{Feature: goal.ID, Stage: domain.StageImplement, Kind: EventGoal})
+		}
+		return nil
 	case goalpolicy.Run:
 		run, err := e.StartExperiment(ctx, goal, ExperimentStart{Name: a.Experiment, Purpose: a.Reason, Control: e.needsControl(goal.ID, a.Experiment)})
 		if err != nil {
@@ -750,6 +825,43 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		return e.goalNeedBudget(ctx, goal, a.Card, a.To, a.Reason)
 	}
 	return nil
+}
+
+// RaiseGoalSubstrate raises a goal's substrate budget. Like its envelope,
+// only a person does: neither ceiling is one an agent can move. A zero
+// leaves that dimension as it is; a value below the present one is refused,
+// because lowering a ceiling under a goal that has already spent past it is
+// a way to stop a goal that has a verb of its own.
+func (e *Engine) RaiseGoalSubstrate(ctx context.Context, goalID domain.FeatureID, runs, minutes int) error {
+	goal, err := e.cfg.Store.GetFeature(ctx, goalID)
+	if err != nil {
+		return err
+	}
+	if !goal.IsGoal() {
+		return fmt.Errorf("%s is not a goal", goalID)
+	}
+	cur := substrateBudgetFrom(mustGoalLog(ctx, e, goalID), nil, e.now())
+	if runs == 0 {
+		runs = cur.Runs
+	}
+	if minutes == 0 {
+		minutes = cur.Minutes
+	}
+	if runs < cur.Runs || minutes < cur.Minutes {
+		return fmt.Errorf("%s's substrate budget is %d runs and %d minutes; a raise does not lower it", goalID, cur.Runs, cur.Minutes)
+	}
+	if runs == cur.Runs && minutes == cur.Minutes {
+		return nil
+	}
+	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalSubstrateBudget, From: cur.Runs, To: runs, Minutes: minutes, By: "user",
+		Detail: fmt.Sprintf("raised from %d runs / %d minutes", cur.Runs, cur.Minutes)})
+	e.send(Event{Feature: goalID, Stage: goal.Stage, Kind: EventGoal})
+	return nil
+}
+
+func mustGoalLog(ctx context.Context, e *Engine, id domain.FeatureID) []state.GoalEntry {
+	log, _ := e.cfg.Store.GoalLog(ctx, id)
+	return log
 }
 
 // goalNeedBudget stops the goal on a card it cannot fund and records what
@@ -1424,6 +1536,14 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 	if problem := e.goalExperimentProblem(items); problem != "" {
 		return problem
 	}
+	budget, _, err := spec.ParseGoalSubstrate(doc)
+	if err != nil {
+		return err.Error()
+	}
+	if names := experimentNames(items); len(names) > 0 && !budget.Agreed() {
+		return fmt.Sprintf("the goal is proved by %s and agrees no substrate budget — give the gummi-goal block `runs:` and/or `minutes:`, "+
+			"what the goal may spend of the substrate as its envelope is what it may spend of credits", strings.Join(names, ", "))
+	}
 	rows, found, err := spec.ParseGoalCards(doc, items)
 	if err != nil {
 		return err.Error()
@@ -1517,6 +1637,14 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		if err := e.cfg.Store.SetGoalLanes(ctx, goal.ID, lanes); err != nil {
 			return err
 		}
+	}
+	if budget, _, berr := spec.ParseGoalSubstrate(doc); berr != nil {
+		return berr
+	} else if budget.Agreed() && !substrateBudgetFrom(mustGoalLog(ctx, e, goal.ID), nil, e.now()).Agreed() {
+		// once: a crossing resumed half-way must not reset a budget a
+		// person has raised since
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalSubstrateBudget, To: budget.Runs, Minutes: budget.Minutes, By: "user",
+			Detail: "agreed with the plan"})
 	}
 	// Where the goal itself belongs is settled here, from the plan, before
 	// a single card exists: the goal was minted into a provisional repo

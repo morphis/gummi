@@ -38,9 +38,13 @@ const (
 // Options configures one run. Envelope is required (D6); a missing agent
 // or envelope fails loud before any work starts.
 type Options struct {
-	Envelope     int
-	Profile      string
-	GateApproval string // GateAttended (default) | GateAutopilot
+	Envelope int
+	// SubstrateRuns and SubstrateMinutes raise a goal's substrate budget on
+	// resume; zero leaves that ceiling where it is. Like Envelope they only
+	// ever raise.
+	SubstrateRuns, SubstrateMinutes int
+	Profile                         string
+	GateApproval                    string // GateAttended (default) | GateAutopilot
 	// GateApprovalSet reports that the caller passed --gate-approval
 	// explicitly on this invocation. A resume uses it to decide between
 	// overriding the card's persisted mode (set) and inheriting it (unset),

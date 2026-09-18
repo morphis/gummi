@@ -340,6 +340,7 @@ func TestDriveGoalProvedByAnExperiment(t *testing.T) {
 		return nil
 	})
 	doc := strings.Replace(driverGoalDoc, "  check: test -f flag.txt\n", "  experiment: live\n", 1)
+	doc = strings.Replace(doc, "lanes: 2\n", "lanes: 2\nruns: 6\n", 1)
 	ctx := context.Background()
 	d := h.driver(Options{Envelope: 6000, Autonomous: true, GoalDoc: doc})
 	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")

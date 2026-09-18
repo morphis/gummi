@@ -255,6 +255,11 @@ func (d *Driver) driveGoal(ctx context.Context, f domain.Feature) (Outcome, erro
 			wg.Wait()
 			return d.goalStalled(ctx, f, res.Stalled), nil
 		}
+		if res.NeedsSubstrate.Waiting() {
+			// the other ceiling, the same ending: only a person raises it
+			wg.Wait()
+			return d.goalNeedsSubstrate(ctx, f, res.NeedsSubstrate), nil
+		}
 		if res.NeedsBudget.Waiting() {
 			// The envelope is spent and only a person raises it. Exit 5
 			// with the report, the same status and the same answer a card
@@ -419,6 +424,11 @@ func (d *Driver) resumeGoal(ctx context.Context, f domain.Feature, in ResumeInpu
 		}
 		d.out.emit(envelopeRaisedEvent{Event: "envelope", ID: string(f.ID), From: from, To: d.opts.Envelope})
 	}
+	if d.opts.SubstrateRuns > 0 || d.opts.SubstrateMinutes > 0 {
+		if err := d.eng.RaiseGoalSubstrate(ctx, f.ID, d.opts.SubstrateRuns, d.opts.SubstrateMinutes); err != nil {
+			return Outcome{}, true, err
+		}
+	}
 	if f.Stage == domain.StageImplement {
 		// someone is here: a card that stopped to wait for its environment
 		// is worth another verify now, and only now
@@ -528,6 +538,21 @@ func (d *Driver) goalNeedsBudget(ctx context.Context, f domain.Feature, need eng
 		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage),
 		Reason: need.Reason, Card: string(need.Card), Needs: need.Needs,
 		Resume: fmt.Sprintf("gummi resume %s --envelope <more than %d>", f.ID, f.Budget.Envelope),
+	}
+	if r, err := d.eng.GoalReport(ctx, f.ID); err == nil {
+		ev.Goal = &r
+	}
+	d.out.emit(ev)
+	return Outcome{Status: StatusExhausted, ID: string(f.ID)}
+}
+
+// goalNeedsSubstrate reports a goal stopped on a run it cannot afford. It
+// is an exhaustion of the goal's other budget, so it wears the same status
+// and the same shape of answer.
+func (d *Driver) goalNeedsSubstrate(ctx context.Context, f domain.Feature, need engine.GoalNeedsSubstrate) Outcome {
+	ev := goalStopEvent{
+		Event: "exhausted", ID: string(f.ID), Stage: string(f.Stage), Reason: need.Reason,
+		Resume: fmt.Sprintf("gummi resume %s --runs <more> --minutes <more>", f.ID),
 	}
 	if r, err := d.eng.GoalReport(ctx, f.ID); err == nil {
 		ev.Goal = &r

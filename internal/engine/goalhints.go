@@ -67,6 +67,15 @@ asking:
    warning never blocks; the user may approve anyway. Set lanes in the
    gummi-goal block: how many cards may run at once (default 2; fewer
    when the cards touch the same code).
+   A goal with an experiment item has a second budget, and the gate
+   refuses the plan without it: ` + "`runs:`" + ` and/or ` + "`minutes:`" + ` in the
+   gummi-goal block — how many experiment runs the goal may make and how
+   long it may hold the substrate. It is not convertible to credits and
+   only the user raises it. Two runs are always held back for the goal
+   being judged; everything it does to find out early comes from the
+   rest, so agree enough for the goal to learn from — a handful of runs
+   proves a result and teaches nothing on the way to it. Ask the user
+   what a run costs in wall-clock if the config does not say.
    Size those ranges against what a CARD costs, not against how small the
    change looks. A card is a plan conversation, its critique, a build, its
    critique, a check discovery pass and a verify — six model passes before

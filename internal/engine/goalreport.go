@@ -159,6 +159,9 @@ type GoalReport struct {
 	// says it is unfinished and resumable: raise the envelope and send it
 	// back and the card carries on from where it stopped.
 	NeedsBudget GoalNeedsBudget `json:"needs_budget,omitempty"`
+	// NeedsSubstrate is NeedsBudget for the goal's other ceiling: it cannot
+	// afford the run it has to make in order to be judged.
+	NeedsSubstrate GoalNeedsSubstrate `json:"needs_substrate,omitempty"`
 	// WaitingOn is set when a card of the goal is waiting for an
 	// environment that could not run its verification plan: the sentence
 	// that says which card and what it lacked. Like NeedsBudget it says
@@ -194,6 +197,19 @@ type GoalReportBudget struct {
 	Reserve   int     `json:"reserve"`
 	Available float64 `json:"left_to_give"`
 	Total     float64 `json:"total_spend"`
+	// Substrate is the goal's other ledger, absent when none was agreed.
+	Substrate *GoalReportSubstrate `json:"substrate,omitempty"`
+}
+
+// GoalReportSubstrate is the substrate budget at the hand-over: what was
+// agreed, what the goal's runs spent, and what is held back for the runs it
+// needs in order to be judged.
+type GoalReportSubstrate struct {
+	Runs         int     `json:"runs"`
+	Minutes      int     `json:"minutes"`
+	RunsSpent    int     `json:"runs_spent"`
+	MinutesSpent float64 `json:"minutes_spent"`
+	ReserveRuns  int     `json:"reserve_runs"`
 }
 
 // Met counts the met done-when items.
@@ -253,6 +269,13 @@ func buildGoalReport(v GoalView) GoalReport {
 		WrappingUp: g.Goal.WrappingUp(), Lanes: g.Goal.LaneCount(),
 		NeedsBudget: v.NeedsBudget,
 	}
+	if v.Substrate.Agreed() {
+		r.Budget.Substrate = &GoalReportSubstrate{
+			Runs: v.Substrate.Runs, Minutes: v.Substrate.Minutes, RunsSpent: v.Substrate.RunsSpent,
+			MinutesSpent: v.Substrate.MinutesSpent, ReserveRuns: goalpolicy.ReserveRuns,
+		}
+	}
+	r.NeedsSubstrate = v.NeedsSubstrate
 	if g.Stage == domain.StageImplement {
 		for _, c := range v.Cards {
 			if c.State == goalpolicy.Blocked {
@@ -462,12 +485,17 @@ func RenderGoalReport(r GoalReport) string {
 		// Not "ready": work remains and a top-up continues it. Saying
 		// ready here would report an unfinished result as a finished one.
 		state = "waiting for you — " + r.NeedsBudget.Reason
+	case r.NeedsSubstrate.Waiting():
+		state = "waiting for you — " + r.NeedsSubstrate.Reason
 	case r.WaitingOn != "":
 		state = "waiting on an environment — " + r.WaitingOn
 	case r.Partial != "":
 		state = "ready for you — partial: " + r.Partial
 	}
 	fmt.Fprintf(&b, "%s. %d of %d done-when items met.\n\n", capitalize(state), met, total)
+	if r.NeedsSubstrate.Waiting() && !r.NeedsBudget.Waiting() {
+		fmt.Fprintf(&b, "Nothing was dropped. Raise the goal's substrate budget and it makes the run and carries on:\n\n```sh\ngummi resume %s --runs <more> --minutes <more>\n```\n\n", r.ID)
+	}
 	if r.WaitingOn != "" && !r.NeedsBudget.Waiting() {
 		fmt.Fprintf(&b, "Nothing was dropped and nothing was judged. Once the environment can run the card's verification plan, pick the goal back up and it verifies the card again:\n\n```sh\ngummi resume %s --autonomous\n```\n\n", r.ID)
 	}
@@ -606,7 +634,19 @@ func RenderGoalReport(r GoalReport) string {
 	}
 	fmt.Fprintf(&b, "\n### Spend\n\n- budget %d · goal %.0f · cards %.0f · total %.0f · reserve %d\n",
 		r.Budget.Envelope, r.Budget.Own, r.Budget.CardSpent, r.Budget.Total, r.Budget.Reserve)
+	if sb := r.Budget.Substrate; sb != nil {
+		fmt.Fprintf(&b, "- substrate: %d of %s runs · %.0f of %s minutes · %d run(s) held back for being judged\n",
+			sb.RunsSpent, orUnbounded(sb.Runs), sb.MinutesSpent, orUnbounded(sb.Minutes), sb.ReserveRuns)
+	}
 	return b.String()
+}
+
+// orUnbounded spells a ceiling, or says there is none in that dimension.
+func orUnbounded(n int) string {
+	if n <= 0 {
+		return "unbounded"
+	}
+	return fmt.Sprint(n)
 }
 
 func capitalize(s string) string {

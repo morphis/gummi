@@ -20,7 +20,7 @@ const experimentGoalDoc = "# GL-001: Export works offline\n\n" +
 	"- id: DW-1\n  says: a deployed build serves the cache\n  experiment: matrix\n" +
 	"- id: DW-2\n  says: the first probe of the matrix holds\n  experiment: matrix\n  assertions: [first]\n```\n\n" +
 	"## Limits\n\nNone.\n\n" +
-	"## Budget\n\nAbout 1500 credits.\n\n```gummi-goal\nlanes: 1\n```\n\n" +
+	"## Budget\n\nAbout 1500 credits.\n\n```gummi-goal\nlanes: 1\nruns: 10\nminutes: 600\n```\n\n" +
 	"## Cards\n\n```gummi-cards\n" +
 	"- title: local cache for export\n  serves: [DW-1, DW-2]\n  envelope: 600\n```\n\n" +
 	"## Notes\n\n\n## Try it\n\n\n## Review\n\n\n## Verification plan\n\nRun the matrix.\n\n## Report\n\n\n"
@@ -198,5 +198,69 @@ func TestAGoalStopsMakingRunsThatJudgeNothing(t *testing.T) {
 	}
 	if n != goalpolicy.MaxInconclusive+1 {
 		t.Fatalf("every run is in the goal's log: %d", n)
+	}
+}
+
+// The substrate budget is a ceiling, its spend is read off the runs, and a
+// goal that cannot afford its proof asks rather than going without.
+func TestAGoalOutOfSubstrateBudgetAsksForMore(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, matrixRun)
+
+	// the plan gate wants the second budget agreed wherever there is
+	// something to spend it on
+	none := strings.Replace(experimentGoalDoc, "runs: 10\nminutes: 600\n", "", 1)
+	g := goalAtPlan(t, store, wt, none, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusBlockedGoalPlan || !strings.Contains(res.Reason, "substrate budget") {
+		t.Fatalf("%v %v %q", res.Status, err, res.Reason)
+	}
+	writeArtifact(t, wt.Root(), g, strings.Replace(experimentGoalDoc, "runs: 10\nminutes: 600\n", "runs: 2\n", 1))
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	goal, _ := store.GetFeature(ctx, g.ID)
+	for i := 0; i < 2; i++ { // two runs made early, by whoever
+		if _, err := e.StartExperiment(ctx, goal, ExperimentStart{Name: "matrix", Purpose: PurposeIntegration}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, _ := e.GoalView(ctx, g.ID)
+	if view.Substrate.Runs != 2 || view.Substrate.RunsSpent != 2 {
+		t.Fatalf("agreed at the gate, spent by the runs on disk: %+v", view.Substrate)
+	}
+
+	card := goalCards(t, store, g.ID)[0]
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, wt.Root(), card.ID, "cache.txt")
+	tick(t, e, g.ID)
+	res := tick(t, e, g.ID)
+	if !res.NeedsSubstrate.Waiting() || res.NeedsSubstrate.Experiment != "matrix" || res.Finished {
+		t.Fatalf("settled, unproven and out of runs: it asks: %+v", res)
+	}
+	tick(t, e, g.ID)
+	log, _ := store.GoalLog(ctx, g.ID)
+	asked := 0
+	for _, en := range log {
+		if en.Action == state.GoalNeedSubstrate {
+			asked++
+		}
+	}
+	if asked != 1 || len(e.ExperimentRuns(g.ID)) != 2 {
+		t.Fatalf("asked once (%d), and no run was made on credit", asked)
+	}
+	rep, _ := e.GoalReport(ctx, g.ID)
+	if body := RenderGoalReport(rep); !rep.NeedsSubstrate.Waiting() || !strings.Contains(body, "--runs") || !strings.Contains(body, "2 of 2 runs") {
+		t.Fatalf("the hand-over says it is waiting and how to continue:\n%s", body)
+	}
+
+	if err := e.RaiseGoalSubstrate(ctx, g.ID, 1, 0); err == nil {
+		t.Fatal("a raise does not lower the ceiling")
+	}
+	if err := e.RaiseGoalSubstrate(ctx, g.ID, 5, 0); err != nil {
+		t.Fatal(err)
+	}
+	if res = tick(t, e, g.ID); len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run || res.NeedsSubstrate.Waiting() {
+		t.Fatalf("raised, it makes the run: %+v", res)
 	}
 }

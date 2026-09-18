@@ -58,8 +58,12 @@ func runResume(args []string) error {
 	// it (the only way to clear an exhausted stage headlessly — driver.Resume
 	// treats it as a floor and never lowers). The rest of the driving options
 	// mirror run so the continued tail behaves the same.
+	if *rv.runs < 0 || *rv.minutes < 0 {
+		return fmt.Errorf("--runs and --minutes must be positive, got %d and %d", *rv.runs, *rv.minutes)
+	}
 	opts := driver.Options{
-		Envelope:     *rv.envelope,
+		Envelope:      *rv.envelope,
+		SubstrateRuns: *rv.runs, SubstrateMinutes: *rv.minutes,
 		GateApproval: gate, GateApprovalSet: isSet(fs, "gate-approval"),
 		StageTimeout: *rv.timeout,
 		Autonomous:   *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
@@ -121,6 +125,7 @@ type resumeFlagValues struct {
 	approve, autonomous, bounce  *bool
 	verbose                      *bool
 	envelope                     *int
+	runs, minutes                *int
 	timeout                      *time.Duration
 	goalNote, reverse            *string
 	wrapUp                       *bool
@@ -146,6 +151,8 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		goalNote:       fs.String("goal-note", "", "goals: add a note to a running goal; its lead reads it on its next turn"),
 		reverse:        fs.String("reverse", "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why"),
 		wrapUp:         fs.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped"),
+		runs:           fs.Int("runs", 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)"),
+		minutes:        fs.Int("minutes", 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)"),
 	}
 }
 

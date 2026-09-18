@@ -529,16 +529,48 @@ func goalStatusText(v GoalView) string {
 	l := v.Ledger
 	fmt.Fprintf(&b, "Budget %d · goal's own spend %.0f · held by cards %.0f · reserve %d · left to give %.0f\n",
 		l.Envelope, l.Own, l.Given, l.Reserve, max(0, l.Available))
+	if sb := v.Substrate; sb.Agreed() {
+		// the goal's other ledger, in the same breath: what to spend on
+		// finding out early is a trade against it, not against credits
+		fmt.Fprintf(&b, "Substrate budget: %d of %s runs · %.0f of %s minutes spent · %d run(s) held back for being judged · a run has cost about %.0f minutes\n",
+			sb.RunsSpent, orUnbounded(sb.Runs), sb.MinutesSpent, orUnbounded(sb.Minutes), goalpolicy.ReserveRuns, sb.TypicalMinutes)
+	}
 	if g.Goal.WrappingUp() {
 		b.WriteString("The goal is wrapping up.\n")
 	}
 	b.WriteString("\nDone when:\n")
 	for _, d := range v.DoneWhen {
 		how := "judged"
-		if d.Check != "" {
+		switch {
+		case d.Experiment != "":
+			how = "experiment: " + d.Experiment
+			if len(d.Assertions) > 0 {
+				how += " [" + strings.Join(d.Assertions, ", ") + "]"
+			}
+		case d.Check != "":
 			how = "check: " + d.Check
 		}
 		fmt.Fprintf(&b, "- %s: %s (%s)\n", d.ID, d.Says, how)
+	}
+	if len(v.Experiments) > 0 {
+		b.WriteString("\nExperiments (against the goal's current heads):\n")
+		for _, x := range v.Experiments {
+			fmt.Fprintf(&b, "- %s proves %s: ", x.Name, strings.Join(x.Items, ","))
+			switch {
+			case x.Problem != "":
+				b.WriteString("cannot be run — " + x.Problem)
+			case x.Running != nil:
+				fmt.Fprintf(&b, "run %s in flight (%s)", x.Running.ID, x.Running.Purpose)
+			case x.Evidence != nil:
+				b.WriteString(describeEvidence(*x.Evidence, nil))
+			default:
+				b.WriteString("no conclusive run on these heads yet")
+				if x.LastReason != "" {
+					fmt.Fprintf(&b, " — the last %d judged nothing: %s", x.Inconclusive, x.LastReason)
+				}
+			}
+			b.WriteString("\n")
+		}
 	}
 	b.WriteString("\nCards:\n")
 	if len(v.Cards) == 0 {
