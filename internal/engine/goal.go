@@ -767,6 +767,12 @@ func (e *Engine) goalLand(ctx context.Context, goal, card domain.Feature) ([]Goa
 		return nil, e.goalParkCard(ctx, card, "its research document could not be accepted: "+describeAdvance(adv))
 	}
 
+	// The goal tree is what this card lands on, and a tracked file left
+	// modified there refuses the merge. Put it back first: the landing is
+	// the point where its state stops being nobody's business.
+	if t, terr := e.pool.GoalTree(&goal, card.Repo); terr == nil && t.Exists() {
+		e.tidyGoalTree(ctx, goal, t.Dir)
+	}
 	e.goalCatchUp(ctx, goal)
 
 	gm, err := e.pool.ManagerFor(ctx, &card)
@@ -850,6 +856,29 @@ func (e *Engine) goalLand(ctx context.Context, goal, card domain.Feature) ([]Goa
 	subject, _, _ := strings.Cut(msg, "\n")
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLanded, Card: card.ID, Detail: shortSHA(sha) + " " + subject, Ref: sha, By: ActorGoal})
 	return nil, nil
+}
+
+// tidyGoalTree puts a goal tree's tracked files back the way its branch
+// has them, and records it when there was anything to put back.
+//
+// gummi runs the repository's own commands in this tree — the baseline at
+// plan approval, the goal's verify — and a suite that regenerates a
+// tracked file (a golden, a generated doc, a snapshot of the machine it
+// ran on) leaves that file modified. Nothing there is anyone's work, and
+// a modified tracked file in the tree a card lands on refuses every
+// landing after it, so the tree is left as the checks found it.
+func (e *Engine) tidyGoalTree(ctx context.Context, goal domain.Feature, dir string) {
+	restored, err := worktree.RestoreTracked(ctx, dir)
+	switch {
+	case err != nil && len(restored) == 0:
+		return // an operation in progress, or a tree that cannot be read: leave it
+	case err != nil:
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTidied, By: ActorGoal,
+			Detail: "could not put the goal tree back after running the checks: " + err.Error()})
+	case len(restored) > 0:
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTidied, By: ActorGoal,
+			Detail: "running the checks changed " + strings.Join(restored, ", ") + " in the goal tree; restored"})
+	}
 }
 
 // goalParkCard records that a goal card stopped at something the

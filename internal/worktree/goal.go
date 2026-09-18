@@ -719,3 +719,72 @@ func (m *Manager) WithMainCheckout(ctx context.Context, fn func(dir string) erro
 	}()
 	return fn(dir)
 }
+
+// RestoreTracked puts a gummi-owned checkout's tracked files back the way
+// its HEAD has them, and reports what it restored.
+//
+// It exists for the goal tree, which is the one checkout gummi both runs
+// commands in and merges into. A goal's checks run there — the baseline
+// at plan approval, the goal's own verify later — and a repository whose
+// test suite regenerates a tracked file (golden files, generated docs, a
+// snapshot keyed on the machine it ran on) leaves that file modified
+// afterwards. Nothing in a goal tree is anyone's work: the cards' work is
+// on the cards' branches, the goal doc lives outside the tree entirely,
+// and the engine's checkpoint commit skips a goal's own worktree on
+// purpose — so a modified tracked file there is a side effect of running
+// the repository's own commands, and the honest answer is to put it back
+// rather than to refuse the landing it would otherwise block.
+//
+// A tree with a merge, rebase or cherry-pick in progress is left alone
+// and reported: those are half-finished operations with an owner, not
+// side effects.
+func RestoreTracked(ctx context.Context, dir string) ([]string, error) {
+	gitDir, err := runGit(ctx, dir, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil, err
+	}
+	gitDir = strings.TrimSpace(gitDir)
+	for _, marker := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"} {
+		if _, err := os.Stat(filepath.Join(gitDir, marker)); err == nil {
+			return nil, fmt.Errorf("%s has a %s in progress", dir, strings.ToLower(strings.TrimSuffix(marker, "_HEAD")))
+		}
+	}
+	changed, err := trackedChanges(ctx, dir)
+	if err != nil || len(changed) == 0 {
+		return nil, err
+	}
+	if _, err := runGit(ctx, dir, "reset", "-q", "HEAD", "--", "."); err != nil {
+		return nil, err
+	}
+	if _, err := runGit(ctx, dir, "checkout", "-q", "--", "."); err != nil {
+		return nil, err
+	}
+	left, err := trackedChanges(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(left) > 0 {
+		return changed, fmt.Errorf("%s still has %s modified after restoring", dir, strings.Join(left, ", "))
+	}
+	return changed, nil
+}
+
+// trackedChanges names the tracked files a checkout has modified, staged
+// or not, ignoring .gummi for the same reason MainTrackedDirty does. It
+// reads the diff against HEAD rather than porcelain status because that
+// gives bare paths: status prefixes each line with its two-letter code,
+// and the leading space of an unstaged change does not survive the
+// trimming every command in this package does.
+func trackedChanges(ctx context.Context, dir string) ([]string, error) {
+	out, err := runGit(ctx, dir, "diff", "--name-only", "HEAD", "--", ":(exclude).gummi")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			paths = append(paths, line)
+		}
+	}
+	return paths, nil
+}

@@ -44,6 +44,7 @@ const (
 	GoalLeadTurn     = "lead-turn"     // the lead took a turn
 	GoalLeadFailed   = "lead-failed"   // a lead turn failed
 	GoalCaughtUp     = "caught-up"     // the goal branch caught up with main
+	GoalTidied       = "tidied"        // the goal tree was put back after a check run changed tracked files
 	GoalCatchUpFail  = "catch-up-failed"
 	GoalReserve      = "reserve"     // the lead re-estimated the reserve
 	GoalWrapUp       = "wrap-up"     // the goal was told to finish now

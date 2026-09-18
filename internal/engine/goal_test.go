@@ -903,3 +903,53 @@ func TestAGoalOutOfBudgetAsksInsteadOfDropping(t *testing.T) {
 		t.Fatal("more budget is the answer to the question")
 	}
 }
+
+// The measured failure. A goal's own checks run in the goal tree — the
+// baseline at plan approval, its verify later — and a repository whose
+// suite regenerates a tracked file leaves one modified there. The goal
+// tree is what every card lands on, so that file refused the next
+// landing, the goal's run ended with it, and a resume hit the same wall:
+// the only way out was for a person to find a directory under .gummi and
+// clean it by hand. The conductor puts the tree back instead, and says
+// that it did.
+func TestACheckRunInTheGoalTreeDoesNotStopTheNextLanding(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	root := wt.Root()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("goal plan gate: %v %v", res.Status, err)
+	}
+	cache := goalCards(t, store, g.ID)[0]
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, root, cache.ID, "cache.txt")
+
+	// the repo's own test suite, run in the goal tree, rewrites a tracked
+	// file — a golden, a generated doc, a snapshot of the machine it ran on
+	goalDir := filepath.Join(root, g.WorktreePath())
+	if err := os.WriteFile(filepath.Join(goalDir, "README.md"), []byte("regenerated\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if r := tick(t, e, g.ID); !r.Again {
+		t.Fatalf("a landing asks for another tick: %v", r.Actions)
+	}
+	landed, _ := store.GetFeature(ctx, cache.ID)
+	if landed.Stage != domain.StageDone || landed.LandedSHA == "" {
+		t.Fatalf("the card did not land over a check run's leftovers: %+v", landed)
+	}
+	if out, err := os.ReadFile(filepath.Join(goalDir, "README.md")); err != nil || string(out) != "x\n" {
+		t.Fatalf("the goal tree was not put back: %q %v", out, err)
+	}
+	log, _ := store.GoalLog(ctx, g.ID)
+	var said bool
+	for _, en := range log {
+		if en.Action == state.GoalTidied && strings.Contains(en.Detail, "README.md") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("restoring the tree happened silently: %+v", log)
+	}
+}
+

@@ -314,7 +314,7 @@ the same name in every other repository its cards are in.
 
 **Run.** Approving the plan starts the goal, and from there it runs itself.
 It mints its cards and runs each on autopilot on the goal branch
-`gummi/GL-NNN-slug` **of the card's own repository**, up to its lanes. When
+`goal/<slug>` **of the card's own repository**, up to its lanes. When
 a card verifies it lands on that goal branch as one commit — after the goal branch catches up with main, and
 after the card is rebased and re-checked if the goal branch moved under
 it. The goal's **lead** (the `lead` role, or the architect's model) answers

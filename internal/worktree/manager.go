@@ -1120,10 +1120,15 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	} else if !ok {
 		return "", fmt.Errorf("feature %s has no branch %s", f.ID, branch)
 	}
-	if dirty, err := m.MainTrackedDirty(ctx); err != nil {
+	if changed, err := trackedChanges(ctx, m.repo); err != nil {
 		return "", err
-	} else if dirty {
-		return "", fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging")
+	} else if len(changed) > 0 {
+		// Name the checkout. For an ordinary card it is the repository the
+		// person is sitting in and they know where to look; for a goal
+		// card it is the goal tree under .gummi/worktrees, which they have
+		// never opened and would not think to check.
+		return "", fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging (%s in %s)",
+			strings.Join(changed, ", "), m.repo)
 	}
 	// The squash merge runs in the managed checkout as it stands, so the
 	// branch it lands on is whatever that checkout has out. A card whose

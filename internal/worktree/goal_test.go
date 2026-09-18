@@ -456,3 +456,73 @@ func TestAGoalTreeHoldingWorkSurvivesCleanup(t *testing.T) {
 		t.Fatal("a branch with unlanded work must survive the cleanup")
 	}
 }
+
+// A repository whose own test suite regenerates a tracked file leaves the
+// goal tree dirty, and the goal tree is what every card lands on — so the
+// first landing after a check run refused, naming a "main checkout" the
+// person would look for in the wrong place. RestoreTracked is what the
+// conductor runs before it lands, so the side effect of running the
+// repo's commands does not end the goal.
+func TestACheckRunLeavingTheGoalTreeDirtyDoesNotBlockLandingForever(t *testing.T) {
+	pool, root, g := goalPool(t)
+	goalDir := filepath.Join(root, g.WorktreePath())
+	commitIn(t, goalDir, "docs/generated.md", "ran on /bin/echo\n", "generated docs")
+
+	c := feature(2, "local cache")
+	c.GoalID = g.ID
+	cm, err := pool.ManagerFor(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cDir, err := cm.Create(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, cDir, "cache.go", "package cache\n", "the card's work")
+
+	// the goal's own checks run in the goal tree and the suite rewrites a
+	// tracked file there
+	writeFile(t, goalDir, "docs/generated.md", "ran on /usr/bin/echo\n")
+
+	_, err = cm.SquashMerge(ctx, c, "feat(cache): local cache")
+	if err == nil {
+		t.Fatal("a dirty goal tree must still refuse a squash merge")
+	}
+	if !strings.Contains(err.Error(), "docs/generated.md") || !strings.Contains(err.Error(), goalDir) {
+		t.Fatalf("the refusal must name what is modified and where: %v", err)
+	}
+
+	restored, err := RestoreTracked(ctx, goalDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0] != "docs/generated.md" {
+		t.Fatalf("restored = %v", restored)
+	}
+	if _, err := RestoreTracked(ctx, goalDir); err != nil {
+		t.Fatalf("a clean tree restores to nothing: %v", err)
+	}
+	if _, err := cm.SquashMerge(ctx, c, "feat(cache): local cache"); err != nil {
+		t.Fatalf("landing after the tree was put back: %v", err)
+	}
+	if got := mustGit(t, goalDir, "log", "-1", "--format=%s"); got != "feat(cache): local cache" {
+		t.Fatalf("goal branch tip = %q", got)
+	}
+}
+
+// A half-finished merge in the goal tree has an owner; it is not a check
+// run's leftovers and must not be swept away.
+func TestRestoreTrackedLeavesAMergeInProgressAlone(t *testing.T) {
+	_, root, g := goalPool(t)
+	goalDir := filepath.Join(root, g.WorktreePath())
+	commitIn(t, goalDir, "shared.txt", "goal side\n", "goal edit")
+	commitIn(t, root, "shared.txt", "main side\n", "main edit")
+	// merging main in conflicts and leaves the merge open
+	_, _ = runGit(ctx, goalDir, "merge", "main")
+	if _, err := RestoreTracked(ctx, goalDir); err == nil || !strings.Contains(err.Error(), "in progress") {
+		t.Fatalf("restore over an open merge = %v", err)
+	}
+	if got := mustGit(t, goalDir, "status", "--porcelain"); got == "" {
+		t.Fatal("the open merge must be left exactly as it was")
+	}
+}

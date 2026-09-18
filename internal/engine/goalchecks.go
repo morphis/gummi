@@ -93,6 +93,7 @@ func (e *Engine) runGoalChecks(ctx context.Context, goal domain.Feature, doc str
 			continue
 		}
 		out, err := verify.RunWithBudget(ctx, tree.Dir, group, verifyStageTimeout)
+		e.tidyGoalTree(ctx, goal, tree.Dir)
 		if err != nil {
 			return nil, err
 		}
