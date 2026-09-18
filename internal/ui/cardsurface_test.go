@@ -349,3 +349,28 @@ func TestNarrationNeverContradictsTheAnswers(t *testing.T) {
 		t.Errorf("the loop-breaker says nothing: %q", whyItStopped(loud))
 	}
 }
+
+// A backend that is rate-limited is configured and working; it is busy.
+// Telling its user this is a setup problem sends them to `gummi doctor`,
+// which will report a healthy workspace, and hides the one useful fact —
+// the provider's own sentence usually says when it will serve again.
+func TestAnOutageIsNotReportedAsASetupProblem(t *testing.T) {
+	in := nextInput{
+		stage: domain.StageImplement, kind: domain.KindFeature, attn: attnFailure,
+		backendUnavailable: "You've hit your session limit · resets 3:10pm (UTC)",
+	}
+	said := whyItStopped(in)
+	if !strings.Contains(said, "resets 3:10pm") {
+		t.Errorf("the backend's own words are the useful part: %q", said)
+	}
+	for _, wrong := range []string{"setup problem", "gummi doctor", "never started"} {
+		if strings.Contains(said, wrong) {
+			t.Errorf("narration says %q for an outage: %q", wrong, said)
+		}
+	}
+	// a backend that really never started keeps the setup advice
+	setup := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, attn: attnFailure, backendNeverStarted: true}
+	if !strings.Contains(whyItStopped(setup), "gummi doctor") {
+		t.Errorf("a broken backend still gets doctor: %q", whyItStopped(setup))
+	}
+}

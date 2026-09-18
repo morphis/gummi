@@ -345,6 +345,15 @@ func whyItStopped(in nextInput) string {
 		if in.verdictFloorReason != "" {
 			return "The " + stage + " session stopped: " + sanitize(in.verdictFloorReason) + "."
 		}
+		if in.backendUnavailable != "" {
+			// Not a setup problem and not this card's fault: the backend
+			// is configured and working, and declined to serve this turn.
+			// Its own sentence is the useful part — it generally says
+			// when it will serve again — so it is quoted rather than
+			// summarized, and `gummi doctor` is not offered, because it
+			// will report a healthy workspace.
+			return "The " + stage + " session's backend could not serve the turn: " + sanitize(in.backendUnavailable) + ". Nothing is wrong with the card or the setup — pick it back up when the backend is available again."
+		}
 		if in.backendNeverStarted {
 			// The failure a first-time user hits most and can act on
 			// least: the coding CLI died before producing a single turn,

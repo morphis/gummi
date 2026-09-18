@@ -111,8 +111,14 @@ type nextInput struct {
 	// card — the backend is not set up. Re-running is the one thing
 	// guaranteed not to help, and it used to be the only thing offered.
 	backendNeverStarted bool
-	openSpecQs          int // open user %% threads in the artifact (block gates)
-	openDiffComments    int // unresolved diff annotations (block gates)
+	// backendUnavailable carries the backend's own words when the failure
+	// was the backend being unable to serve the turn at all — a provider
+	// quota, a rate limit, an overload (agent.Unavailable). It is the
+	// opposite advice from backendNeverStarted's: nothing here is
+	// misconfigured, and the sentence usually says when it comes back.
+	backendUnavailable string
+	openSpecQs         int // open user %% threads in the artifact (block gates)
+	openDiffComments   int // unresolved diff annotations (block gates)
 	// undrafted names the required section(s) the departing stage left
 	// blank — the artifact half of the same gate, resolved through the
 	// engine's own predicate so the panel can name what is missing before
@@ -359,6 +365,13 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		in.verdictFloorReason = snap.VerdictFloorReason
 		var rf *agent.RunFailure
 		in.backendNeverStarted = errors.As(snap.Err, &rf) && rf.FirstTurn
+		if words, out := agent.Unavailable(snap.Err); out {
+			// an outage on a session's first turn is still an outage: the
+			// backend is set up, it is busy. Saying "setup problem" here
+			// sends the reader to `gummi doctor`, which will tell them
+			// everything is fine.
+			in.backendUnavailable, in.backendNeverStarted = words, false
+		}
 	}
 	// No session at all — a restart took it — but the log still says how
 	// the stage ended. The exit's verdict stands in for the session's,
@@ -708,7 +721,10 @@ func stageActions(in nextInput) []nextAction {
 		// say anything and change nothing (stageActions' own contract),
 		// not in a fifth arm.
 		why := "the session errored — a fresh run retries " + string(in.stage)
-		if in.backendNeverStarted {
+		switch {
+		case in.backendUnavailable != "":
+			why = "the backend could not serve this turn — a retry works once it can"
+		case in.backendNeverStarted:
 			why = "the backend never started — a retry runs the same command"
 		}
 		return append([]nextAction{nextStep("run", "enter", "try again", why)}, stopHere(in)...)
@@ -863,10 +879,15 @@ func stageActions(in nextInput) []nextAction {
 				}
 			}
 			// a goal's implement stage is conducted: nothing to run by
-			// hand, and typing into the composer is a note to its lead
+			// hand, and typing into the composer is a note to its lead.
+			//
+			// The page leads and the stop follows, because the first row
+			// is the one `enter` takes: a running goal is a healthy card
+			// with nothing to decide, and the reflex keystroke on it was
+			// dropping its unfinished work and ending it partial.
 			return []nextAction{
-				nextStep("goalstop", "", "stop the goal", "finish now — verified work lands, the rest is dropped, and it comes back partial"),
 				nextStep("goalpage", "P", "open the goal page", "the done-when list, the cards (enter watches one), the budget and the lead's log"),
+				nextStep("goalstop", "", "stop the goal", "finish now — verified work lands, the rest is dropped, and it comes back partial"),
 			}
 		}
 		if !finished {
