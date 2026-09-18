@@ -31,7 +31,7 @@ func TestBG103EveryClosingRuleCarriesItsTime(t *testing.T) {
 	at := time.Date(2026, 9, 4, 8, 38, 0, 0, time.UTC)
 	clock := regexp.MustCompile(` \d\d:\d\d ──$`)
 
-	for _, how := range []stretchClose{stretchParked, stretchFinished, stretchTakenBack, stretchOrphaned, stretchHandedOver} {
+	for _, how := range []stretchClose{stretchParked, stretchFinished, stretchTakenBack, stretchOrphaned} {
 		st := autopilotStretch{closed: how, closedAt: at}
 		got := ansi.Strip(stretchCloseLines(m0Styles(), st, 100)[0])
 		if !clock.MatchString(got) {

@@ -25,7 +25,10 @@ package ui
 // Closing is derived, and deliberately generous about what counts,
 // because a period that never closes swallows the rest of the card's
 // life. Four things end one, whichever lands first: an explicit handback
-// row, a park, a gate a person crossed, or a turn a person typed.
+// row, a park, a gate a person crossed, or a turn a person typed. All
+// four are rows: a period ends when the log says it ended, and the one
+// judgement made outside the log (closeOrphaned) exists only for the
+// stop that by definition wrote nothing down.
 
 import (
 	"encoding/json"
@@ -62,16 +65,6 @@ const (
 	// (closeOrphaned) applied on top of a stretch the log alone still
 	// calls running().
 	stretchOrphaned stretchClose = "orphaned"
-	// stretchHandedOver is a period that ended because autopilot carried
-	// the card into a stage it is not allowed to drive — an interactive
-	// one, which needs a person at the keyboard. Nothing in the log says
-	// so: autopilot writes a machine gate crossing (not a closing event)
-	// and then simply has nothing further it may do, so it parks nothing
-	// and hands back nothing. Like stretchOrphaned this is a query-time
-	// judgement (closeHandedOver), and it must be distinguished from it:
-	// orphaned says the driver died, this says it finished its turn and
-	// the card is waiting for you.
-	stretchHandedOver stretchClose = "handed-over"
 )
 
 // autopilotStretch is one such period. from and to bound it as a half-
@@ -263,68 +256,35 @@ func closeOrphaned(stretches []autopilotStretch, events []state.CardEvent, live 
 	// there is no exact moment to read, and an undated rule was the
 	// wrong answer to that: this is the one closing whose rule is the
 	// only record the run ended at all, which makes "when" the thing the
-	// reader most needs from it. closeHandedOver makes the same
-	// approximation from the crossing that brought the card to rest.
+	// reader most needs from it.
 	if len(events) > 0 {
 		last.closedAt = events[len(events)-1].At
 	}
 	return stretches
 }
 
-// closeHandedOver closes a still-open period whose card has come to rest
-// at a stage autopilot is not allowed to drive. Autopilot's last act was
-// to cross into it; an interactive stage needs a person, so from that
-// crossing on the card was the reader's, not the machine's.
+// liveStretches is autopilotStretches with the render-time liveness
+// judgement folded in — what every rendering call site should call
+// instead of autopilotStretches directly. A period still open per the
+// log renders as still running only if a process is actually driving the
+// card right now; a process killed mid-run writes nothing on its way
+// out, so the log can never say this by itself (BG-059).
 //
-// The log cannot say this on its own. A machine gate crossing is not one
-// of the four closing events (it is autopilot working, not stopping),
-// and autopilot writes no park and no handback here because it did not
-// give up on anything — it arrived where it was always going to stop.
-// closeOrphaned cannot cover it either, and must not: the process that
-// opened the period is usually still alive and holding the card, so the
-// liveness test correctly says "running" and the period would otherwise
-// stay open for the rest of the card's life, claiming a machine drove
-// every stage the reader went on to work by hand (BG-085).
-//
-// Ordered before the liveness judgement by liveStretches, because it is
-// the more specific answer: a card resting at the design stage got there
-// by being handed over, whether or not the driver has since gone.
-func closeHandedOver(f domain.Feature, stretches []autopilotStretch, events []state.CardEvent) []autopilotStretch {
-	if len(stretches) == 0 || f.Stage != domain.StagePlan {
-		return stretches
-	}
-	last := &stretches[len(stretches)-1]
-	if !last.running() {
-		return stretches
-	}
-	// dated from the crossing that brought the card here, so the rule
-	// carries the moment autopilot actually stopped rather than now.
-	at := last.openedAt
-	for i := len(events) - 1; i >= last.from; i-- {
-		if events[i].Kind == state.EventGate {
-			at = events[i].At
-			break
-		}
-	}
-	last.closed = stretchHandedOver
-	last.closedAt = at
-	return stretches
-}
-
-// liveStretches is autopilotStretches with the render-time judgements
-// folded in — what every rendering call site should call instead of
-// autopilotStretches directly.
-//
-// Two things can close a period that the log itself never closes, and
-// they are asked in order of specificity. A card resting at a stage
-// autopilot may not drive was handed over, which is a normal ending and
-// says so (BG-085). Otherwise, a period still open per the log renders
-// as still running only if a process is actually driving the card right
-// now; a process killed mid-run writes nothing on its way out, so the
-// log can never say this by itself (BG-059).
+// There was a second judgement here, and it is gone: a card resting at a
+// stage autopilot may not drive used to be read as handed over (BG-085),
+// because back then the design stage was interactive and autopilot's
+// arrival there was a stop nothing wrote down. Every stage is autonomous
+// now, and every way a card comes to rest writes its own row — a gate
+// waiting on a person raises the card's needs-you item, and that raise
+// records a park (shell.go's parkAttentionItem), which closes the period
+// with the gate's own sentence as the reason. What survived the stage
+// merge was the question asked of the wrong graph: "is the card at
+// plan", answered yes by every card in the design phase, running or not.
+// So pressing the switch on a working card drew the opening rule and the
+// closing one in the same breath while the stage went on writing
+// (BG-105).
 func liveStretches(f domain.Feature, events []state.CardEvent, ws state.Workspace) []autopilotStretch {
-	sts := closeHandedOver(f, autopilotStretches(events), events)
-	return closeOrphaned(sts, events, state.CardIsLive(ws, f.ID))
+	return closeOrphaned(autopilotStretches(events), events, state.CardIsLive(ws, f.ID))
 }
 
 // askedBy names who answered an ask. By is what the caller stated
@@ -415,8 +375,6 @@ func stretchLabel(how stretchClose) string {
 		return "you took back control"
 	case stretchOrphaned:
 		return "autopilot stopped without saying so"
-	case stretchHandedOver:
-		return "autopilot handed it to you"
 	default:
 		return "autopilot parked it"
 	}
