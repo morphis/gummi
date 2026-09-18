@@ -55,6 +55,10 @@ type Options struct {
 	// Repo is the managed repository the created card belongs to (a
 	// configured `repos:` name, or "" for the workspace default).
 	Repo string
+	// Base is the branch the created card's work forks from and lands on
+	// ("" for whatever the repository has checked out, which is what
+	// every card did before bases were selectable).
+	Base string
 	// GoalDoc, for a goal, is a complete goal doc to start the plan from
 	// (--plan-file) instead of the template seeded with the objective.
 	GoalDoc string
@@ -479,6 +483,14 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 		return d.fail(ctx, string(id),
 			fmt.Errorf("%s is linked to %s#%d (%s); land it via the PR, or run `gummi pr unlink %s` to land it locally instead",
 				id, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, id))
+	}
+	// A stacked card carries the commits of every card below it, so it
+	// cannot land before they have. The only ordering a stack imposes —
+	// and it constrains landing alone, never the work.
+	if blocker, blocked := d.eng.StackLandBlocker(ctx, &f); blocked {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s sits on %s in its stack; land %s first, or its commits would ride in under %s",
+				id, blocker, blocker, id))
 	}
 	// the same open-thread / open-diff floor Advance applies before the
 	// verify→done gate; unresolved ones hold the merge.
@@ -2108,7 +2120,7 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: ct.Kind, Mode: ct.Mode, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
-		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo,
+		Repo: d.opts.Repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 		GoalDoc: d.opts.GoalDoc,
 	})

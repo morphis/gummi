@@ -21,6 +21,9 @@ type MaterializeOpts struct {
 	// Repo is the managed repository the created bugs and features belong
 	// to (a configured `repos:` name, or "" for the workspace default).
 	Repo string
+	// Base is the branch the created cards' work forks from and lands on
+	// ("" for whatever the repository has checked out).
+	Base string
 }
 
 // Materialize turns an approved IngestResult into real cards (DESIGN
@@ -88,6 +91,13 @@ func (e *Engine) Materialize(ctx context.Context, res domain.IngestResult, opts 
 			// than one it can compare.
 			GateApproval: domain.GateAttended,
 			Budget:       domain.Budget{Envelope: opts.Envelope}, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
+			Base: opts.Base,
+			// Ingested cards are newly minted, so they get the current
+			// branch-name scheme exactly as cardmint's do. This path does
+			// not go through cardmint (it mints in bulk so depends_on can
+			// resolve to real ids before any row exists), which is why the
+			// scheme is set here too rather than inherited.
+			BranchScheme: domain.DefaultBranchScheme,
 		}
 		feats[i] = f
 		if _, seen := byTitle[p.Title]; !seen {

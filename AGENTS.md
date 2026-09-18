@@ -63,6 +63,7 @@ leaf services.
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
 | `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |
+| `stack` | Pure policy for a **stack** — a chain of cards whose branches fork from one another. Answers what each card forks from, which are sitting on commits that have moved, and whether one may land yet. No git, no store, no clock. Read by `Engine.StackTick`, the worktree base seam and the board alike. |
 | `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the stats tab, `status --stats` and the week view. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |
@@ -79,7 +80,7 @@ leaf services.
 (spec decomposition), `bugs` (GitHub issue import / manual add), and the
 headless driver surface — `run`, `resume`, `status` (`--stats` reports where a
 card's credits and hours went), `spec`, `diff`, `verify`,
-`merge`, `clean`, `deps`, `doctor`, `skill`. See README's "Running headlessly"
+`merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See README's "Running headlessly"
 for the driver's command grammar and exit-status table.
 
 `internal/deps.go` (build tag `pin`) blank-imports the pinned Charm stack
@@ -147,7 +148,15 @@ still work — the board just stays static. Key env vars are tabled in
   windows small: pass specs between stages, not conversation history.
 - **gummi's job ends at a verified branch.** It does not open PRs or
   release. Don't add that scope without checking `docs/DESIGN.md §7`
-  (scope guards) and §10 (Decisions — binding).
+  (scope guards) and §10 (Decisions — binding). Stacks (§18) replay
+  branches locally and print the `git push --force-with-lease` they need;
+  they still never push, create a PR, or retarget one.
+- **A stack is topology; a dependency is scheduling.** A stack position
+  says "my branch forks from that card's branch" and must never gate a
+  card from running — a dependency is met only at `StageDone`, so a
+  position that implied one would serialize exactly the parallel work a
+  stack exists for. See DESIGN §18.1; `internal/stack` enforces it and
+  `TestAStackNeverBlocksWork` asserts it.
 - **Formatting:** `gofumpt` + `goimports` (enforced by golangci-lint v2).
 - **Errors on cleanup paths** (`Close`, `os.Remove` in defer) are
   intentionally unchecked per the linter's `exclude-functions` — match
@@ -168,6 +177,10 @@ still work — the board just stays static. Key env vars are tabled in
 ## Where to look first
 
 - Behavior of a stage/transition → `internal/workflow` then `internal/engine`.
+- "why did this card's branch move" / stacks → `internal/stack` for the
+  rules, `internal/engine/stack.go` for the tick, `worktree.Manager.baseRev`
+  for what a card forks from (and read its comment before touching any
+  `"HEAD"` in that package — the token means two different things there).
 - A TUI bug → `internal/ui` (`board.go`, `chat.go`, `diffview.go`, `inbox.go`).
 - "what did this card cost / how did it run" → `internal/cardrun`, then its
   three readers (`internal/ui/statsview.go`, `cmd/gummi/statusstats.go`,

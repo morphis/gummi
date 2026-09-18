@@ -232,3 +232,20 @@ func (p *repoPicker) cycle(delta int) {
 // bugSeverityChoices are the severities the new-card dialog cycles
 // through for a bug; the first ("") means unset — triage classifies it.
 var bugSeverityChoices = []domain.Severity{"", domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
+
+// selectName settles the picker on a configured name, for a dialog that
+// inherits the repository rather than asking for it — a card stacked on
+// another must live in the same repo as the branch it forks from, so the
+// row is answered, not offered.
+func (p *repoPicker) selectName(name string) {
+	for i, n := range p.options() {
+		if n == name {
+			p.idx = i
+			return
+		}
+	}
+	// An unconfigured name leaves the picker as it was: the dialog then
+	// still refuses to create until a real repository is chosen, which
+	// is the right outcome for a card whose parent points somewhere the
+	// workspace no longer knows about.
+}

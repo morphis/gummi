@@ -85,9 +85,29 @@ CREATE TABLE IF NOT EXISTS features (
 	goal_reserve    INTEGER NOT NULL DEFAULT 0,
 	goal_wrapup_at  TEXT NOT NULL DEFAULT '',
 	goal_partial    TEXT NOT NULL DEFAULT '',
-	research_mode   TEXT NOT NULL DEFAULT ''
+	research_mode   TEXT NOT NULL DEFAULT '',
+	base            TEXT NOT NULL DEFAULT '',
+	branch_scheme   TEXT NOT NULL DEFAULT '',
+	stack_id        TEXT NOT NULL DEFAULT '',
+	stack_pos       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
+-- features_stack is created by the column migrations, not here: this
+-- block runs against pre-existing databases too, where stack_id does
+-- not exist until the ALTER TABLE below has run. features_goal is
+-- placed there for exactly the same reason.
+
+-- A stack is an ordered chain of cards in one repo whose branches fork
+-- from one another (see internal/domain/stack.go). Only the identity
+-- lives here: membership and order are features.stack_id / stack_pos,
+-- because a member list stored in two places is one that can disagree
+-- with itself, and the card needs its stack anyway to resolve its base.
+CREATE TABLE IF NOT EXISTS stacks (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	repo       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+);
 
 -- One row per (feature, round kind) live loop counter: the collapsed
 -- seam behind internal/rounds, replacing the former plan_rounds and
@@ -703,6 +723,18 @@ var migrations = []string{
 	// survey every RS card written before diagnosis existed was, so no
 	// row needs a value.
 	`ALTER TABLE features ADD COLUMN research_mode TEXT NOT NULL DEFAULT ''`,
+	// The branch a card forks from and the spelling of its own branch.
+	// Both empty defaults reproduce the behavior every card had before
+	// either was selectable: fork from the checkout's HEAD, and spell the
+	// branch `gummi/<ID>-<slug>`. That is why no row needs a backfill —
+	// and why an existing card's branch is never renamed underneath it.
+	`ALTER TABLE features ADD COLUMN base TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN branch_scheme TEXT NOT NULL DEFAULT ''`,
+	// Stack membership and order (internal/domain/stack.go). Empty stack
+	// id reads as "not stacked", which every pre-existing card is.
+	`ALTER TABLE features ADD COLUMN stack_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN stack_pos INTEGER NOT NULL DEFAULT 0`,
+	`CREATE INDEX IF NOT EXISTS features_stack ON features(stack_id)`,
 }
 
 // Close releases the database.
@@ -738,8 +770,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			kind, external_ref, skip_triage, skip_diagnose, quick, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 			pr_repo, pr_number, pr_url, pr_head_sha,
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
-			research_mode)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			research_mode,
+			base, branch_scheme, stack_id, stack_pos)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -751,7 +784,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, f.PullRequest.HeadSHA,
 		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
-		string(f.Mode))
+		string(f.Mode),
+		f.Base, f.BranchScheme, string(f.StackID), f.StackPos)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -766,7 +800,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	kind, external_ref, skip_triage, skip_diagnose, quick, verified_at, handed_off_at, gate_approval, severity, fork_point, landed_sha, commit_draft_fail, commit_draft, commit_draft_sha, repo,
 	pr_repo, pr_number, pr_url, pr_head_sha,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
-	research_mode`
+	research_mode,
+	base, branch_scheme, stack_id, stack_pos`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -790,6 +825,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
 	var goalID, goalDropped, foundBy, goalWrapUp, mode string
+	var stackID string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -804,10 +840,12 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&kind, &f.ExternalRef, &vestigialSkips[2], &vestigialSkips[3], &vestigialSkips[4], &verified, &handedOff, &f.GateApproval, &severity, &f.ForkPoint, &f.LandedSHA, &f.CommitDraftFail, &f.CommitDraft, &f.CommitDraftSHA, &f.Repo,
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
-		&mode)
+		&mode,
+		&f.Base, &f.BranchScheme, &stackID, &f.StackPos)
 	if err != nil {
 		return f, err
 	}
+	f.StackID = domain.StackID(stackID)
 	f.Mode = domain.ResearchMode(mode)
 	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)

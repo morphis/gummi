@@ -257,14 +257,16 @@ func TestCardFormKindRowCycles(t *testing.T) {
 }
 
 // TestCardFormTabOrder: tab walks kind, text, then expands the options —
-// envelope, profile, (severity for a bug), after — then the buttons, and
-// wraps. The repo stop is absent when there is nothing to choose.
+// envelope, profile, (severity for a bug), after, stack — then the
+// buttons, and wraps. The repo stop is absent when there is nothing to
+// choose, and so is the base stop when the repo has fewer than two
+// branches to choose between (this scaffold has none).
 func TestCardFormTabOrder(t *testing.T) {
 	form := door(domain.CardType{Kind: domain.KindFeature}, nil)
 	if form.expanded {
 		t.Fatal("options should open collapsed")
 	}
-	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopAfter, cardStopButtons, cardStopKind, cardStopText} {
+	for _, want := range []int{cardStopText, cardStopEnvelope, cardStopProfile, cardStopAfter, cardStopStack, cardStopButtons, cardStopKind, cardStopText} {
 		if form.focus != want {
 			t.Fatalf("focus = %d, want %d", form.focus, want)
 		}

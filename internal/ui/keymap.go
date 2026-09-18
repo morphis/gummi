@@ -376,6 +376,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "f", label: "fold goal", help: "fold or unfold a goal's cards under it"},
 		{key: "B", label: "bug", help: "same screen as n, straight to the bug preset"},
 		{key: "R", label: "research", help: "same screen as n, straight to the research preset"},
+		{key: "T", label: "stack on top", help: "new card whose branch forks from this one's — gummi replays it whenever this card changes"},
 		{key: "I", label: "ingest", help: "split a document into cards"},
 		{key: "G", label: "import", help: "same screen as n, straight to importing a bug from a GitHub issue — browse the repo's issues"},
 		{key: "S", label: "sort", help: "toggle severity sort (todo only)"},

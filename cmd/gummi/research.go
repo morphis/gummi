@@ -56,7 +56,7 @@ func runResearchCard(args []string, ct domain.CardType, noun string) error {
 	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
 		return err
 	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, "", "", *rv.repo)
+	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, "", "", *rv.repo, *rv.base)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func runResearchCard(args []string, ct domain.CardType, noun string) error {
 type researchFlagValues struct {
 	envelope            *int
 	profile, gate, ref  *string
-	repo, until         *string
+	repo, until, base   *string
 	autonomous, verbose *bool
 	timeout             *time.Duration
 }
@@ -113,6 +113,7 @@ func registerResearchFlags(fs *flag.FlagSet) *researchFlagValues {
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
 		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)"),
+		base:       fs.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)"),
 		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this stage (only \"plan\" is a valid stop)"),
 	}
 }

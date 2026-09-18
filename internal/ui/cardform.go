@@ -52,6 +52,32 @@ type cardForm struct {
 	afterFilter textinput.Model
 	afterCursor int
 
+	// base is the branch the card's work forks from, and baseCands the
+	// branches the chosen repo actually has. An empty base means "what
+	// the checkout has out", which is the default and what every card
+	// did before bases were selectable.
+	base       string
+	baseCands  []string
+	baseCursor int
+	// stackOnto names the card this one is being stacked on top of, set
+	// when the form was opened with S. stackInto names an existing stack
+	// to join instead. Both empty is a standalone card.
+	//
+	// They live in the expanded options rather than the main flow because
+	// the overwhelming majority of cards are standalone, and a row every
+	// reader has to tab past to say "no" is a row that costs more than it
+	// gives. What keeps the S gesture legible is the `becomes` readout,
+	// which is always visible and names the branch this card will fork
+	// from — so the one case where stacking matters says so without the
+	// reader opening anything.
+	stackOnto  domain.FeatureID
+	stackLabel string
+	stackInto  domain.StackID
+	// stackOffer remembers the card S named, so toggling the row back to
+	// "on top of" after saying standalone once restores the offer rather
+	// than losing it.
+	stackOffer domain.FeatureID
+
 	// expanded shows the run options as rows instead of one readout line.
 	expanded bool
 
@@ -134,6 +160,8 @@ const (
 	cardStopProfile
 	cardStopSeverity
 	cardStopAfter
+	cardStopBase
+	cardStopStack
 	cardStopButtons
 )
 
@@ -259,6 +287,10 @@ func (d *cardForm) stops() []int {
 			s = append(s, cardStopSeverity)
 		}
 		s = append(s, cardStopAfter)
+		if len(d.baseCands) > 1 {
+			s = append(s, cardStopBase)
+		}
+		s = append(s, cardStopStack)
 	} else {
 		s = append(s, cardStopRuns)
 	}
@@ -451,6 +483,18 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case cardStopAfter:
 		if !d.handleAfterKey(key) {
 			// enter with nothing to add is enter: create
+			return d.submit(false)
+		}
+	case cardStopBase:
+		if delta, ok := selectCycleDelta(k); ok {
+			d.cycleBase(delta)
+		} else if k == "enter" {
+			return d.submit(false)
+		}
+	case cardStopStack:
+		if delta, ok := selectCycleDelta(k); ok {
+			d.cycleStack(delta)
+		} else if k == "enter" {
 			return d.submit(false)
 		}
 	}
@@ -702,6 +746,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	res := formResult{
 		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.repo.name(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
+		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start: start, FromPicker: d.fromPicker,
 	}
 	if d.ct.Kind == domain.KindBug {
@@ -1051,6 +1096,14 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 		return cardLabel(s, "becomes") + s.Error.Render("the first line needs a letter or digit to make a title")
 	}
 	out := d.ct.Prefix() + " (" + d.ct.Name() + ") · " + title
+	// Name where the branch comes from whenever it is not the plain
+	// default. This is the line that keeps the S gesture honest: the
+	// stack row itself is folded away in the options, so this readout is
+	// the reader's only chance to see what the card will fork from
+	// before pressing enter.
+	if from := d.forkFrom(); from != "" {
+		out += s.Faint.Render(" · from ") + from
+	}
 	if d.ct.Kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
 		out += " · severity " + string(bugSeverityChoices[d.sev])
 		if d.imported != nil && d.imported.prop.Severity == bugSeverityChoices[d.sev] {
@@ -1074,6 +1127,12 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 	out := env + " · " + d.profiles[d.profile]
 	if len(d.after) > 0 {
 		out += " · runs after " + joinIDs(d.after)
+	}
+	if st := d.stackSummary(); st != "" {
+		out += " · " + st
+	}
+	if d.base != "" {
+		out += " · on " + d.base
 	}
 	return cardLabel(s, "runs as") + out + "   " + s.KeyHint.Render("alt+o") + s.Faint.Render(" edit")
 }
@@ -1136,6 +1195,31 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 	if d.focus == cardStopAfter {
 		rows = append(rows, d.afterListRows(s, width)...)
 	}
+	// The base row appears only when there is a choice to make: a repo
+	// with one branch has nothing to offer, and an unanswerable row is
+	// a tab stop that teaches nothing.
+	if len(d.baseCands) > 1 {
+		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopBase, "forks from"), optionLabelW,
+			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
+			d.baseIdx(), width, maxLines)...)
+	}
+	stackLine := optionLabel(s, d.focus == cardStopStack, "stack")
+	switch {
+	case d.stackOnto != "":
+		stackLine += "on top of " + s.KeyHint.Render(string(d.stackOnto))
+		if d.stackLabel != "" {
+			stackLine += s.Faint.Render("  " + d.stackLabel)
+		}
+	case d.stackInto != "":
+		stackLine += "into " + s.KeyHint.Render(string(d.stackInto))
+	case d.stackOffer != "":
+		// Short on purpose: this dialog has to hold at 60 columns, and
+		// the row already has the focused hint line underneath it.
+		stackLine += s.Faint.Render("standalone   ←/→ on " + string(d.stackOffer))
+	default:
+		stackLine += s.Faint.Render("standalone")
+	}
+	rows = append(rows, stackLine)
 	return rows
 }
 
@@ -1333,6 +1417,10 @@ func (d *cardForm) hint() string {
 		return "←/→ choose the severity · alt+o collapse · tab next · esc cancel"
 	case cardStopAfter:
 		return "type to filter · ↑/↓ move · enter add · backspace remove last · alt+o collapse · tab next · esc cancel"
+	case cardStopBase:
+		return "←/→ choose the branch it forks from · alt+o collapse · tab next · esc cancel"
+	case cardStopStack:
+		return "←/→ stack it or leave it standalone · alt+o collapse · tab next · esc cancel"
 	case cardStopButtons:
 		return "←/→ buttons · enter activate · tab next · esc cancel"
 	case cardStopRuns:
@@ -1351,4 +1439,109 @@ func (d *cardForm) hint() string {
 // sortAfterCands orders candidates by id for a stable list.
 func sortAfterCands(c []afterCand) {
 	sort.Slice(c, func(i, j int) bool { return c[i].ID < c[j].ID })
+}
+
+// --- base and stack ------------------------------------------------------
+
+// setBaseCands installs the branches the chosen repo has, with cur (the
+// branch it currently has out) first so the row opens on the default.
+// A repo with one branch offers no choice and the row is not a stop.
+func (d *cardForm) setBaseCands(branches []string, cur string) {
+	d.baseCands = branches
+	d.baseCursor = 0
+	for i, b := range branches {
+		if b == cur {
+			d.baseCursor = i
+			break
+		}
+	}
+	// The default is "whatever the checkout has out", which is stored as
+	// an empty base rather than as the branch's name: a card that named
+	// the branch explicitly would keep forking from it after the reader
+	// moved the checkout on, which is not what "the default" means.
+	d.base = ""
+}
+
+// stackOn presets the form to stack the new card on top of onto. Called
+// by the S gesture; the label is what the row and the readouts show.
+func (d *cardForm) stackOn(onto domain.FeatureID, label string, into domain.StackID) {
+	d.stackOnto, d.stackLabel, d.stackInto = onto, label, into
+	d.stackOffer = onto
+}
+
+// forkFrom is the phrase the `becomes` readout uses for where this
+// card's branch comes from, empty when it is the plain default (the
+// checkout's HEAD, unstacked) and there is nothing to say.
+func (d *cardForm) forkFrom() string {
+	if d.stackOnto != "" {
+		return string(d.stackOnto) + "'s branch"
+	}
+	if d.stackInto != "" {
+		return "the top of " + string(d.stackInto)
+	}
+	if d.base != "" {
+		return d.base
+	}
+	return ""
+}
+
+// stackSummary is the stack half of the collapsed options readout.
+func (d *cardForm) stackSummary() string {
+	switch {
+	case d.stackOnto != "":
+		return "on top of " + string(d.stackOnto)
+	case d.stackInto != "":
+		return "into " + string(d.stackInto)
+	}
+	return ""
+}
+
+// baseChoices are the row's cells: the default first, then each branch.
+func (d *cardForm) baseChoices() []string {
+	out := make([]string, 0, len(d.baseCands)+1)
+	out = append(out, "checked-out")
+	return append(out, d.baseCands...)
+}
+
+// baseIdx is the selected cell of baseChoices.
+func (d *cardForm) baseIdx() int {
+	if d.base == "" {
+		return 0
+	}
+	for i, b := range d.baseCands {
+		if b == d.base {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// cycleBase moves the base row by dir over baseChoices.
+func (d *cardForm) cycleBase(dir int) {
+	choices := d.baseChoices()
+	i := (d.baseIdx()+dir)%len(choices) + 0
+	if i < 0 {
+		i += len(choices)
+	}
+	if i == 0 {
+		d.base = ""
+		return
+	}
+	d.base = choices[i]
+}
+
+// cycleStack moves the stack row: standalone, or on top of the card the
+// S gesture named. It is deliberately not a free picker — a stack is
+// built by stacking onto a card you are looking at, and a row offering
+// every card in the workspace would be a second dependency picker
+// wearing a different label.
+func (d *cardForm) cycleStack(dir int) {
+	if d.stackLabel == "" && d.stackInto == "" {
+		return // nothing on offer: this form was not opened from a card
+	}
+	if d.stackOnto != "" || d.stackInto != "" {
+		d.stackOnto, d.stackInto = "", ""
+		return
+	}
+	d.stackOnto = d.stackOffer
 }

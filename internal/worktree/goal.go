@@ -324,7 +324,15 @@ func (m *Manager) RebaseOnto(ctx context.Context, f *domain.Feature, oldBase str
 	if _, statErr := os.Stat(p); statErr != nil {
 		return m.forkStore.ClearForkPoint(ctx, f.ID)
 	}
-	head, err := m.MainHead(ctx)
+	// The card's OWN base, not the checkout's HEAD. For a goal card the
+	// two are the same thing — its manager is rooted at the goal
+	// worktree, so that checkout's HEAD *is* the goal branch — which is
+	// why this read as MainHead for as long as goals were the only
+	// caller. A stacked card's base is the branch of the card below it,
+	// resolved in a manager rooted at the ordinary repository, so
+	// targeting the checkout's HEAD would replay it onto main and
+	// quietly flatten the chain.
+	head, err := m.BaseHead(ctx, f)
 	if err != nil {
 		return err
 	}

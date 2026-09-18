@@ -81,7 +81,7 @@ func (m *Shell) judgeRebase(id domain.FeatureID) tea.Cmd {
 		} else if dirty {
 			return rebaseSettledMsg{f: f, problem: "the worktree was left dirty"}
 		}
-		if rebased, err := m.wt.RebasedOnMain(ctx, &f); err != nil {
+		if rebased, err := m.wt.RebasedOnBase(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if !rebased {
 			return rebaseSettledMsg{f: f, problem: "the branch is still not rebased"}

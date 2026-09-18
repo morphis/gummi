@@ -313,8 +313,8 @@ the audit trail is part of the quality story.
 ┌──▼───────┐  ┌───▼────────┐  ┌───▼───────────┐
 │ Worktree │  │ Spec store │  │ Agent runtime │
 │ manager  │  │ (.gummi/   │  │  (adapters)   │
-│ (go-git +│  │  specs/)   │  └──┬────────┬───┘
-│  git CLI)│  └────────────┘     │        │
+│ (git CLI,│  │  specs/)   │  └──┬────────┬───┘
+│  argv)   │  └────────────┘     │        │
 └──────────┘            ┌────────▼──┐  ┌──▼─────────┐
                         │ copilot   │  │ opencode / │
                         │ (Copilot  │  │ generic    │
@@ -1313,11 +1313,18 @@ have.
   commit over its cards' commits. The one other merge it makes on its own
   is inside a goal (§17): a goal card lands on the goal branch, and the
   goal branch catches up with main — both gummi-owned, local branches
-  that reach main only through that same accepted landing. PRs, pushing,
+  that reach main only through that same accepted landing. A **stack**
+  (§18) adds a third gummi-owned arrangement of the same kind: a card's
+  branch may fork from another card's branch, and gummi replays the cards
+  above one that changed. Those replays are local `rebase --onto` on
+  branches gummi cut, and the stack still reaches main one accepted
+  landing at a time, bottom first. PRs, pushing,
   and releasing stay in your hands. A card may name and read the PR it
   lands through — linking it and pulling its review threads in as diff
   annotations — but gummi still never writes to GitHub: no PR creation,
-  no push, no merge, no thread resolution, no CI gating.
+  no push, no merge, no base retarget, no thread resolution, no CI
+  gating. Pushing a replayed branch is a `git push --force-with-lease`
+  gummi prints and never runs.
 - Not a process editor — one workflow, compiled in. If the workflow needs
   changing, that's a gummi release, not a config file.
 - Not a second driver — a hosted agent acts on the running board through
@@ -1412,7 +1419,11 @@ Decided in the design interview (2026-07-03):
    requirements of reading a run, not of the pane that happened to hold
    them. Watching a run another process drives stays a read-only view
    (decision 13).
-6. **The endgame is a squash commit on main.** When you accept a
+6. **The endgame is a squash commit on main.** *Amended for stacks
+   (§18):* the branch a card forks **from** is now the card's own — a
+   chosen local branch, or the branch of the card below it in a stack —
+   while what it lands **onto** is unchanged, and a stacked card refuses
+   to land until every card below it has. When you accept a
    verified feature, gummi lands its branch on local main as one squash
    commit with a message you approve — no PR or push automation; sharing
    the result is yours. gummi detects when a branch landed outside this
@@ -1792,6 +1803,20 @@ tests, no agent), `Engine.Ingest` + the tool (unit-tested against the `Fake`
 agent, both the client-tool and fenced-convention paths), materialization
 (headless engine/state), the `gummi ingest` CLI, and the TUI review pane (driven
 through simulated key presses against a `Fake` architect).
+
+A dependency is **scheduling**, and is deliberately not the same fact as
+a stack position, which is **topology** (§18). A dependency says "do not
+start coding until that card is done" and is met only at `StageDone`; a
+stack position says "my branch forks from that card's branch" and never
+gates anything. Conflating them was this feature's first design and it
+was wrong twice over: a card with two same-repo dependencies has no single
+unambiguous base, and treating a position as a dependency would hold
+every card above the bottom out of its coding stage until the one below
+had landed — the serialized waiting a stack exists to remove. The two
+coexist on one card, and `worktree.ResolveCollapseBase`'s original
+"exactly one dependency names the parent branch" guess is superseded for
+a stacked card (it remains the fallback for an unstacked one, so
+`gummi squash` is unchanged).
 
 ### 11.5 Deferred
 
@@ -2511,3 +2536,117 @@ met with its evidence, the cards with their landed commits and diff stats,
 the decisions for review, declined findings, what was found along the way,
 the try-it guide, and the budget tree.
 
+
+## 18. Stacks — slicing one piece of work into several landings
+
+A **stack** is an ordered chain of cards in one repository whose branches
+fork from one another: the card at the bottom forks from its own base, and
+every card above it forks from the branch of the card below. It exists for
+the shape of work gummi could not hold before — slice a feature into
+several separately reviewable branches, work them all at once, land them
+one at a time, take review feedback on the ones below, and never rebase by
+hand.
+
+### 18.1 Topology, not scheduling
+
+The one thing to get right, because getting it wrong defeats the feature:
+
+| | dependency (§11.4a) | stack position |
+|---|---|---|
+| means | "don't start coding until A is done" | "my branch forks from A's branch" |
+| shape | a DAG, any number of parents, crosses repos | a line, exactly one predecessor, one repo |
+| blocks work? | **yes** — met only at `StageDone` | **never** |
+| stored as | `feature_deps` | `features.stack_id` / `stack_pos` |
+
+A card with three same-repo dependencies still has exactly one base,
+because the base comes from its declared position and is never inferred
+from an edge count. And a position must not gate: a dependency is met only
+at done, so a position that implied one would hold every card above the
+bottom out of its coding stage until the one below had *landed* — the
+serialized waiting the whole feature removes. `internal/stack` is where
+this is enforced, and `TestAStackNeverBlocksWork` asserts it structurally.
+
+The only ordering a stack imposes is on **landing**, and git imposes it,
+not gummi: a card's branch contains the commits of every card beneath it,
+so landing it early would land their work under its message and without
+their review. Both land paths refuse it (`ui/merge.go`, `driver.Merge`),
+beside the refusal a PR-linked card already gets.
+
+### 18.2 The base a card forks from
+
+Before stacks, `worktree.BaseBranch` was **decorative** — every "main" in
+the package was `HEAD` of the manager's repo, which is what made the goal
+branch free (§17.2). A per-card base needed that made explicit, so
+`Manager.baseRev` is now the single chokepoint for "the revision this card
+forks from and lands on", and every `runGit(ctx, m.repo, …, "HEAD")` that
+meant *the trunk* goes through it. A `"HEAD"` against a **worktree** path
+still means the card's own branch tip — a different fact wearing the same
+token, and the distinction is the whole review surface of the change.
+
+Resolution is a callback (`worktree.BaseLookup`, installed at launch from
+`Engine.StackBaseFor`) for the reason `forkStore` is one: a stacked card's
+base takes the store, and the package must not import it. A nil lookup
+leaves every card on the checkout's HEAD, so an unstacked card with no
+chosen base behaves exactly as it always did — asserted directly, because
+that equivalence is what makes the sweep reviewable.
+
+`Feature.Base` (empty = the checkout's HEAD) is the card's own choice,
+offered by the creation dialog's `forks from` row and `--base` on every
+card-creating command. A stacked card above the bottom ignores it.
+
+### 18.3 The replay
+
+`BaseFor` skips **landed** members, and that one rule is the whole landing
+cascade: when the bottom card lands, the card above it stops forking from a
+branch whose commits are in the base anyway and forks from the base
+directly, so the replay that follows is a fast-forward rather than a
+re-application of work already there.
+
+`Engine.StackTick` mirrors `GoalTick` — read, ask the pure policy,
+execute — and the board (`queueStackTick`, drained in `Update` beside
+`drainGoalTicks`, plus a backstop poll) and the headless driver both tick
+without either deciding. `stack.Decide` returns **at most one** restack per
+tick on purpose: a replay rewrites what every card above it forks from, so
+their staleness is not knowable until it has happened.
+
+The primitive is `Manager.RebaseOnto` — `rebase --onto <base> <oldFork>`
+inside the card's worktree, then re-anchor the fork point, with the fork
+point read *before* anything moves. `--onto` replaying only the card's own
+commits is the property the feature rests on. It targeted `MainHead` while
+goals were its only caller (correct there, since a goal card's manager is
+rooted at the goal worktree) and now targets `BaseHead`, which is the same
+value for a goal card and the card below for a stacked one.
+
+Staleness is `RebasedOnBase` inverted. A replay never races a session: the
+policy declines to move a card with a live one, and the executor takes the
+card's own lock to close the gap. A conflict stops the walk exactly there —
+`RebaseOnto` aborts before returning, so the branch is untouched, the cards
+below are already correct, and the TUI offers the agent through the
+hand-off `internal/ui/rebase.go` already had.
+
+### 18.4 Setting one up
+
+A stack is **created by the act of stacking**, not by a dialog: `T` on a
+card opens the ordinary new-card form with its `stack` row pre-answered,
+and creating that second card is what brings the stack into being, named
+after the card at the bottom. The common case costs one key, and a stack of
+one card — which nobody wants — never exists. The row itself lives in the
+folded run options, because the overwhelming majority of cards are
+standalone and a row every reader tabs past to say "no" costs more than it
+gives; what keeps the gesture legible is the always-visible `becomes`
+readout, which names the branch the card will fork from.
+
+`T` and not `S`: `S` is the severity sort, and one key wearing two meanings
+on one surface is the defect this keymap's own comments keep recording.
+
+### 18.5 Deferred
+
+- **Pushing and retargeting.** gummi prints the `git push
+  --force-with-lease` a replayed branch needs and never runs it, and never
+  changes a PR's base. Reversing that needs a write-scoped token story
+  where gummi reads no token at all today (`pr.Available` is a `LookPath`).
+- **Stacks inside a goal.** A goal's cards already share one branch; the
+  two arrangements answer different questions and are kept apart.
+- **Renaming existing branches.** A card minted under the original
+  `gummi/<ID>-<slug>` scheme keeps it for life (`Feature.BranchScheme`),
+  because its branch already exists in checkouts gummi cannot see.

@@ -465,7 +465,7 @@ func TestRebaseInProgressAndAbort(t *testing.T) {
 func TestRebasedOnMain(t *testing.T) {
 	m, f, p := conflictedWorktree(t)
 
-	if ok, err := m.RebasedOnMain(ctx, f); ok || err != nil {
+	if ok, err := m.RebasedOnBase(ctx, f); ok || err != nil {
 		t.Fatalf("diverged branch reads rebased: %v %v", ok, err)
 	}
 
@@ -481,7 +481,7 @@ func TestRebasedOnMain(t *testing.T) {
 	mustGit(t, p, "add", "README.md")
 	mustGit(t, p, "-c", "core.editor=true", "rebase", "--continue")
 
-	if ok, err := m.RebasedOnMain(ctx, f); !ok || err != nil {
+	if ok, err := m.RebasedOnBase(ctx, f); !ok || err != nil {
 		t.Errorf("completed rebase not detected: %v %v", ok, err)
 	}
 }

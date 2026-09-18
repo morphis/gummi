@@ -71,6 +71,7 @@ failure can never be mistaken for a drive's typed status.
 gummi run [flags] "<description>"
     --acceptance string       acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)
     --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --base string             branch the card's work forks from and lands on (default: whatever the repository has checked out)
     --envelope int            credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
@@ -82,6 +83,7 @@ gummi run [flags] "<description>"
 
 gummi research [flags] "<brief>"
     --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --base string             branch the card's work forks from and lands on (default: whatever the repository has checked out)
     --envelope int            credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
@@ -92,6 +94,7 @@ gummi research [flags] "<brief>"
     --verbose                 add per-tool-call activity lines to the stream
 gummi diagnose [flags] "<symptom>"
     --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --base string             branch the card's work forks from and lands on (default: whatever the repository has checked out)
     --envelope int            credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
@@ -103,6 +106,7 @@ gummi diagnose [flags] "<symptom>"
 
 gummi goal [flags] "<objective>"
     --autonomous              let the architect take its recommended answer instead of asking during the plan conversation
+    --base string             branch the goal branch forks from and lands on (default: whatever the repository has checked out)
     --envelope int            the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)
     --plan-file string        a complete goal doc to start the plan conversation from (a file path, or - for stdin)

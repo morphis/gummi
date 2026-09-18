@@ -118,6 +118,38 @@ func (k Kind) prefix() string {
 	return "FD" // KindFeature and the empty default
 }
 
+// Branch-name schemes. A card stores which one it was minted under, so
+// changing the default never renames an existing branch.
+const (
+	// BranchSchemeGummi is the original `gummi/<ID>-<slug>` spelling. It
+	// is the empty value so every card minted before schemes existed
+	// reads as this one with no backfill.
+	BranchSchemeGummi = ""
+	// BranchSchemeKind spells the branch with a prefix naming the kind of
+	// work — `feat/`, `bug/`, `goal/` — which is the convention most
+	// repos, changelog tools and PR templates already expect.
+	BranchSchemeKind = "kind"
+)
+
+// DefaultBranchScheme is what a newly minted card gets.
+const DefaultBranchScheme = BranchSchemeKind
+
+// branchPrefix is the branch-name prefix for a kind under
+// BranchSchemeKind. Research has no branch at all (it runs in a detached
+// scratch tree), so its value is never spelled onto a ref; it is defined
+// only so the function is total.
+func (k Kind) branchPrefix() string {
+	switch k {
+	case KindBug:
+		return "bug"
+	case KindResearch:
+		return "research"
+	case KindGoal:
+		return "goal"
+	}
+	return "feat" // KindFeature and the empty default
+}
+
 // ArtifactNoun names the design artifact this kind of work item carries,
 // in the word the rest of that kind uses for it: a bug's report, a
 // research card's research document, a feature's spec. It lives here,
@@ -277,9 +309,31 @@ type Feature struct {
 	// else the workspace root), so every pre-existing row needs no migration
 	// value. It is metadata for routing git operations; it never feeds a
 	// branch, worktree, or spec path.
-	Repo      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Repo string
+	// Base is the git branch this card's work forks from and lands on,
+	// chosen at creation and changeable until the card cuts a worktree.
+	//
+	// Empty means "whatever the managed checkout has out" — which is what
+	// every card did before bases were selectable, so no pre-existing row
+	// needs a migration value and an empty base reproduces the old
+	// behavior exactly. A stacked card at a position above the bottom
+	// ignores this field: its base is the branch of the card below it,
+	// resolved live (see BranchScheme's note on why the scheme is stored
+	// but the branch name is not).
+	Base string
+	// BranchScheme is how this card's branch name was spelled when the
+	// card was minted. Empty is the original `gummi/<ID>-<slug>` scheme;
+	// BranchSchemeKind is the per-kind spelling (`feat/`, `bug/`, `goal/`).
+	//
+	// It is the scheme and not the rendered name because the name is
+	// derivable from (scheme, ID, slug) and a derivable fact gets a method
+	// — but the scheme in force at minting is NOT recoverable afterwards,
+	// since it changes with the default. Storing it is what lets the
+	// spelling change for new cards without renaming a branch that already
+	// exists in someone's checkout.
+	BranchScheme string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 	// VerifiedAt is stamped when the item's verify gate passes and its
 	// branch becomes ready to land — the headless driver's stop-at-verified
 	// terminal state (DESIGN §12). Zero until then. Distinct from reaching
@@ -364,6 +418,25 @@ type Feature struct {
 	// Goal holds the settings only a goal card carries. Zero on every
 	// other kind.
 	Goal GoalSettings
+	// StackID is the stack this card sits in, empty for a card that is not
+	// stacked. A stack is TOPOLOGY, not scheduling: it says this card's
+	// branch forks from the branch of the card below it, and it never
+	// blocks the card from running. Every member of a stack shares one
+	// repo, because a branch cannot fork from a branch in another one.
+	//
+	// This is deliberately not a dependency edge. A dependency is met only
+	// at StageDone, so a position that implied one would stop every card
+	// above the bottom from entering its coding stage until the card below
+	// had landed — serializing exactly the parallel work a stack is for.
+	// Dependencies remain available alongside a stack for the rare card
+	// that genuinely cannot start yet.
+	StackID StackID
+	// StackPos is this card's place in its stack, 0 at the bottom.
+	// Contiguous within a stack and meaningless when StackID is empty.
+	// The card at position 0 forks from its own Base; the card at N forks
+	// from the branch of the card at N-1, so "exactly one predecessor" is
+	// structural rather than a rule that could be violated.
+	StackPos int
 }
 
 // GoalSettings are the goal-only fields of a card: how many of its cards
@@ -589,8 +662,20 @@ func (f *Feature) Ending(landedOnBase bool) Ending {
 	return EndingNone
 }
 
-// BranchName is the feature's git branch: gummi/FD-042-slug.
+// BranchName is the feature's git branch — the ONE place a branch name is
+// constructed, and nothing anywhere parses one back. Worktrees are found
+// by path (worktree.Manager.List filters .gummi/worktrees/), branches by
+// this derived name, and drifted cards by walking store rows, so the
+// spelling is free to change without a migration.
+//
+// Which spelling a card gets is its stored BranchScheme, not the current
+// default: a card minted under the original scheme keeps
+// `gummi/FD-042-slug` for life, because its branch already exists in
+// checkouts this process cannot see. New cards get the per-kind spelling.
 func (f *Feature) BranchName() string {
+	if f.BranchScheme == BranchSchemeKind {
+		return f.kind().branchPrefix() + "/" + string(f.ID) + "-" + f.Slug
+	}
 	return "gummi/" + string(f.ID) + "-" + f.Slug
 }
 
@@ -691,6 +776,36 @@ func (f *Feature) Validate() error {
 	}
 	if f.Goal.Lanes < 0 || f.Goal.Reserve < 0 {
 		return fmt.Errorf("feature %s: negative goal lanes or reserve", f.ID)
+	}
+	// Base, when set, must be a plain branch name. The check is the same
+	// shape as Repo's and for the same reason: this value is handed to git
+	// as a revision, so a leading dash (an option), whitespace, or a refspec
+	// separator must never reach it. Empty is always legal — it means "the
+	// managed checkout's HEAD", which is what every card did before bases
+	// were selectable.
+	if err := ValidateBaseBranch(f.Base); err != nil {
+		return fmt.Errorf("feature %s: %w", f.ID, err)
+	}
+	if f.BranchScheme != BranchSchemeGummi && f.BranchScheme != BranchSchemeKind {
+		return fmt.Errorf("feature %s: unknown branch scheme %q", f.ID, f.BranchScheme)
+	}
+	if f.StackID != "" {
+		if !stackIDRe.MatchString(string(f.StackID)) {
+			return fmt.Errorf("feature %s: invalid stack id %q", f.ID, f.StackID)
+		}
+		if f.kind() == KindGoal {
+			return fmt.Errorf("feature %s: a goal card is not stackable — its cards share one goal branch", f.ID)
+		}
+		// A research card never cuts a branch, so it has no base to chain
+		// and nothing for a successor to fork from.
+		if f.kind() == KindResearch {
+			return fmt.Errorf("feature %s: a research card has no branch to stack", f.ID)
+		}
+		if f.StackPos < 0 {
+			return fmt.Errorf("feature %s: negative stack position %d", f.ID, f.StackPos)
+		}
+	} else if f.StackPos != 0 {
+		return fmt.Errorf("feature %s: stack position %d without a stack", f.ID, f.StackPos)
 	}
 	return nil
 }
@@ -827,6 +942,39 @@ func ValidateSlug(s string) error {
 	}
 	if !slugRe.MatchString(s) {
 		return fmt.Errorf("slug %q contains characters outside [a-z0-9-]", s)
+	}
+	return nil
+}
+
+// ValidateBaseBranch checks a card's chosen base branch. Empty is legal
+// and means the managed checkout's HEAD.
+//
+// This value reaches git as a revision, so the rules are about what git
+// would do with it rather than about tidiness: a leading dash would be
+// read as an option, whitespace and the ref-format exclusions would make
+// it an invalid ref, and `..` / `@{` are revision syntax that would
+// resolve to something other than the branch the reader picked. The
+// allowlist is deliberately narrower than git's own: a base branch is
+// chosen from a list of local branches, never typed freehand, so nothing
+// legitimate is excluded.
+func ValidateBaseBranch(b string) error {
+	if b == "" {
+		return nil
+	}
+	if strings.TrimSpace(b) != b {
+		return fmt.Errorf("base branch %q has surrounding whitespace", b)
+	}
+	if strings.HasPrefix(b, "-") {
+		return fmt.Errorf("base branch %q starts with a dash", b)
+	}
+	if strings.HasPrefix(b, "/") || strings.HasSuffix(b, "/") || strings.HasSuffix(b, ".lock") {
+		return fmt.Errorf("base branch %q is not a valid ref name", b)
+	}
+	if strings.Contains(b, "..") || strings.Contains(b, "@{") {
+		return fmt.Errorf("base branch %q contains revision syntax", b)
+	}
+	if strings.ContainsAny(b, " \t\n\\~^:?*[") {
+		return fmt.Errorf("base branch %q contains characters git refuses in a ref", b)
 	}
 	return nil
 }

@@ -15,7 +15,8 @@ step burns frontier-model tokens whether it needs them or not, and nothing
 stops an agent from skipping the spec or shipping unreviewed work.
 
 gummi replaces the pile of terminals with one board. Every piece of work
-is a card. Every card gets its own git worktree and branch and walks the
+is a card. Every card gets its own git worktree and branch (`feat/FD-042-slug`,
+`bug/BG-007-slug`) and walks the
 same fixed workflow. Every stage is done by an agent whose model you
 choose. gummi's job ends at a **verified branch**. Landing it on main is
 your keypress, always.
@@ -163,6 +164,7 @@ The keys you need first:
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
 | `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
+| `T` | new card stacked on this one — its branch forks from this card's, and gummi replays it whenever this card changes |
 | `C` / `W` | close out the session — land what is ready, then sweep the worktrees / what the last seven days produced |
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
 | `i` | the needs-attention inbox |
@@ -308,6 +310,8 @@ it. `gummi status` says by how much when it happens.
 | `merge <id> -m <msg\|->` | land the branch as one squash commit |
 | `handoff <id>` | close a verified card and keep its branch — nothing lands |
 | `squash`, `commit`, `clean` | collapse the branch, commit stray changes, remove a landed worktree |
+| `stack new\|add\|rm\|mv\|list` | build and read a stack of cards whose branches fork from one another |
+| `stack restack <stack>` | replay every card in a stack onto its current base now (the board does this on its own) |
 | `pr link\|unlink\|status\|comments` | land through a PR you opened; gummi never writes to GitHub |
 | `deps add\|rm\|list` | dependency edges between cards |
 | `ingest`, `bugs ingest\|new` | bring in existing work |
@@ -397,3 +401,39 @@ make ci             # build + test + lint
 ## License
 
 [MIT](LICENSE)
+
+## Stacks — slice it, land it in pieces
+
+A **stack** chains cards so each one's branch forks from the one below it.
+You slice a feature into several reviewable branches, work them **all at
+once**, land them one at a time, and take review feedback on the ones
+below — while gummi keeps everything above them rebased.
+
+Press `T` on a card and the next card is created *on top of it*; that is
+the whole setup, and it creates the stack. The board then shows the chain:
+
+```
+▾ rule-engine · 3 cards · on main
+  1 ⬤ FD-101  token parser     ⛁1/3 ← main      PR#412
+  2 ◐ FD-104  evaluate rules   ⛁2/3 ← FD-101
+  3 ◐ FD-103  cli surface      ⛁3/3 ← FD-104
+```
+
+All three run at the same time: **a stack orders landing, never work.**
+A dependency (`gummi deps add`) is the separate, opt-in fact that holds a
+card back until another is done.
+
+When you apply review feedback to FD-101 and its branch moves, the cards
+above it are replaying before you could have typed the rebase — there is no
+key for it and no order to remember. Only a conflict interrupts, with the
+same offer a manual rebase gets: let an agent resolve it in that worktree.
+When FD-101 lands, FD-104's base moves to `main` on its own and the stack
+shortens by one.
+
+Cards land bottom-first, and gummi refuses out of order: a card's branch
+carries the commits of every card below it, so landing it early would land
+their work under its message. Pushing a replayed branch is still yours —
+gummi prints the `git push --force-with-lease` and never runs it.
+
+A card can also fork from a branch that is not checked out — pick it on the
+creation dialog's `forks from` row, or pass `--base release-2.1`.

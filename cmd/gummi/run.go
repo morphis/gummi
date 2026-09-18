@@ -59,7 +59,7 @@ func runRun(args []string) error {
 	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
 		return err
 	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo)
+	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo, *rv.base)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func runRun(args []string) error {
 type runFlagValues struct {
 	envelope                       *int
 	profile, gate, ref, acceptance *string
-	repo, until                    *string
+	repo, until, base              *string
 	autonomous, verbose            *bool
 	timeout                        *time.Duration
 }
@@ -114,6 +114,7 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
 		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
 		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)"),
+		base:       fs.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)"),
 		acceptance: fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
 	}
@@ -144,7 +145,7 @@ func readAcceptance(pathOrDash string) (string, error) {
 
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
-func driverOptions(envelope int, profile string, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until, repo string) (driver.Options, error) {
+func driverOptions(envelope int, profile string, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until, repo, base string) (driver.Options, error) {
 	if envelope == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -164,7 +165,7 @@ func driverOptions(envelope int, profile string, gate string, timeout time.Durat
 	return driver.Options{
 		Envelope: envelope, Profile: profile, GateApproval: norm,
 		StageTimeout: timeout, Autonomous: autonomous, Verbose: verbose, Ref: ref,
-		Acceptance: acceptance, Until: domain.Stage(until), Repo: repo,
+		Acceptance: acceptance, Until: domain.Stage(until), Repo: repo, Base: base,
 	}, nil
 }
 

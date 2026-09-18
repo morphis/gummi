@@ -242,6 +242,51 @@ var depsListCmd = &cobra.Command{
 	},
 }
 
+// stackCmd groups the stack operations. A stack is a chain of cards
+// whose branches fork from one another: slice one piece of work into
+// several reviewable branches, land them bottom-first, and let gummi
+// replay the ones above whenever a card below them changes.
+var stackCmd = &cobra.Command{
+	Use:   "stack",
+	Short: "Chain cards so each one's branch forks from the one below it",
+}
+
+var stackNewCmd = &cobra.Command{
+	Use:   "new <bottom-card>",
+	Short: "Start a stack from the card that sits at its bottom",
+	RunE:  func(_ *cobra.Command, args []string) error { return runStackNew(args) },
+}
+
+var stackAddCmd = &cobra.Command{
+	Use:   "add <stack> <card>",
+	Short: "Put a card into a stack",
+	RunE:  func(_ *cobra.Command, args []string) error { return runStackAdd(args) },
+}
+
+var stackRmCmd = &cobra.Command{
+	Use:   "rm <card>",
+	Short: "Take a card out of its stack",
+	RunE:  func(_ *cobra.Command, args []string) error { return runStackRm(args) },
+}
+
+var stackMvCmd = &cobra.Command{
+	Use:   "mv <card> <position>",
+	Short: "Move a card within its stack (0 is the bottom)",
+	RunE:  func(_ *cobra.Command, args []string) error { return runStackMv(args) },
+}
+
+var stackListCmd = &cobra.Command{
+	Use:   "list [<stack>]",
+	Short: "List the stacks, or one stack's cards bottom-first",
+	RunE:  func(_ *cobra.Command, args []string) error { return runStackList(args) },
+}
+
+var stackRestackCmd = &cobra.Command{
+	Use:   "restack <stack|card>",
+	Short: "Replay every card in a stack onto its current base now",
+	RunE:  func(_ *cobra.Command, args []string) error { return runStackRestack(args) },
+}
+
 // prCmd groups the outbound-PR operations (link/unlink/status).
 var prCmd = &cobra.Command{
 	Use:   "pr",
@@ -342,6 +387,7 @@ func init() {
 
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
+	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 }
@@ -360,6 +406,7 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
 	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)")
+	f.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)")
 	f.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
 }
@@ -379,6 +426,7 @@ func bindResearchFlags(cmd *cobra.Command) {
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
 	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)")
+	f.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)")
 	f.String("until", "", `stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)`)
 }
 
@@ -404,6 +452,7 @@ func bindGoalFlags(cmd *cobra.Command) {
 	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
 	f.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
 	f.String("repo", "", "managed repository for the goal and all its cards (a configured `repos:` name; required when `repos:` is configured)")
+	f.String("base", "", "branch the goal branch forks from and lands on (default: whatever the repository has checked out)")
 	f.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)")
 }
@@ -457,6 +506,7 @@ func bindBugsNewFlags(cmd *cobra.Command) {
 	f.String("profile", "", "profile the bug adopts (default: first configured)")
 	f.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)")
+	f.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
 	f.Bool("yes", false, "create without the confirmation prompt")
 }
 

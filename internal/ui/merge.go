@@ -60,6 +60,18 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 			return mergeReadyMsg{err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or press h to close the card and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
 				f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f), f.ID)}
 		}
+		// A stacked card's branch contains the commits of every card
+		// below it, so landing it early would land their work too —
+		// under this card's message and without their review. This is
+		// the ONE ordering a stack imposes, and git imposes it, not
+		// gummi: working on the cards above is never held up.
+		if eng, release := m.stackEngine(); eng != nil {
+			defer release()
+			if blocker, blocked := eng.StackLandBlocker(ctx, &f); blocked {
+				return mergeReadyMsg{err: fmt.Errorf("%s sits on %s in its stack — %s has to land first, or its commits would ride in under this card",
+					f.ID, blocker, blocker)}
+			}
+		}
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
 			return mergeReadyMsg{err: err}
 		}

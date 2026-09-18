@@ -254,7 +254,7 @@ func TestAgentRebaseSuccessReVerifies(t *testing.T) {
 	if n := rebases.Load(); n != 1 {
 		t.Fatalf("rebase sessions = %d, want 1", n)
 	}
-	if ok, err := m.wt.RebasedOnMain(context.Background(), &f); !ok || err != nil {
+	if ok, err := m.wt.RebasedOnBase(context.Background(), &f); !ok || err != nil {
 		t.Fatalf("branch not rebased onto main: %v %v", ok, err)
 	}
 	// the judged-ok rebase re-anchored the fork to main's head, so drift is

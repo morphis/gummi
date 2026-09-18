@@ -39,6 +39,29 @@ type Pool struct {
 	// goalLookup resolves a goal card by id, so a card whose goal worktree
 	// is gone can tell an ended goal from a broken one (see goal.go).
 	goalLookup GoalLookup
+	// baseLookup resolves the revision a card forks from, installed on
+	// every manager the pool builds. Nil leaves every card on its repo's
+	// HEAD, which is what happened before bases were selectable.
+	baseLookup BaseLookup
+}
+
+// SetBaseLookup installs the base resolver on the pool and on every
+// manager it has already built, so a lookup registered after launch
+// reaches the eagerly-created default manager too.
+// A nil *Pool is a working no-op, the way a nil *state.CardLocks is: a
+// caller with no pool at all (a test scaffold, a launch that got no
+// further than the config) has nothing to teach about bases and must not
+// have to know that.
+func (p *Pool) SetBaseLookup(l BaseLookup) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.baseLookup = l
+	for _, m := range p.byRoot {
+		m.SetBaseLookup(l)
+	}
 }
 
 // NewPool builds the pool from the workspace root, the default repo root, and
@@ -168,6 +191,12 @@ func (p *Pool) manager(ctx context.Context, root string) (*Manager, error) {
 	m, err := NewManager(ctx, p.root, root, p.fs)
 	if err != nil {
 		return nil, err
+	}
+	p.mu.Lock()
+	lookup := p.baseLookup
+	p.mu.Unlock()
+	if lookup != nil {
+		m.SetBaseLookup(lookup)
 	}
 	if p.exclude {
 		if untracked, xerr := m.EnsureGummiExcluded(ctx); xerr != nil {
@@ -397,12 +426,12 @@ func (p *Pool) AbortRebase(ctx context.Context, f *domain.Feature) (bool, error)
 	return wt.AbortRebase(ctx, f)
 }
 
-func (p *Pool) RebasedOnMain(ctx context.Context, f *domain.Feature) (bool, error) {
+func (p *Pool) RebasedOnBase(ctx context.Context, f *domain.Feature) (bool, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
 		return false, err
 	}
-	return wt.RebasedOnMain(ctx, f)
+	return wt.RebasedOnBase(ctx, f)
 }
 
 func (p *Pool) AssertNoForkDrift(ctx context.Context, f *domain.Feature) error {

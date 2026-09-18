@@ -102,7 +102,11 @@ func (r featureRow) baseBranch() string {
 // rowsMsg delivers a fresh load of the board content.
 type rowsMsg struct {
 	rows []featureRow
-	err  error
+	// stacks is the per-card stack annotation, keyed by card id and
+	// empty for an unstacked one. Derived in loadRows for the same
+	// reason every other git-derived column is.
+	stacks map[domain.FeatureID]stackRow
+	err    error
 }
 
 // noticeMsg surfaces a transient outcome (success or failure) in the
@@ -243,7 +247,10 @@ func (m *Shell) loadRows() tea.Msg {
 		}
 		rows = append(rows, row)
 	}
-	return rowsMsg{rows: rows}
+	// Stack annotations are derived here, on the command goroutine,
+	// because they ask git (is this card stale? has it landed?) and the
+	// render path may not. Keyed by card, so cardLine is a map lookup.
+	return rowsMsg{rows: rows, stacks: m.stackRowsForFeatures(ctx, feats)}
 }
 
 // dependencyBlockers reports the direct dependencies that would block the
@@ -302,8 +309,15 @@ type formResult struct {
 	Source      string // "manual", "github"
 	Discussion  string // an imported issue's comments
 	After       []domain.FeatureID
-	Start       bool
-	FromPicker  bool
+	// Base is the branch the card forks from, "" for the checkout's HEAD.
+	Base string
+	// StackOnto names a card to stack this one on top of, creating the
+	// stack if that card is not in one yet. StackInto joins an existing
+	// stack at the top. Both empty is a standalone card.
+	StackOnto  domain.FeatureID
+	StackInto  domain.StackID
+	Start      bool
+	FromPicker bool
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
@@ -313,7 +327,10 @@ type cardCreatedMsg struct {
 	f          domain.Feature
 	start      bool
 	fromPicker bool
-	warn       string // a dependency edge that could not be written
+	// stack is the stack the new card joined, empty when standalone. The
+	// shell ticks it so the card's branch is cut on the right base.
+	stack domain.StackID
+	warn  string // a dependency edge that could not be written
 }
 
 // createCard mints a card of any kind through cardmint.Mint — the same
@@ -334,7 +351,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 		}
 		f, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
 			Kind: kind, Mode: res.Mode, Description: res.Desc, Profile: res.Profile, Envelope: env,
-			Repo: res.Repo, RequireRepo: m.requireRepo,
+			Repo: res.Repo, RequireRepo: m.requireRepo, Base: res.Base,
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion: res.Discussion,
 		})
@@ -347,7 +364,21 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 				warn = append(warn, sanitize(err.Error()))
 			}
 		}
-		return cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker, warn: strings.Join(warn, "; ")}
+		// Stacking happens after the mint, and a failure to stack is a
+		// warning rather than a rollback: the card is real, described and
+		// numbered, and throwing it away because a chain could not be
+		// formed would lose the reader's words. They can stack it after.
+		stacked := domain.StackID("")
+		if res.StackOnto != "" || res.StackInto != "" {
+			id, serr := m.stackNewCard(ctx, f, res.StackOnto, res.StackInto)
+			if serr != nil {
+				warn = append(warn, sanitize(serr.Error()))
+			} else {
+				stacked = id
+			}
+		}
+		return cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker,
+			stack: stacked, warn: strings.Join(warn, "; ")}
 	}
 }
 

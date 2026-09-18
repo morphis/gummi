@@ -337,6 +337,16 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
 	})
+	// Teach every worktree manager how to resolve a card's base. Until
+	// this is installed a card forks from whatever the checkout has out,
+	// which is what gummi did before bases were selectable — so the
+	// lookup going in late is a widening, never a change of behavior for
+	// a card that names no base.
+	//
+	// It is installed here rather than at pool construction because only
+	// the engine can answer the question: a stacked card's base is the
+	// branch of the card below it, which takes the store.
+	pool.SetBaseLookup(eng.StackBaseFor)
 	// Names() already orders the declared default first (the rest sorted) so
 	// index 0 is the intended default for the forms and the CLI --profile
 	// fallback. Re-sorting alphabetically here would silently pick the wrong

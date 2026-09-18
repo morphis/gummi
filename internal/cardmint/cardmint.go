@@ -92,6 +92,12 @@ type Input struct {
 	// the card: a caller with no repo pool at all (cardmint's own tests)
 	// has a single implicit repository and nothing to choose between.
 	RequireRepo func(repo string) error
+	// Base is the git branch the card's work forks from and lands on: a
+	// local branch name, or "" for whatever the managed checkout has out
+	// (which is what every card did before bases were selectable). A
+	// stacked card above the bottom ignores it — its base is the branch
+	// of the card below it.
+	Base string
 	// ExternalRef is an optional external correlation id (e.g. a GitHub
 	// issue reference), persisted as Feature.ExternalRef and echoed by
 	// callers that track it.
@@ -183,6 +189,12 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
+		Base: in.Base,
+		// Every newly minted card gets the current branch-name scheme.
+		// Stored rather than read from the default at render time, so a
+		// later change to the default never renames this card's branch —
+		// which by then exists in checkouts this process cannot see.
+		BranchScheme: domain.DefaultBranchScheme,
 	}
 	if in.Kind == domain.KindBug {
 		f.Severity = in.Severity

@@ -412,6 +412,21 @@ type Engine struct {
 	// goalLocks serializes the conductor per goal (goal.go's goalLock).
 	goalLocksMu sync.Mutex
 	goalLocks   map[domain.FeatureID]*sync.Mutex
+
+	// stackLocks serializes the restack walk per stack (stack.go's
+	// stackLock), so two ticks never replay two members at once.
+	stackLocksMu sync.Mutex
+	stackLocks   map[domain.StackID]*sync.Mutex
+}
+
+// oneShotBusy reports whether a session-less pass (check discovery, its
+// baseline) is running on the card. It is the other half of "is this
+// card working?" that e.live cannot see — the gap that once had the
+// board call a live card stopped.
+func (e *Engine) oneShotBusy(id domain.FeatureID) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.oneShots[id] > 0
 }
 
 // New builds an engine from the config. The caller owns every agent's

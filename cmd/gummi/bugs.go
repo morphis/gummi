@@ -177,7 +177,7 @@ func runBugIngest(args []string) error {
 				return nil
 			}
 		}
-		return materializeBugs(ctx, be, []domain.BugProposal{prop}, *f.targetRepo)
+		return materializeBugs(ctx, be, []domain.BugProposal{prop}, *f.targetRepo, "")
 	}
 
 	renderBugProposals(os.Stdout, res)
@@ -192,7 +192,7 @@ func runBugIngest(args []string) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo)
+	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo, "")
 }
 
 // selectIssue resolves a GitHub issue number against a single
@@ -232,7 +232,7 @@ func ingestGitHubSource(repo, label, state string, comments bool, dir string) en
 // runBugNew and the cobra adapter share one flag grammar.
 type bugNewFlagValues struct {
 	title, oneLiner, severity, repro, expected, actual, env, desc *string
-	profile, repo                                                 *string
+	profile, repo, base                                           *string
 	envelope                                                      *int
 	yes                                                           *bool
 }
@@ -254,6 +254,7 @@ func registerBugsNewFlags(fs *flag.FlagSet) *bugNewFlagValues {
 		profile:  fs.String("profile", "", "profile the bug adopts (default: first configured)"),
 		envelope: fs.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
 		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)"),
+		base:     fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)"),
 		yes:      fs.Bool("yes", false, "create without the confirmation prompt"),
 	}
 }
@@ -264,7 +265,7 @@ func runBugNew(args []string) error {
 	fs := flag.NewFlagSet("bugs new", flag.ContinueOnError)
 	f := registerBugsNewFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--repo r] [--envelope n] [--yes]")
+		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--repo r] [--base b] [--envelope n] [--yes]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -306,12 +307,12 @@ func runBugNew(args []string) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, *f.repo)
+	return materializeBugs(ctx, be, res.Proposals, *f.repo, *f.base)
 }
 
 // materializeBugs mints the proposals and prints what was created.
-func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo string) error {
-	created, err := be.eng.MaterializeBugs(ctx, props, engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo})
+func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo, base string) error {
+	created, err := be.eng.MaterializeBugs(ctx, props, engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo, Base: base})
 	for _, f := range created {
 		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))
 	}

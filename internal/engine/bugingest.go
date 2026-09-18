@@ -113,6 +113,12 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 			// readers that compared the raw string got it wrong.
 			GateApproval: domain.GateAttended,
 			ExternalRef:  p.ExternalRef, Severity: p.Severity, Repo: opts.Repo, CreatedAt: now, UpdatedAt: now,
+			Base: opts.Base,
+			// Same reasoning as GateApproval above: this mint path does
+			// not run through cardmint, so the current branch-name scheme
+			// is written here too, and the two paths produce identical
+			// rows rather than rows a reader has to tell apart.
+			BranchScheme: domain.DefaultBranchScheme,
 		}
 		// Draft first so a write failure aborts before the bug exists — a
 		// persisted bug with no draft would be reseeded blank on first open.

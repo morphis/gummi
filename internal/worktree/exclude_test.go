@@ -194,7 +194,7 @@ func TestRebaseAfterWorktreeUntrack(t *testing.T) {
 	if err := m.RebaseOnMain(ctx, f); err != nil {
 		t.Fatalf("rebase failed: %v", err)
 	}
-	if ok, err := m.RebasedOnMain(ctx, f); err != nil || !ok {
+	if ok, err := m.RebasedOnBase(ctx, f); err != nil || !ok {
 		t.Fatalf("branch not rebased on main: ok=%v err=%v", ok, err)
 	}
 	if out := mustGit(t, p, "ls-files", "--", ".gummi"); out != "" {

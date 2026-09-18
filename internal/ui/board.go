@@ -200,6 +200,18 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	if g := goalRowTag(s, r, m.goalOpen[r.F.ID]); g != "" {
 		badge += " " + g
 	}
+	// A stacked card says where it sits and what it forks from. It is a
+	// map lookup, never a git call: loadRows derived it.
+	if sr, ok := m.stackRows[r.F.ID]; ok {
+		st := s.ProfileTag
+		if sr.Stale {
+			st = s.Warning
+		}
+		if selected {
+			st = faint
+		}
+		badge += " " + st.Render("⛁"+stackTag(sr))
+	}
 	// a card's managed repository badge, naming the configured repo, so
 	// multi-repo boards read at a glance. Cards in the workspace default
 	// repo render no badge (the default is implicit); it is metadata only,

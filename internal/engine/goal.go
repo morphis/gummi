@@ -679,7 +679,7 @@ func (e *Engine) goalLand(ctx context.Context, goal, card domain.Feature) ([]Goa
 	if _, err := gm.CommitAll(ctx, &card, "final checkpoint"); err != nil && !errors.Is(err, worktree.ErrNoWorktree) {
 		return nil, err
 	}
-	rebased, err := gm.RebasedOnMain(ctx, &card)
+	rebased, err := gm.RebasedOnBase(ctx, &card)
 	if err != nil {
 		return nil, err
 	}

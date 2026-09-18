@@ -65,9 +65,87 @@ type Manager struct {
 	// anchor diff-based stages check against for drift.
 	forkStore ForkPointStore
 
+	// baseLookup resolves the revision a card forks from and lands on.
+	// Nil means "the managed checkout's HEAD" for every card, which is
+	// what this package did before bases were selectable — so a manager
+	// built without one behaves exactly as it always has, and every test
+	// fixture keeps working untouched.
+	//
+	// It is a callback rather than a wider signature on twenty methods
+	// for the same reason forkStore is one: resolving a card's base needs
+	// the store (its stack's members, in the stacked case), and this
+	// package must not import it.
+	baseLookup BaseLookup
+
 	// mainMu serializes gummi-initiated mutations of the main checkout
 	// (squash merges).
 	mainMu sync.Mutex
+}
+
+// BaseLookup resolves the git revision a card's work forks from and lands
+// on — a branch name, or "" to mean the managed checkout's HEAD.
+//
+// A card with no chosen base and no stack returns "". A card with a
+// chosen base returns that branch. A stacked card above the bottom
+// returns the branch of the card below it, which is what chains a stack.
+type BaseLookup func(ctx context.Context, f *domain.Feature) (string, error)
+
+// SetBaseLookup installs the base resolver. Called once at pool
+// construction; a nil lookup leaves every card on the checkout's HEAD.
+func (m *Manager) SetBaseLookup(l BaseLookup) { m.baseLookup = l }
+
+// baseRev is THE chokepoint for "the revision this card forks from and
+// lands on" — what this package used to spell as a bare "HEAD" against
+// m.repo in twenty places.
+//
+// The distinction that matters when reading this file: a "HEAD" passed to
+// runGit with m.repo as the directory meant *the trunk*, and every one of
+// those is now this call. A "HEAD" passed with a worktree path as the
+// directory means *the card's own branch tip* — a completely different
+// fact that happens to share the token — and those are untouched. Mixing
+// the two up is the one way to break this seam, so they never appear in
+// the same call.
+//
+// Resolution failures fall back to "HEAD" rather than erroring: a base
+// gummi cannot resolve is a reason to behave as it did before bases
+// existed, never a reason to refuse an operation git itself would accept.
+func (m *Manager) baseRev(ctx context.Context, f *domain.Feature) string {
+	if m.baseLookup == nil || f == nil {
+		return "HEAD"
+	}
+	base, err := m.baseLookup(ctx, f)
+	if err != nil || strings.TrimSpace(base) == "" {
+		return "HEAD"
+	}
+	// The branch must actually exist here, or every merge-base against it
+	// fails and the card looks drifted when it is merely pointed at a
+	// branch this checkout has not got.
+	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+base); err != nil {
+		return "HEAD"
+	}
+	return base
+}
+
+// BaseRevFor reports the revision f forks from, as baseRev resolves it.
+// Exported for the callers that need to name it in a sentence or pass it
+// to a rebase.
+func (m *Manager) BaseRevFor(ctx context.Context, f *domain.Feature) string {
+	return m.baseRev(ctx, f)
+}
+
+// ListBranches returns the repository's local branch names, for the
+// pickers that let a person choose a base. Branch listing did not exist
+// in this package before: nothing needed to enumerate refs, because the
+// only base was whatever was checked out.
+func (m *Manager) ListBranches(ctx context.Context) ([]string, error) {
+	out, err := runGit(ctx, m.repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, fmt.Errorf("listing branches in %s: %w", m.repo, err)
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
 }
 
 // NewManager binds a manager to the workspace rooted at ws and the git
@@ -127,12 +205,17 @@ const DefaultBaseBranchName = "main"
 // BaseBranch names the branch the main checkout currently has out — the
 // branch every card's work lands on.
 //
-// It is DECORATIVE. gummi never operates on a branch name: Create forks
-// from the checkout's HEAD, Landed compares against HEAD, and the merge
-// runs in the checkout as it stands. This exists only so the sentences
-// that tell a human what is about to happen can say "master" to a repo
-// on master instead of asserting "main" and being wrong about the single
-// most consequential action in the product.
+// It names what the CHECKOUT has out, which is a different question from
+// what a given card forks from: that is baseRev, and a card may name a
+// branch this checkout does not currently have out. This is the answer
+// for the sentences that tell a human what the repository is sitting on
+// — so a repo on master reads "master" instead of asserting "main" — and
+// for SquashMerge's refusal to land a card onto a branch other than the
+// one it forked from.
+//
+// It was DECORATIVE before bases were selectable, when forking, landing
+// and drift all leaned on this checkout's HEAD and no branch name was
+// ever passed to git. It is load-bearing now only in that refusal.
 //
 // Unreadable HEAD reports DefaultBaseBranchName rather than an error:
 // a name the UI cannot get is a copy problem, never a reason to refuse a
@@ -241,13 +324,17 @@ func (m *Manager) requireWorktree(f *domain.Feature) (string, error) {
 	return p, nil
 }
 
-// Create adds the feature's worktree at .gummi/worktrees/FD-NNN on a
-// new branch gummi/FD-NNN-slug based at the main checkout's HEAD.
+// Create adds the feature's worktree at .gummi/worktrees/FD-NNN on a new
+// branch forked from the revision the card names — its chosen base, the
+// branch of the card below it in its stack, or the main checkout's HEAD
+// when it names neither (which is what every card did before bases were
+// selectable).
 func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error) {
 	p, branch, err := m.featurePaths(f)
 	if err != nil {
 		return "", err
 	}
+	base := m.baseRev(ctx, f)
 	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "HEAD"); err != nil {
 		return "", fmt.Errorf("repository has no commits yet; commit something before creating a feature worktree: %w", err)
 	}
@@ -262,7 +349,10 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	if err := os.MkdirAll(m.worktreesDir(), 0o750); err != nil {
 		return "", err
 	}
-	if _, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p); err != nil {
+	// The base is named explicitly rather than left implicit: `worktree
+	// add -b` without a commit-ish forks from whatever HEAD carries, which
+	// is right only for a card that named no base.
+	if _, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p, base); err != nil {
 		return "", err
 	}
 	// The checkout tracks whatever HEAD carries, including .gummi content
@@ -278,7 +368,7 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	// so diff-based stages can later detect if main is rewound past it.
 	// This happens after the untrack succeeds, so a rolled-back creation
 	// never leaves a stored SHA pointing at a nonexistent worktree.
-	recorded, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
+	recorded, err := runGit(ctx, m.repo, "merge-base", base, branch)
 	if err != nil {
 		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
 			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
@@ -545,7 +635,7 @@ func (m *Manager) Head(ctx context.Context, f *domain.Feature) (string, error) {
 }
 
 // BranchAhead reports whether the feature branch carries commits of its
-// own beyond where it forked from the main checkout — i.e. the stage has
+// own beyond where it forked from its base — i.e. the stage has
 // committed work on the branch. Used to tell a budget park that stopped
 // with work committed (nothing lost) from one that stopped mid-edit.
 func (m *Manager) BranchAhead(ctx context.Context, f *domain.Feature) (bool, error) {
@@ -553,7 +643,7 @@ func (m *Manager) BranchAhead(ctx context.Context, f *domain.Feature) (bool, err
 	if err != nil {
 		return false, err
 	}
-	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
+	base, err := runGit(ctx, m.repo, "merge-base", m.baseRev(ctx, f), branch)
 	if err != nil {
 		return false, err
 	}
@@ -660,11 +750,12 @@ func (m *Manager) Landed(ctx context.Context, f *domain.Feature) (bool, error) {
 	if recorded != "" && branchTip == recorded {
 		return false, nil
 	}
-	anc, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", branch, "HEAD")
+	base := m.baseRev(ctx, f)
+	anc, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", branch, base)
 	if err != nil {
 		return false, err
 	}
-	head, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+	head, err := runGit(ctx, m.repo, "rev-parse", base)
 	if err != nil {
 		return false, err
 	}
@@ -690,7 +781,7 @@ func (m *Manager) squashLanded(ctx context.Context, f *domain.Feature) (bool, er
 	if sha == "" {
 		return false, nil
 	}
-	return gitOK(ctx, m.repo, "merge-base", "--is-ancestor", sha, "HEAD")
+	return gitOK(ctx, m.repo, "merge-base", "--is-ancestor", sha, m.baseRev(ctx, f))
 }
 
 // RebaseConflictError reports that a rebase stopped on conflicts and was
@@ -735,7 +826,7 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 	if err != nil {
 		return err
 	}
-	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", m.baseRev(ctx, f))
 	if err != nil {
 		return err
 	}
@@ -760,17 +851,17 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 
 // ReanchorOnMain re-stamps the feature's recorded fork point to main's
 // current HEAD — the recovery that clears fork drift. It is guarded by
-// RebasedOnMain: main's HEAD must already be in the branch's history, so the
+// RebasedOnBase: the base tip must already be in the branch's history, so the
 // merge base IS main's HEAD and the post-rebase diff can only be the
 // feature's own commits. When the guard fails the feature is still drifted,
 // and its current ForkDriftError is returned so the operator keeps the
 // remedies. Idempotent: re-anchoring to the same HEAD twice is a no-op.
 func (m *Manager) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
-	mainHead, err := m.MainHead(ctx)
+	mainHead, err := m.BaseHead(ctx, f)
 	if err != nil {
 		return err
 	}
-	rebased, err := m.RebasedOnMain(ctx, f)
+	rebased, err := m.RebasedOnBase(ctx, f)
 	if err != nil {
 		return err
 	}
@@ -783,11 +874,21 @@ func (m *Manager) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 	return nil
 }
 
-// MainHead returns the main checkout's current HEAD commit id — the
-// commit RebaseOnMain rebases onto, exposed so an agent-driven rebase
-// can be pointed at the exact same target.
+// MainHead returns the managed checkout's current HEAD commit id.
+//
+// It is the card-less form, still used where the trunk itself is the
+// subject: a goal branch catching up, a throwaway checkout of main. For
+// anything scoped to a card, use BaseHead — a card's base is not
+// necessarily what the checkout has out.
 func (m *Manager) MainHead(ctx context.Context) (string, error) {
 	return runGit(ctx, m.repo, "rev-parse", "HEAD")
+}
+
+// BaseHead returns the current tip of the revision f forks from — the
+// commit a rebase of f targets, exposed so an agent-driven rebase can be
+// pointed at the exact same target.
+func (m *Manager) BaseHead(ctx context.Context, f *domain.Feature) (string, error) {
+	return runGit(ctx, m.repo, "rev-parse", m.baseRev(ctx, f))
 }
 
 // RebaseInProgress reports whether the feature's worktree has a rebase
@@ -819,17 +920,21 @@ func (m *Manager) AbortRebase(ctx context.Context, f *domain.Feature) (bool, err
 	return true, nil
 }
 
-// RebasedOnMain reports whether the feature branch's history now
-// includes the main checkout's HEAD — the success test for a completed
-// rebase. A conflicted, aborted, or never-started rebase leaves main's
-// HEAD outside the branch (assuming main has moved since the branch was
-// cut; a branch already at main's HEAD trivially passes).
-func (m *Manager) RebasedOnMain(ctx context.Context, f *domain.Feature) (bool, error) {
+// RebasedOnBase reports whether the feature branch's history now
+// includes the tip of the revision it forks from — the success test for a
+// completed rebase, and the staleness test a stack asks of every member:
+// a card whose base tip is NOT in its history is sitting on commits that
+// have moved, and is what the restack walk replays.
+//
+// A conflicted, aborted, or never-started rebase leaves the base tip
+// outside the branch (assuming the base has moved since the branch was
+// cut; a branch already at its base tip trivially passes).
+func (m *Manager) RebasedOnBase(ctx context.Context, f *domain.Feature) (bool, error) {
 	p, err := m.requireWorktree(f)
 	if err != nil {
 		return false, err
 	}
-	mainHead, err := m.MainHead(ctx)
+	mainHead, err := m.BaseHead(ctx, f)
 	if err != nil {
 		return false, err
 	}
@@ -889,7 +994,24 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	} else if dirty {
 		return "", fmt.Errorf("main checkout has uncommitted changes — commit or stash them before merging")
 	}
-	base, err := runGit(ctx, m.repo, "merge-base", "HEAD", branch)
+	// The squash merge runs in the managed checkout as it stands, so the
+	// branch it lands on is whatever that checkout has out. A card whose
+	// base is some other branch would therefore land somewhere it never
+	// forked from — silently, and with a diff nobody reviewed.
+	//
+	// gummi has never checked a branch out on anyone's behalf and this is
+	// not the place to start: refuse, and say which branch needs to be out.
+	// A card with no chosen base resolves to "HEAD" and skips this
+	// entirely, which is every card that existed before bases did.
+	base := m.baseRev(ctx, f)
+	if base != "HEAD" {
+		out := m.BaseBranch(ctx)
+		if out != base {
+			return "", fmt.Errorf("%s forked from %s but the checkout has %s out — check out %s before landing it",
+				f.ID, base, out, base)
+		}
+	}
+	forkBase, err := runGit(ctx, m.repo, "merge-base", base, branch)
 	if err != nil {
 		// merge-base gives up when main and branch share no common
 		// ancestor — the signature of a rewind that took main to a
@@ -901,10 +1023,10 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 		}
 		return "", err
 	}
-	if err := m.assertNoForkDriftAgainstBase(ctx, f, base); err != nil {
+	if err := m.assertNoForkDriftAgainstBase(ctx, f, forkBase); err != nil {
 		return "", err
 	}
-	if n, err := runGit(ctx, m.repo, "rev-list", "--count", base+".."+branch); err != nil {
+	if n, err := runGit(ctx, m.repo, "rev-list", "--count", forkBase+".."+branch); err != nil {
 		return "", err
 	} else if n == "0" {
 		return "", fmt.Errorf("branch %s has no commits to merge", branch)
@@ -997,7 +1119,7 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	// for worktrees predating drift detection. Drift already suffered by
 	// them is unreconstructable; detection starts from here.
 	if recorded == "" {
-		recorded, err = runGit(ctx, m.repo, "merge-base", "HEAD", f.BranchName())
+		recorded, err = runGit(ctx, m.repo, "merge-base", m.baseRev(ctx, f), f.BranchName())
 		if err != nil {
 			return err
 		}
@@ -1026,14 +1148,15 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	// into a caller's own merge-base computation: drift is defined against
 	// main HEAD, not the live merge-base, so reusing the latter would flag
 	// a legitimate branch rebase as drift.
-	ok, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", recorded, "HEAD")
+	base := m.baseRev(ctx, f)
+	ok, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", recorded, base)
 	if err != nil {
 		return err
 	}
 	if ok {
 		return nil
 	}
-	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+	mainHead, err := runGit(ctx, m.repo, "rev-parse", base)
 	if err != nil {
 		return err
 	}
@@ -1187,10 +1310,13 @@ func (m *Manager) diffBase(ctx context.Context, f *domain.Feature) (wtPath, base
 	if err := m.AssertNoForkDrift(ctx, f); err != nil {
 		return "", "", err
 	}
-	mainHead, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+	mainHead, err := m.BaseHead(ctx, f)
 	if err != nil {
 		return "", "", err
 	}
+	// The "HEAD" here is the card's own branch tip (the directory is its
+	// worktree), not the trunk — the other meaning of the token that
+	// baseRev's comment warns about. Both ends are deliberate.
 	base, err = runGit(ctx, p, "merge-base", mainHead, "HEAD")
 	if err != nil {
 		return "", "", err

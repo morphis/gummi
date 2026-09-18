@@ -225,6 +225,17 @@ type Shell struct {
 	// The goal loop (goalloop.go): goals queued for a tick by this update,
 	// goals whose tick is running, and goals owed one more when it lands.
 	goalTickQueue map[domain.FeatureID]bool
+	// stackTickQueue is the same seam for stacks (stackboard.go): a card
+	// whose branch moved wakes its stack, and the engine replays the
+	// cards above it. Coalesced per stack, drained by Update.
+	stackTickQueue map[domain.StackID]bool
+	// repoBranches is each repo's local branch list, read once at attach
+	// beside baseBranches and for the same reason: the creation dialog's
+	// base row is rendered, and rendering may not run git.
+	repoBranches map[string][]string
+	// stackRows is each stacked card's position and staleness, derived in
+	// loadRows (it asks git) and read by cardLine (which may not).
+	stackRows     map[domain.FeatureID]stackRow
 	goalTicking   map[domain.FeatureID]bool
 	goalTickAgain map[domain.FeatureID]bool
 	// sizedFor is how many landed rows worktreeSizeText was measured
@@ -520,8 +531,24 @@ func (m *Shell) resolveBaseBranches() {
 	}
 	ctx := context.Background()
 	m.baseBranches = map[string]string{"": m.wt.BaseBranch(ctx, "")}
+	m.repoBranches = map[string][]string{}
+	if mgr, err := m.wt.ManagerForName(ctx, ""); err == nil {
+		if branches, berr := mgr.ListBranches(ctx); berr == nil {
+			m.repoBranches[""] = branches
+		}
+	}
 	for _, name := range m.wt.Names() {
 		m.baseBranches[name] = m.wt.BaseBranch(ctx, name)
+		// Read once here, for the same reason the branch a repo has out
+		// is read once: the creation dialog's base row is a render path,
+		// and a render path may not run git. A branch cut after launch
+		// is therefore not offered until the next one — acceptable for a
+		// row whose default is "whatever is checked out".
+		if mgr, err := m.wt.ManagerForName(ctx, name); err == nil {
+			if branches, berr := mgr.ListBranches(ctx); berr == nil {
+				m.repoBranches[name] = branches
+			}
+		}
 	}
 }
 
@@ -1162,6 +1189,11 @@ func (m *Shell) Init() tea.Cmd {
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
 		cmds = append(cmds, goalPollTick())
+		// The stack loop's backstop poll. Stacks mostly wake on engine
+		// events (a session settled, a branch moved); this catches the
+		// changes gummi cannot hear — a hand-run git command, or a PR
+		// merging and main being pulled.
+		cmds = append(cmds, stackPoll())
 	}
 	return tea.Batch(cmds...)
 }
@@ -1473,6 +1505,9 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if tick := m.drainGoalTicks(); tick != nil {
 		cmd = tea.Batch(cmd, tick)
 	}
+	if tick := m.drainStackTicks(); tick != nil {
+		cmd = tea.Batch(cmd, tick)
+	}
 	if !m.spinning && m.spinnerActive() {
 		m.spinning = true
 		cmd = tea.Batch(cmd, spinnerTick())
@@ -1482,6 +1517,9 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd, ok := m.updateGoal(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateStack(msg); ok {
 		return m, cmd
 	}
 	switch msg := msg.(type) {
@@ -1549,6 +1587,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and an index alone would quietly point somewhere else.
 		was := m.selectedID()
 		m.rows = msg.rows
+		m.stackRows = msg.stacks
 		m.restoreSel(was)
 		// the action cursor belongs to whichever card is selected, so it
 		// resyncs whether or not the selection survived.
@@ -2857,6 +2896,18 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindBug}))
 	case "R":
 		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindResearch}))
+	case "T":
+		// Stack a new card on TOP of the selected one. This is the whole
+		// of setting a stack up: the stack is created by the act of
+		// stacking a second card onto a first, so there is no "new
+		// stack" dialog to find and the common case costs one key.
+		//
+		// T and not S — S is the severity sort, and one key wearing two
+		// meanings on the same surface is the defect the keymap's own
+		// comments keep recording.
+		if cmd := m.openStackForm(); cmd != nil {
+			return cmd
+		}
 	case "S":
 		if m.sortMode == SortSeverity {
 			m.sortMode = SortCreation
