@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -215,6 +216,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		sources = map[string]string{}
 	}
 	checks = append(checks, envChecks(wsCfg, defaultRoot)...)
+	checks = append(checks, substrateChecks(wsCfg, ws)...)
 	checks = append(checks, configLayeringChecks(wsCfg, sources, userPath, ws.ConfigFile())...)
 
 	// profiles are parsed once and shared by the backend check (they decide
@@ -829,6 +831,52 @@ func envChecks(cfg config.Config, dir string) []doctorCheck {
 		probe := cfg.Env[r.Name].Probe
 		detail := fmt.Sprintf("%s — probe: %s — %s", r.Describe, probe, envprobe.StatusString(r))
 		checks = append(checks, doctorCheck{Name: "env:" + r.Name, Status: status, Detail: detail})
+	}
+	return checks
+}
+
+// substrateChecks emits one substrate:<name> check per configured
+// substrate: its state, who holds it, when it expires, and what gummi may
+// do about it. Advisory like an env check — a substrate that is down is a
+// thing to wait for, not a reason gummi cannot run.
+func substrateChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
+	if len(cfg.Substrates) == 0 {
+		return nil
+	}
+	m := substrate.New(ws.StateDir(), ws.Root, cfg.Substrates)
+	var checks []doctorCheck
+	for _, name := range m.Names() {
+		spec := cfg.Substrates[name]
+		st, err := m.Status(context.Background(), name)
+		status := statusWarn
+		if err == nil && (st.State == substrate.Ready || st.State == substrate.Held) {
+			status = statusOK
+		}
+		detail := fmt.Sprintf("%s — %s", spec.Describe, strings.ToUpper(st.State.String()))
+		if err != nil {
+			detail = fmt.Sprintf("%s — %v", spec.Describe, err)
+		}
+		if st.State == substrate.Held {
+			detail += " by " + st.Holder.String()
+		}
+		if !st.ExpiresAt.IsZero() {
+			detail += " — expires " + st.ExpiresAt.Local().Format("Jan 2 15:04")
+		}
+		var can []string
+		if spec.Reset != "" {
+			can = append(can, "reset")
+		}
+		if spec.Provision != "" {
+			can = append(can, "provision")
+		}
+		fix := ""
+		if status == statusWarn {
+			fix = "gummi can only wait for it: no provision or reset command is configured"
+			if len(can) > 0 {
+				fix = "a goal that needs it may " + strings.Join(can, " and ") + " it"
+			}
+		}
+		checks = append(checks, doctorCheck{Name: "substrate:" + name, Status: status, Detail: detail, Remediation: fix})
 	}
 	return checks
 }

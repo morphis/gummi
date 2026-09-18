@@ -38,6 +38,7 @@ import (
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -410,6 +411,10 @@ type Engine struct {
 	repoInstructions map[string]string
 
 	// goalLocks serializes the conductor per goal (goal.go's goalLock).
+	// substrates remembers the last reading of each substrate, so a goal
+	// that ticks every few seconds does not probe real machines that often
+	substrates substrateCache
+
 	goalLocksMu sync.Mutex
 	goalLocks   map[domain.FeatureID]*sync.Mutex
 
@@ -1292,22 +1297,19 @@ const verifyStageTimeout = 10 * time.Minute
 // feature's worktree, reporting whether any probe came back clean-present
 // (Err nil and Present true). It does not mutate or persist session state.
 func (e *Engine) probeCleanPresent(ctx context.Context, f *domain.Feature) bool {
-	userPath, err := config.UserConfigPath()
-	if err != nil {
-		if e.envWarn != nil {
-			e.envWarn(fmt.Sprintf("user config path could not be resolved: %v", err))
-		}
-		userPath = ""
-	}
-	cfg, _, err := config.LoadLayered(userPath, e.cfg.Workspace.ConfigFile())
+	cfg, err := e.layeredConfig()
 	if err != nil {
 		return false
 	}
-	if len(cfg.Env) == 0 {
+	if len(cfg.EnvProbes()) == 0 {
+		return false
+	}
+	m, err := e.Substrates()
+	if err != nil {
 		return false
 	}
 	workDir := filepath.Join(e.pool.Root(), f.WorktreePath())
-	for _, r := range envprobe.Run(ctx, workDir, cfg.Env) {
+	for _, r := range probeEnvironment(ctx, cfg, m, workDir) {
 		if r.Err == nil && r.Present {
 			return true
 		}
@@ -1321,25 +1323,22 @@ func (e *Engine) probeCleanPresent(ctx context.Context, f *domain.Feature) bool 
 // report block. Env probes run in all sandbox/permission modes because their
 // command source is operator config from outside the worktree.
 func (e *Engine) runEnvProbes(s *Session) string {
-	userPath, err := config.UserConfigPath()
-	if err != nil {
-		if e.envWarn != nil {
-			e.envWarn(fmt.Sprintf("user config path could not be resolved: %v", err))
-		}
-		userPath = ""
+	cfg, err := e.layeredConfig()
+	var m *substrate.Manager
+	if err == nil {
+		m, err = e.Substrates()
 	}
-	cfg, _, err := config.LoadLayered(userPath, e.cfg.Workspace.ConfigFile())
 	if err != nil {
 		msg := "Environment prerequisites could not be probed: " + err.Error()
 		s.appendActivity(msg)
 		e.persist(s)
 		return msg
 	}
-	if len(cfg.Env) == 0 {
+	if len(cfg.EnvProbes()) == 0 {
 		return ""
 	}
 	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())
-	results := envprobe.Run(context.Background(), workDir, cfg.Env)
+	results := probeEnvironment(context.Background(), cfg, m, workDir)
 	s.mu.Lock()
 	s.envProbes = results
 	s.mu.Unlock()

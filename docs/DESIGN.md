@@ -2694,6 +2694,48 @@ branch** it forks from and lands on, never the repository's trunk
 under its own message.
 
 
+### 17.7 Substrates
+
+Some work is only provable on infrastructure: a cluster of machines, a
+device farm, a staging account. Such a **substrate** differs from an env
+prerequisite (§4.4's `env:`) in every way that matters to scheduling: it is
+scarce, slow, stateful and shared. It can be absent or *broken*; it can be
+brought up and put back; it expires; and two jobs on it at once are not
+slow but **wrong**, in a way that reads as the code's fault.
+
+`substrates:` in the config names them, with the commands that probe,
+provision and reset each. They are operator config from outside every
+worktree, as env probes are, and for a stronger reason: the commands that
+decide whether work is proven must not be editable by the work.
+`internal/substrate` answers three questions and knows nothing of goals,
+cards or credits:
+
+- **What state is it in** (`Status`): ready, held, absent, broken or
+  expired. Expiry outranks a passing probe — machines past their TTL may be
+  reclaimed under a job at any moment — and a held substrate is reported
+  held *without* being probed, since a health check fired into someone
+  else's experiment is its own kind of interference.
+- **Who may use it now** (`Acquire`): one holder per substrate, workspace
+  wide — another goal, a board card and a person at the TUI contend for the
+  same machines. The lease is an advisory lock on an open file, the shape of
+  the `.gummi` driver lock: the process that dies holding one lets go of it,
+  so a crash can leave a substrate dirty but never unreachable.
+- **Can it be made ready** (`Lease.EnsureReady`): a reset, then a
+  provision, each at most once and each reported, so that whoever is keeping
+  count of what bringing it up cost can charge it. The reset is tried even
+  when the probe says absent — an exit status cannot tell "not there" from
+  "there and dirty", and the step it might save is the slowest thing gummi
+  ever waits for.
+
+A verification plan cites a substrate as `[env: <name>]`, and a verify
+kickoff reports its state beside the env probes; one that is held reads as
+errored, never absent, because only a clean absence licenses skipping a
+live step. A goal card blocked at verify (§17.4a) is retried when every
+substrate its plan cites probes ready — read at most every two minutes, and
+at most twice between one visit from a person and the next, because a card
+that keeps blocking against a passing probe is waiting for something the
+probe cannot see.
+
 ## 18. Stacks — slicing one piece of work into several landings
 
 A **stack** is an ordered chain of cards in one repository whose branches

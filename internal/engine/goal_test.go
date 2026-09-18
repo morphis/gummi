@@ -1179,3 +1179,79 @@ func TestACardItsEnvironmentCouldNotVerifyIsKeptAndWaitedFor(t *testing.T) {
 		t.Fatalf("resumed entries: %d", resumed)
 	}
 }
+
+// A blocked card whose plan cites a substrate is tried again when that
+// substrate probes ready — and only so often, because each try is a paid
+// verify and a card that keeps blocking against a passing probe is waiting
+// for something the probe cannot see.
+func TestABlockedCardIsRetriedWhenTheSubstrateItCitesIsReady(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	up := filepath.Join(t.TempDir(), "up")
+	cfg := "substrates:\n  rig:\n    describe: a test cluster\n    probe: test -f " + up + "\n"
+	if err := os.WriteFile(filepath.Join(wt.Root(), ".gummi", "config.yaml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	e.now = func() time.Time { return now }
+
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	card := goalCards(t, store, g.ID)[0]
+	for _, st := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
+		if _, err := store.Transition(ctx, card.ID, st, state.ActorAutopilot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	card, _ = store.GetFeature(ctx, card.ID)
+	art, _, _ := spec.ReplaceSection(spec.Template(&card), "Verification plan", "- deploy and run the matrix [env: rig]\n")
+	writeArtifact(t, wt.Root(), card, art)
+	block := func() {
+		t.Helper()
+		enterStage(t, store, card.ID, domain.StageVerify, "gen")
+		if err := store.AppendPark(ctx, card.ID, domain.StageVerify, state.ParkReasonBlocked, "verify BLOCKED — rig is absent", "", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block()
+
+	view, _ := e.GoalView(ctx, g.ID)
+	gc, _ := view.Card(card.ID)
+	if gc.State != goalpolicy.Blocked || gc.Retry || len(gc.WaitsOn) != 1 || gc.WaitsOn[0] != "rig" {
+		t.Fatalf("blocked on rig, which is absent: %+v", gc)
+	}
+	if res := tick(t, e, g.ID); res.StalledOn != card.ID {
+		t.Fatalf("stalls: %+v", res)
+	}
+
+	// the rig comes up; the goal notices on its own once its reading is stale
+	if err := os.WriteFile(up, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res := tick(t, e, g.ID); len(res.Start) != 0 {
+		t.Fatalf("a fresh reading is not asked for again: %+v", res)
+	}
+	for i := 1; i <= maxSubstrateRetries; i++ {
+		now = now.Add(substrateProbeEvery + time.Second)
+		res := tick(t, e, g.ID)
+		if len(res.Start) != 1 || res.Start[0].ID != card.ID {
+			t.Fatalf("retry %d: %+v", i, res)
+		}
+		now = now.Add(time.Second)
+		block() // and it blocks again, against a probe that passes
+	}
+	now = now.Add(substrateProbeEvery + time.Second)
+	if res := tick(t, e, g.ID); len(res.Start) != 0 || res.StalledOn != card.ID {
+		t.Fatalf("the goal stops paying to be told the same thing: %+v", res)
+	}
+	// until someone has been there
+	if err := e.GoalNote(ctx, g.ID, "rig fixed"); err != nil {
+		t.Fatal(err)
+	}
+	if res := tick(t, e, g.ID); len(res.Start) != 1 {
+		t.Fatalf("a person's visit buys another try: %+v", res)
+	}
+}

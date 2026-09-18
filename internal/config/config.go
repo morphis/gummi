@@ -64,6 +64,17 @@ type Config struct {
 	// tags in a verification plan; gummi probes each entry's Probe command
 	// at Verify kickoff and in `gummi doctor`.
 	Env map[string]EnvPrereq `yaml:"env"`
+	// Substrates names the external environments work here is proved on —
+	// a test cluster, a device farm, a staging account: scarce, slow,
+	// stateful and shared, which an env prerequisite is not. A substrate
+	// can be provisioned and reset as well as probed, it expires, and only
+	// one job holds it at a time. Its name is citable from a verification
+	// plan exactly as an env prerequisite's is ([env: <name>]).
+	//
+	// Like env probes these are operator config from outside every
+	// worktree, and that ownership is the point: the commands that decide
+	// whether work is proven must not be editable by the work.
+	Substrates map[string]Substrate `yaml:"substrates"`
 	// Instructions is a list of extra instruction-file paths that are
 	// appended to the workspace environment card, in user-then-workspace
 	// order. Every entry must be an absolute path; Load rejects relative or
@@ -91,6 +102,109 @@ type EnvPrereq struct {
 	// Describe is a short human-readable description of the prerequisite,
 	// included in kickoff reports and `gummi doctor` output.
 	Describe string `yaml:"describe"`
+}
+
+// Substrate is one operator-configured external environment.
+type Substrate struct {
+	// Describe is a short human-readable description.
+	Describe string `yaml:"describe"`
+	// Probe decides whether the substrate is ready to take a job. It runs
+	// via `sh -c` in the workspace root and is classified as an env probe
+	// is: clean exit 0 READY, clean non-zero ABSENT, anything else BROKEN.
+	Probe string `yaml:"probe"`
+	// Provision brings the substrate up from nothing. Optional: without it
+	// an absent substrate can only be waited for.
+	Provision string `yaml:"provision"`
+	// Reset returns a provisioned substrate to its known state — the
+	// snapshot a job expects to start from. Optional.
+	Reset string `yaml:"reset"`
+	// TTL is how long a provisioned substrate lives (a Go duration, e.g.
+	// "24h"). Empty means it does not expire. gummi never starts a job
+	// that cannot finish before the substrate expires.
+	TTL string `yaml:"ttl"`
+	// Timeout bounds one provision or reset (a Go duration). Empty means
+	// DefaultSubstrateOpTimeout.
+	Timeout string `yaml:"timeout"`
+}
+
+// DefaultSubstrateOpTimeout bounds a provision or reset whose substrate
+// names no timeout. Bringing machines up is slow by nature — cloud-init
+// alone runs a quarter of an hour — so the default is generous and the
+// ceiling is what stops a hung command holding the lease for ever.
+const DefaultSubstrateOpTimeout = 45 * time.Minute
+
+// MaxSubstrateOpTimeout is the ceiling for a configured substrate timeout.
+const MaxSubstrateOpTimeout = 6 * time.Hour
+
+// OpTimeout resolves the substrate's provision/reset bound.
+func (s Substrate) OpTimeout() time.Duration {
+	if d, err := time.ParseDuration(s.Timeout); err == nil && d > 0 {
+		return d
+	}
+	return DefaultSubstrateOpTimeout
+}
+
+// Lifetime resolves the substrate's TTL; zero means it does not expire.
+func (s Substrate) Lifetime() time.Duration {
+	d, _ := time.ParseDuration(s.TTL)
+	return d
+}
+
+func validateSubstrates(path string, c Config) error {
+	for name, sub := range c.Substrates {
+		if err := validateEnvName(path, "substrates", name); err != nil {
+			return err
+		}
+		if _, dup := c.Env[name]; dup {
+			return fmt.Errorf("%s: substrates: %q is also an env prerequisite; a name cited as [env: %s] must mean one thing", path, name, name)
+		}
+		if strings.TrimSpace(sub.Probe) == "" {
+			return fmt.Errorf("%s: substrates: %q has an empty probe", path, name)
+		}
+		if sub.TTL != "" {
+			if d, err := time.ParseDuration(sub.TTL); err != nil || d <= 0 {
+				return fmt.Errorf("%s: substrates: %q has an invalid ttl %q", path, name, sub.TTL)
+			}
+		}
+		if sub.Timeout != "" {
+			d, err := time.ParseDuration(sub.Timeout)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("%s: substrates: %q has an invalid timeout %q", path, name, sub.Timeout)
+			}
+			if d > MaxSubstrateOpTimeout {
+				return fmt.Errorf("%s: substrates: %q timeout %s exceeds maximum %s", path, name, d, MaxSubstrateOpTimeout)
+			}
+		}
+	}
+	return nil
+}
+
+// validateEnvName holds a name that may appear inside an [env: <name>] tag
+// to what that tag can carry.
+func validateEnvName(path, section, name string) error {
+	if name == "" {
+		return fmt.Errorf("%s: %s: entry has an empty name", path, section)
+	}
+	if strings.ContainsAny(name, "]") || strings.ContainsAny(name, " \t\n\r") {
+		return fmt.Errorf("%s: %s: name %q contains a ']' or whitespace character", path, section, name)
+	}
+	return nil
+}
+
+// EnvProbes is every name a verification plan may cite with [env: <name>]
+// and the command that probes it: the env prerequisites, and each
+// substrate under its own name. A substrate is an environment
+// prerequisite that can also be brought up; to a plan asking "is it
+// there" they are the same question.
+func (c Config) EnvProbes() map[string]EnvPrereq {
+	out := make(map[string]EnvPrereq, len(c.Env)+len(c.Substrates))
+	for k, v := range c.Env {
+		out[k] = v
+	}
+	for k, v := range c.Substrates {
+		out[k] = EnvPrereq{Probe: v.Probe, Describe: v.Describe}
+	}
+	return out
 }
 
 // Load reads and parses config.yaml. A missing file yields the default
@@ -121,15 +235,15 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("%s: autopilot_lanes must be >= 0, got %d", path, c.AutopilotLanes)
 	}
 	for name, p := range c.Env {
-		if name == "" {
-			return Config{}, fmt.Errorf("%s: env: entry has an empty name", path)
-		}
-		if strings.ContainsAny(name, "]") || strings.ContainsAny(name, " \t\n\r") {
-			return Config{}, fmt.Errorf("%s: env: name %q contains a ']' or whitespace character", path, name)
+		if err := validateEnvName(path, "env", name); err != nil {
+			return Config{}, err
 		}
 		if strings.TrimSpace(p.Probe) == "" {
 			return Config{}, fmt.Errorf("%s: env: %q has an empty probe", path, name)
 		}
+	}
+	if err := validateSubstrates(path, c); err != nil {
+		return Config{}, err
 	}
 	for i, inst := range c.Instructions {
 		if inst == "" {
@@ -277,6 +391,24 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	for k, v := range ws.Env {
 		merged.Env[k] = v
 		sources["env."+k] = workspacePath
+	}
+
+	// Substrates layer as env does: a machine an operator can reach from
+	// every workspace may live in the user file, and a workspace entry of
+	// the same name replaces it whole.
+	merged.Substrates = make(map[string]Substrate, len(user.Substrates)+len(ws.Substrates))
+	for k, v := range user.Substrates {
+		merged.Substrates[k] = v
+		sources["substrates."+k] = userPath
+	}
+	for k, v := range ws.Substrates {
+		merged.Substrates[k] = v
+		sources["substrates."+k] = workspacePath
+	}
+	for name := range merged.Substrates {
+		if _, dup := merged.Env[name]; dup {
+			return Config{}, nil, fmt.Errorf("substrates: %q is also an env prerequisite (%s); a name cited as [env: %s] must mean one thing", name, sources["env."+name], name)
+		}
 	}
 
 	merged.Instructions = make([]string, 0, len(user.Instructions)+len(ws.Instructions))

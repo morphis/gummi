@@ -31,6 +31,7 @@ import (
 	"github.com/morphis/gummi/internal/goalpolicy"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -63,6 +64,18 @@ const goalIdleGrace = 5 * time.Minute
 // which is what a person expects to come back to.
 const goalOutageRetry = 2 * time.Minute
 
+// goalRetryRef marks the log entry of a blocked card started again, so the
+// retries a goal makes on its own can be counted.
+const goalRetryRef = "retry-blocked"
+
+// maxSubstrateRetries is how many times a goal retries a blocked card on
+// the strength of a substrate probing ready, between one visit from a
+// person and the next. A retry is a verify session and costs what one
+// costs; a card that blocks twice against a substrate whose probe passes
+// is waiting for something the probe cannot see, and asking a third time
+// is spending on it.
+const maxSubstrateRetries = 2
+
 // goalLock serializes everything the conductor does for one goal: two
 // ticks of the same goal must never land two cards on its branch at once
 // or read a snapshot the other is changing.
@@ -94,6 +107,7 @@ type GoalCard struct {
 	LeadTries int
 	TakenOver bool
 	Retry     bool     // a blocked card there is a reason to try again
+	WaitsOn   []string // the substrates a blocked card's plan cites
 	Serves    []string // done-when ids, from the goal doc's card row
 }
 
@@ -194,6 +208,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	dropReason := map[domain.FeatureID]string{}
 	leadSeen := map[domain.FeatureID][]int64{}
 	var lastLeadOK, lastLeadAny, retrySince int64
+	autoRetries := map[domain.FeatureID]int{}
 	failures := 0
 	outage, stalled := "", ""
 	var stalledAt time.Time
@@ -259,6 +274,10 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			// a person acted: whatever a blocked card was waiting for may
 			// be there now
 			retrySince = en.Seq
+			autoRetries = map[domain.FeatureID]int{}
+		}
+		if en.Action == state.GoalStarted && en.Ref == goalRetryRef {
+			autoRetries[en.Card]++
 		}
 		if en.Action == state.GoalAttached {
 			attachSpent[en.Card] = en.From
@@ -302,7 +321,13 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		if gc.State == goalpolicy.Verified {
 			gc.Findings = e.openReviewerFindings(&c)
 		}
-		gc.Retry = gc.State == goalpolicy.Blocked && retrySince > marks.Park.Seq
+		if gc.State == goalpolicy.Blocked {
+			gc.Retry = retrySince > marks.Park.Seq
+			gc.WaitsOn = e.citedSubstrates(&c)
+			if !gc.Retry && autoRetries[c.ID] < maxSubstrateRetries {
+				gc.Retry = e.substratesReady(ctx, gc.WaitsOn)
+			}
+		}
 		// lead turns that saw this card since it last crossed a stage: a
 		// send-back or a restart is the lead acting on the same problem, not
 		// the card getting past it, so neither resets the count — otherwise
@@ -462,6 +487,50 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 		return goalpolicy.Stuck, "stopped with nothing running"
 	}
 	return goalpolicy.Running, ""
+}
+
+// citedSubstrates lists the substrates a card's verification plan cites
+// with [env: <name>] — what a card blocked at verify is, most likely,
+// waiting for.
+func (e *Engine) citedSubstrates(f *domain.Feature) []string {
+	path := e.artifactFile(f)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	m, err := e.Substrates()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, name := range spec.EnvTags(string(raw), f.Kind) {
+		if m.Has(name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// substratesReady reports that every named substrate is ready now. None
+// named is not "ready": a card that cites no substrate is waiting for
+// something gummi cannot probe, and only a person knows when that changed.
+func (e *Engine) substratesReady(ctx context.Context, names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+	m, err := e.Substrates()
+	if err != nil {
+		return false
+	}
+	for _, name := range names {
+		if st, err := e.substrateStatus(ctx, m, name); err != nil || st.State != substrate.Ready {
+			return false
+		}
+	}
+	return true
 }
 
 // openReviewerFindings counts the reviewer findings still open in a card's
@@ -626,7 +695,11 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 			note = "This card's verify could not run in the environment it had (" + gc.Reason +
 				"). Someone has been at the goal since, so try the verification plan again; if it still cannot run, say so with VERDICT: blocked."
 		}
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalStarted, Card: a.Card, By: ActorGoal})
+		started := state.GoalPayload{Action: state.GoalStarted, Card: a.Card, By: ActorGoal}
+		if gc.State == goalpolicy.Blocked {
+			started.Ref, started.Detail = goalRetryRef, "its verify is tried again"
+		}
+		e.goalLog(ctx, goal.ID, started)
 		res.Start = append(res.Start, GoalStart{ID: a.Card, Note: note})
 		return nil
 	case goalpolicy.Finish:

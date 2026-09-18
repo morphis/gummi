@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadMissingIsDefault(t *testing.T) {
@@ -541,5 +542,63 @@ func TestLoadLayeredInstructionsConcat(t *testing.T) {
 	}
 	if sources["instructions"] != userPath+","+wsPath {
 		t.Errorf("instructions source = %q, want %s,%s", sources["instructions"], userPath, wsPath)
+	}
+}
+
+func TestSubstratesAreValidatedAndCitableAsEnv(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "config.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	c, err := Load(write("env:\n  docker:\n    probe: command -v docker\nsubstrates:\n  rig:\n    describe: a cluster\n    probe: rigctl healthy\n    provision: rigctl up\n    reset: rigctl restore clean\n    ttl: 24h\n    timeout: 1h\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig := c.Substrates["rig"]
+	if rig.Lifetime() != 24*time.Hour || rig.OpTimeout() != time.Hour {
+		t.Fatalf("got %+v", rig)
+	}
+	if (Substrate{}).OpTimeout() != DefaultSubstrateOpTimeout || (Substrate{}).Lifetime() != 0 {
+		t.Fatal("defaults: a generous timeout, and no expiry")
+	}
+	probes := c.EnvProbes()
+	if len(probes) != 2 || probes["rig"].Probe != "rigctl healthy" || probes["docker"].Probe == "" {
+		t.Fatalf("a plan cites a substrate the way it cites an env prerequisite: %+v", probes)
+	}
+	for name, body := range map[string]string{
+		"no probe":       "substrates:\n  rig:\n    provision: up\n",
+		"bad ttl":        "substrates:\n  rig:\n    probe: x\n    ttl: tomorrow\n",
+		"timeout cap":    "substrates:\n  rig:\n    probe: x\n    timeout: 48h\n",
+		"bad name":       "substrates:\n  \"my rig\":\n    probe: x\n",
+		"also an env":    "env:\n  rig:\n    probe: x\nsubstrates:\n  rig:\n    probe: x\n",
+		"negative ttl":   "substrates:\n  rig:\n    probe: x\n    ttl: -1h\n",
+		"empty timeout0": "substrates:\n  rig:\n    probe: x\n    timeout: 0s\n",
+	} {
+		if _, err := Load(write(body)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestSubstratesLayerLikeEnv(t *testing.T) {
+	dir := t.TempDir()
+	user, ws := filepath.Join(dir, "user.yaml"), filepath.Join(dir, "ws.yaml")
+	_ = os.WriteFile(user, []byte("substrates:\n  rig:\n    probe: from-user\n  farm:\n    probe: farm\n"), 0o600)
+	_ = os.WriteFile(ws, []byte("substrates:\n  rig:\n    probe: from-ws\n"), 0o600)
+	c, sources, err := LoadLayered(user, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Substrates["rig"].Probe != "from-ws" || sources["substrates.rig"] != ws || sources["substrates.farm"] != user {
+		t.Fatalf("got %+v %v", c.Substrates, sources)
+	}
+	// a name means one thing across the layers too
+	_ = os.WriteFile(user, []byte("env:\n  rig:\n    probe: x\n"), 0o600)
+	if _, _, err := LoadLayered(user, ws); err == nil {
+		t.Fatal("an env prerequisite in one file and a substrate in the other under one name is refused")
 	}
 }
