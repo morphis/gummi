@@ -155,7 +155,14 @@ func (m *Shell) watchConducted(f domain.Feature) tea.Cmd {
 	if !m.cardOpen {
 		open = m.openCard()
 	}
-	m.notice = noticeMsg{text: fmt.Sprintf("watching %s — %s drives it (read-only; type into %s to reach its lead)", f.ID, goalDriver(f.GoalID), f.GoalID)}
+	// A card its goal already landed is watched for the same reason and
+	// says so in the past tense: the goal is still running, so the card is
+	// still the goal's, but nothing is driving it any more.
+	drives := "drives it"
+	if f.Stage == domain.StageDone {
+		drives = "conducted it"
+	}
+	m.notice = noticeMsg{text: fmt.Sprintf("watching %s — %s %s (read-only; type into %s to reach its lead)", f.ID, goalDriver(f.GoalID), drives, f.GoalID)}
 	return open
 }
 

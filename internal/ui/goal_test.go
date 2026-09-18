@@ -581,3 +581,100 @@ func TestAGoalsReviewGateSaysWhoseAnswerItIs(t *testing.T) {
 		t.Fatalf("a goal's review gate names whose answer it was: %q", got)
 	}
 }
+
+// TestAGoalsCardNamesTheGoalBranchItLandsOn pins the branch name in every
+// sentence the board writes about a card inside a goal.
+//
+// A goal's cards resolve to a manager rooted at the goal's worktree, so
+// they fork from and squash-merge onto the GOAL branch
+// (worktree.Pool.ManagerFor) — the goal lands on the trunk later, once,
+// under its own message. Every one of these sentences named the trunk
+// anyway: a landed card of a goal cut from `setup-publishing` closed with
+// "Landed on setup-publishing. Its branch and worktree are still here",
+// naming a branch its commit had never touched.
+func TestAGoalsCardNamesTheGoalBranchItLandsOn(t *testing.T) {
+	m := goalBoard()
+	goal := m.rows[1].F
+	want := goal.GoalBranchName()
+
+	card := m.rows[2] // FD-011, done inside the goal
+	if got := m.baseBranch(card.F); got != want {
+		t.Fatalf("a goal's card lands on the goal branch: got %q, want %q", got, want)
+	}
+	if got := m.baseBranch(m.rows[0].F); got != worktree.DefaultBaseBranchName {
+		t.Fatalf("a card outside any goal still lands on the trunk: got %q", got)
+	}
+
+	// the closing receipt, which is where a reader meets the name
+	card.F.LandedSHA = "135c8dd1d961cafe"
+	card.Landed, card.HasWorktree = true, true
+	in := m.nextInputFor(card)
+	if s := endingSentence(in); !strings.Contains(s, "Landed on "+want) {
+		t.Fatalf("the closing sentence names the goal branch: %q", s)
+	}
+	// and the clean-up row underneath it, which says where it landed
+	var clean string
+	for _, a := range closedActions(in) {
+		if a.id == "clean" {
+			clean = a.why
+		}
+	}
+	if !strings.Contains(clean, want) {
+		t.Fatalf("clean-up names the goal branch: %q", clean)
+	}
+
+	// Once the goal is over its trees are removed and its cards resolve to
+	// their own repository again (worktree.Pool.managerForGoalCard), so the
+	// trunk is the honest answer from then on.
+	m.rows[1].F.Stage = domain.StageDone
+	if got := m.baseBranch(card.F); got != worktree.DefaultBaseBranchName {
+		t.Fatalf("a finished goal's card is back on the trunk: got %q", got)
+	}
+}
+
+// TestAGoalKeepsItsLandedCardUntilTheGoalIsOver pins who owns a card the
+// goal has already landed.
+//
+// domain.Feature.Conducted releases a card at done, which is right once
+// the goal is over and wrong while it runs: the branch sits inside the
+// running goal's own worktree, and the board handed a reader the full
+// inventory over it — "clean up — remove the worktree and branch" on a
+// checkout the conductor is still working beside. The goal keeps such a
+// card until it reaches done itself; a card it DROPPED is released on the
+// spot, which is what keeps adopt reachable (DESIGN §17.6).
+func TestAGoalKeepsItsLandedCardUntilTheGoalIsOver(t *testing.T) {
+	m := goalBoard()
+	card := m.rows[2] // FD-011, done inside a goal still at implement
+	card.F.LandedSHA, card.Landed, card.HasWorktree, card.GoalLive = "135c8dd1d961", true, true, true
+
+	if !card.watchOnly() {
+		t.Fatal("a card its goal landed is the goal's until the goal is over")
+	}
+	if d := m.openDecision(card); d != nil {
+		t.Fatalf("no answers are offered over a conducted card: %+v", d.actions)
+	}
+	in := m.nextInputFor(card)
+	for _, a := range cardActionsFor(in, card) {
+		if !foreignSafeActions[a.id] && a.id != expandID {
+			t.Fatalf("the inventory withholds everything that writes: %q", a.id)
+		}
+	}
+
+	// released when the goal reaches done — its trees come out then, and
+	// the card is the reader's again
+	card.GoalLive = false
+	if card.watchOnly() {
+		t.Fatal("a finished goal hands its cards back")
+	}
+	d := m.openDecision(card)
+	if d == nil || d.kind != decisionClosed {
+		t.Fatalf("the closing block comes back with the card: %+v", d)
+	}
+
+	// a dropped card is nobody's the moment it is dropped, live goal or not
+	dropped := m.rows[4] // FD-013, dropped by the goal
+	dropped.GoalLive = true
+	if dropped.watchOnly() {
+		t.Fatal("a card the goal dropped keeps its full inventory, so adopt stays reachable")
+	}
+}

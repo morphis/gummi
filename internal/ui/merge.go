@@ -78,7 +78,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if dirty, err := m.wt.MainTrackedDirty(ctx, &f); err != nil {
 			return mergeReadyMsg{err: err}
 		} else if dirty {
-			return mergeReadyMsg{err: errors.New("main checkout has uncommitted changes — commit or stash them before merging")}
+			return mergeReadyMsg{err: errors.New(m.baseBranch(f) + " checkout has uncommitted changes — commit or stash them before merging")}
 		}
 		// stale-row safety: the board flag may predate an outside merge
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
@@ -118,7 +118,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if landed {
-			return noticeMsg{text: string(f.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
+			return noticeMsg{text: string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
 		}
 		if _, err := m.wt.SquashMerge(ctx, &f, message); err != nil {
 			var ce *worktree.MergeConflictError

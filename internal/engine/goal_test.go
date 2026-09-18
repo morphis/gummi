@@ -299,6 +299,30 @@ func TestGoalRunsItsCardsOnTheGoalBranch(t *testing.T) {
 			t.Fatalf("log %q lacks %q", joined, want)
 		}
 	}
+
+	// The cards' checkouts and merged branches come out with the goal's,
+	// and this is the only moment they can: a card of a goal resolves to a
+	// manager rooted at the goal's tree, so once that tree is gone its
+	// branch is measured against a trunk that never took its commits and
+	// reads as unlanded for good.
+	swept, err := e.CleanGoalCards(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(swept.Took) != 2 || len(swept.Left) != 0 {
+		t.Fatalf("both landed cards come out with the goal: %+v", swept)
+	}
+	for _, c := range []domain.Feature{cache, docs} {
+		if _, err := os.Stat(filepath.Join(goalDir, c.WorktreePath())); err == nil {
+			t.Fatalf("%s is still checked out inside the goal tree", c.ID)
+		}
+		if ok, berr := wt.BranchExists(ctx, &c); berr != nil || ok {
+			t.Fatalf("%s kept its branch: %v %v", c.ID, ok, berr)
+		}
+	}
+	if _, err := os.Stat(goalDir); err != nil {
+		t.Fatalf("the goal's own tree stays until the goal itself is cleaned: %v", err)
+	}
 }
 
 func TestStopGoalDropsUnfinishedWorkAndFinishesPartial(t *testing.T) {

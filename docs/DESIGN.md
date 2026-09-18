@@ -2634,9 +2634,30 @@ this board. A line typed into a conducted card is refused rather than
 delivered, because the one thing it could honestly be — a note for the
 conductor — has a home already: the goal's own thread.
 
-A card the goal dropped and a card already done wear a goal id and are
-nobody's to conduct; both keep the full inventory, which is what makes
-`adopt` reachable on the first of them.
+A card the goal **dropped** wears a goal id and is nobody's to conduct: it
+is closed where it stands and keeps the full inventory, which is what
+makes `adopt` reachable on it.
+
+A card the goal **landed** is not released that way, and the card alone
+cannot say so — `domain.Feature.Conducted` sees a card at done and lets go
+of it. The board supplies the half it is missing (`ui.featureRow.conducted`,
+from the row load's reading of the goal's own stage): a landed card stays
+the goal's until the **goal** reaches done. Its branch sits inside the
+running goal's worktree, so every verb over it — clean-up above all —
+would reach into a checkout the conductor is still working beside. When
+the goal ends, its cards come back with it.
+
+That is also why a goal's cleanup takes its cards' worktrees and merged
+branches with it (`Engine.CleanGoalCards`), in the moment before it
+removes its trees: a card of a goal resolves to a manager rooted at that
+tree, so afterwards its branch is measured against a trunk that never took
+its commits and reads as unlanded for good. A card carrying work no merge
+has — dropped, handed off — is left standing, branch and all.
+
+Every sentence the board writes about such a card names the **goal
+branch** it forks from and lands on, never the repository's trunk
+(`ui.Shell.baseBranch`): the trunk is where the goal lands, later, once,
+under its own message.
 
 
 ## 18. Stacks — slicing one piece of work into several landings

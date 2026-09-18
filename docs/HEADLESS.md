@@ -63,7 +63,7 @@ Other `run` flags:
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
 | `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands (a goal not yet ready is abandoned) |
-| `gummi clean <id\|ref>` | remove a landed card's worktree and branch |
+| `gummi clean <id\|ref>` | remove a landed card's worktree and branch (a goal: its cards' come out with it) |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
 | `gummi ingest [flags] <spec-file>` | decompose a spec into feature proposals and materialize them |

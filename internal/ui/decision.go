@@ -55,7 +55,7 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		// routes a foreign card's line to its consult session instead.
 		return nil
 	}
-	if r.F.Conducted() {
+	if r.conducted() {
 		// A card inside a goal has an answerer already: its goal's lead
 		// (goalloop.go's goalAnswerAsk takes every ask such a card
 		// raises, and goalPlanCheck its plan gate). Offering the same

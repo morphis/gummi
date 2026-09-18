@@ -498,7 +498,7 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	// budget on a conversation the conductor never sees. The line is
 	// kept, not discarded: it stays in the composer so it can be retyped
 	// where it lands, which is the goal's own thread.
-	if r.F.Conducted() {
+	if r.conducted() {
 		m.notice = noticeMsg{
 			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID),
 			isErr: true,
@@ -989,7 +989,7 @@ type consultSentMsg struct {
 func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 	if r.DrivenAbroad {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
-	} else if r.F.Conducted() {
+	} else if r.conducted() {
 		m.threadInput.Placeholder = fmt.Sprintf(conductedPlaceholderText, goalDriver(r.F.GoalID), r.F.GoalID)
 	} else {
 		// up reaches the inventory whether or not a decision is pinned

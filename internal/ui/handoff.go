@@ -48,7 +48,7 @@ func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
 			return handOffReadyMsg{err: err}
 		} else if landed {
-			return handOffReadyMsg{err: errors.New(string(f.ID) + " already landed on main — " + cleanUpNudge)}
+			return handOffReadyMsg{err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
 		}
 		deps, err := m.store.ListDependents(ctx, f.ID)
 		if err != nil {

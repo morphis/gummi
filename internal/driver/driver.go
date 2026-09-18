@@ -537,15 +537,21 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	}
 	// SquashMerge re-enforces these, but checking first fails with a clear
 	// reason before any git mutation.
+	// the branch this card actually lands on, read off the manager it
+	// resolved to rather than written as the literal "main": a `master`
+	// repo is one case, and a card inside a goal — whose manager is rooted
+	// at the GOAL's worktree, so it lands on the goal branch — is the
+	// other.
+	base := wt.BaseBranch(ctx)
 	if dirty, err := wt.MainTrackedDirty(ctx); err != nil {
 		return d.fail(ctx, string(id), err)
 	} else if dirty {
-		return d.fail(ctx, string(id), errors.New("main checkout has uncommitted changes — commit or stash them before merging"))
+		return d.fail(ctx, string(id), fmt.Errorf("%s checkout has uncommitted changes — commit or stash them before merging", base))
 	}
 	if landed, err := wt.Landed(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	} else if landed {
-		return d.fail(ctx, string(id), fmt.Errorf("%s already landed on main — run `gummi clean %s`", id, id))
+		return d.fail(ctx, string(id), fmt.Errorf("%s already landed on %s — run `gummi clean %s`", id, base, id))
 	}
 	if ahead, err := wt.BranchAhead(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
@@ -616,12 +622,22 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 			return d.fail(ctx, string(id),
 				fmt.Errorf("%s was handed off, not landed — cleaning up would delete %s", id, f.BranchName()))
 		}
-		return d.fail(ctx, string(id), fmt.Errorf("%s has not landed on main — nothing to clean", id))
+		return d.fail(ctx, string(id), fmt.Errorf("%s has not landed on %s — nothing to clean", id, wt.BaseBranch(ctx)))
 	}
 	if dirty, err := wt.TrackedDirty(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	} else if dirty {
 		return d.fail(ctx, string(id), fmt.Errorf("%s worktree has tracked-dirty rework; resolve or commit it before cleaning", id))
+	}
+	// A goal's cards resolve to a manager rooted at the goal's tree, so
+	// they come out before it does: after this remove their checkouts are
+	// unreachable and their branches read as unlanded for good
+	// (Engine.CleanGoalCards). A sweep that fails is not fatal to the
+	// goal's own cleanup — it leaves checkouts behind, which is what
+	// happened before it existed.
+	var swept engine.GoalCardCleanup
+	if f.IsGoal() {
+		swept, _ = d.eng.CleanGoalCards(ctx, id)
 	}
 	if err := wt.Remove(ctx, &f, true); err != nil {
 		return d.fail(ctx, string(id), err)
@@ -647,8 +663,21 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 			}
 		}
 	}
-	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName()})
+	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName(),
+		Cards: idStrings(swept.Took), Kept: idStrings(swept.Left)})
 	return Outcome{Status: StatusVerified, ID: string(id)}, nil
+}
+
+// idStrings is a card-id slice as the NDJSON surface carries it.
+func idStrings(ids []domain.FeatureID) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
 }
 
 // HandOff ends a card without landing it — the headless counterpart of the
@@ -748,7 +777,7 @@ func (d *Driver) Squash(ctx context.Context, id domain.FeatureID, message string
 	if landed, err := wt.Landed(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	} else if landed {
-		return d.fail(ctx, string(id), fmt.Errorf("%s is already landed on main", id))
+		return d.fail(ctx, string(id), fmt.Errorf("%s is already landed on %s", id, wt.BaseBranch(ctx)))
 	}
 
 	if err := engine.ValidateCommitMessage(message); err != nil {

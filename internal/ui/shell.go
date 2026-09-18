@@ -565,6 +565,16 @@ func (m *Shell) resolveBaseBranches() {
 // resolved to nothing and for a Shell that was never attached (the test
 // scaffolds), so a sentence built from it is never missing a word.
 func (m *Shell) baseBranch(f domain.Feature) string {
+	if name := m.goalBranchOf(f); name != "" {
+		return name
+	}
+	return m.repoBaseBranch(f)
+}
+
+// repoBaseBranch is baseBranch's trunk half: the branch f's repository has
+// out, with no goal considered. Only the two callers that have already
+// answered the goal question for themselves reach it directly.
+func (m *Shell) repoBaseBranch(f domain.Feature) string {
 	if name, ok := m.baseBranches[f.Repo]; ok && name != "" {
 		return name
 	}
@@ -572,6 +582,53 @@ func (m *Shell) baseBranch(f domain.Feature) string {
 		return name
 	}
 	return worktree.DefaultBaseBranchName
+}
+
+// conducted answers featureRow.conducted for a caller holding only the
+// feature, off the card's own loaded row — the row is where the goal's
+// liveness is resolved (loadRows). A card with no row loaded falls back to
+// its own half of the predicate.
+func (m *Shell) conducted(f domain.Feature) bool {
+	if i := m.rowIndex(f.ID); i >= 0 {
+		return m.rows[i].conducted()
+	}
+	return f.Conducted()
+}
+
+// goalBranchOf names the goal branch f lands on, or "" for a card that
+// lands on its repository's trunk.
+//
+// A goal's cards do not land on main: they resolve to a manager rooted at
+// the goal's worktree, so their branches fork from and squash-merge onto
+// the goal branch (worktree.Pool.ManagerFor). Every sentence built from
+// baseBranch used to name the trunk anyway — a landed card of a goal cut
+// from `setup-publishing` read "Landed on setup-publishing", which is
+// where the GOAL lands, one merge later and under the goal's own message.
+//
+// It reads the goal card off the loaded rows, which is where the branch
+// name lives; loadRows resolves the same rule from the features it is
+// already holding, since the rows it is building are not on the Shell yet.
+func (m *Shell) goalBranchOf(f domain.Feature) string {
+	if f.GoalID == "" {
+		return ""
+	}
+	i := m.rowIndex(f.GoalID)
+	if i < 0 {
+		return ""
+	}
+	return goalLandingBranch(m.rows[i].F)
+}
+
+// goalLandingBranch is that rule stated on the goal card itself: its
+// branch while the goal is live, and nothing once the goal is done —
+// a finished goal's trees are removed and its cards resolve to their own
+// repository again (worktree.Pool.managerForGoalCard), so the trunk is
+// the honest answer from then on.
+func goalLandingBranch(goal domain.Feature) string {
+	if !goal.IsGoal() || goal.Stage == domain.StageDone {
+		return ""
+	}
+	return goal.GoalBranchName()
 }
 
 // baseBranchOf is baseBranch keyed by card id, for the callers that hold
@@ -3511,7 +3568,7 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 	// and lands it (§17), so running the stage by hand here would put a
 	// second driver on a card that already has one. enter opens it to
 	// watch, which is the same answer, one level in.
-	if f.Conducted() {
+	if m.conducted(f) {
 		return m.watchConducted(f)
 	}
 	if m.engine == nil {

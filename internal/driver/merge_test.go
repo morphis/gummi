@@ -376,3 +376,29 @@ func TestCleanNamedRepo(t *testing.T) {
 		t.Fatalf("cleaned event = %v, want branch %s", got, branch)
 	}
 }
+
+// TestRefusalsNameTheBranchTheCardLandsOn pins the branch name in the
+// headless refusals. They wrote the literal "main", which is wrong twice
+// over: on a `master` repo, and on a card inside a goal — whose manager is
+// rooted at the goal's worktree, so it lands on the goal branch and the
+// trunk is where the GOAL lands, later and once.
+func TestRefusalsNameTheBranchTheCardLandsOn(t *testing.T) {
+	h, d, id := driveVerified(t)
+	ctx := context.Background()
+	if out, err := exec.Command("git", "-C", h.root, "branch", "-m", "trunk").CombinedOutput(); err != nil {
+		t.Fatalf("renaming the trunk: %v %s", err, out)
+	}
+
+	if _, err := d.Clean(ctx, id); err == nil || !strings.Contains(err.Error(), "has not landed on trunk") {
+		t.Fatalf("clean names the branch the card lands on: %v", err)
+	}
+	// and the merge's own precondition, which reports the state of that
+	// same checkout
+	if err := os.WriteFile(filepath.Join(h.root, "README.md"), []byte("edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): land the json export"); err == nil ||
+		!strings.Contains(err.Error(), "trunk checkout has uncommitted changes") {
+		t.Fatalf("merge names it too: %v", err)
+	}
+}

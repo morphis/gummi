@@ -65,7 +65,10 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 	if landed, err := wt.Landed(ctx, &f); err != nil {
 		return AdvanceResult{}, err
 	} else if landed {
-		return AdvanceResult{}, fmt.Errorf("%s already landed on main — there is nothing to hand off", id)
+		// the branch it landed on, not the literal "main": a card of a goal
+		// lands on the goal branch, and a `master` repo has never been
+		// called main.
+		return AdvanceResult{}, fmt.Errorf("%s already landed on %s — there is nothing to hand off", id, wt.BaseBranch(ctx))
 	}
 
 	if exists, err := wt.Exists(ctx, &f); err != nil {

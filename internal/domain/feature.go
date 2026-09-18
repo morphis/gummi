@@ -602,6 +602,13 @@ func (f *Feature) GoalDropped() bool { return !f.GoalDroppedAt.IsZero() }
 // dropped (it is closed where it stands and the person may adopt it back)
 // and one already done. A card the goal only attached is conducted while
 // it is held — releasing it clears the GoalID entirely.
+//
+// The done case is only half the answer, and a card cannot hold the other
+// half: whether the goal is still conducting. A card the goal LANDED
+// while the goal runs is still the goal's — its branch is inside the
+// goal's worktree — so the board pairs this with the goal's own stage
+// (ui.featureRow.conducted, §17.6). Nothing here can do that without the
+// goal card, which is why this stays the card's half of it.
 func (f *Feature) Conducted() bool {
 	return f.InGoal() && !f.GoalDropped() && f.Stage != StageDone
 }

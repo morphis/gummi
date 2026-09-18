@@ -86,6 +86,11 @@ type featureRow struct {
 	// its cards and its budget tree. Nil for every other kind, and for a
 	// goal on a board with no engine to read it through.
 	Goal *engine.GoalReport
+	// GoalLive says the goal this card belongs to is still conducting —
+	// it has not reached done. Resolved in loadRows, which holds every
+	// feature and can therefore read the goal's stage; false for a card in
+	// no goal, and in a scaffold that builds rows by hand. See conducted().
+	GoalLive bool
 }
 
 // baseBranch names the branch r's card lands on, for prose that only has
@@ -109,7 +114,31 @@ func (r featureRow) baseBranch() string {
 //
 // What differs is only who to name when saying so, which is why the
 // notices and the labels branch on watchDriver rather than on this.
-func (r featureRow) watchOnly() bool { return r.DrivenAbroad || r.F.Conducted() }
+func (r featureRow) watchOnly() bool { return r.DrivenAbroad || r.conducted() }
+
+// conducted is domain.Feature.Conducted plus the half no card can see for
+// itself: whether its goal is still conducting.
+//
+// The card alone gets exactly one case wrong, and it is the case a reader
+// meets most — one the goal LANDED. Conducted() releases a card at done
+// (§17.6), which handed a person the full inventory on a card whose
+// branch sits inside the running goal's own worktree: a clean-up there
+// removes a checkout the conductor is still working beside, and every
+// sentence on the page invited it. A card of a live goal is the goal's
+// until the goal is over, whatever stage the card itself reached.
+//
+// A card the goal DROPPED is unchanged and deliberately so: it is closed
+// where it stands and the person may adopt it back, which is the one
+// thing the full inventory is needed for.
+//
+// Without GoalLive (a test scaffold, or a card whose goal never loaded)
+// this is the card's own half, exactly as it was.
+func (r featureRow) conducted() bool {
+	if r.GoalLive && r.F.InGoal() && !r.F.GoalDropped() {
+		return true
+	}
+	return r.F.Conducted()
+}
 
 // watchDriver names the driver watchOnly is deferring to, for the one
 // sentence each refusal owes the reader. Empty when the row is this
@@ -118,7 +147,7 @@ func (r featureRow) watchDriver() string {
 	switch {
 	case r.DrivenAbroad:
 		return fmt.Sprintf("pid %d", r.Foreign.PID)
-	case r.F.Conducted():
+	case r.conducted():
 		return goalDriver(r.F.GoalID)
 	}
 	return ""
@@ -232,9 +261,25 @@ func (m *Shell) loadRows() tea.Msg {
 	if err != nil {
 		return rowsMsg{err: err}
 	}
+	// The goal branches in play, resolved from the features this load is
+	// already holding rather than from m.rows: the rows being built here
+	// are not on the Shell yet, so a first load would have every goal
+	// card's member read as landing on the trunk (Shell.goalBranchOf).
+	goalBranches := map[domain.FeatureID]string{}
+	for _, f := range feats {
+		if name := goalLandingBranch(f); name != "" {
+			goalBranches[f.ID] = name
+		}
+	}
 	rows := make([]featureRow, 0, len(feats))
 	for _, f := range feats {
-		row := featureRow{F: f, BaseBranch: m.baseBranch(f)}
+		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
+		if name := goalBranches[f.GoalID]; name != "" {
+			// The same lookup answers both questions, because it is the
+			// same fact: a goal still conducting, and the branch its cards
+			// land on while it is (goalLandingBranch).
+			row.BaseBranch, row.GoalLive = name, true
+		}
 		if hist, err := m.store.History(ctx, f.ID); err == nil {
 			row.History = hist
 		}
@@ -863,6 +908,9 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 			return noticeMsg{text: string(f.ID) + " hasn't landed on " + m.baseBranch(f) + " yet — nothing to clean up", isErr: true}
 		}
 		m.dropSession(f.ID)
+		// what a goal's sweep took with it, for the closing notice; the
+		// zero value for every other kind.
+		var cards engine.GoalCardCleanup
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if ok {
@@ -876,6 +924,17 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			} else if dirty {
 				return noticeMsg{text: string(f.ID) + " has uncommitted changes on its branch — commit or discard them before cleanup", isErr: true}
+			}
+			// A goal's cards resolve to a manager rooted at THIS tree, so
+			// they come out before it does: after this remove their
+			// checkouts are unreachable and their branches read as
+			// unlanded for good (Engine.CleanGoalCards). While the goal
+			// ran, its landed cards did not offer the verb themselves
+			// (featureRow.conducted) — this is where it went.
+			if f.IsGoal() && m.engine != nil {
+				if swept, cerr := m.engine.CleanGoalCards(ctx, f.ID); cerr == nil {
+					cards = swept
+				}
 			}
 			// force: only disposable untracked artifacts remain now, and a
 			// non-force remove would abort on them. The confirm dialog spells
@@ -901,8 +960,24 @@ func (m *Shell) cleanupLanded(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}
-		return noticeMsg{text: string(f.ID) + " cleaned up — worktree and merged branch removed", reload: true}
+		text := string(f.ID) + " cleaned up — worktree and merged branch removed"
+		if n := len(cards.Took); n > 0 {
+			text += ", with " + itoa(n) + " of its card" + plural(n)
+		}
+		if n := len(cards.Left); n > 0 {
+			text += " · " + idList(cards.Left) + " kept — work no merge has"
+		}
+		return noticeMsg{text: text, reload: true}
 	})
+}
+
+// idList spells a handful of card ids for one notice.
+func idList(ids []domain.FeatureID) string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return strings.Join(out, ", ")
 }
 
 // dropSession ends and forgets a feature's engine session and clears
