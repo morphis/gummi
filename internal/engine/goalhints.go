@@ -58,7 +58,17 @@ asking:
    (feature, bug, research or diagnosis), serves (the DW ids it is for — every card
    serves at least one and every item is served), depends_on (titles of
    rows that must land first), and envelope (credits; leave it out to let
-   the goal split its budget). A card is PR-sized: one coherent change
+   the goal split its budget). Where an item is proved by an experiment,
+   the goal proves what has LANDED as it goes — an integration run
+   whenever the substrate is idle and cards have landed since the last
+   one (` + "`integrate_every: N`" + ` in the gummi-goal block batches N landings
+   per run, when runs are dear) — and bisects the landings when something
+   that held stops holding. That covers most cards. Mark a row
+   ` + "`live: true`" + ` only when the card's whole point is live behaviour and
+   landing it unproven would poison everything that forks from the goal
+   branch after it: such a card gets a run of its own, on its own branch,
+   before it lands, and each of those is a run the rest of the goal does
+   not get. A card is PR-sized: one coherent change
    an autopilot can plan, build and verify alone. To hand an existing
    board card to the goal, give its row that card's id; only the user may
    do that, so ask.

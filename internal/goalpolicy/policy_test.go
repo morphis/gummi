@@ -556,3 +556,149 @@ func TestAGoalThatCannotAffordItsProofAsksInsteadOfGoingWithout(t *testing.T) {
 		t.Fatalf("raised, it carries on: got %q, want %q", got, want)
 	}
 }
+
+func TestBisectFindsTheLandingThatBrokeIt(t *testing.T) {
+	// eight landings; it held before the first and does not after the last
+	for culprit := 0; culprit < 8; culprit++ {
+		verdicts := map[int]bool{}
+		runs := 0
+		for {
+			next, found := Bisect(8, verdicts)
+			if found >= 0 {
+				if found != culprit {
+					t.Fatalf("culprit %d: blamed %d after %d runs", culprit, found, runs)
+				}
+				break
+			}
+			if next < 0 || runs > 3 {
+				t.Fatalf("culprit %d: no next step after %d runs (%v)", culprit, runs, verdicts)
+			}
+			verdicts[next] = next < culprit
+			runs++
+		}
+	}
+	if next, culprit := Bisect(1, nil); next != -1 || culprit != 0 {
+		t.Fatalf("one landing needs no run to blame: %d %d", next, culprit)
+	}
+	if next, culprit := Bisect(4, map[int]bool{0: false, 2: true}); next != -1 || culprit != -1 {
+		t.Fatalf("held after a landing it failed before: nothing to blame, got %d %d", next, culprit)
+	}
+}
+
+// While work is in flight the goal proves what has landed, when the
+// substrate is idle, from what is left above the runs it holds back.
+func TestLandedWorkIsProvenEarlyOnAnIdleSubstrate(t *testing.T) {
+	in := base()
+	in.Lanes = 1
+	in.Cards = []Card{
+		{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300},
+		{ID: "FD-003", State: Running, Envelope: 500},
+	}
+	in.Substrate = SubstrateBudget{Runs: 10}
+	in.Experiments = []Experiment{{Name: "matrix", LandedSince: 1}}
+	if got, want := acts(in), "run matrix: integration"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.IntegrateEvery = 3
+	if got := acts(in); got != "" {
+		t.Fatalf("batching waits for three landings, got %q", got)
+	}
+	in.IntegrateEvery = 0
+	for name, x := range map[string]Experiment{
+		"already proven":         {Name: "matrix", LandedSince: 1, Proven: true},
+		"a run in flight":        {Name: "matrix", LandedSince: 1, Running: true},
+		"someone else has it":    {Name: "matrix", LandedSince: 1, Held: true},
+		"nothing has landed":     {Name: "matrix"},
+		"the rig is not trusted": {Name: "matrix", LandedSince: 1, Inconclusive: MaxInconclusive},
+	} {
+		in.Experiments[0] = x
+		if got := acts(in); got != "" {
+			t.Errorf("%s: got %q", name, got)
+		}
+	}
+	in.Experiments[0] = Experiment{Name: "matrix", LandedSince: 1}
+	in.Substrate.RunsSpent = 8
+	if got := acts(in); got != "" {
+		t.Fatalf("what is left is held back for being judged, got %q", got)
+	}
+}
+
+// Something that held and no longer does is a landing's doing: the landings
+// since are bisected, and then the lead is told which.
+func TestARegressionIsBisectedThenToldToTheLead(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.Cards = []Card{{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300}, {ID: "FD-009", State: Running, Envelope: 500}}
+	in.Substrate = SubstrateBudget{Runs: 20}
+	x := Experiment{Name: "matrix", Proven: true, Failed: true, LeadSaw: true, Regressed: []string{"egress"},
+		Candidates: 4, BisectNext: 1, RegressionWhy: "egress held and no longer does"}
+	in.Experiments = []Experiment{x}
+	if got, want := acts(in), "run matrix @1: bisect"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	x.BisectNext, x.Culprit, x.RegressionWhy = -1, "FD-005", "FD-005's landing broke egress"
+	in.Experiments[0] = x
+	if got, want := acts(in), "lead [FD-005's landing broke egress]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	x.RegressionSeen = true
+	in.Experiments[0] = x
+	if got := acts(in); got != "" {
+		t.Fatalf("told once, got %q", got)
+	}
+	// with nothing left to explore with, the lead is told what is known
+	x.RegressionSeen, x.Culprit, x.BisectNext = false, "", 1
+	in.Experiments[0] = x
+	in.Substrate.RunsSpent = 19
+	if got, want := acts(in), "lead [FD-005's landing broke egress]"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// A live card proves itself on the substrate before it lands.
+func TestALiveCardIsProvenBeforeItLands(t *testing.T) {
+	in := base()
+	in.LeadAvailable = true
+	in.Substrate = SubstrateBudget{Runs: 10}
+	in.Experiments = []Experiment{{Name: "matrix"}}
+	in.Cards = []Card{{ID: "FD-002", State: Verified, Envelope: 500, Live: true, LiveExperiment: "matrix"}}
+	if got, want := acts(in), "run FD-002 matrix: card"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Cards[0].LiveProof = LiveRunning
+	in.Experiments[0].Running = true
+	if got := acts(in); got != "" {
+		t.Fatalf("waits for it, got %q", got)
+	}
+	in.Experiments[0].Running = false
+	in.Cards[0].LiveProof = LivePassed
+	if got, want := acts(in), "land FD-002"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Cards[0].LiveProof, in.Cards[0].LiveWhy = LiveFailed, "migration dropped the stream"
+	if got := acts(in); !strings.Contains(got, "lead [FD-002 verified, and its run on the substrate failed: migration dropped the stream]") {
+		t.Fatalf("got %q", got)
+	}
+	in.Cards[0].LeadTries = 1
+	if got, want := acts(in), "land FD-002"; got != want {
+		t.Fatalf("the lead looked and left it: got %q, want %q", got, want)
+	}
+	// unaffordable, or a rig that judges nothing: it lands, and the goal's
+	// own proof still stands between it and the hand-over
+	in.Cards[0].LeadTries, in.Cards[0].LiveProof = 0, LiveNone
+	in.Substrate.RunsSpent = 9
+	if got, want := acts(in), "land FD-002"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	in.Substrate.RunsSpent, in.Cards[0].LiveProof = 0, LiveGaveUp
+	if got, want := acts(in), "land FD-002"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// a busy substrate is waited for, and another verified card lands meanwhile
+	in.Cards[0].LiveProof = LiveNone
+	in.Experiments[0].Held = true
+	in.Cards = append(in.Cards, Card{ID: "FD-003", State: Verified, Envelope: 500})
+	if got, want := acts(in), "land FD-003"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

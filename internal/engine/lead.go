@@ -420,6 +420,15 @@ the check could do without); otherwise leave it exactly as it is — the
 goal keeps it, waits, and says what it is waiting on. Do not drop it and
 do not mark its item not met: nothing has been found wrong.
 
+When you are woken over a regression — something an experiment showed
+holding that a later run shows failing — it is the strongest statement
+about the code a substrate makes: a thing that never held failing is
+expected, a thing that did is a landing's doing. gummi has already
+bisected the landings where it could and names the card. Act on it with a
+card that fixes it, citing the evidence directory; do not re-derive the
+blame, and do not send the named card back — it has landed, and what is
+on the goal branch is changed by a new card, not by reopening an old one.
+
 Record a decision for review for every call a user of the result would
 notice — behaviour, interface, user-visible naming, a dependency added, a
 data format — and for anything that trades against a done-when item,

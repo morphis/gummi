@@ -120,10 +120,17 @@ type GoalReportExperiment struct {
 	// Assertions is the newest conclusive run's, so a reader sees which
 	// held without opening the bundle.
 	Assertions []experiment.Assertion `json:"assertion_results,omitempty"`
+	// Green is the frontier — everything that has held in some run of the
+	// goal's heads — and Regressed what is in it and does not hold now,
+	// with the card a bisect of the landings put it on.
+	Green     []string         `json:"ever_held,omitempty"`
+	Regressed []string         `json:"regressed,omitempty"`
+	Culprit   domain.FeatureID `json:"regressed_by,omitempty"`
 }
 
 func reportExperiment(x GoalExperiment) GoalReportExperiment {
-	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem, Runs: len(x.Runs)}
+	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem, Runs: len(x.Runs),
+		Green: x.Green, Regressed: x.Regressed, Culprit: x.Culprit}
 	for _, r := range x.Runs {
 		out.Minutes += r.Seconds / 60
 		switch {
@@ -550,6 +557,13 @@ func RenderGoalReport(r GoalReport) string {
 				if !a.OK {
 					fmt.Fprintf(&b, "  - ✗ %s %s\n", a.ID, a.Detail)
 				}
+			}
+			if len(x.Regressed) > 0 {
+				fmt.Fprintf(&b, "  - regressed (held in an earlier run): %s", strings.Join(x.Regressed, ", "))
+				if x.Culprit != "" {
+					fmt.Fprintf(&b, " — bisected to %s's landing", x.Culprit)
+				}
+				b.WriteString("\n")
 			}
 		}
 	}

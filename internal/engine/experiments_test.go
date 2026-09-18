@@ -264,3 +264,176 @@ func TestAGoalOutOfSubstrateBudgetAsksForMore(t *testing.T) {
 		t.Fatalf("raised, it makes the run: %+v", res)
 	}
 }
+
+const threeCardGoalDoc = "# GL-001: Export works offline\n\n" +
+	"## Objective\n\nExport works with no network.\n\n" +
+	"## Done when\n\n```gummi-done-when\n" +
+	"- id: DW-1\n  says: a deployed build serves the cache\n  experiment: matrix\n```\n\n" +
+	"## Limits\n\nNone.\n\n" +
+	"## Budget\n\nAbout 1500 credits.\n\n```gummi-goal\nlanes: 1\nruns: 20\nintegrate_every: 2\n```\n\n" +
+	"## Cards\n\n```gummi-cards\n" +
+	"- title: one\n  serves: [DW-1]\n  envelope: 300\n" +
+	"- title: two\n  serves: [DW-1]\n  envelope: 300\n" +
+	"- title: three\n  serves: [DW-1]\n  envelope: 300\n```\n\n" +
+	"## Notes\n\n\n## Try it\n\n\n## Review\n\n\n## Verification plan\n\nRun the matrix.\n\n## Report\n\n\n"
+
+// "cache" holds once cache.txt is deployed and as long as break.txt is not.
+const regressionRun = `if test -f "$GUMMI_TREE_HOME/cache.txt" && ! test -f "$GUMMI_TREE_HOME/break.txt"; then printf '{"id":"cache","ok":true}\n' > "$GUMMI_EVIDENCE/results.ndjson"; else printf '{"id":"cache","ok":false,"detail":"not served"}\n' > "$GUMMI_EVIDENCE/results.ndjson"; exit 1; fi`
+
+// landNext starts, verifies and lands the goal's next waiting card.
+func landNext(t *testing.T, e *Engine, store *state.Store, root string, goal domain.FeatureID, file string) domain.FeatureID {
+	t.Helper()
+	var id domain.FeatureID
+	if res := tick(t, e, goal); len(res.Start) == 1 {
+		id = res.Start[0].ID
+	} else {
+		// the tick that landed the previous card started this one already
+		view, _ := e.GoalView(context.Background(), goal)
+		for _, c := range view.Cards {
+			if c.State == goalpolicy.Running {
+				id = c.Feature.ID
+				break
+			}
+		}
+	}
+	if id == "" {
+		t.Fatal("no card is started or starting")
+	}
+	verifyCard(t, e, store, root, id, file)
+	for i := 0; i < 3; i++ {
+		for _, a := range tick(t, e, goal).Actions {
+			if a.Kind == goalpolicy.Land && a.Card == id {
+				return id
+			}
+		}
+	}
+	t.Fatalf("%s did not land", id)
+	return id
+}
+
+// Something that held and no longer does is a landing's doing. The goal's
+// landings are one commit each, so it bisects them, and names the card.
+func TestARegressionIsBisectedToTheCardThatLandedIt(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, regressionRun)
+	g := goalAtPlan(t, store, wt, threeCardGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	landNext(t, e, store, wt.Root(), g.ID, "cache.txt")
+	goal, _ := store.GetFeature(ctx, g.ID)
+	if r, err := e.StartExperiment(ctx, goal, ExperimentStart{Name: "matrix", Purpose: PurposeIntegration}); err != nil || r.ID == "" {
+		t.Fatal(err)
+	}
+	view, _ := e.GoalView(ctx, g.ID)
+	if x := view.Experiments[0]; x.Evidence == nil || x.Evidence.Outcome != experiment.Pass || len(x.Green) != 1 {
+		t.Fatalf("the frontier: cache holds: %+v", x)
+	}
+
+	landNext(t, e, store, wt.Root(), g.ID, "other.txt")
+	view, _ = e.GoalView(ctx, g.ID)
+	if n := len(view.Experiments[0].LandedSince); n != 1 {
+		t.Fatalf("one landing since the last run: %d", n)
+	}
+	culpritID := landNext(t, e, store, wt.Root(), g.ID, "break.txt")
+
+	// settled and unproven: the goal makes its run, which fails — twice,
+	// on a reset substrate, before it is believed
+	res := tick(t, e, g.ID)
+	if len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run || res.Actions[0].Reason != PurposeVerify {
+		t.Fatalf("%v", res.Actions)
+	}
+	view, _ = e.GoalView(ctx, g.ID)
+	x := view.Experiments[0]
+	if len(x.Regressed) != 1 || x.Regressed[0] != "cache" || len(x.Suspects) != 2 || x.Culprit != "" || x.BisectNext != 0 {
+		t.Fatalf("cache held and no longer does; two landings could have done it: %+v", x)
+	}
+
+	res = tick(t, e, g.ID)
+	if len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run || res.Actions[0].Reason != PurposeBisect || res.Finished {
+		t.Fatalf("it narrows it before it goes on: %v", res.Actions)
+	}
+	view, _ = e.GoalView(ctx, g.ID)
+	x = view.Experiments[0]
+	if x.Culprit != culpritID {
+		t.Fatalf("held after the second card landed, not after the third: blamed %q, want %q", x.Culprit, culpritID)
+	}
+	if why := x.regressionWhy(); !strings.Contains(why, string(culpritID)) || !strings.Contains(why, "cache") {
+		t.Fatalf("the lead is told which card and what: %s", why)
+	}
+	runs := e.ExperimentRuns(g.ID)
+	if len(runs) != 3 || runs[2].Purpose != PurposeBisect {
+		t.Fatalf("one bisect run was all it took: %d runs", len(runs))
+	}
+	// the snapshots a run deployed from are gone once it is over; the
+	// evidence is not
+	for _, r := range runs {
+		if _, err := os.Stat(filepath.Join(r.Dir, "trees")); err == nil {
+			t.Fatalf("%s still has its checkouts", r.ID)
+		}
+		if _, err := os.Stat(filepath.Join(r.Dir, "evidence", "results.ndjson")); err != nil {
+			t.Fatalf("%s lost its evidence", r.ID)
+		}
+	}
+}
+
+// While work is in flight, what has landed is proven as soon as enough of
+// it has piled up and the substrate is idle.
+func TestLandingsAreProvenWhileOtherWorkIsStillInFlight(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, regressionRun)
+	g := goalAtPlan(t, store, wt, threeCardGoalDoc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	landNext(t, e, store, wt.Root(), g.ID, "cache.txt")
+	if got := len(e.ExperimentRuns(g.ID)); got != 0 {
+		t.Fatalf("integrate_every is 2: one landing is not enough, got %d runs", got)
+	}
+	landNext(t, e, store, wt.Root(), g.ID, "other.txt")
+	var made bool
+	for i := 0; i < 3 && !made; i++ {
+		for _, a := range tick(t, e, g.ID).Actions {
+			made = made || (a.Kind == goalpolicy.Run && a.Reason == PurposeIntegration)
+		}
+	}
+	runs := e.ExperimentRuns(g.ID)
+	if !made || len(runs) != 1 || runs[0].Outcome != experiment.Pass {
+		t.Fatalf("two landings and an idle substrate: an integration run, with the third card still to come: %+v", runs)
+	}
+}
+
+// A live card proves itself on the substrate before it lands, on the goal's
+// heads with its own branch in place of the goal's.
+func TestALiveCardIsProvenOnItsOwnBranchBeforeItLands(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	experimentRig(t, e, wt, regressionRun)
+	doc := strings.Replace(experimentGoalDoc, "  envelope: 600\n", "  envelope: 600\n  live: true\n", 1)
+	g := goalAtPlan(t, store, wt, doc, 4000)
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
+	}
+	card := goalCards(t, store, g.ID)[0]
+	tick(t, e, g.ID)
+	verifyCard(t, e, store, wt.Root(), card.ID, "cache.txt")
+
+	res := tick(t, e, g.ID)
+	if len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Run || res.Actions[0].Card != card.ID {
+		t.Fatalf("verified is not proven: a run first, not a landing: %v", res.Actions)
+	}
+	runs := e.ExperimentRuns(g.ID)
+	if len(runs) != 1 || runs[0].Purpose != "card "+string(card.ID) || runs[0].Outcome != experiment.Pass {
+		t.Fatalf("the run deployed the card's branch, which carries cache.txt: %+v", runs)
+	}
+	view, _ := e.GoalView(ctx, g.ID)
+	if gc, _ := view.Card(card.ID); gc.LiveProof != goalpolicy.LivePassed || runs[0].Heads[""] != gc.LiveHead {
+		t.Fatalf("the proof is about the head the card has: %+v", gc)
+	}
+	res = tick(t, e, g.ID)
+	if len(res.Actions) != 1 || res.Actions[0].Kind != goalpolicy.Land {
+		t.Fatalf("proven, it lands: %v", res.Actions)
+	}
+}

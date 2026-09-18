@@ -20,11 +20,13 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/experiment"
+	"github.com/morphis/gummi/internal/goalpolicy"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/substrate"
 	"github.com/morphis/gummi/internal/verify"
@@ -44,6 +46,9 @@ const (
 	// PurposeBisect: one landing of several, to find which broke what was
 	// green.
 	PurposeBisect = "bisect"
+	// PurposeCard prefixes the purpose of a run made for one card, on the
+	// goal's heads with that card's branch in place of the goal's.
+	PurposeCard = "card"
 )
 
 // ExperimentSpawner starts the process that makes a prepared run. The
@@ -77,12 +82,12 @@ func spawnDetached(dir string) error {
 }
 
 // goalInputs names the state a run of def would be about: for each input
-// repository, the checkout to deploy from and the commit it has out. A
-// repository the goal has a tree in contributes that tree; one it never
-// touched contributes its own checkout, because the experiment deploys it
-// either way and evidence that did not say which commit would be evidence
-// about nothing in particular.
-func (e *Engine) goalInputs(ctx context.Context, goal domain.Feature, def config.Experiment) (heads, trees map[string]string, err error) {
+// repository, the commit it has out and the repository that commit is in.
+// A repository the goal has a tree in contributes that tree's head; one it
+// never touched contributes its own checkout's, because the experiment
+// deploys it either way and evidence that did not say which commit would be
+// evidence about nothing in particular.
+func (e *Engine) goalInputs(ctx context.Context, goal domain.Feature, def config.Experiment) (heads, roots map[string]string, err error) {
 	goalTrees, err := e.goalTrees(ctx, goal)
 	if err != nil {
 		return nil, nil, err
@@ -100,45 +105,91 @@ func (e *Engine) goalInputs(ctx context.Context, goal domain.Feature, def config
 		}
 		sort.Strings(repos)
 	}
-	heads, trees = map[string]string{}, map[string]string{}
+	heads, roots = map[string]string{}, map[string]string{}
 	for _, repo := range repos {
-		dir := ""
+		root, ok := e.pool.RootForName(repo)
+		if !ok {
+			return nil, nil, fmt.Errorf("the experiment's input %q is not a repository this workspace manages", repo)
+		}
+		dir := root
 		if t, ok := byRepo[repo]; ok {
 			dir = t.Dir
-		} else if root, ok := e.pool.RootForName(repo); ok {
-			dir = root
-		} else {
-			return nil, nil, fmt.Errorf("the experiment's input %q is not a repository this workspace manages", repo)
 		}
 		sha, herr := worktree.HeadOf(ctx, dir)
 		if herr != nil {
 			return nil, nil, fmt.Errorf("reading the head of %s: %w", dir, herr)
 		}
-		heads[repo], trees[repo] = sha, dir
+		heads[repo], roots[repo] = sha, root
 	}
-	return heads, trees, nil
+	return heads, roots, nil
 }
 
 // trunkInputs is goalInputs for the trunk: every input at its repository's
 // own checkout. It is what a negative control runs on.
-func (e *Engine) trunkInputs(ctx context.Context, goal domain.Feature, def config.Experiment) (heads, trees map[string]string, err error) {
-	about, _, err := e.goalInputs(ctx, goal, def)
+func (e *Engine) trunkInputs(ctx context.Context, goal domain.Feature, def config.Experiment) (heads, roots map[string]string, err error) {
+	_, roots, err = e.goalInputs(ctx, goal, def)
 	if err != nil {
 		return nil, nil, err
 	}
-	heads, trees = map[string]string{}, map[string]string{}
-	for repo := range about {
-		root, ok := e.pool.RootForName(repo)
-		if !ok {
-			return nil, nil, fmt.Errorf("the experiment's input %q is not a repository this workspace manages", repo)
-		}
+	heads = map[string]string{}
+	for repo, root := range roots {
 		sha, herr := worktree.HeadOf(ctx, root)
 		if herr != nil {
 			return nil, nil, herr
 		}
-		heads[repo], trees[repo] = sha, root
+		heads[repo] = sha
 	}
-	return heads, trees, nil
+	return heads, roots, nil
+}
+
+// snapshotInputs checks each head out, detached, under the run directory.
+// A run deploys from these and never from a goal tree: a goal tree is what
+// cards land on, and a landing under a running deploy would make the run
+// evidence about a commit it only half deployed.
+func snapshotInputs(ctx context.Context, runDir string, heads, roots map[string]string) (map[string]string, error) {
+	trees := map[string]string{}
+	for repo, sha := range heads {
+		name := repo
+		if name == "" {
+			name = "home"
+		}
+		dir := filepath.Join(runDir, "trees", name)
+		if err := os.MkdirAll(filepath.Dir(dir), 0o750); err != nil {
+			return nil, err
+		}
+		if err := worktree.AddDetached(ctx, roots[repo], dir, sha); err != nil {
+			for r, d := range trees {
+				worktree.RemoveDetached(ctx, roots[r], d)
+			}
+			return nil, err
+		}
+		trees[repo] = dir
+	}
+	return trees, nil
+}
+
+// reapExperimentTrees removes the snapshots of runs that are over. The
+// evidence stays; the checkouts were only ever somewhere to deploy from,
+// and on a repository of any size they are most of what a run weighs.
+func (e *Engine) reapExperimentTrees(ctx context.Context, runs []experiment.Result) {
+	for _, r := range runs {
+		if r.State == experiment.StateRunning {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(r.Dir, "trees")); err != nil {
+			continue
+		}
+		job, err := experiment.LoadJob(r.Dir)
+		if err != nil {
+			continue
+		}
+		for repo, dir := range job.Trees {
+			if root := job.Roots[repo]; root != "" && strings.HasPrefix(dir, r.Dir) {
+				worktree.RemoveDetached(ctx, root, dir)
+			}
+		}
+		_ = os.RemoveAll(filepath.Join(r.Dir, "trees"))
+	}
 }
 
 // ExperimentRuns lists every run made for owner, oldest first.
@@ -155,9 +206,12 @@ type ExperimentStart struct {
 	// Trunk runs on the trunk instead of the goal's trees, expecting the
 	// experiment to fail there.
 	Trunk bool
-	// Heads and Trees override what the run is about (a bisect step). Both
-	// or neither.
-	Heads, Trees map[string]string
+	// Heads overrides what the run is about: a bisect step, or a card's
+	// own branch in place of the goal's. Every repository it names must be
+	// an input of the experiment.
+	Heads map[string]string
+	// Card is the card a run is for, when it is for one.
+	Card domain.FeatureID
 }
 
 // StartExperiment prepares a run for goal and starts its runner. It
@@ -172,25 +226,35 @@ func (e *Engine) StartExperiment(ctx context.Context, goal domain.Feature, st Ex
 	if !ok {
 		return experiment.Result{}, fmt.Errorf("no experiment %q is configured", st.Name)
 	}
-	heads, trees := st.Heads, st.Trees
-	switch {
-	case heads != nil:
-	case st.Trunk:
-		heads, trees, err = e.trunkInputs(ctx, goal, def)
-	default:
-		heads, trees, err = e.goalInputs(ctx, goal, def)
+	var heads, roots map[string]string
+	if st.Trunk {
+		heads, roots, err = e.trunkInputs(ctx, goal, def)
+	} else {
+		heads, roots, err = e.goalInputs(ctx, goal, def)
 	}
 	if err != nil {
 		return experiment.Result{}, err
 	}
+	for repo, sha := range st.Heads {
+		if _, ok := heads[repo]; !ok {
+			return experiment.Result{}, fmt.Errorf("%q is not an input of %s", repo, st.Name)
+		}
+		heads[repo] = sha
+	}
 	now := e.now()
 	job := experiment.Job{
 		ID: experiment.NewID(now), Experiment: st.Name, Owner: string(goal.ID), Purpose: st.Purpose,
-		Heads: heads, Trees: trees, Control: st.Control, ExpectFail: st.Trunk,
+		Heads: heads, Roots: roots, Control: st.Control, ExpectFail: st.Trunk,
 		Def: def, Substrate: cfg.Substrates[def.Substrate],
 		Root: e.cfg.Workspace.Root, StateDir: e.cfg.Workspace.StateDir(),
 	}
+	if st.Card != "" {
+		job.Purpose = PurposeCard + " " + string(st.Card)
+	}
 	job.Dir = filepath.Join(e.cfg.Workspace.EvidenceDir(goal.ID), job.ID)
+	if job.Trees, err = snapshotInputs(ctx, job.Dir, heads, roots); err != nil {
+		return experiment.Result{}, err
+	}
 	if err := experiment.Prepare(job); err != nil {
 		return experiment.Result{}, err
 	}
@@ -252,12 +316,236 @@ type GoalExperiment struct {
 	// control.
 	ControlFailed bool
 	Runs          []experiment.Result
+
+	// Green is the frontier: every assertion that has held in some
+	// conclusive run of the goal's heads, at any point. It should only
+	// grow. Regressed is what is in it and does not hold in Evidence.
+	Green     []string
+	Regressed []string
+	// WholeRegressed reports a regression of a run that names no
+	// assertions: it passed before and fails now.
+	WholeRegressed bool
+	// LandedSince lists the cards landed since the newest conclusive run.
+	LandedSince []domain.FeatureID
+	// Suspects are the landings between the run where what regressed last
+	// held and the one where it did not, oldest first; BisectNext indexes
+	// the one to try next (-1: none), Culprit is the one found, and
+	// BisectStuck reports verdicts that contradict each other.
+	Suspects    []goalLanding
+	BisectNext  int
+	Culprit     domain.FeatureID
+	BisectStuck bool
+	// base is the run what regressed last held in.
+	base *experiment.Result
+	// knownAt is when the newest fact about the regression arrived.
+	knownAt time.Time
+}
+
+// goalLanding is one card's landing on the goal branch, from the goal log.
+type goalLanding struct {
+	Card domain.FeatureID
+	Repo string
+	SHA  string
+	At   time.Time
+}
+
+// headsAfter is the goal's heads as they were just after suspect i landed:
+// the base run's, moved by each landing up to it. Every landing is one
+// commit on its repository's goal branch, which is what makes a goal's
+// history bisectable at all.
+func (x GoalExperiment) headsAfter(i int) map[string]string {
+	heads := map[string]string{}
+	if x.base != nil {
+		for repo, sha := range x.base.Heads {
+			heads[repo] = sha
+		}
+	}
+	for j := 0; j <= i && j < len(x.Suspects); j++ {
+		if _, input := heads[x.Suspects[j].Repo]; input {
+			heads[x.Suspects[j].Repo] = x.Suspects[j].SHA
+		}
+	}
+	return heads
+}
+
+func sameHeads(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// readFrontier fills in what the goal's runs say over time: what has ever
+// held, what no longer does, and how far a bisect of the landings in
+// between has got.
+func (x *GoalExperiment) readFrontier(landings []goalLanding) {
+	x.BisectNext = -1
+	green := map[string]bool{}
+	var newest *experiment.Result
+	for i := range x.Runs {
+		r := &x.Runs[i]
+		if r.ExpectFail || !r.Outcome.Conclusive() || strings.HasPrefix(r.Purpose, PurposeCard+" ") {
+			continue
+		}
+		for _, a := range r.Assertions {
+			if a.OK {
+				green[a.ID] = true
+			}
+		}
+		if r.Purpose != PurposeBisect {
+			newest = r
+		}
+	}
+	for id := range green {
+		x.Green = append(x.Green, id)
+	}
+	sort.Strings(x.Green)
+	for _, l := range landings {
+		if newest == nil || l.At.After(newest.Started) {
+			x.LandedSince = append(x.LandedSince, l.Card)
+		}
+	}
+
+	ev := x.Evidence
+	if ev == nil || ev.Outcome != experiment.Fail {
+		return
+	}
+	for _, a := range ev.Assertions {
+		if !a.OK && green[a.ID] {
+			x.Regressed = append(x.Regressed, a.ID)
+		}
+	}
+	held := func(r *experiment.Result) (bool, bool) { return r.Holds(x.Regressed) }
+	if len(ev.Assertions) == 0 {
+		held = func(r *experiment.Result) (bool, bool) { return r.Holds(nil) }
+	} else if len(x.Regressed) == 0 {
+		return
+	}
+	// the newest earlier run in which all of it held
+	for i := range x.Runs {
+		r := &x.Runs[i]
+		if r.ExpectFail || r.ID == ev.ID || !r.Started.Before(ev.Started) || strings.HasPrefix(r.Purpose, PurposeCard+" ") {
+			continue
+		}
+		if h, ok := held(r); ok && h {
+			x.base = r
+		}
+	}
+	if x.base == nil {
+		x.Regressed = nil // it never held as a whole: nothing regressed
+		return
+	}
+	x.WholeRegressed = len(ev.Assertions) == 0
+	x.knownAt = ev.Ended
+	for _, l := range landings {
+		if l.At.After(x.base.Started) && !l.At.After(ev.Started) {
+			x.Suspects = append(x.Suspects, l)
+		}
+	}
+	verdicts := map[int]bool{}
+	for i := range x.Suspects {
+		want := x.headsAfter(i)
+		for j := range x.Runs {
+			r := &x.Runs[j]
+			if r.ExpectFail || !sameHeads(r.Heads, want) {
+				continue
+			}
+			if h, ok := held(r); ok {
+				verdicts[i] = h
+				if r.Ended.After(x.knownAt) {
+					x.knownAt = r.Ended
+				}
+			}
+		}
+	}
+	next, culprit := goalpolicy.Bisect(len(x.Suspects), verdicts)
+	switch {
+	case culprit >= 0:
+		x.Culprit = x.Suspects[culprit].Card
+	case next >= 0:
+		x.BisectNext = next
+	default:
+		x.BisectStuck = len(x.Suspects) > 0
+	}
+}
+
+// readLiveProof reads how far a live card's proof has got: the runs made
+// for it, about the commit its branch has now. A card sent back and
+// verified again has a new head, and what was proven about the old one
+// says nothing about it.
+func (e *Engine) readLiveProof(ctx context.Context, gc *GoalCard, runs []experiment.Result, since time.Time) {
+	m, err := e.pool.ManagerFor(ctx, &gc.Feature)
+	if err != nil {
+		return
+	}
+	head, err := m.Head(ctx, &gc.Feature)
+	if err != nil {
+		return
+	}
+	gc.LiveHead = head
+	purpose := PurposeCard + " " + string(gc.Feature.ID)
+	inconclusive := 0
+	for _, r := range runs {
+		if r.Purpose != purpose || r.Heads[gc.Feature.Repo] != head {
+			continue
+		}
+		switch {
+		case r.State == experiment.StateRunning:
+			gc.LiveProof = goalpolicy.LiveRunning
+			return
+		case r.Outcome == experiment.Pass:
+			gc.LiveProof, gc.LiveWhy = goalpolicy.LivePassed, ""
+			inconclusive = 0
+		case r.Outcome == experiment.Fail:
+			gc.LiveProof, gc.LiveWhy = goalpolicy.LiveFailed, describeEvidence(r, nil)
+			inconclusive = 0
+		case r.Ended.After(since):
+			inconclusive++
+			if gc.LiveProof == goalpolicy.LiveNone && inconclusive >= goalpolicy.MaxInconclusive {
+				gc.LiveProof, gc.LiveWhy = goalpolicy.LiveGaveUp, r.Reason
+			}
+		}
+	}
+}
+
+// regressionWhy is the sentence a lead is woken with.
+func (x GoalExperiment) regressionWhy() string {
+	what := strings.Join(x.Regressed, ", ")
+	if x.WholeRegressed {
+		what = "the run as a whole"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "a regression in %s: %s held in run %s and does not in run %s, on the goal's current heads. ", x.Name, what, x.base.ID, x.Evidence.ID)
+	switch {
+	case x.Culprit != "":
+		fmt.Fprintf(&b, "Bisecting the %d landings between them puts it on %s: it held just before that card landed and not just after. "+
+			"Send %s's work back as a new card that fixes it (card_create), citing the evidence in %s.", len(x.Suspects), x.Culprit, x.Culprit, x.Evidence.Dir)
+	case x.BisectStuck:
+		b.WriteString("Bisecting the landings between them gave verdicts that contradict each other — it held after a landing it had failed before — so no single card can be blamed and the rig itself may be flaky. ")
+		fmt.Fprintf(&b, "The landings in question: %s. Evidence in %s.", landingIDs(x.Suspects), x.Evidence.Dir)
+	default:
+		fmt.Fprintf(&b, "The landings between them: %s. There was no substrate budget to narrow it further. Evidence in %s.", landingIDs(x.Suspects), x.Evidence.Dir)
+	}
+	return b.String()
+}
+
+func landingIDs(ls []goalLanding) string {
+	ids := make([]string, 0, len(ls))
+	for _, l := range ls {
+		ids = append(ids, string(l.Card))
+	}
+	return strings.Join(ids, ", ")
 }
 
 // goalExperiments reads the experiments goal's items name against its
 // runs. since bounds the inconclusive count: runs that ended before it
 // were seen by a person who chose to carry on.
-func (e *Engine) goalExperiments(ctx context.Context, goal domain.Feature, items []domain.DoneWhen, since int64) []GoalExperiment {
+func (e *Engine) goalExperiments(ctx context.Context, goal domain.Feature, items []domain.DoneWhen, since int64, landings []goalLanding) []GoalExperiment {
 	byName := map[string]*GoalExperiment{}
 	var order []string
 	for _, it := range items {
@@ -317,6 +605,7 @@ func (e *Engine) goalExperiments(ctx context.Context, goal domain.Feature, items
 				x.LastReason, x.ControlFailed = r.Reason, r.ControlFailed
 			}
 		}
+		x.readFrontier(landings)
 		out = append(out, x)
 	}
 	return out
@@ -371,7 +660,7 @@ func (e *Engine) goalExperimentResults(ctx context.Context, goal domain.Feature,
 		return nil
 	}
 	var out []verify.Result
-	for _, r := range experimentCheckResults(items, e.goalExperiments(ctx, goal, items, 0)) {
+	for _, r := range experimentCheckResults(items, e.goalExperiments(ctx, goal, items, 0, nil)) {
 		res := verify.Result{Name: r.Item.CheckName(), Cmd: experimentCmdPrefix + r.Item.Experiment, Output: r.Detail}
 		switch {
 		case !r.Known:

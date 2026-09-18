@@ -109,7 +109,16 @@ type GoalCard struct {
 	TakenOver bool
 	Retry     bool     // a blocked card there is a reason to try again
 	WaitsOn   []string // the substrates a blocked card's plan cites
-	Serves    []string // done-when ids, from the goal doc's card row
+	// Live marks a card that proves itself on the substrate before it lands
+	// (its row's `live: true`); LiveExperiment is the experiment that does,
+	// LiveHead the commit a proof has to be about, LiveProof how far that
+	// has got and LiveWhy what a failed proof found.
+	Live           bool
+	LiveExperiment string
+	LiveHead       string
+	LiveProof      goalpolicy.LiveProof
+	LiveWhy        string
+	Serves         []string // done-when ids, from the goal doc's card row
 }
 
 // GoalView is a goal at one moment: its card, its cards, its budget, its
@@ -176,11 +185,20 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		}
 	}
 	serves := map[domain.FeatureID][]string{}
+	live := map[domain.FeatureID]bool{}
 	for _, r := range v.Rows {
 		if r.ID != "" {
 			serves[r.ID] = r.Serves
+			live[r.ID] = r.Live
 		}
 	}
+	itemExperiment := map[string]string{}
+	for _, d := range v.DoneWhen {
+		itemExperiment[d.ID] = strings.TrimSpace(d.Experiment)
+	}
+	runs := e.ExperimentRuns(goal.ID)
+	e.reapExperimentTrees(ctx, runs)
+	landedAt := map[domain.FeatureID]time.Time{}
 	open, err := e.cfg.Store.OpenDecisions(ctx)
 	if err != nil {
 		return v, err
@@ -228,6 +246,10 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			lastTouch[en.Card] = en.Seq
 			if en.Action != state.GoalMinted && en.Action != state.GoalAttached {
 				lastTouchAt[en.Card] = en.At
+			}
+		case state.GoalLanded:
+			if en.Card != "" {
+				landedAt[en.Card] = en.At
 			}
 		case state.GoalDropped:
 			dropReason[en.Card] = en.Detail
@@ -331,6 +353,17 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		if gc.State == goalpolicy.Verified {
 			gc.Findings = e.openReviewerFindings(&c)
 		}
+		if gc.State == goalpolicy.Verified && live[c.ID] {
+			for _, item := range gc.Serves {
+				if x := itemExperiment[item]; x != "" {
+					gc.Live, gc.LiveExperiment = true, x
+					break
+				}
+			}
+			if gc.Live {
+				e.readLiveProof(ctx, &gc, runs, visitedAt)
+			}
+		}
 		if gc.State == goalpolicy.Blocked {
 			gc.Retry = retrySince > marks.Park.Seq
 			gc.WaitsOn = e.citedSubstrates(&c)
@@ -372,10 +405,23 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			ID: gc.Feature.ID, State: gc.State, Envelope: gc.Envelope, Spent: gc.Spent,
 			DependsOn: gc.DependsOn, TakenOver: gc.TakenOver, Findings: gc.Findings,
 			LeadTries: gc.LeadTries, Reason: gc.Reason, Retry: gc.Retry,
+			Live: gc.Live, LiveExperiment: gc.LiveExperiment, LiveProof: gc.LiveProof, LiveWhy: gc.LiveWhy,
 		})
 	}
 	if goal.Stage == domain.StageImplement || goal.Stage == domain.StageVerify {
-		v.Experiments = e.goalExperiments(ctx, goal, v.DoneWhen, visitedAt.UnixNano())
+		var landings []goalLanding
+		for _, gc := range v.Cards {
+			if at, ok := landedAt[gc.Feature.ID]; ok && gc.State == goalpolicy.Landed && gc.Feature.LandedSHA != "" {
+				landings = append(landings, goalLanding{Card: gc.Feature.ID, Repo: gc.Feature.Repo, SHA: gc.Feature.LandedSHA, At: at})
+			}
+		}
+		sort.Slice(landings, func(i, j int) bool { return landings[i].At.Before(landings[j].At) })
+		v.Experiments = e.goalExperiments(ctx, goal, v.DoneWhen, visitedAt.UnixNano(), landings)
+	}
+	if v.DocPath != "" {
+		if raw, rerr := os.ReadFile(v.DocPath); rerr == nil {
+			_, in.IntegrateEvery, _ = spec.ParseGoalSubstrate(string(raw))
+		}
 	}
 	v.Substrate = substrateBudgetFrom(v.Log, e.ExperimentRuns(goal.ID), e.now())
 	v.NeedsSubstrate = needsSubstrateFrom(v.Log)
@@ -391,8 +437,19 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 				"Turn what it shows into a card (card_create, card_send_back) or, if the item cannot be met, say so (done_when_not_met); "+
 				"leave it and the goal goes on to be judged on this result.", x.Name, describeEvidence(*x.Evidence, nil), x.Evidence.Dir)
 		}
-		if !px.Proven && !px.Running && x.Problem == "" {
+		if !px.Running && x.Problem == "" {
 			px.Held = e.substrateHeld(ctx, x.Substrate)
+		}
+		px.LandedSince = len(x.LandedSince)
+		if len(x.Regressed) > 0 || x.WholeRegressed {
+			px.Regressed = x.Regressed
+			if x.WholeRegressed {
+				px.Regressed = []string{"the run"}
+			}
+			px.Candidates, px.BisectNext, px.Culprit, px.BisectStuck = len(x.Suspects), x.BisectNext, x.Culprit, x.BisectStuck
+			px.RegressionWhy, px.RegressionSeen = x.regressionWhy(), lastLeadAt.After(x.knownAt)
+		} else {
+			px.BisectNext = -1
 		}
 		in.Experiments = append(in.Experiments, px)
 	}
@@ -746,6 +803,19 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		return e.goalDrop(ctx, goal, gc.Feature, a.Reason, ActorGoal)
 	case goalpolicy.Land:
 		gc, _ := view.Card(a.Card)
+		if gc.Live && gc.LiveProof != goalpolicy.LivePassed {
+			// honest reporting over optimistic: the card was meant to be
+			// proven before it landed, and was not
+			why := "the goal could not afford the run"
+			switch gc.LiveProof {
+			case goalpolicy.LiveFailed:
+				why = "its run failed and the lead left it: " + gc.LiveWhy
+			case goalpolicy.LiveGaveUp:
+				why = "its runs kept judging nothing: " + gc.LiveWhy
+			}
+			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadNote, Card: a.Card, By: ActorGoal,
+				Detail: fmt.Sprintf("%s lands without its proof on the substrate — %s", a.Card, why)})
+		}
 		starts, err := e.goalLand(ctx, goal, gc.Feature)
 		res.Start = append(res.Start, starts...)
 		res.Again = true
@@ -781,7 +851,25 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		}
 		return nil
 	case goalpolicy.Run:
-		run, err := e.StartExperiment(ctx, goal, ExperimentStart{Name: a.Experiment, Purpose: a.Reason, Control: e.needsControl(goal.ID, a.Experiment)})
+		start := ExperimentStart{Name: a.Experiment, Purpose: a.Reason, Control: e.needsControl(goal.ID, a.Experiment)}
+		switch a.Reason {
+		case PurposeBisect:
+			for _, x := range view.Experiments {
+				if x.Name == a.Experiment && a.Landing >= 0 && a.Landing < len(x.Suspects) {
+					start.Heads = x.headsAfter(a.Landing)
+				}
+			}
+			if start.Heads == nil {
+				return nil // the snapshot moved on; the next tick decides again
+			}
+		case PurposeCard:
+			gc, ok := view.Card(a.Card)
+			if !ok || gc.LiveHead == "" {
+				return nil
+			}
+			start.Card, start.Heads = a.Card, map[string]string{gc.Feature.Repo: gc.LiveHead}
+		}
+		run, err := e.StartExperiment(ctx, goal, start)
 		if err != nil {
 			// not the conductor's failure to pass up: the run is on record
 			// as not run, and the next tick reads that like any other
@@ -789,8 +877,8 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 				Detail: fmt.Sprintf("a %s run of %s could not start: %v", a.Reason, a.Experiment, err)})
 			return nil
 		}
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRun, Ref: run.ID, Item: a.Experiment, By: ActorGoal,
-			Detail: fmt.Sprintf("%s run of %s on %s", a.Reason, a.Experiment, describeHeads(run.Heads))})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRun, Card: a.Card, Ref: run.ID, Item: a.Experiment, By: ActorGoal,
+			Detail: fmt.Sprintf("%s run of %s on %s", run.Purpose, a.Experiment, describeHeads(run.Heads))})
 		return nil
 	case goalpolicy.Lead:
 		starts, err := e.runLeadTurn(ctx, view, a.Reasons)

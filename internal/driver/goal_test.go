@@ -355,10 +355,20 @@ func TestDriveGoalProvedByAnExperiment(t *testing.T) {
 	if got.Goal.Partial != "" {
 		t.Fatalf("whole: %q", got.Goal.Partial)
 	}
+	// Two runs. The first card's landing is proven early, while the second
+	// card is still to come, and fails — the flag is not there yet, which is
+	// something that never held failing, not a regression, and costs the
+	// goal nothing. The second is the proof of what it hands over.
 	runs := h.eng.ExperimentRuns(g.ID)
-	if len(runs) != 1 || runs[0].Outcome != experiment.Pass {
-		t.Fatalf("one run, made once the work settled: %+v", runs)
+	if len(runs) != 2 || runs[0].Outcome != experiment.Fail || runs[1].Outcome != experiment.Pass {
+		t.Fatalf("an early run and the final one: %+v", runs)
 	}
+	for _, ev := range h.events() {
+		if ev["result"] == "reworking" {
+			t.Fatalf("a run that fails on work still in flight sends nothing back:\n%s", h.buf.String())
+		}
+	}
+	runs = runs[1:]
 	if _, err := os.Stat(filepath.Join(runs[0].Dir, "evidence", "state.txt")); err != nil {
 		t.Fatal("the bundle a reviewer reads is there")
 	}

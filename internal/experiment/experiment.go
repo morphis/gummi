@@ -85,6 +85,9 @@ type Job struct {
 	Purpose    string            `json:"purpose"` // "integration", "verify", "control", "card FD-003", …
 	Heads      map[string]string `json:"heads"`   // repo → commit the run is about
 	Trees      map[string]string `json:"trees"`   // repo → checkout to deploy from
+	// Roots is the repository each tree was snapshotted from, for whoever
+	// removes the snapshots once the run is over.
+	Roots map[string]string `json:"roots,omitempty"`
 	// Control runs the experiment's positive control first.
 	Control bool `json:"control,omitempty"`
 	// ExpectFail marks a negative control: the inputs are the trunk, and
@@ -213,9 +216,12 @@ const (
 	resultFile = "result.json"
 )
 
-// NewID mints a run id that sorts by when it was made.
+// NewID mints a run id that sorts by when it was made, to the nanosecond:
+// a goal reads its runs in order, and two made in the same second are the
+// ordinary case in a test and not unheard of outside one.
 func NewID(now time.Time) string {
-	return now.UTC().Format("20060102T150405") + fmt.Sprintf("-%04x", now.UnixNano()&0xffff)
+	now = now.UTC()
+	return now.Format("20060102T150405") + fmt.Sprintf("-%09d", now.Nanosecond())
 }
 
 // Prepare writes the job into its run directory, ready for Execute — in
@@ -291,7 +297,12 @@ func List(root string) []Result {
 			out = append(out, r)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].Started.Equal(out[j].Started) {
+			return out[i].Started.Before(out[j].Started)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

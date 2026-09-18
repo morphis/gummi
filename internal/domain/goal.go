@@ -120,6 +120,12 @@ type GoalCardRow struct {
 	// other way. A row that names an existing card (ID) ignores it: that
 	// card already has a repository and it is not the row's to change.
 	Repo string `yaml:"repo,omitempty"`
+	// Live marks a card that proves itself on the substrate before it
+	// lands: the goal makes a run of the experiment its items name, on the
+	// goal's heads with this card's branch in place of the goal's. For the
+	// few cards whose whole point is live behaviour — every other card is
+	// proven with the rest, by the goal's integration runs.
+	Live bool `yaml:"live,omitempty"`
 }
 
 // EffectiveType resolves the row's `kind:` to a card type, defaulting the

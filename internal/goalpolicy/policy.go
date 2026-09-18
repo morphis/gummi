@@ -31,6 +31,13 @@
 //     review of the combined branch starts.
 //  10. When nothing can move and a blocked card is why, the goal stalls:
 //     it stops, drops nothing, and says what it is waiting on.
+//  12. While work is still in flight the goal finds out early: when cards
+//     have landed on heads no conclusive run is about, and the substrate
+//     is idle, it makes an integration run — from what is left above the
+//     runs held back for being judged. Something that held before and no
+//     longer does is a regression: the landings since it held are
+//     bisected, and the lead is told which one broke it.
+//  13. A card marked live proves itself on the substrate before it lands.
 //  11. A goal whose items are proved by an experiment does not finish on
 //     heads no conclusive run is about: it makes the run first. A run that
 //     failed goes to the lead once before the goal goes on to be judged
@@ -99,6 +106,16 @@ type Card struct {
 	// Reason says why a Stuck card is stuck, or what a Blocked one is
 	// waiting on.
 	Reason string
+	// Live marks a card that proves itself on the substrate before it
+	// lands — one whose whole point is live behaviour, where landing it on
+	// the strength of unit tests is landing it unproven. LiveProof is how
+	// far that has got for the head the card has now, and LiveWhy says what
+	// a failed or abandoned proof found.
+	Live      bool
+	LiveProof LiveProof
+	LiveWhy   string
+	// LiveExperiment is the experiment that proves it.
+	LiveExperiment string
 	// Retry marks a Blocked card there is a reason to try again: something
 	// happened since it stopped that may have changed its environment. A
 	// retry is a verify session and costs what one costs, so the goal
@@ -129,6 +146,26 @@ type Experiment struct {
 	ControlFailed bool
 	// Held: someone else has the substrate right now.
 	Held bool
+	// LandedSince counts the cards landed on the goal's heads since the
+	// newest conclusive run (all of them, before the first).
+	LandedSince int
+	// Regressed names what held in an earlier run and does not in the one
+	// about the current heads. It is the strongest signal on the code a
+	// substrate gives: something that never held failing is expected,
+	// something that did is a landing's doing.
+	Regressed []string
+	// Candidates is how many landings lie between the run where it held and
+	// the one where it did not. BisectNext is the one to try next (-1 when
+	// there is nothing to try), Culprit the card found to have broken it,
+	// and BisectStuck reports verdicts that contradict each other.
+	Candidates  int
+	BisectNext  int
+	Culprit     domain.FeatureID
+	BisectStuck bool
+	// RegressionWhy is the sentence the lead is woken with, and
+	// RegressionSeen reports that a lead turn has run since it was known.
+	RegressionWhy  string
+	RegressionSeen bool
 }
 
 // SubstrateBudget is a goal's second ledger: the experiment runs it may
@@ -208,6 +245,52 @@ func (b SubstrateBudget) CanExplore() bool {
 // two did.
 const MaxInconclusive = 3
 
+// LiveProof is how far a live card's proof has got.
+type LiveProof int
+
+const (
+	// LiveNone: no conclusive run is about the card's head.
+	LiveNone LiveProof = iota
+	// LiveRunning: one is in flight.
+	LiveRunning
+	// LivePassed and LiveFailed: what the conclusive run said.
+	LivePassed
+	LiveFailed
+	// LiveGaveUp: runs kept judging nothing. The card lands without its
+	// proof and the log says so; the goal's own proof still stands between
+	// it and the hand-over.
+	LiveGaveUp
+)
+
+// Bisect narrows which of n ordered landings broke something that held
+// before the first of them and does not hold after the last. verdicts maps
+// a landing's index to what a run on the state just after it showed. It
+// returns the index to try next, or the culprit once two neighbours
+// disagree; both are -1 when the verdicts contradict each other — held
+// after a landing it failed before — which is a rig that cannot be
+// believed, not a landing to blame.
+func Bisect(n int, verdicts map[int]bool) (next, culprit int) {
+	lo, hi := -1, n-1
+	for i, held := range verdicts {
+		if i < 0 || i >= n {
+			continue
+		}
+		if held && i > lo {
+			lo = i
+		}
+		if !held && i < hi {
+			hi = i
+		}
+	}
+	switch {
+	case n <= 0 || lo >= hi:
+		return -1, -1
+	case hi-lo == 1:
+		return -1, hi
+	}
+	return lo + (hi-lo)/2, -1
+}
+
 // Input is a goal snapshot.
 type Input struct {
 	Stage      domain.Stage
@@ -239,6 +322,10 @@ type Input struct {
 	// Substrate is the goal's substrate budget and what its runs have
 	// spent of it.
 	Substrate SubstrateBudget
+	// IntegrateEvery is how many landings pile up before an integration
+	// run; 0 reads as 1 — whenever the substrate is idle and the heads are
+	// unproven, because an idle scarce resource is pure waste.
+	IntegrateEvery int
 }
 
 // MaxLeadFailures is how many lead turns in a row may fail before the goal
@@ -338,6 +425,9 @@ type Action struct {
 	// Experiment names the experiment a Run makes, or the one a Stall is
 	// waiting to be able to believe.
 	Experiment string
+	// Landing is the landing a bisect Run tries: the run is about the
+	// goal's heads as they were just after it.
+	Landing int
 }
 
 func (a Action) String() string {
@@ -348,6 +438,9 @@ func (a Action) String() string {
 	}
 	if a.Experiment != "" {
 		b.WriteString(" " + a.Experiment)
+	}
+	if a.Kind == Run && a.Reason == "bisect" {
+		fmt.Fprintf(&b, " @%d", a.Landing)
 	}
 	if a.To != 0 {
 		fmt.Fprintf(&b, " → %d", a.To)
@@ -478,6 +571,7 @@ func Decide(in Input) []Action {
 	}
 
 	// land one verified card per tick
+	idle := substrateIdle(in)
 	for _, c := range cards {
 		if c.State != Verified {
 			continue
@@ -485,6 +579,34 @@ func Decide(in Input) []Action {
 		if c.Findings > 0 && c.LeadTries == 0 && in.LeadAvailable && !wrap {
 			addLead(fmt.Sprintf("%s verified with %d open reviewer finding(s) to settle", c.ID, c.Findings))
 			break
+		}
+		if c.Live && !wrap && !c.TakenOver {
+			// A live card's verify proved it compiles. Whether it WORKS is
+			// only visible on the substrate, and the cheapest moment to
+			// find out is before it is on the branch everything else forks
+			// from.
+			switch c.LiveProof {
+			case LiveRunning:
+				continue // another verified card may land meanwhile
+			case LiveFailed:
+				if in.LeadAvailable && c.LeadTries == 0 {
+					addLead(fmt.Sprintf("%s verified, and its run on the substrate failed: %s", c.ID, c.LiveWhy))
+					break
+				}
+				// the lead looked and left it: it lands, as a card with
+				// findings the lead left open does, and the goal's own proof
+				// is what stands between it and the hand-over
+			case LiveNone:
+				if in.Substrate.CanExplore() {
+					if idle {
+						out = append(out, Action{Kind: Run, Card: c.ID, Experiment: c.LiveExperiment, Reason: "card"})
+						idle = false
+					}
+					continue
+				}
+				// it cannot be afforded: landing it unproven is the honest
+				// remainder, and the log says that is what happened
+			}
 		}
 		out = append(out, Action{Kind: Land, Card: c.ID})
 		break
@@ -582,6 +704,15 @@ func Decide(in Input) []Action {
 		}
 	}
 
+	// finding out early: regressions first, then heads nobody has proven
+	if !wrap && !needBudget {
+		acts, reasons := integrate(in, idle && !hasKind(out, Run), settled(cards, state))
+		out = append(out, acts...)
+		for _, r := range reasons {
+			addLead(r)
+		}
+	}
+
 	if in.LeadAvailable && !wrap {
 		leadReasons = append(leadReasons, in.LeadPending...)
 	}
@@ -622,7 +753,7 @@ func Decide(in Input) []Action {
 	// Nothing to do and nothing in flight, and a blocked card is why: the
 	// goal stops and says what it is waiting on. It drops nothing, which
 	// is the whole difference from the wrap-up this used to end in.
-	if !wrap && len(out) == 0 && len(leadReasons) == 0 && count(state, Running) == 0 {
+	if !wrap && len(out) == 0 && len(leadReasons) == 0 && count(state, Running) == 0 && !anyRunning(in) {
 		for _, c := range cards {
 			if state[c.ID] == Blocked {
 				return []Action{{Kind: Stall, Card: c.ID,
@@ -636,6 +767,9 @@ func Decide(in Input) []Action {
 		// proves need evidence about the heads the goal has NOW — and a goal
 		// wrapping up gets the same, because a partial result still has to
 		// say truthfully which of its items hold.
+		if hasKind(out, Run) {
+			return out // a run was just asked for; what it says comes first
+		}
 		if acts, wait := proveFirst(in); wait {
 			return append(out, acts...)
 		}
@@ -649,6 +783,73 @@ func Decide(in Input) []Action {
 		out = append(out, Action{Kind: Finish, Reason: reason})
 	}
 	return out
+}
+
+// substrateIdle reports that none of the goal's experiments has a run in
+// flight and nobody else holds a substrate one of them needs: the goal
+// makes one run at a time, because its experiments as good as always share
+// a substrate and would only queue behind each other.
+func substrateIdle(in Input) bool {
+	for _, x := range in.Experiments {
+		if x.Running || x.Held {
+			return false
+		}
+	}
+	return true
+}
+
+func anyRunning(in Input) bool {
+	for _, x := range in.Experiments {
+		if x.Running {
+			return true
+		}
+	}
+	return false
+}
+
+// canBisect reports that a regression can still be narrowed by a run.
+func (x Experiment) canBisect() bool {
+	return len(x.Regressed) > 0 && x.Culprit == "" && !x.BisectStuck && x.Candidates > 1 && x.BisectNext >= 0
+}
+
+// integrate is how a goal finds out early. For each experiment, in order:
+// a regression is bisected while a run can still narrow it and then told to
+// the lead, once; otherwise heads that enough cards have landed on since
+// anything was proven get an integration run. At most one run, only on an
+// idle substrate, and only from what is left above the runs held back for
+// the goal being judged.
+//
+// Settled work is not explored, it is proven: that run is proveFirst's, and
+// may spend what is held back.
+func integrate(in Input, idle, isSettled bool) (acts []Action, leadReasons []string) {
+	every := max(1, in.IntegrateEvery)
+	for _, x := range in.Experiments {
+		if x.Problem != "" || x.Running {
+			continue
+		}
+		if len(x.Regressed) > 0 {
+			if x.RegressionSeen {
+				continue
+			}
+			if x.canBisect() && in.Substrate.CanExplore() {
+				if idle {
+					acts = append(acts, Action{Kind: Run, Experiment: x.Name, Reason: "bisect", Landing: x.BisectNext})
+					idle = false
+				}
+				continue // the lead is told once there is a name to tell it
+			}
+			leadReasons = append(leadReasons, x.RegressionWhy)
+			continue
+		}
+		if x.Proven || x.ControlFailed || x.Inconclusive >= MaxInconclusive {
+			continue
+		}
+		if idle && !isSettled && x.LandedSince >= every && in.Substrate.CanExplore() {
+			acts = append(acts, Action{Kind: Run, Experiment: x.Name, Reason: "integration"})
+			idle = false
+		}
+	}
+	return acts, leadReasons
 }
 
 // proveFirst is what stands between settled work and the goal's review:

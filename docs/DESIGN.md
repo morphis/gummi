@@ -2838,6 +2838,52 @@ the rig could be believed: runs made, how many judged nothing, how many were
 failures that did not reproduce, and the substrate minutes they held. A pass
 from a rig that wavered reads differently from one that never did.
 
+### 17.9 Finding out early
+
+If only the goal's verify touches the substrate, dozens of cards land on the
+strength of unit tests and the first real signal arrives at the end —
+precisely what a budgeted unattended run cannot absorb. If every card
+verifies live, the substrate is the bottleneck and the lanes mean nothing.
+The middle is what a merge queue does, and a goal branch already has the
+property that makes it cheap: **every card lands as one commit**.
+
+- **Every card**: its local checks, as always. They falsify compilation.
+- **The goal branch, continuously** (`goalpolicy.integrate`): an
+  *integration run* whenever cards have landed on heads no conclusive run is
+  about and the substrate is idle — one run amortised over every landing
+  since the last. An idle scarce resource is pure waste, so that is the
+  default cadence; `integrate_every: N` batches when runs are dear. It is
+  bought only from what is left above the runs held back for being judged
+  (§17.3), and a rig that has stopped being believable is not asked again.
+- **A card that asks** (`live: true`): the few cards whose whole point is
+  live behaviour prove themselves *before* they land, on the goal's heads
+  with their own branch in place of the goal's. A failed proof goes to the
+  lead once, as open findings do. One that cannot be afforded, or that the
+  rig would not judge, lands anyway with the log saying it landed unproven —
+  the goal's own proof still stands between it and the hand-over.
+- **The frontier.** A run reports per assertion, so a goal knows everything
+  that has *ever* held on its heads (`GoalExperiment.Green`), and that set
+  should only grow. Something that never held failing is expected and costs
+  nothing. Something that **held and no longer does** is a landing's doing —
+  the strongest statement about the code a substrate makes — and the goal
+  bisects the landings between the two runs (`goalpolicy.Bisect`, log₂ n
+  runs, each about the heads as they were just after one landing), then
+  tells the lead which card. Verdicts that contradict each other — held
+  after a landing it had failed before — blame nobody: that is a rig to
+  distrust, and the lead is told so instead.
+
+Every run deploys from **detached snapshots** of the exact commits it
+records, under its run directory, never from a goal tree: a goal tree is
+what cards land on, and a landing under a running deploy would make the run
+evidence about a commit it only half deployed. The snapshots go when the run
+is over; the evidence stays.
+
+One run at a time per goal, and only on a substrate nobody holds. Lanes keep
+their meaning — they bound the *agent* work that runs at once, and all of it
+still runs in parallel — while live proof is a second, serial queue. After
+mutual exclusion that is the honest concurrency figure for a programme like
+this: as many cards thinking as the lanes allow, and one experiment.
+
 ## 18. Stacks — slicing one piece of work into several landings
 
 A **stack** is an ordered chain of cards in one repository whose branches
