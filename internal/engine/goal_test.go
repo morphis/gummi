@@ -123,6 +123,9 @@ func TestGoalPlanGateRefusesUnrunnablePlans(t *testing.T) {
 		"no done-when": strings.Replace(testGoalDoc, "- id: DW-1\n  says: the cache file exists\n  check: test -f cache.txt\n- id: DW-2\n  says: the docs mention the cache\n  judge: true\n", "", 1),
 		"unserved":     strings.Replace(testGoalDoc, "  serves: [DW-2]\n", "  serves: [DW-1]\n", 1),
 		"no cards":     strings.Replace(testGoalDoc, "- title: local cache for export\n  serves: [DW-1]\n  envelope: 600\n- title: document the cache\n  serves: [DW-2]\n  depends_on: [local cache for export]\n", "", 1),
+		// a row that promises live proof with nothing that could give it:
+		// read as an ordinary card, and nothing anywhere says so
+		"live with no experiment": strings.Replace(testGoalDoc, "  serves: [DW-1]\n  envelope: 600\n", "  serves: [DW-1]\n  live: true\n  envelope: 600\n", 1),
 	}
 	for name, doc := range cases {
 		t.Run(name, func(t *testing.T) {

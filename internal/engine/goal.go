@@ -1826,6 +1826,32 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 			return fmt.Sprintf("%s is served by no card", it.ID)
 		}
 	}
+	// A live row is a promise that this card is proven on the substrate
+	// before it lands, and the only thing that can prove it is an
+	// experiment one of its items names. A row that promises it with
+	// nothing behind it is read as an ordinary card and nothing says so,
+	// which is the one way a plan can be wrong about proof without
+	// anybody finding out.
+	byItem := map[string]string{}
+	for _, it := range items {
+		byItem[it.ID] = strings.TrimSpace(it.Experiment)
+	}
+	for _, r := range rows {
+		if !r.Live {
+			continue
+		}
+		proven := false
+		for _, s := range r.Serves {
+			if byItem[s] != "" {
+				proven = true
+			}
+		}
+		if !proven {
+			return fmt.Sprintf("card %q is marked live, but no item it serves (%s) is proved by an experiment — "+
+				"a live card is one proved on the substrate before it lands, so give one of those items an `experiment:`, or drop `live:`",
+				r.Title, strings.Join(r.Serves, ", "))
+		}
+	}
 	if _, err := spec.ParseGoalLanes(doc); err != nil {
 		return err.Error()
 	}
