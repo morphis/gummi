@@ -441,6 +441,12 @@ func TestAMarkerThatRepeatsItsOwnAuthorStillResolves(t *testing.T) {
 	if n := len(d.OpenQuestions()); n != 0 {
 		t.Errorf("open threads = %d, want none", n)
 	}
+	// and the same again without the at-sign, which is how the other
+	// half of the real markers were written
+	d = Parse("## Review\n\ntext\n\n%% @reviewer(2026-09-19): reviewer: resolved — re-ran go vet; exit 0.\n")
+	if !d.Markers[0].Resolved {
+		t.Errorf("bare-name prefix reads as open: %q", d.Markers[0].Text)
+	}
 }
 
 // Only the marker's own author is stripped: addressing somebody else is

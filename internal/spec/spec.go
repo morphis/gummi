@@ -89,16 +89,20 @@ var (
 )
 
 // dropSelfAddress removes an author's own name repeated at the head of
-// its marker text: `%% @reviewer(date): @reviewer: resolved — …`.
+// its marker text, with or without the at-sign:
 //
-// Agents write it that way often enough to matter, and it is pure noise —
-// the prefix the parser already read off the line, said again. Left in,
-// it pushed the word the resolution test looks for off the start of the
-// text, so a marker that said "resolved" in plain English parsed as
+//	%% @reviewer(date): @reviewer: resolved — …
+//	%% @reviewer(date): reviewer: resolved — …
+//
+// Agents write it both ways often enough to matter, and it is pure noise
+// — the prefix the parser already read off the line, said again. Left
+// in, it pushed the word the resolution test looks for off the start of
+// the text, so a marker that said "resolved" in plain English parsed as
 // open and stayed open forever. On a goal that meant a lead turn for
 // every verified card, woken to settle findings that were pass verdicts
 // already closed, and a hand-over that listed them as findings the lead
-// had declined.
+// had declined. Two goals on a two-function repository paid for that
+// turn and reported six findings between them that did not exist.
 //
 // Only the marker's OWN author is stripped. A reviewer that opens with
 // "@architect: …" is addressing somebody, which is content, and one that
@@ -108,11 +112,12 @@ func dropSelfAddress(author, text string) string {
 	if author == "" {
 		return text
 	}
-	rest, ok := strings.CutPrefix(text, "@"+author+":")
-	if !ok {
-		return text
+	for _, prefix := range []string{"@" + author + ":", author + ":"} {
+		if rest, ok := strings.CutPrefix(text, prefix); ok {
+			return strings.TrimSpace(rest)
+		}
 	}
-	return strings.TrimSpace(rest)
+	return text
 }
 
 // isIndented reports whether a line begins with whitespace — the signal
