@@ -492,6 +492,25 @@ func (p *Pool) Remove(ctx context.Context, f *domain.Feature, force bool) error 
 // its tree gone: the cleanup's job is the checkouts, and unmerged work is
 // never a cleanup's to discard.
 func (p *Pool) removeGoalTrees(ctx context.Context, goal *domain.Feature) error {
+	return p.sweepGoalTrees(ctx, goal, false)
+}
+
+// DeleteGoalTrees removes a goal's trees in every repository but its
+// home, branch and all. It is removeGoalTrees for the caller that is
+// destroying the goal rather than tidying up after it (the board's D):
+// there, a branch left standing belongs to a card, a tree and a record
+// that are all gone, so nothing will ever offer to remove it again.
+//
+// The home repo's tree is the goal card's own worktree and goes the way
+// every card's does, through Remove — which, finding no siblings left on
+// disk, has nothing more to sweep.
+func (p *Pool) DeleteGoalTrees(ctx context.Context, goal *domain.Feature) error {
+	return p.sweepGoalTrees(ctx, goal, true)
+}
+
+// sweepGoalTrees is both of the above, over every repository the goal
+// has a tree in but its home.
+func (p *Pool) sweepGoalTrees(ctx context.Context, goal *domain.Feature, force bool) error {
 	for _, repo := range p.goalTreeRepos(*goal) {
 		if repo == goal.Repo {
 			continue
@@ -500,7 +519,11 @@ func (p *Pool) removeGoalTrees(ctx context.Context, goal *domain.Feature) error 
 		if err != nil {
 			return err
 		}
-		if err := m.RemoveGoalTree(ctx, goal, goalTreeName(*goal, repo)); err != nil {
+		remove := m.RemoveGoalTree
+		if force {
+			remove = m.DeleteGoalTree
+		}
+		if err := remove(ctx, goal, goalTreeName(*goal, repo)); err != nil {
 			var unmerged *unmergedBranchError
 			if errors.As(err, &unmerged) {
 				continue

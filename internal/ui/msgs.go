@@ -1152,7 +1152,22 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 	}
 }
 
-// deleteFeature removes worktree, branch, and record.
+// deleteFeature removes worktree, branch, and record — and, for a goal,
+// its cards' too.
+//
+// A goal is deleted with its cards because it cannot be deleted without
+// them: a card of a goal resolves to a manager rooted at the GOAL's tree
+// in the card's own repository (worktree.Pool.managerForGoalCard), so
+// the moment those trees come out, every card's checkout is gone with
+// them and its branch is measured against a trunk that never took its
+// commits. Cards kept back would be rows pointing at a goal that no
+// longer exists, holding branches no surface would ever offer to remove
+// again. So they go first, while the trees that reach them are still
+// standing, and the goal follows.
+//
+// Nothing is touched until everything can be: a card another card
+// outside the goal depends on, or one another gummi process is driving,
+// refuses the whole delete rather than half-doing it.
 func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 	return m.cardLocked(id, func() tea.Msg {
 		ctx := context.Background()
@@ -1160,37 +1175,173 @@ func (m *Shell) deleteFeature(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		if ok, err := m.wt.Exists(ctx, &f); err == nil && ok {
-			if err := m.wt.Remove(ctx, &f, true); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
+		var cards []domain.Feature
+		if f.IsGoal() {
+			if cards, err = m.store.ListGoalCards(ctx, f.ID); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 		}
-		// ...and the scratch tree, which is the only tree a research card
-		// ever has.
-		if err := m.wt.RemoveScratch(ctx, &f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
+		// the cards' locks, for the same reason the goal's was taken: a
+		// card a headless run is driving is not this board's to delete.
+		for _, c := range cards {
+			release, lerr := m.locks.Acquire(c.ID)
+			if lerr != nil {
+				return noticeMsg{text: cardLockedNotice(c.ID, lerr), isErr: true}
+			}
+			defer release()
 		}
-		// a feature that never left Spec has no branch — only delete
-		// one that exists
-		if ok, err := m.wt.BranchExists(ctx, &f); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		} else if ok {
-			if err := m.wt.DeleteBranch(ctx, &f, true); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
+		if notice := m.dependentsOutside(ctx, f, cards); notice != nil {
+			return *notice
+		}
+		// the edges among the set are the set's own business and go with
+		// it; after this every remaining dependent is outside, and there
+		// are none (dependentsOutside).
+		for _, c := range append(append([]domain.Feature(nil), cards...), f) {
+			deps, derr := m.store.ListDependents(ctx, c.ID)
+			if derr != nil {
+				return noticeMsg{text: sanitize(derr.Error()), isErr: true}
+			}
+			for _, d := range deps {
+				if err := m.store.RemoveDependency(ctx, d, c.ID); err != nil {
+					return noticeMsg{text: sanitize(err.Error()), isErr: true}
+				}
 			}
 		}
-		if err := m.store.DeleteFeature(ctx, id); err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
+		// a goal tree removed by hand takes its cards out of reach —
+		// checkout, branch and all — so it comes back for as long as the
+		// sweep needs it, on the branch that is still there, and goes
+		// again with the rest below. Best effort: whatever cannot be cut
+		// is reported by the card that needed it. A goal with no cards
+		// needs no tree recut to remove one.
+		if len(cards) > 0 {
+			for _, repo := range goalRepos(f, cards) {
+				_, _ = m.wt.EnsureGoalTree(ctx, &f, repo)
+			}
 		}
-		// the artifact and its draft are workspace files keyed to the
-		// record — they go with it (best effort: an orphan is only clutter)
-		_ = os.RemoveAll(filepath.Join(m.wt.Root(), f.ArtifactPath()))
-		_ = os.RemoveAll(filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(&f)))
-		// the live-stream mirror is keyed to the record too; without this
-		// a deleted card's last session would linger as a watchable file
-		// (harmless — its owner is gone — but clutter all the same).
-		_ = os.Remove(m.ws.LiveFile(id))
-		m.dropSession(id)
-		return noticeMsg{text: fmt.Sprintf("%s deleted", id), reload: true}
+		var unreachable []domain.FeatureID
+		for _, c := range cards {
+			err := m.deleteCard(ctx, &c)
+			if errors.Is(err, worktree.ErrGoalWorktreeMissing) {
+				// nothing on disk answers for this card any more. Its row
+				// still does, and a row pointing at a goal that is gone is
+				// the worse of the two things to leave behind.
+				if derr := m.store.DeleteFeature(ctx, c.ID); derr != nil {
+					return noticeMsg{text: sanitize(derr.Error()), isErr: true}
+				}
+				m.dropSession(c.ID)
+				unreachable = append(unreachable, c.ID)
+				continue
+			}
+			if err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+		}
+		if err := m.deleteCard(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		text := fmt.Sprintf("%s deleted", id)
+		if n := len(cards); n > 0 {
+			ids := make([]domain.FeatureID, 0, n)
+			for _, c := range cards {
+				ids = append(ids, c.ID)
+			}
+			text += ", with its " + itoa(n) + " card" + plural(n) + " — " + idList(ids)
+		}
+		if n := len(unreachable); n > 0 {
+			text += " · " + idList(unreachable) + ": no goal tree left to reach, so branch" +
+				plural(n) + " kept"
+		}
+		return noticeMsg{text: text, reload: true}
 	})
+}
+
+// goalRepos names every repository a goal has work in: its own and its
+// cards'. Empty for anything but a goal, which has no cards to name.
+func goalRepos(f domain.Feature, cards []domain.Feature) []string {
+	if !f.IsGoal() {
+		return nil
+	}
+	out, seen := []string{f.Repo}, map[string]bool{f.Repo: true}
+	for _, c := range cards {
+		if !seen[c.Repo] {
+			seen[c.Repo] = true
+			out = append(out, c.Repo)
+		}
+	}
+	return out
+}
+
+// dependentsOutside refuses the delete when a card outside the set being
+// deleted depends on one inside it. The edge is the outsider's, not the
+// goal's, so the reader is told which pair to break rather than having a
+// dependency silently dropped under a card still counting on it.
+func (m *Shell) dependentsOutside(ctx context.Context, f domain.Feature, cards []domain.Feature) *noticeMsg {
+	inSet := map[domain.FeatureID]bool{f.ID: true}
+	for _, c := range cards {
+		inSet[c.ID] = true
+	}
+	// the goal first, then its cards in the order they were minted, so
+	// two runs of the same board report the same pair.
+	for _, c := range append([]domain.Feature{f}, cards...) {
+		id := c.ID
+		deps, err := m.store.ListDependents(ctx, id)
+		if err != nil {
+			return &noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		for _, d := range deps {
+			if !inSet[d] {
+				return &noticeMsg{text: fmt.Sprintf("%s depends on %s — remove that dependency first", d, id), isErr: true}
+			}
+		}
+	}
+	return nil
+}
+
+// deleteCard takes one card off disk and out of the store: its worktree,
+// its branch, its record, and the workspace files keyed to it. A goal's
+// trees in the repositories it spans go too — its home one is its own
+// card's worktree and goes with every other card's.
+func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
+	if f.IsGoal() {
+		if err := m.wt.DeleteGoalTrees(ctx, f); err != nil {
+			return err
+		}
+	}
+	if ok, err := m.wt.Exists(ctx, f); err == nil && ok {
+		if err := m.wt.Remove(ctx, f, true); err != nil {
+			return err
+		}
+	}
+	// ...and the scratch tree, which is the only tree a research card
+	// ever has.
+	if err := m.wt.RemoveScratch(ctx, f); err != nil {
+		return err
+	}
+	// a feature that never left Spec has no branch — only delete
+	// one that exists
+	if ok, err := m.wt.BranchExists(ctx, f); err != nil {
+		return err
+	} else if ok {
+		if err := m.wt.DeleteBranch(ctx, f, true); err != nil {
+			return err
+		}
+	}
+	if err := m.store.DeleteFeature(ctx, f.ID); err != nil {
+		return err
+	}
+	// the artifact and its draft are workspace files keyed to the
+	// record — they go with it (best effort: an orphan is only clutter)
+	_ = os.RemoveAll(filepath.Join(m.wt.Root(), f.ArtifactPath()))
+	_ = os.RemoveAll(filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)))
+	// the live-stream mirror is keyed to the record too; without this
+	// a deleted card's last session would linger as a watchable file
+	// (harmless — its owner is gone — but clutter all the same).
+	_ = os.Remove(m.ws.LiveFile(f.ID))
+	// what a goal knew that no card owned is keyed to the record in the
+	// same way (state.Workspace.GoalNotebookDir).
+	if f.IsGoal() {
+		_ = os.RemoveAll(m.ws.GoalNotebookDir(f.ID))
+	}
+	m.dropSession(f.ID)
+	return nil
 }

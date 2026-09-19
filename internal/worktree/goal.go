@@ -279,6 +279,22 @@ func (p *Pool) EnsureGoalTree(ctx context.Context, goal *domain.Feature, repo st
 		return t, nil
 	}
 	if t.Home {
+		// The goal's own worktree, cut the way every card's is — except
+		// when its branch is there and its tree is not, which is a tree
+		// removed by hand. Manager.Create refuses an existing branch,
+		// unable to tell a leftover from another card's collision, while
+		// CreateGoalTree checks it out: the goal branch is not a leftover,
+		// it is the thing being recut.
+		have, err := t.mgr.BranchExists(ctx, goal)
+		if err != nil {
+			return GoalTree{}, err
+		}
+		if have {
+			if _, err := t.mgr.CreateGoalTree(ctx, goal, goalTreeName(*goal, repo)); err != nil {
+				return GoalTree{}, err
+			}
+			return t, nil
+		}
 		if _, err := t.mgr.Ensure(ctx, goal); err != nil {
 			return GoalTree{}, err
 		}
@@ -317,6 +333,12 @@ func (m *Manager) CreateGoalTree(ctx context.Context, goal *domain.Feature, name
 	if _, err := os.Stat(p); err == nil {
 		return p, nil
 	}
+	// A registration whose directory is gone — a tree removed by hand —
+	// makes git refuse the path it is still registered at ("missing but
+	// already registered"), which is exactly the case this is meant to
+	// recover from. Clear it first, as Manager.unregisterStaleWorktree
+	// does for a card's own tree.
+	_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
 	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "HEAD"); err != nil {
 		return "", fmt.Errorf("repository has no commits yet; commit something before creating a goal worktree: %w", err)
 	}
@@ -355,6 +377,22 @@ func (m *Manager) CreateGoalTree(ctx context.Context, goal *domain.Feature, name
 // provisional home a goal is minted with, before its plan says where its
 // work actually is.
 func (m *Manager) RemoveGoalTree(ctx context.Context, goal *domain.Feature, name string) error {
+	return m.removeGoalTree(ctx, goal, name, false)
+}
+
+// DeleteGoalTree removes a goal's tree in this repository and its branch
+// with it, merged or not. It is RemoveGoalTree for the caller that is
+// destroying the goal rather than tidying up after it (the board's D,
+// whose confirmation says the branch goes): a goal spanning repositories
+// keeping N-1 branches of work whose card, tree and record are all gone
+// is not a kept promise, it is litter nothing points at any more.
+func (m *Manager) DeleteGoalTree(ctx context.Context, goal *domain.Feature, name string) error {
+	return m.removeGoalTree(ctx, goal, name, true)
+}
+
+// removeGoalTree is both of the above: the tree, then the branch it was
+// holding, with only the branch's safety catch to choose.
+func (m *Manager) removeGoalTree(ctx context.Context, goal *domain.Feature, name string, force bool) error {
 	p, err := m.cardTreePathNamed(m.worktreesDir(), goal, name)
 	if err != nil {
 		return err
@@ -367,6 +405,12 @@ func (m *Manager) RemoveGoalTree(ctx context.Context, goal *domain.Feature, name
 	}
 	if ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil || !ok {
 		return err
+	}
+	if force {
+		if _, err := runGit(ctx, m.repo, "branch", "-D", "--", branch); err != nil {
+			return err
+		}
+		return m.forkStore.ClearForkPoint(ctx, goal.ID)
 	}
 	// -d, never -D: a branch with commits of its own is work, and work is
 	// never what this is for. Git refusing it is the right outcome, and it

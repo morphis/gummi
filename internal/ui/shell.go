@@ -3215,12 +3215,18 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "D":
 		if r, ok := m.selected(); ok {
 			f := r.F
+			detail := f.Title + " — removes worktree, branch, and record"
+			// a goal's cards go with it (deleteFeature says why), so the
+			// dialog says so before the key that cannot be undone.
+			if n := m.goalCardCount(f); n > 0 {
+				detail += ", and the same for its " + itoa(n) + " card" + plural(n)
+			}
 			m.Overlay.Push(&confirmDialog{
 				id:           "confirm-delete",
 				cancelLabel:  "Keep",
 				confirmLabel: "Delete",
 				question:     "delete " + string(f.ID) + "?",
-				detail:       f.Title + " — removes worktree, branch, and record",
+				detail:       detail,
 				onConfirm:    func() tea.Cmd { return m.deleteFeature(f.ID) },
 			})
 		}

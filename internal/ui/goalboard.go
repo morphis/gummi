@@ -17,6 +17,23 @@ func (m *Shell) rowIndex(id domain.FeatureID) int {
 	return -1
 }
 
+// goalCardCount is how many of the board's rows belong to f, zero for
+// anything but a goal. It is the loaded board's count rather than the
+// store's, which is what a dialog drawn on the render path can ask for;
+// the delete itself reads the store.
+func (m *Shell) goalCardCount(f domain.Feature) int {
+	if !f.IsGoal() {
+		return 0
+	}
+	n := 0
+	for _, r := range m.rows {
+		if r.F.GoalID == f.ID {
+			n++
+		}
+	}
+	return n
+}
+
 // isFoldedChild reports whether rows[idx] is a goal card shown under its
 // loaded goal.
 func (m *Shell) isFoldedChild(idx int) bool {
