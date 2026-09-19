@@ -348,6 +348,13 @@ func (d *Driver) settleGoalCard(ctx context.Context, r childResult) {
 		return
 	}
 	_ = d.store.AppendPark(ctx, r.id, c.Stage, state.ParkReasonGaveUp, detail, "", time.Now())
+	// A drive that failed leaves nothing working, and the session it was
+	// driving must go with it. The conductor reads a card with a live
+	// session as RUNNING (goalCardState), so a session left behind by a
+	// backend that never answered is a card the goal waits on for ever:
+	// no lead turn, no drop, no stall, no exit — a goal that has stopped
+	// without saying it stopped.
+	d.eng.Drop(r.id)
 }
 
 // goalVerifyNotPassed handles a goal whose verify did not pass. A goal that
