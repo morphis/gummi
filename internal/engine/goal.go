@@ -583,8 +583,22 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 	}
 	if s := e.Get(c.ID); s != nil {
 		switch s.State() {
-		case StateRunning, StateQueued, StateInteractive:
+		case StateRunning, StateQueued:
 			return goalpolicy.Running, ""
+		case StateInteractive:
+			// An interactive session is a conversation, and a conversation
+			// nobody is having is not a card that is working. A process
+			// killed mid-turn leaves its session persisted, and the next
+			// gummi rehydrates it exactly as it was — interactive — so a
+			// goal read the card as running and never acted on it again:
+			// no lead turn, no drop, no stall, no exit, across every
+			// resume, because each resume restores the same snapshot.
+			// CardIsLive asks the question the log cannot answer — is any
+			// process driving this card right now — and its pid check is
+			// what a killed process fails.
+			if e.cfg.Workspace.Root == "" || state.CardIsLive(e.cfg.Workspace, c.ID) {
+				return goalpolicy.Running, ""
+			}
 		}
 	}
 	// A card between sessions may still be working: check discovery and its
