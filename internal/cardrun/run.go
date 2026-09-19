@@ -141,6 +141,23 @@ type Money struct {
 	Corrected float64
 	Reproved  float64
 
+	// Elsewhere is what the card spent outside any stage session, and
+	// ElsewhereBy names it by role. FirstPass + Rework + Elsewhere is
+	// Credits.
+	//
+	// Not every turn a card pays for is a pass. A goal's lead turns are
+	// short synchronous sessions that open and close between ticks, and
+	// the one-shot scribe passes — check discovery, the estimate — are
+	// one turn each with no stage_enter to bracket them. None of them
+	// leaves the two events a Session is built from, so a report that
+	// listed only passes silently dropped them: on a one-card goal that
+	// was 68 of 149 credits, the lead's 50 among them, missing from the
+	// one panel whose whole job is to say where the money went. The
+	// stage totals had it all along, which is worse than either — the
+	// same report said two different things about what the card cost.
+	Elsewhere   float64
+	ElsewhereBy []Bucket
+
 	ByStage []Bucket
 	ByRole  []Bucket
 	ByModel []Bucket

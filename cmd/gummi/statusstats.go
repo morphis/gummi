@@ -87,6 +87,11 @@ type statusStatsMoney struct {
 	ReworkShare float64 `json:"rework_share"`
 	Corrected   float64 `json:"corrected"`
 	Reproved    float64 `json:"reproved"`
+	// Elsewhere is what the card spent on turns that are not stage
+	// sessions — a goal's lead turns, the one-shot scribe passes — and
+	// so appear in no row of `passes`. ElsewhereBy names it by role.
+	Elsewhere   float64        `json:"elsewhere"`
+	ElsewhereBy []statusBucket `json:"elsewhere_by,omitempty"`
 
 	ByStage []statusBucket    `json:"by_stage,omitempty"`
 	ByRole  []statusBucket    `json:"by_role,omitempty"`
@@ -221,6 +226,8 @@ func statsPayload(r cardrun.Run) *statusStats {
 			ReworkShare: round4(r.Money.ReworkShare()),
 			Corrected:   round2(r.Money.Corrected),
 			Reproved:    round2(r.Money.Reproved),
+			Elsewhere:   round2(r.Money.Elsewhere),
+			ElsewhereBy: bucketPayload(r.Money.ElsewhereBy),
 			ByStage:     bucketPayload(r.Money.ByStage),
 			ByRole:      bucketPayload(r.Money.ByRole),
 			ByModel:     bucketPayload(r.Money.ByModel),
@@ -345,6 +352,16 @@ func renderStats(w io.Writer, view statusView, r *statusStats) {
 	fmt.Fprintf(w, "  %-12s %s %8.2f  credits\n", "", strings.Repeat(" ", 24), r.Money.Credits)
 	if r.Money.Estimated > 0 {
 		fmt.Fprintf(w, "  ~%.2f of it estimated — not yet settled by the provider\n", r.Money.Estimated)
+	}
+	// Spend that belongs to no pass, named before the pass table is read,
+	// so nobody adds the passes up and wonders where the rest went.
+	if r.Money.Elsewhere > 0 {
+		var by []string
+		for _, b := range r.Money.ElsewhereBy {
+			by = append(by, fmt.Sprintf("%s %.2f", b.Name, b.Credits))
+		}
+		fmt.Fprintf(w, "  %.2f of it on turns that are not passes (%s) — no row below holds it\n",
+			r.Money.Elsewhere, strings.Join(by, ", "))
 	}
 	fmt.Fprintln(w)
 

@@ -478,3 +478,44 @@ func TestReportUnionsOverlappingDecisions(t *testing.T) {
 		t.Errorf("on you = %v, want %v — one union, not the 4m the two spans sum to", run.Clock.OnYou, want)
 	}
 }
+
+// Not every turn a card pays for is a pass. A goal's lead turns and the
+// one-shot scribe passes leave no stage_enter to bracket them, so the
+// pass list cannot hold them — and a report that only listed passes said
+// a one-card goal cost 80 credits while its own stage table said 149.
+func TestReportNamesSpendThatBelongsToNoPass(t *testing.T) {
+	passes := []pass{{stage: domain.StagePlan, role: "architect", flavor: "stage", minutes: 2, turns: 4, credits: 19.2}}
+	evs, spend := build(t, passes)
+	// the lead's turns and a one-shot scribe pass: rollup rows under
+	// session keys no stage session ever opened
+	spend = append(spend,
+		state.StageSpend{Stage: domain.StageImplement, Session: "lead-1", Role: "lead",
+			Model: "m", Credits: 50.38, UpdatedAt: base},
+		state.StageSpend{Stage: domain.StageImplement, Session: "oneshot-1", Role: "scribe",
+			Model: "m", Credits: 18.29, UpdatedAt: base},
+	)
+	run := Report(Input{Feature: card(87.87, 2000), Events: evs, Spend: spend})
+
+	if want := 68.67; run.Money.Elsewhere < want-0.01 || run.Money.Elsewhere > want+0.01 {
+		t.Errorf("elsewhere = %.2f, want %.2f", run.Money.Elsewhere, want)
+	}
+	if got := run.Money.FirstPass + run.Money.Rework + run.Money.Elsewhere; got < 87.86 || got > 87.88 {
+		t.Errorf("first pass + rework + elsewhere = %.2f, want the card's %.2f", got, 87.87)
+	}
+	// and it says which roles, because "the lead" and "a scribe one-shot"
+	// are different facts about where a goal's money went
+	if len(run.Money.ElsewhereBy) != 2 || run.Money.ElsewhereBy[0].Name != "lead" {
+		t.Errorf("elsewhere by role = %+v, want the lead's share named and largest", run.Money.ElsewhereBy)
+	}
+}
+
+// A card whose every credit belongs to a pass reports none elsewhere,
+// rather than a rounding crumb that would make a reader look for a turn
+// that never happened.
+func TestReportNamesNothingElsewhereWhenEveryPassIsAccountedFor(t *testing.T) {
+	evs, spend := build(t, bg004())
+	run := Report(Input{Feature: card(42.43, 1350), Events: evs, Spend: spend})
+	if run.Money.Elsewhere != 0 {
+		t.Errorf("elsewhere = %v, want nothing", run.Money.Elsewhere)
+	}
+}

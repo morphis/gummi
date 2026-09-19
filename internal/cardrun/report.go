@@ -275,7 +275,17 @@ func money(sess []Session, spend []state.StageSpend, f domain.Feature) Money {
 		Credits:   f.Spend.Credits,
 		Estimated: f.Spend.EstimatedCredits,
 	}
+	// Every session's generation, so a rollup row can be told from one a
+	// pass accounts for. A session with no key predates the keyed rollup
+	// and can match nothing, which is why the empty key is never added.
+	passKeys := map[string]bool{}
+	for _, s := range sess {
+		if s.Key != "" {
+			passKeys[s.Key] = true
+		}
+	}
 	byStage, byRole, byModel := map[string]float64{}, map[string]float64{}, map[string]float64{}
+	elsewhere := map[string]float64{}
 	for _, r := range spend {
 		byStage[string(r.Stage)] += r.Credits
 		byRole[r.Role] += r.Credits
@@ -283,6 +293,10 @@ func money(sess []Session, spend []state.StageSpend, f domain.Feature) Money {
 		m.InputTokens += r.InputTokens
 		m.CachedTokens += r.CachedTokens
 		m.OutputTokens += r.OutputTokens
+		if !passKeys[r.Session] {
+			m.Elsewhere += r.Credits
+			elsewhere[r.Role] += r.Credits
+		}
 	}
 	for _, s := range sess {
 		switch {
@@ -296,6 +310,7 @@ func money(sess []Session, spend []state.StageSpend, f domain.Feature) Money {
 			m.Corrected += s.Credits
 		}
 	}
+	m.ElsewhereBy = buckets(elsewhere)
 	m.ByStage = buckets(byStage)
 	m.ByRole = buckets(byRole)
 	m.ByModel = buckets(byModel)

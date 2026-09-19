@@ -211,6 +211,16 @@ func statsMoneyLines(s *theme.Styles, r cardrun.Run, clip func(string) string) [
 			s.Muted.Render(fmt.Sprintf(" redone %.2f (%.0f%%)",
 				r.Money.Rework, r.Money.ReworkShare()*100)))
 	}
+	// Spend no pass holds, named here rather than left for a reader to
+	// find by adding the pass list up and coming out short.
+	if r.Money.Elsewhere > 0 {
+		var by []string
+		for _, b := range r.Money.ElsewhereBy {
+			by = append(by, fmt.Sprintf("%s %.2f", b.Name, b.Credits))
+		}
+		add("  " + s.Muted.Render(fmt.Sprintf("%.2f on turns that are not passes — %s",
+			r.Money.Elsewhere, strings.Join(by, ", "))))
+	}
 	return out
 }
 
