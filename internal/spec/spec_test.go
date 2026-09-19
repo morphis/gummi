@@ -421,3 +421,40 @@ func TestContinuationRunEndsAtTheNextContentLine(t *testing.T) {
 		t.Errorf("second thread anchored to line %d, want %d (the child bullet)", threads[1].Anchor, want)
 	}
 }
+
+// An author that says its own name twice has still resolved the thread.
+// A reviewer wrote `%% @reviewer(date): @reviewer: resolved — verified`
+// on a card that had nothing wrong with it; the repeated prefix pushed
+// "resolved" off the start of the text, the marker stayed open forever,
+// and the goal woke its lead to settle a finding that did not exist.
+func TestAMarkerThatRepeatsItsOwnAuthorStillResolves(t *testing.T) {
+	d := Parse("## Review\n\ntext\n\n%% @reviewer(2026-09-19): @reviewer: resolved — verified, all checks pass.\n")
+	if len(d.Markers) != 1 {
+		t.Fatalf("markers = %d, want 1", len(d.Markers))
+	}
+	if !d.Markers[0].Resolved {
+		t.Errorf("marker reads as open: %q", d.Markers[0].Text)
+	}
+	if got := d.Markers[0].Text; got != "resolved — verified, all checks pass." {
+		t.Errorf("text = %q, want the duplicate prefix gone", got)
+	}
+	if n := len(d.OpenQuestions()); n != 0 {
+		t.Errorf("open threads = %d, want none", n)
+	}
+}
+
+// Only the marker's own author is stripped: addressing somebody else is
+// content, and a reviewer must not be able to close a thread by quoting
+// another author's resolution.
+func TestAMarkerAddressingAnotherAuthorKeepsItsText(t *testing.T) {
+	d := Parse("## Review\n\ntext\n\n%% @reviewer(2026-09-19): @architect: resolved — you signed this off.\n")
+	if len(d.Markers) != 1 {
+		t.Fatalf("markers = %d, want 1", len(d.Markers))
+	}
+	if d.Markers[0].Resolved {
+		t.Errorf("a reviewer closed a thread by quoting the architect: %q", d.Markers[0].Text)
+	}
+	if got, want := d.Markers[0].Text, "@architect: resolved — you signed this off."; got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+}

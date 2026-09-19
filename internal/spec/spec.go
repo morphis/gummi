@@ -88,6 +88,33 @@ var (
 	resolvedRe = regexp.MustCompile(`(?i)^resolved\s*(?:$|[:—–]|-(?:\s|$))`)
 )
 
+// dropSelfAddress removes an author's own name repeated at the head of
+// its marker text: `%% @reviewer(date): @reviewer: resolved — …`.
+//
+// Agents write it that way often enough to matter, and it is pure noise —
+// the prefix the parser already read off the line, said again. Left in,
+// it pushed the word the resolution test looks for off the start of the
+// text, so a marker that said "resolved" in plain English parsed as
+// open and stayed open forever. On a goal that meant a lead turn for
+// every verified card, woken to settle findings that were pass verdicts
+// already closed, and a hand-over that listed them as findings the lead
+// had declined.
+//
+// Only the marker's OWN author is stripped. A reviewer that opens with
+// "@architect: …" is addressing somebody, which is content, and one that
+// could close a thread by quoting another author's resolution would be a
+// worse bug than the one this fixes.
+func dropSelfAddress(author, text string) string {
+	if author == "" {
+		return text
+	}
+	rest, ok := strings.CutPrefix(text, "@"+author+":")
+	if !ok {
+		return text
+	}
+	return strings.TrimSpace(rest)
+}
+
 // isIndented reports whether a line begins with whitespace — the signal
 // that it belongs to the marker above it rather than standing as content
 // of its own (Parse's anchoring rule).
@@ -160,6 +187,7 @@ func Parse(content string) Doc {
 		mk := Marker{Line: n, Anchor: anchor}
 		if m != nil {
 			mk.Author, mk.Date, mk.Text = m[1], m[2], strings.TrimSpace(m[3])
+			mk.Text = dropSelfAddress(mk.Author, mk.Text)
 		}
 		mk.Resolved = resolvedRe.MatchString(mk.Text)
 		d.Markers = append(d.Markers, mk)
