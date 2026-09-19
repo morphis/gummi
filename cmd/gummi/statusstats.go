@@ -113,10 +113,16 @@ type statusStatsClock struct {
 	AgentSeconds   float64 `json:"agent_seconds"`
 	ElapsedSeconds float64 `json:"elapsed_seconds"`
 	// WaitingSeconds is elapsed less agent time: the part of the card's
-	// life when nothing was running, which is usually the part it spent
-	// waiting for a person.
-	WaitingSeconds     float64 `json:"waiting_seconds"`
-	WaitingShare       float64 `json:"waiting_share"`
+	// life when nothing was running.
+	WaitingSeconds float64 `json:"waiting_seconds"`
+	WaitingShare   float64 `json:"waiting_share"`
+	// OnYouSeconds and IdleSeconds split that by whether anybody was
+	// asked — the decision log's answer, not an assumption. They sum to
+	// WaitingSeconds.
+	OnYouSeconds       float64 `json:"on_you_seconds"`
+	OnYouShare         float64 `json:"on_you_share"`
+	IdleSeconds        float64 `json:"idle_seconds"`
+	IdleShare          float64 `json:"idle_share"`
 	ToFirstGateSeconds float64 `json:"to_first_gate_seconds,omitempty"`
 	ToVerifiedSeconds  float64 `json:"to_verified_seconds,omitempty"`
 }
@@ -228,6 +234,10 @@ func statsPayload(r cardrun.Run) *statusStats {
 			ElapsedSeconds:     r.Clock.Elapsed.Seconds(),
 			WaitingSeconds:     r.Clock.Waiting.Seconds(),
 			WaitingShare:       round4(r.Clock.WaitingShare()),
+			OnYouSeconds:       r.Clock.OnYou.Seconds(),
+			OnYouShare:         round4(r.Clock.OnYouShare()),
+			IdleSeconds:        r.Clock.Idle.Seconds(),
+			IdleShare:          round4(r.Clock.IdleShare()),
 			ToFirstGateSeconds: r.Clock.ToFirstGate.Seconds(),
 			ToVerifiedSeconds:  r.Clock.ToVerified.Seconds(),
 		},
@@ -354,7 +364,14 @@ func renderStats(w io.Writer, view statusView, r *statusStats) {
 
 	fmt.Fprintln(w, "the clock")
 	fmt.Fprintf(w, "  agent working   %10s\n", dur(r.Clock.AgentSeconds))
-	fmt.Fprintf(w, "  waiting on you  %10s  (%.0f%%)\n", dur(r.Clock.WaitingSeconds), r.Clock.WaitingShare*100)
+	fmt.Fprintf(w, "  waiting on you  %10s  (%.0f%%)\n", dur(r.Clock.OnYouSeconds), r.Clock.OnYouShare*100)
+	// The idle line appears only when there is idle time to explain. It
+	// is the figure that used to be folded into the one above, and a
+	// card that never stopped for an unexplained reason should not have
+	// to read a zero to learn so.
+	if r.Clock.IdleSeconds > 0 {
+		fmt.Fprintf(w, "  nothing running %10s  (%.0f%%)\n", dur(r.Clock.IdleSeconds), r.Clock.IdleShare*100)
+	}
 	fmt.Fprintf(w, "  elapsed         %10s\n\n", dur(r.Clock.ElapsedSeconds))
 
 	fmt.Fprintln(w, "its hands")

@@ -395,3 +395,86 @@ func TestReportKeepsContextPeak(t *testing.T) {
 func round(v float64) float64 {
 	return float64(int64(v*100+0.5)) / 100
 }
+
+// A gap nobody was asked about is not time waiting on a person. This is
+// the shape of the goal whose stats read "waiting on you 4h52m (91%)"
+// while nobody was attending it: the backend stopped serving between two
+// passes, no decision was ever opened, and the residual was charged to
+// the reader anyway.
+func TestReportDoesNotChargeAnUnaskedGapToYou(t *testing.T) {
+	enter, _ := json.Marshal(map[string]string{"role": "implementer", "flavor": "stage"})
+	exit, _ := json.Marshal(map[string]any{"verdict": ""})
+	evs := []state.CardEvent{
+		{Stage: domain.StageImplement, Kind: state.EventStageEnter, At: base, Payload: string(enter)},
+		{Stage: domain.StageImplement, Kind: state.EventStageExit, At: base.Add(10 * time.Minute), Payload: string(exit)},
+		// five hours of nothing, then the card picks up where it left off
+		{Stage: domain.StageImplement, Kind: state.EventStageEnter, At: base.Add(5 * time.Hour), Payload: string(enter)},
+		{Stage: domain.StageImplement, Kind: state.EventStageExit, At: base.Add(5*time.Hour + 10*time.Minute), Payload: string(exit)},
+	}
+	run := Report(Input{Feature: card(10, 100), Events: evs})
+
+	if run.Clock.Waiting < 4*time.Hour {
+		t.Fatalf("waiting = %v, want the gap to show up as waiting at all", run.Clock.Waiting)
+	}
+	if run.Clock.OnYou != 0 {
+		t.Errorf("on you = %v, want nothing: no decision was ever opened", run.Clock.OnYou)
+	}
+	if run.Clock.Idle != run.Clock.Waiting {
+		t.Errorf("idle = %v, want the whole %v residual", run.Clock.Idle, run.Clock.Waiting)
+	}
+}
+
+// The other half of the same claim: a card that really did stand at a
+// gate overnight is reported as having stood at a gate overnight, and
+// the wait ends when the gate is crossed rather than running on.
+func TestReportChargesAnOpenDecisionToYou(t *testing.T) {
+	enter, _ := json.Marshal(map[string]string{"role": "architect", "flavor": "stage"})
+	exit, _ := json.Marshal(map[string]any{"verdict": "approve"})
+	open1, _ := json.Marshal(state.DecisionPayload{ID: "d1", Kind: state.DecisionKindGate, Question: "land it?"})
+	gate, _ := json.Marshal(state.GatePayload{From: "plan", To: "implement", Actor: "user", ID: "d1"})
+	evs := []state.CardEvent{
+		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: base, Payload: string(enter)},
+		{Stage: domain.StagePlan, Kind: state.EventStageExit, At: base.Add(10 * time.Minute), Payload: string(exit)},
+		{Stage: domain.StagePlan, Kind: state.EventDecisionOpen, At: base.Add(10 * time.Minute), Payload: string(open1)},
+		{Stage: domain.StagePlan, Kind: state.EventGate, At: base.Add(8 * time.Hour), Payload: string(gate)},
+		{Stage: domain.StageImplement, Kind: state.EventStageEnter, At: base.Add(9 * time.Hour), Payload: string(enter)},
+		{Stage: domain.StageImplement, Kind: state.EventStageExit, At: base.Add(9*time.Hour + 10*time.Minute), Payload: string(exit)},
+	}
+	run := Report(Input{Feature: card(10, 100), Events: evs})
+
+	if want := 7*time.Hour + 50*time.Minute; run.Clock.OnYou != want {
+		t.Errorf("on you = %v, want %v — question to crossing", run.Clock.OnYou, want)
+	}
+	if want := time.Hour; run.Clock.Idle != want {
+		t.Errorf("idle = %v, want %v — the hour after the gate, which nobody was asked about", run.Clock.Idle, want)
+	}
+	if run.Clock.OnYou+run.Clock.Idle != run.Clock.Waiting {
+		t.Errorf("on you %v + idle %v != waiting %v", run.Clock.OnYou, run.Clock.Idle, run.Clock.Waiting)
+	}
+}
+
+// Two decisions standing open together are one wait, not two: a card
+// cannot wait on two people for twice the time.
+func TestReportUnionsOverlappingDecisions(t *testing.T) {
+	enter, _ := json.Marshal(map[string]string{"role": "architect", "flavor": "stage"})
+	exit, _ := json.Marshal(map[string]any{"verdict": ""})
+	d1, _ := json.Marshal(state.DecisionPayload{ID: "d1", Kind: state.DecisionKindAsk})
+	d2, _ := json.Marshal(state.DecisionPayload{ID: "d2", Kind: state.DecisionKindAsk})
+	a1, _ := json.Marshal(state.AskPayload{ID: "d1", Answer: "yes"})
+	a2, _ := json.Marshal(state.AskPayload{ID: "d2", Answer: "yes"})
+	evs := []state.CardEvent{
+		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: base, Payload: string(enter)},
+		{Stage: domain.StagePlan, Kind: state.EventStageExit, At: base.Add(time.Minute), Payload: string(exit)},
+		{Stage: domain.StagePlan, Kind: state.EventDecisionOpen, At: base.Add(time.Minute), Payload: string(d1)},
+		{Stage: domain.StagePlan, Kind: state.EventDecisionOpen, At: base.Add(2 * time.Minute), Payload: string(d2)},
+		{Stage: domain.StagePlan, Kind: state.EventAsk, At: base.Add(3 * time.Minute), Payload: string(a1)},
+		{Stage: domain.StagePlan, Kind: state.EventAsk, At: base.Add(4 * time.Minute), Payload: string(a2)},
+		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: base.Add(4 * time.Minute), Payload: string(enter)},
+		{Stage: domain.StagePlan, Kind: state.EventStageExit, At: base.Add(5 * time.Minute), Payload: string(exit)},
+	}
+	run := Report(Input{Feature: card(10, 100), Events: evs})
+
+	if want := 3 * time.Minute; run.Clock.OnYou != want {
+		t.Errorf("on you = %v, want %v — one union, not the 4m the two spans sum to", run.Clock.OnYou, want)
+	}
+}

@@ -353,6 +353,20 @@ func clock(sess []Session, evs []state.CardEvent, f domain.Feature) Clock {
 	if first.IsZero() {
 		return c
 	}
+	// OnYou is the part of that a person was actually asked for, and Idle
+	// the rest. The record of the asking is the decision log, so the
+	// split is read from it rather than assumed: whatever is left once
+	// the open decisions are accounted for is time nothing ran and
+	// nobody had been asked.
+	c.OnYou = openDecisionTime(evs, first, last)
+	if c.OnYou > c.Waiting {
+		// A decision can be open while a session runs — a stage that
+		// asked a question and kept reading. That time is the agent's,
+		// not the reader's, and the residual is the ceiling on what can
+		// be charged to a person.
+		c.OnYou = c.Waiting
+	}
+	c.Idle = c.Waiting - c.OnYou
 	for _, ev := range evs {
 		if ev.Kind == state.EventGate && c.ToFirstGate == 0 && ev.At.After(first) {
 			c.ToFirstGate = ev.At.Sub(first)
@@ -364,6 +378,100 @@ func clock(sess []Session, evs []state.CardEvent, f domain.Feature) Clock {
 		c.ToVerified = v.Sub(first)
 	}
 	return c
+}
+
+// openDecisionTime is how long the card stood at a decision nobody had
+// answered yet, as the union of those intervals clamped to [first,last].
+//
+// A decision opens with an EventDecisionOpen carrying an id and closes
+// when a later gate or ask event carries the same id — exactly the rule
+// state.OpenDecisions applies, restated here over the event slice
+// because this package takes no store. One still open at the end of the
+// card's life runs to last: the card really was waiting then, and the
+// alternative is to report the longest wait on the record as no wait at
+// all.
+//
+// The intervals are unioned rather than summed because two decisions can
+// stand open together — an ask raised while a gate waits — and a card
+// cannot wait on two people for twice the time.
+func openDecisionTime(evs []state.CardEvent, first, last time.Time) time.Duration {
+	if !last.After(first) {
+		return 0
+	}
+	answeredAt := map[string]time.Time{}
+	for _, ev := range evs {
+		if ev.Kind != state.EventGate && ev.Kind != state.EventAsk {
+			continue
+		}
+		id := correlatingID(ev)
+		if id == "" {
+			continue
+		}
+		if at, seen := answeredAt[id]; !seen || ev.At.Before(at) {
+			answeredAt[id] = ev.At
+		}
+	}
+
+	type span struct{ from, to time.Time }
+	var spans []span
+	for _, ev := range evs {
+		if ev.Kind != state.EventDecisionOpen {
+			continue
+		}
+		var p state.DecisionPayload
+		if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.ID == "" {
+			continue
+		}
+		from, to := ev.At, last
+		if at, ok := answeredAt[p.ID]; ok {
+			if !at.After(from) {
+				// An answer recorded at or before its own question is a
+				// clock skew, not a negative wait.
+				continue
+			}
+			to = at
+		}
+		if from.Before(first) {
+			from = first
+		}
+		if to.After(last) {
+			to = last
+		}
+		if to.After(from) {
+			spans = append(spans, span{from, to})
+		}
+	}
+	if len(spans) == 0 {
+		return 0
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].from.Before(spans[j].from) })
+
+	var total time.Duration
+	cur := spans[0]
+	for _, s := range spans[1:] {
+		if s.from.After(cur.to) {
+			total += cur.to.Sub(cur.from)
+			cur = s
+			continue
+		}
+		if s.to.After(cur.to) {
+			cur.to = s.to
+		}
+	}
+	return total + cur.to.Sub(cur.from)
+}
+
+// correlatingID is the decision id a gate or ask event answers, or "" on
+// an event that answers none. The two payload shapes carry the id under
+// the same key, so one decode serves both.
+func correlatingID(ev state.CardEvent) string {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal([]byte(ev.Payload), &p) != nil {
+		return ""
+	}
+	return p.ID
 }
 
 // hands tallies what the card did: its turns, its tool calls by name, the

@@ -186,9 +186,25 @@ type Clock struct {
 	// life, not counting whatever happened after the work stopped.
 	Elapsed time.Duration
 	// Waiting is Elapsed less Agent: the time the card existed with
-	// nothing running, which on most cards is the time it spent waiting
-	// for a person. It is never negative.
+	// nothing running. It is never negative.
 	Waiting time.Duration
+
+	// OnYou and Idle split Waiting by whether anybody was actually
+	// asked. OnYou is the union of the intervals a decision was open
+	// with nobody having answered it yet — a gate, an ask, a failed
+	// verify, an exhausted envelope — clamped to the card's own life.
+	// Idle is the rest: time nothing ran and nothing had been asked.
+	//
+	// The split exists because the residual is not one thing. A card
+	// that sat at a gate overnight and a goal whose backend stopped
+	// serving for five hours both leave Waiting large, and only the
+	// first of them was waiting on a person. Attributing the second to
+	// one — which is what a single "waiting on you" figure does — puts
+	// the blame for an outage on the reader and, worse, makes the
+	// clock the least trustworthy panel in a report whose whole job is
+	// to be trusted about where the time went.
+	OnYou time.Duration
+	Idle  time.Duration
 
 	// ToFirstGate is how long until the card first crossed a design gate,
 	// and ToVerified until its verify stage first passed. Zero means it
@@ -204,6 +220,26 @@ func (c Clock) WaitingShare() float64 {
 		return 0
 	}
 	return float64(c.Waiting) / float64(c.Elapsed)
+}
+
+// OnYouShare is the fraction of the card's life it spent stopped at a
+// decision somebody had to take. Zero when the card has no measured
+// elapsed time.
+func (c Clock) OnYouShare() float64 {
+	if c.Elapsed <= 0 {
+		return 0
+	}
+	return float64(c.OnYou) / float64(c.Elapsed)
+}
+
+// IdleShare is the fraction of the card's life that nothing was running
+// and nothing had been asked. Zero when the card has no measured
+// elapsed time.
+func (c Clock) IdleShare() float64 {
+	if c.Elapsed <= 0 {
+		return 0
+	}
+	return float64(c.Idle) / float64(c.Elapsed)
 }
 
 // Hands is what the card did, as against what it decided.

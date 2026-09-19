@@ -265,10 +265,16 @@ func statsClockLines(s *theme.Styles, r cardrun.Run) []string {
 	}
 	out := append(statsHeading(s, "the clock"),
 		fmt.Sprintf("  %-15s %10s", "agent working", shortDur(r.Clock.Agent)),
-		fmt.Sprintf("  %-15s %10s  %s", "waiting on you", shortDur(r.Clock.Waiting),
-			s.Muted.Render(fmt.Sprintf("(%.0f%%)", r.Clock.WaitingShare()*100))),
-		fmt.Sprintf("  %-15s %10s", "elapsed", shortDur(r.Clock.Elapsed)),
+		fmt.Sprintf("  %-15s %10s  %s", "waiting on you", shortDur(r.Clock.OnYou),
+			s.Muted.Render(fmt.Sprintf("(%.0f%%)", r.Clock.OnYouShare()*100))),
 	)
+	// Only a card with unexplained time has to account for it; the rest
+	// say nothing rather than a zero.
+	if r.Clock.Idle > 0 {
+		out = append(out, fmt.Sprintf("  %-15s %10s  %s", "nothing running", shortDur(r.Clock.Idle),
+			s.Muted.Render(fmt.Sprintf("(%.0f%%)", r.Clock.IdleShare()*100))))
+	}
+	out = append(out, fmt.Sprintf("  %-15s %10s", "elapsed", shortDur(r.Clock.Elapsed)))
 	if r.Clock.ToVerified > 0 {
 		out = append(out, s.Faint.Render(fmt.Sprintf("  %-15s %10s", "to verified", shortDur(r.Clock.ToVerified))))
 	}
