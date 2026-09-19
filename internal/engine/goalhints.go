@@ -53,6 +53,13 @@ asking:
    waiting on the last. An item about an emergent property must still
    name what would be OBSERVED if it held — a counter that did not move,
    a stream with no gap — or it is not yet an item.
+   A check that must nonetheless touch such a place — it reads a cluster
+   rather than deploying to it, say — says which one with
+   ` + "`substrate: <name>`" + ` beside its ` + "`check:`" + `. gummi then holds that
+   substrate for the length of the check, as it does for a run, so the
+   check cannot collide with one; a substrate somebody else has makes the
+   check NOT RUN rather than failed. Name only a configured substrate, and
+   never beside an experiment — an experiment brings its own.
 3. Limits — out of scope, constraints, things not to touch.
 4. Cards — the work, one gummi-cards row each: title, one_liner, kind
    (feature, bug, research or diagnosis), serves (the DW ids it is for — every card

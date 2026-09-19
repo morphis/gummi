@@ -2769,7 +2769,16 @@ cards or credits:
 A verification plan cites a substrate as `[env: <name>]`, and a verify
 kickoff reports its state beside the env probes; one that is held reads as
 errored, never absent, because only a clean absence licenses skipping a
-live step. A goal card blocked at verify (§17.4a) is retried when every
+live step. A goal's done-when item says the same thing about its **check**
+with `substrate:`, and for the same reason one job at a time is the rule:
+`runGoalChecks` takes that substrate's lease for the length of the checks
+that cite it, so a command in a checkout cannot drive the machines an
+experiment run believes it has to itself. A substrate somebody else holds,
+or one that is not ready, makes those checks **not run** rather than
+failed — decision 21's rule, that a check which cannot run is no opinion
+rather than a block. It is a property of the means, not of the statement:
+an item proved by an `experiment:` takes its substrate from the
+experiment's own definition and may not name one. A goal card blocked at verify (§17.4a) is retried when every
 substrate its plan cites probes ready — read at most every two minutes, and
 at most twice between one visit from a person and the next, because a card
 that keeps blocking against a passing probe is waiting for something the

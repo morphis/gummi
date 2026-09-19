@@ -1902,6 +1902,23 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 				return fmt.Sprintf("%s's check %s", it.ID, problem)
 			}
 		}
+		// A substrate the workspace does not configure is one the check
+		// could never be given, and the lease is what keeps two jobs off
+		// the same machines: an unknown name would take nothing and run
+		// anyway, which is the failure it exists to prevent.
+		if name := strings.TrimSpace(it.Substrate); name != "" {
+			m, serr := e.Substrates()
+			switch {
+			case serr != nil:
+				return fmt.Sprintf("%s names the substrate %q and the config cannot be read: %v", it.ID, name, serr)
+			case !m.Has(name):
+				known := m.Names()
+				if len(known) == 0 {
+					return fmt.Sprintf("%s's check names the substrate %q and this workspace configures none — an operator adds it under `substrates:` in .gummi/config.yaml", it.ID, name)
+				}
+				return fmt.Sprintf("%s's check names the substrate %q, which is not configured — use one of %s", it.ID, name, strings.Join(known, ", "))
+			}
+		}
 	}
 	if problem := e.goalExperimentProblem(items); problem != "" {
 		return problem

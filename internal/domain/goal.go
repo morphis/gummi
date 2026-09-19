@@ -40,6 +40,18 @@ type DoneWhen struct {
 	// be met weeks before "a migration keeps its connections" can be, by
 	// the same experiment. Empty means the whole run.
 	Assertions []string `yaml:"assertions,omitempty"`
+	// Substrate names the external environment this item's CHECK needs —
+	// a cluster, a device farm, a staging account (§17.7). A command in a
+	// checkout that drives one is scarce, slow, stateful and shared like
+	// any other job on it, and two of them at once are not slow but wrong:
+	// so gummi takes the substrate's lease for the length of the check,
+	// the way it does for an experiment run, and reports the check not-run
+	// rather than failed when somebody else has it.
+	//
+	// It is a property of the means, not of the statement: an item proved
+	// by an `experiment:` gets its substrate from the experiment's own
+	// definition and must not name one here.
+	Substrate string `yaml:"substrate,omitempty"`
 }
 
 // Means names how the item is shown to hold: "check", "judge" or
@@ -86,6 +98,12 @@ func (d DoneWhen) Validate() error {
 	}
 	if len(d.Assertions) > 0 && strings.TrimSpace(d.Experiment) == "" {
 		return fmt.Errorf("done-when %s lists assertions but names no experiment to report them", d.ID)
+	}
+	if strings.TrimSpace(d.Substrate) != "" && strings.TrimSpace(d.Check) == "" {
+		if strings.TrimSpace(d.Experiment) != "" {
+			return fmt.Errorf("done-when %s names a substrate and an experiment; an experiment brings its own, and naming a second one here would be two answers to one question", d.ID)
+		}
+		return fmt.Errorf("done-when %s names a substrate but has no check to run on it: a substrate is what a COMMAND needs, and a judged item runs none", d.ID)
 	}
 	return nil
 }
