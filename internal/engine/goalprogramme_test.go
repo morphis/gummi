@@ -69,6 +69,15 @@ func TestAGoalThatContinuesAnotherWaitsForItAndInheritsWhatItKnew(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
+	// ended is not landed: a goal that reached done with nothing merged has
+	// left this goal's cards nothing to fork from
+	if res, err = e.Advance(ctx, second.ID, "user"); err != nil || res.Status != StatusBlockedGoalPlan ||
+		!strings.Contains(res.Reason, "ended without landing anything") {
+		t.Fatalf("a predecessor that landed nothing was accepted: %v %v %q", res.Status, err, res.Reason)
+	}
+	if err := store.SetLandedSHA(ctx, first.ID, "deadbeef"); err != nil {
+		t.Fatal(err)
+	}
 	if res, err = e.Advance(ctx, second.ID, "user"); err != nil || res.Status != StatusAdvanced {
 		t.Fatalf("advance: %v %v %q", res.Status, err, res.Reason)
 	}

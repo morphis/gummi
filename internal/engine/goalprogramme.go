@@ -74,6 +74,14 @@ func (e *Engine) goalProgrammeProblem(ctx context.Context, goal domain.Feature, 
 		return fmt.Sprintf("this goal continues %s, which was handed off rather than landed: its work is not on the trunk this goal's cards would fork from. "+
 			"Land it, or take `after:` out if this goal does not build on its code", after)
 	}
+	// "Its work is not on the trunk" is equally true of a goal that reached
+	// done having landed nothing — every card dropped, or a partial result
+	// closed without a merge. The stage says it ended; only the landing says
+	// its work is somewhere this goal's cards can fork from.
+	if sha, serr := e.cfg.Store.LandedSHA(ctx, after); serr == nil && strings.TrimSpace(sha) == "" {
+		return fmt.Sprintf("this goal continues %s, which ended without landing anything: there is no merge of it on the trunk this goal's cards would fork from. "+
+			"Land it, or take `after:` out if this goal does not build on its code", after)
+	}
 	return ""
 }
 

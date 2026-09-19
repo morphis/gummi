@@ -15,7 +15,7 @@ import (
 // statement no run could ever have proved.
 func TestAnAssertionTheRunNeverMentionedIsNotOneThatFailed(t *testing.T) {
 	r := experiment.Result{
-		ID: "R1", Outcome: experiment.Fail, Dir: "/e/R1",
+		ID: "R1", Outcome: experiment.Fail, Dir: "/tmp/a/very/long/container/path/ws/.gummi/evidence/GL-001/R1",
 		Assertions: []experiment.Assertion{
 			{ID: "ing-a-tor2-node1", OK: true},
 			{ID: "ing-b-balance", OK: false, Detail: "reached 1 node"},
@@ -38,5 +38,11 @@ func TestAnAssertionTheRunNeverMentionedIsNotOneThatFailed(t *testing.T) {
 	}
 	if !strings.Contains(silent, "cannot hold as written") {
 		t.Errorf("the sentence does not say what it means for the item: %q", silent)
+	}
+
+	// and the path is one a reader can hold in their head: from the
+	// workspace down, not a hundred characters of container temp directory
+	if !strings.Contains(failed, "evidence in .gummi/evidence/GL-001/R1") {
+		t.Errorf("the evidence path is not workspace-relative: %q", failed)
 	}
 }

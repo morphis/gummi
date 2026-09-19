@@ -382,7 +382,13 @@ func TestDriveGoalProvedByAnExperiment(t *testing.T) {
 	if met, total := rep.Met(); met != 2 || total != 2 {
 		t.Fatalf("met %d of %d: %+v", met, total, rep.DoneWhen)
 	}
-	if ev := rep.DoneWhen[1].Evidence; !strings.Contains(ev, runs[0].ID) || !strings.Contains(ev, runs[0].Dir) {
+	// the run, and where its bundle is — the path from the workspace down,
+	// which is what a reader can hold in their head
+	rel := runs[0].Dir
+	if i := strings.Index(rel, "/.gummi/evidence/"); i >= 0 {
+		rel = rel[i+1:]
+	}
+	if ev := rep.DoneWhen[1].Evidence; !strings.Contains(ev, runs[0].ID) || !strings.Contains(ev, rel) {
 		t.Fatalf("the item's evidence is the run and where its bundle is: %q", ev)
 	}
 }

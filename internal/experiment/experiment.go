@@ -388,7 +388,10 @@ func Execute(ctx context.Context, job Job) Result {
 	ops, st, err := lease.EnsureReady(ctx, r.logFile(0, "substrate"))
 	r.noteOps(ops)
 	if err != nil {
-		return finish(Inconclusive, "the substrate could not be made ready: "+err.Error())
+		// err already says it — "<name> is absent: the substrate could not
+		// be made ready" — so a prefix repeats the sentence back at the
+		// reader instead of framing it.
+		return finish(Inconclusive, err.Error())
 	}
 	if !st.Fits(job.Def.Longest()) {
 		// Renewing is the slowest thing gummi asks of a substrate, so it is

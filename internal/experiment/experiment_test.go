@@ -216,3 +216,18 @@ func TestEveryResetAControlCostsIsReported(t *testing.T) {
 		t.Fatalf("%d resets happened and %d were reported: %v", resets, reported, res.Ops)
 	}
 }
+
+// TestARefusalDoesNotRepeatItself: "the substrate could not be made ready:
+// fabric-sim is absent: the substrate could not be made ready" is the
+// caller's framing plus the sentinel's own words, and the reader gets the
+// same sentence twice around the one fact that matters.
+func TestARefusalDoesNotRepeatItself(t *testing.T) {
+	j := job(t, config.Experiment{Run: "true"}, config.Substrate{Provision: "false", Reset: "false"})
+	res := Execute(context.Background(), j)
+	if res.Outcome != Inconclusive {
+		t.Fatalf("%s — %s", res.Outcome, res.Reason)
+	}
+	if n := strings.Count(res.Reason, "could not be made ready"); n != 1 {
+		t.Fatalf("the refusal says it %d times: %q", n, res.Reason)
+	}
+}

@@ -776,8 +776,21 @@ func describeEvidence(r experiment.Result, assertions []string) string {
 	} else if r.Outcome == experiment.Fail {
 		b.WriteString(" — " + r.Reason)
 	}
-	b.WriteString(" — evidence in " + r.Dir)
+	b.WriteString(" — evidence in " + evidencePath(r.Dir))
 	return b.String()
+}
+
+// evidencePath is a run directory as a reader can hold it: from the
+// workspace down. The absolute path is a container temp directory that can
+// be a hundred characters of nothing, and at eighty columns it spends four
+// wrapped lines of every item's evidence line saying where the workspace
+// is — which the reader already knows, being in it.
+func evidencePath(dir string) string {
+	const mark = "/.gummi/evidence/"
+	if i := strings.Index(dir, mark); i >= 0 {
+		return dir[i+1:]
+	}
+	return dir
 }
 
 // goalExperimentProblem is the plan gate's question about experiment
