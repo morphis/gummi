@@ -927,6 +927,19 @@ markers stacked together collapse into a single checklist item. gummi
 parses unresolved threads into the user's open-question checklist and
 gates stage advancement on them.
 
+So an UNRESOLVED marker is a request for somebody else to act. If you
+are recording something that needs no answer — a verdict, a check you
+ran and it passed, a note for the record — open it resolved, in the same
+line you write it. A finding you have already satisfied yourself about
+is not a finding, and left open it becomes one: a goal reads its cards'
+open reviewer threads as work to settle and spends a lead turn on each.
+Two goals paid for that turn over six threads that were all pass
+verdicts.
+
+Write the body straight after the colon. The role prefix is already
+there, and saying it again ("@reviewer: @reviewer: resolved …") is
+noise.
+
 ` + "`%% @user:`" + ` markers are the human operator's own words, and edits
 the human makes to the ` + short + ` directly are their amendments to
 it. Both are authoritative: never revert, "restore", or rewrite them —
