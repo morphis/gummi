@@ -22,7 +22,7 @@ const twoRepoGoalDoc = "# GL-001: Export works offline\n\n" +
 	"- id: DW-1\n  says: the cache file exists\n  repo: api\n  check: test -f cache.txt\n" +
 	"- id: DW-2\n  says: the button offers the export\n  judge: true\n```\n\n" +
 	"## Limits\n\nNo new dependencies.\n\n" +
-	"## Budget\n\nAbout 1500 credits.\n\n```gummi-goal\nlanes: 1\n```\n\n" +
+	"## Budget\n\nAbout 1500 credits.\n\n```gummi-goal\nlanes: 1\nland_order: [api, web]\n```\n\n" +
 	"## Cards\n\n```gummi-cards\n" +
 	"- title: local cache for export\n  repo: api\n  serves: [DW-1]\n  envelope: 600\n" +
 	"- title: download button\n  repo: web\n  serves: [DW-2]\n  envelope: 400\n" +
@@ -316,5 +316,30 @@ func TestThePlanIsToldWhereAChecksCommandRuns(t *testing.T) {
 	}
 	if !strings.Contains(card, "never `cd` into it by name") {
 		t.Errorf("the plan is not warned off the one mistake this costs a whole goal:\n%s", card)
+	}
+}
+
+// TestGoalPlanGateAsksWhichRepositoryLandsFirst: git has no merge that
+// spans repositories, so a goal whose cards are in more than one lands
+// once in each and can stop part way. Without an agreed order it lands
+// home-first, and the home is settled from where most of the cards are —
+// a fact about card counts, not about what depends on what.
+func TestGoalPlanGateAsksWhichRepositoryLandsFirst(t *testing.T) {
+	doc := strings.Replace(twoRepoGoalDoc, "lanes: 1\nland_order: [api, web]\n", "lanes: 1\n", 1)
+	e, _, _, _, g := twoRepoGoalEngine(t, doc)
+	problem := e.goalPlanProblems(context.Background(), g)
+	if !strings.Contains(problem, "does not say which lands first") {
+		t.Fatalf("a two-repository goal crossed with no land_order: %q", problem)
+	}
+	if !strings.Contains(problem, "land_order: [api, web]") {
+		t.Errorf("the refusal does not say what to write: %q", problem)
+	}
+
+	// and one repository needs no order at all
+	single := strings.Replace(doc, "- title: download button\n  repo: web\n  serves: [DW-2]\n  envelope: 400\n", "- title: download button\n  repo: api\n  serves: [DW-2]\n  envelope: 400\n", 1)
+	single = strings.Replace(single, "- title: document the cache\n  repo: web\n  serves: [DW-2]\n  envelope: 200\n", "- title: document the cache\n  repo: api\n  serves: [DW-2]\n  envelope: 200\n", 1)
+	e2, _, _, _, g2 := twoRepoGoalEngine(t, single)
+	if problem := e2.goalPlanProblems(context.Background(), g2); strings.Contains(problem, "lands first") {
+		t.Fatalf("a single-repository goal was asked for a landing order: %q", problem)
 	}
 }

@@ -1821,6 +1821,56 @@ func goalPartialReason(v GoalView) string {
 
 // --- plan gate and start ---------------------------------------------------
 
+// goalLandOrderProblem asks a goal whose cards are in more than one
+// repository to say which lands first.
+//
+// Git has no merge that spans repositories, so such a goal lands once in
+// each and a landing can stop part way (§17.12). Without an agreed order
+// the order is the home repository's, which is settled from where most of
+// the cards are — a fact about card counts, not about what depends on
+// what. On the drive that prompted this the home was the repository whose
+// cards CALLED the other's new endpoints, so the default order would have
+// put the caller on a trunk without the callee.
+//
+// The gate cannot know the dependency; the plan can, and this is the one
+// place anybody agrees it.
+func (e *Engine) goalLandOrderProblem(ctx context.Context, goal domain.Feature, doc string, rows []domain.GoalCardRow) string {
+	_, order, err := spec.ParseGoalProgramme(doc)
+	if err != nil || len(order) > 0 {
+		return "" // a malformed block is goalProgrammeProblem's to report
+	}
+	repos := map[string]bool{}
+	for _, r := range rows {
+		if r.IsTBD() {
+			continue
+		}
+		repo := r.Repo
+		if r.ID != "" {
+			c, cerr := e.cfg.Store.GetFeature(ctx, r.ID)
+			if cerr != nil {
+				continue
+			}
+			repo = c.Repo
+		}
+		if repo == "" {
+			repo = goal.Repo
+		}
+		repos[repo] = true
+	}
+	if len(repos) < 2 {
+		return ""
+	}
+	names := make([]string, 0, len(repos))
+	for r := range repos {
+		names = append(names, repoName(r))
+	}
+	sort.Strings(names)
+	return fmt.Sprintf("this goal's cards are in %s and the plan does not say which lands first — "+
+		"git has no merge that spans repositories, so it lands once in each and can stop part way. "+
+		"Give the gummi-goal block `land_order: [%s]`, with whatever a repository's changes depend on ahead of them",
+		strings.Join(names, " and "), strings.Join(names, ", "))
+}
+
 // goalPlanProblems is the goal plan gate: the goal doc must carry a
 // done-when list gummi can check, a card list whose every row serves an
 // item and every item is served, attachable ids, and a card list the goal
@@ -1950,6 +2000,9 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 		if problem := e.goalRepoProblem(c.Repo); problem != "" {
 			return fmt.Sprintf("%s %s", r.ID, problem)
 		}
+	}
+	if problem := e.goalLandOrderProblem(ctx, goal, doc, rows); problem != "" {
+		return problem
 	}
 	if goal.Budget.Envelope <= 0 {
 		return "the goal has no budget"
