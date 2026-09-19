@@ -745,18 +745,33 @@ func describeEvidence(r experiment.Result, assertions []string) string {
 		fmt.Fprintf(&b, ", %d of %d assertions held", ok, total)
 	}
 	if len(assertions) > 0 {
-		var failed []string
+		var failed, silent []string
 		by := map[string]experiment.Assertion{}
 		for _, a := range r.Assertions {
 			by[a.ID] = a
 		}
 		for _, id := range assertions {
-			if a, ok := by[id]; ok && !a.OK {
+			a, reported := by[id]
+			switch {
+			case !reported:
+				silent = append(silent, id)
+			case !a.OK:
 				failed = append(failed, strings.TrimSpace(id+" "+a.Detail))
 			}
 		}
 		if len(failed) > 0 {
 			b.WriteString(" — not held: " + strings.Join(failed, "; "))
+		}
+		// An assertion the run never mentioned is not an assertion that
+		// failed, and the difference is the whole difference between work
+		// that is not finished and an item nothing can observe. Without
+		// this the two read identically — the same sentence, word for word
+		// — so nobody, lead or owner, has anything to notice until the
+		// hand-over says "not met" about a statement no run could ever
+		// have proved.
+		if len(silent) > 0 && len(r.Assertions) > 0 {
+			b.WriteString(" — NOT REPORTED by the run at all: " + strings.Join(silent, ", ") +
+				" (the experiment does not observe them; the item cannot hold as written)")
 		}
 	} else if r.Outcome == experiment.Fail {
 		b.WriteString(" — " + r.Reason)
