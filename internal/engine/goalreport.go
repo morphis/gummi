@@ -274,7 +274,20 @@ func (r GoalReport) Met() (met, total int) {
 	return met, len(r.DoneWhen)
 }
 
-var judgedLineRe = regexp.MustCompile(`(?mi)^\s*[-*]?\s*(DW-[0-9]+)\s*[:—-]+\s*(met|not met)\b[\s:—-]*(.*)$`)
+// judgedLineRe reads a judged item's verdict out of the Verification
+// plan. The verify contract asks for "DW-N: met — <evidence>", but it
+// asks a model writing markdown, which reasonably writes
+// "- DW-6 (shared ground untouched): **met** — ..." instead. That is the
+// same verdict, and losing it is silent: the item falls through to "not
+// checked" and the goal under-reports a result it did in fact reach.
+//
+// So the shape is read generously — an optional bullet, an optional
+// parenthetical gloss after the id, and markdown emphasis around the
+// verdict — while staying strict about what matters: the line must begin
+// with the id, and the verdict word must follow a separator rather than
+// appear anywhere in the prose. "DW-6 is not met by any card" is not a
+// verdict line and must not read as one.
+var judgedLineRe = regexp.MustCompile(`(?mi)^\s*[-*]?\s*(DW-[0-9]+)\s*(?:\([^)\n]*\))?\s*[:—–-]+\s*[*_]{0,2}(met|not met)\b[*_]{0,2}[\s:—–-]*(.*)$`)
 
 // GoalReport builds a goal's hand-over from its view, its log and its doc.
 func (e *Engine) GoalReport(ctx context.Context, goalID domain.FeatureID) (GoalReport, error) {
