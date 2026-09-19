@@ -130,6 +130,15 @@ make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 To try the headless driver instead of the TUI, `make demo` still gives you
 a throwaway repo — run `bin/gummi run --envelope 500 "<description>"` in it.
 
+Driving a **goal** costs real money and its budget arithmetic is the part
+hardest to eyeball, so run `scripts/goal-ledger.py ./bin/gummi <workspace>
+GL-NNN` beside it: it polls `status --json` and asserts DESIGN §17.3's
+invariants every tick, exiting non-zero if one ever broke. Most questions
+about that arithmetic need no goal at all — `goalpolicy.Decide` is a pure
+function, so a throwaway test that holds cards with a known cost, calls
+it, applies the actions and books the credits answers wide/deep/thin/fat
+budgets in milliseconds and for nothing.
+
 Running the real TUI (`bin/gummi`) needs a git repo and, for the default
 backend, an authenticated GitHub Copilot CLI. To drive agents without
 Copilot auth, set `GUMMI_AGENT=headless` with `GUMMI_AGENT_CMD` pointed at
