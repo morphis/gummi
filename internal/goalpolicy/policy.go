@@ -376,10 +376,39 @@ type Input struct {
 	// a landing, a lead turn, a card event, a run. It is the backstop's
 	// only input, and zero (an unsupplied clock) disarms it.
 	Quiet time.Duration
+	// QuietCeiling is how long that may go on before the goal says so.
+	// Zero means MaxQuiet. A caller that has given its stages longer than
+	// MaxQuiet to be silent in must raise this to match, or the backstop
+	// fires inside a window the operator explicitly allowed — see
+	// QuietCeilingFor.
+	QuietCeiling time.Duration
 }
 
-// MaxQuiet is how long a goal may produce nothing at all — no landing, no
-// lead turn, no card event, no run heartbeat — before it says so.
+// QuietCeilingFor is how long a goal may produce nothing when its stages
+// are allowed to be silent for stageTimeout.
+//
+// MaxQuiet is longer than the DEFAULT stage timeout on purpose, so a
+// stage that is genuinely stuck is timed out by its driver — which is an
+// event — before the backstop is reached. But the timeout is a flag and
+// MaxQuiet was a constant, so `--stage-timeout 45m` put a stage the
+// operator had given 45 quiet minutes inside a 30-minute backstop. The
+// ceiling therefore keeps the margin the constant was chosen for rather
+// than the number: comfortably past whatever a stage is allowed, and
+// never below MaxQuiet.
+//
+// A zero timeout disables the driver's own cut-off, so there is nothing
+// to stay clear of and MaxQuiet stands as the only backstop there is.
+func QuietCeilingFor(stageTimeout time.Duration) time.Duration {
+	if stageTimeout <= 0 {
+		return MaxQuiet
+	}
+	return max(MaxQuiet, stageTimeout+stageTimeout/2)
+}
+
+// MaxQuiet is the floor under how long a goal may produce nothing at all
+// — no landing, no lead turn, no card event, no run heartbeat — before it
+// says so. QuietCeilingFor raises it for a caller whose stages are
+// allowed to be silent for longer.
 //
 // It deliberately does NOT require that nothing is running. A card the
 // conductor reads as running is the one thing no rule here will touch, so
@@ -937,7 +966,11 @@ func Decide(in Input) []Action {
 	// waiting for a person — it is never simply quiet, and a goal that IS
 	// simply quiet is a goal nobody will ever be told about. Saying so
 	// costs a stop a resume clears; not saying so cost one goal 2h49m.
-	if !wrap && len(out) == 0 && in.Quiet > MaxQuiet && !anyRunning(in) {
+	ceiling := in.QuietCeiling
+	if ceiling <= 0 {
+		ceiling = MaxQuiet
+	}
+	if !wrap && len(out) == 0 && in.Quiet > ceiling && !anyRunning(in) {
 		return []Action{{Kind: Stall, Reason: fmt.Sprintf(
 			"nothing has happened in this goal for %s: no landing, no lead turn, no card event, "+
 				"no run — and the conductor found nothing to do. A card that is working produces "+

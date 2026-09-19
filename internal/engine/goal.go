@@ -491,6 +491,7 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	if !newest.IsZero() {
 		in.Quiet = now.Sub(newest)
 	}
+	in.QuietCeiling = goalpolicy.QuietCeilingFor(e.cfg.StageTimeout)
 	in.NeedOwner = v.NeedsOwner.Question
 	for _, t := range v.Tranches {
 		if !t.Closed {
@@ -818,6 +819,18 @@ func sizeUnestimatedRows(want []int, typical int) {
 		}
 	}
 }
+
+// SetStageTimeout tells the engine how long its caller lets a stage go
+// silent before cutting it off. The engine does not enforce it — the
+// driver does — but a goal's quiet backstop has to stay clear of it:
+// MaxQuiet is longer than the DEFAULT stage timeout on purpose, and a
+// caller that raised the timeout past it would otherwise have its
+// goals stopped inside a window it explicitly allowed.
+//
+// A setter rather than a Config field because the caller that knows
+// the timeout is the driver, which is handed an engine somebody else
+// built (SetExperimentSpawner is here for the same reason).
+func (e *Engine) SetStageTimeout(d time.Duration) { e.cfg.StageTimeout = d }
 
 // GoalStart is a card the driving loop must start, with the note to start
 // it with (a send-back's reason), empty for a plain start.

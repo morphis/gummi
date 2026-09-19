@@ -227,6 +227,13 @@ type Config struct {
 	// uncapped. internal/config.Config's autopilot_lanes key supplies
 	// cmd/gummi's real default (2).
 	AutopilotLanes int
+	// StageTimeout is how long a stage may be silent before its driver
+	// cuts it off (the headless --stage-timeout; zero disables it). The
+	// engine does not enforce it — the driver does — but a goal's quiet
+	// backstop has to stay clear of it, or a stage the operator gave
+	// longer than goalpolicy.MaxQuiet to be silent in trips a backstop
+	// meant for goals that have genuinely stopped.
+	StageTimeout time.Duration
 	// Persist writes session transcripts to Store so they survive a
 	// restart (Restore reloads them).
 	Persist bool

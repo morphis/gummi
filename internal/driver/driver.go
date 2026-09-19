@@ -142,6 +142,12 @@ func New(eng *engine.Engine, store *state.Store, ws state.Workspace, out interfa
 	if opts.GateApproval == "" {
 		opts.GateApproval = GateAttended
 	}
+	// The goal conductor's quiet backstop has to stay clear of whatever
+	// this run lets a stage be silent for; the engine cannot know that
+	// on its own.
+	if eng != nil {
+		eng.SetStageTimeout(opts.StageTimeout)
+	}
 	d := &Driver{
 		eng:        eng,
 		store:      store,

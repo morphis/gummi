@@ -2680,6 +2680,24 @@ own blocked verify back to its cards as rework. Now:
 - The goal's own blocked verify stops at verify, whole, with no rework
   round spent; in the board it is the goal's one stop that reaches you.
 
+
+**The quiet backstop.** A goal that produces nothing at all — no
+landing, no lead turn, no card event, no run heartbeat — for longer than
+`goalpolicy.MaxQuiet` (30 minutes) stops and says so, because a goal in
+that state is finished, stalled or waiting for a person and is never
+simply quiet. It deliberately does not require that nothing is running:
+a card the conductor reads as running is the one thing no other rule
+touches, and a card that is genuinely working produces events.
+
+The 30 minutes is a floor, not the figure. It is longer than the default
+stage timeout on purpose, so a stage that has genuinely stopped is cut
+off by its driver — which is an event — before the backstop is reached.
+That margin is what matters, so `QuietCeilingFor` keeps it rather than
+the number: a caller that gives its stages longer than 30 minutes to be
+silent in (`--stage-timeout 45m`) raises the ceiling with it. Held at
+the constant, such a run had its goals stopped inside a window its
+operator had explicitly allowed.
+
 ### 17.5 Silence and the hand-over
 
 A goal card's stops (escalations, failures, exhausted envelopes) are
