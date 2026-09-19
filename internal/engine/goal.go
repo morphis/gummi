@@ -2107,14 +2107,63 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 			return fmt.Sprintf("the tbd rows hold %d credits, more than the goal budget leaves for cards at all", tranches)
 		}
 	}
-	sizeUnestimatedRows(want, e.typicalCardCredits(ctx))
+	typical := e.typicalCardCredits(ctx)
+	sizeUnestimatedRows(want, typical)
 	if _, err := goalpolicy.StartEnvelopes(want, pool); err != nil && len(want) > 0 {
+		msg := err.Error()
 		if tranches > 0 {
-			return fmt.Sprintf("%v — after the %d credits its tbd rows hold", err, tranches)
+			msg = fmt.Sprintf("%v — after the %d credits its tbd rows hold", err, tranches)
 		}
-		return err.Error()
+		// Say what would work. The refusal names what the budget leaves
+		// and what a card needs, which tells a person the plan is
+		// underfunded without telling them by how much — and the number
+		// they have to produce next is an envelope, not a per-card
+		// share, with a reserve and a lead's headroom taken out of it
+		// before the cards see any of it.
+		if e := envelopeThatFunds(want, tranches); e > 0 {
+			msg += fmt.Sprintf(". An envelope of about %d would fund this plan", e)
+			if typical > 0 {
+				msg += fmt.Sprintf(" (cards here have cost about %d credits each)", typical)
+			}
+		}
+		return msg
 	}
 	return ""
+}
+
+// envelopeThatFunds is the smallest round goal envelope whose mint pool
+// gives every row what it asks for, or 0 when nothing would.
+//
+// Searched rather than solved: GoalMintPool nests a floor, a cap and two
+// proportions, and inverting that in algebra is how the number comes out
+// subtly wrong in the one case nobody tried. Stepping a budget upwards
+// asks the real function the real question.
+func envelopeThatFunds(want []int, tranches int) int {
+	if len(want) == 0 {
+		return 0
+	}
+	need := 0
+	for _, w := range want {
+		need += max(w, domain.MinEnvelope)
+	}
+	// An envelope can never be smaller than what the cards alone need, so
+	// start there and walk up in steps that keep the answer readable.
+	const step = 100
+	for e := (need/step + 1) * step; e <= (need+tranches)*4+10*step; e += step {
+		f := domain.Feature{Budget: domain.Budget{Envelope: e}}
+		pool := f.GoalMintPool(0, len(want)) - float64(tranches)
+		if _, err := goalpolicy.StartEnvelopes(want, pool); err != nil {
+			continue
+		}
+		var given int
+		for _, w := range want {
+			given += max(w, domain.MinEnvelope)
+		}
+		if pool >= float64(given) {
+			return e
+		}
+	}
+	return 0
 }
 
 // startGoal is the goal's plan→implement crossing: it records the lanes,

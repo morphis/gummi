@@ -1292,3 +1292,53 @@ func TestARowWithNoEstimateIsSizedAtWhatCardsCost(t *testing.T) {
 		t.Errorf("cold = %v, want untouched with no history to read", cold)
 	}
 }
+
+// A refused plan says what envelope would fund it. The refusal named
+// what the budget leaves and what a card needs, which tells a person the
+// plan is underfunded without telling them by how much — and the number
+// they have to produce next is a goal envelope, with a reserve and the
+// lead's headroom taken out of it before any card sees a credit.
+func TestAnUnderfundedPlanSaysWhatEnvelopeWouldWork(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		want     []int
+		tranches int
+	}{
+		{"eight cards at the floor", []int{0, 0, 0, 0, 0, 0, 0, 0}, 0},
+		{"eight cards at what cards cost", []int{300, 300, 300, 300, 300, 300, 300, 300}, 0},
+		{"twenty cards", make([]int, 20), 0},
+		{"a tranche held back too", []int{300, 300}, 600},
+	} {
+		got := envelopeThatFunds(tc.want, tc.tranches)
+		if got <= 0 {
+			t.Errorf("%s: no envelope proposed", tc.name)
+			continue
+		}
+		// the proposal must actually pass the gate it is proposed for
+		f := domain.Feature{Budget: domain.Budget{Envelope: got}}
+		pool := f.GoalMintPool(0, len(tc.want)) - float64(tc.tranches)
+		envs, err := goalpolicy.StartEnvelopes(tc.want, pool)
+		if err != nil {
+			t.Errorf("%s: proposed %d, which the gate still refuses: %v", tc.name, got, err)
+			continue
+		}
+		// and every card gets at least what it asked for
+		for i, e := range envs {
+			if floor := max(tc.want[i], domain.MinEnvelope); e < floor {
+				t.Errorf("%s: proposed %d, card %d minted at %d < %d", tc.name, got, i, e, floor)
+			}
+		}
+		// one step below is genuinely not enough, so the answer is tight
+		lower := domain.Feature{Budget: domain.Budget{Envelope: got - 100}}
+		lp := lower.GoalMintPool(0, len(tc.want)) - float64(tc.tranches)
+		if lo, err := goalpolicy.StartEnvelopes(tc.want, lp); err == nil {
+			var given int
+			for i := range lo {
+				given += max(tc.want[i], domain.MinEnvelope)
+			}
+			if lp >= float64(given) {
+				t.Errorf("%s: proposed %d but %d already funds it", tc.name, got, got-100)
+			}
+		}
+	}
+}
