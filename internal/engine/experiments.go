@@ -226,6 +226,16 @@ func (e *Engine) StartExperiment(ctx context.Context, goal domain.Feature, st Ex
 	if !ok {
 		return experiment.Result{}, fmt.Errorf("no experiment %q is configured", st.Name)
 	}
+	// One run at a time per goal (§17.9). The conductor's own guard is the
+	// snapshot it ticked on, and a tick that began before the previous
+	// run's record was written sees no run in flight and orders another —
+	// which then spends its whole existence being refused the lease it was
+	// made to take. The directory is the record, so it is what decides.
+	for _, r := range e.ExperimentRuns(goal.ID) {
+		if r.Experiment == st.Name && r.State == experiment.StateRunning {
+			return experiment.Result{}, fmt.Errorf("a run of %s is already in flight for %s (%s)", st.Name, goal.ID, r.ID)
+		}
+	}
 	var heads, roots map[string]string
 	if st.Trunk {
 		heads, roots, err = e.trunkInputs(ctx, goal, def)
