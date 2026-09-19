@@ -456,9 +456,19 @@ func (x *GoalExperiment) readFrontier(landings []goalLanding) {
 	x.WholeRegressed = len(ev.Assertions) == 0
 	x.knownAt = ev.Ended
 	for _, l := range landings {
-		if l.At.After(x.base.Started) && !l.At.After(ev.Started) {
-			x.Suspects = append(x.Suspects, l)
+		if !l.At.After(x.base.Started) || l.At.After(ev.Started) {
+			continue
 		}
+		// A landing in a repository the experiment does not deploy cannot
+		// have changed what the run saw, and it is not a candidate. Left
+		// in, it is worse than noise: headsAfter leaves the head tuple
+		// unmoved across it, so it shares a tuple with the landing before
+		// it, one run answers for both, and the bisect can name a card
+		// that could not have done it.
+		if _, input := x.Heads[l.Repo]; !input {
+			continue
+		}
+		x.Suspects = append(x.Suspects, l)
 	}
 	verdicts := map[int]bool{}
 	for i := range x.Suspects {

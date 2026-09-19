@@ -521,12 +521,40 @@ func (d *Driver) applyPlainResume(ctx context.Context, f domain.Feature, in Resu
 }
 
 // mergedGoalEvent reports a goal landed on main.
+//
+// A goal across repositories lands once in EACH — git has no merge that
+// spans them — so Commit, the home repository's, is one of several, and a
+// caller that recorded only it would have no way to reach the rest or to
+// tell a whole landing from one that stopped part way. Repos says which
+// repositories the goal is in, which of them have it, and in what order
+// they land.
 type mergedGoalEvent struct {
-	Event  string `json:"event"`
-	ID     string `json:"id"`
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-	Cards  int    `json:"cards"`
+	Event  string           `json:"event"`
+	ID     string           `json:"id"`
+	Branch string           `json:"branch"`
+	Commit string           `json:"commit"`
+	Cards  int              `json:"cards"`
+	Repos  []mergedGoalRepo `json:"repos,omitempty"`
+}
+
+// mergedGoalRepo is one repository a goal lands in.
+type mergedGoalRepo struct {
+	Name   string `json:"name,omitempty"` // empty is the workspace default
+	Home   bool   `json:"home,omitempty"`
+	Landed bool   `json:"landed"`
+	Order  int    `json:"order,omitempty"`
+}
+
+// mergedRepos is the repository list a merged event carries, from the
+// hand-over that already knows it. Split out so it is testable without a
+// multi-repository drive: the wiring below is one line, this is the part
+// with an answer to get wrong.
+func mergedRepos(repos []engine.GoalReportRepo) []mergedGoalRepo {
+	out := make([]mergedGoalRepo, 0, len(repos))
+	for _, r := range repos {
+		out = append(out, mergedGoalRepo{Name: r.Name, Home: r.Home, Landed: r.Landed, Order: r.Order})
+	}
+	return out
 }
 
 // mergeGoal lands a verified goal: one merge commit joining its cards'
@@ -555,7 +583,8 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 			landed++
 		}
 	}
-	d.out.emit(mergedGoalEvent{Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha, Cards: landed})
+	d.out.emit(mergedGoalEvent{Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha,
+		Cards: landed, Repos: mergedRepos(r.Repos)})
 	return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
 }
 
