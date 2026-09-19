@@ -1457,6 +1457,28 @@ func (e *Engine) logLeadFailure(ctx context.Context, goal domain.FeatureID, card
 	e.goalLog(ctx, goal, p)
 }
 
+// NoteBackendOutage records a turn of the goal that the backend could not
+// serve, and reports whether that is what happened. A quota, a rate limit
+// or an overload means "wait", and it means exactly the same thing whether
+// the turn was the lead's or one of the goal's cards': an outage is not a
+// verdict, and waiting is not abandoning (§17.4a).
+//
+// Without this a card's drive failing on a provider quota is recorded as
+// the card being stuck, which costs it two lead turns and then the card
+// itself — the goal drops work for something no retry of the WORK could
+// have fixed, while the identical failure one turn over stalls the goal
+// and keeps everything.
+func (e *Engine) NoteBackendOutage(ctx context.Context, goal, card domain.FeatureID, err error) bool {
+	if goal == "" || err == nil {
+		return false
+	}
+	if _, out := agent.Unavailable(err); !out {
+		return false
+	}
+	e.logLeadFailure(ctx, goal, card, err)
+	return true
+}
+
 // goalStall records that the goal stopped because its agent backend
 // could not serve it. Unlike a wrap-up it drops nothing: every card keeps
 // its branch, its spend and its place, and the next tick after the

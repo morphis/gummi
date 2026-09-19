@@ -339,13 +339,21 @@ func (d *Driver) settleGoalCard(ctx context.Context, r childResult) {
 	if c, err := d.store.GetFeature(ctx, r.id); err == nil && c.GoalDropped() {
 		return // stopped because the goal dropped it
 	}
-	detail := "its drive failed"
-	if r.err != nil {
-		detail = "its drive failed: " + r.err.Error()
-	}
 	c, err := d.store.GetFeature(ctx, r.id)
 	if err != nil {
 		return
+	}
+	// A backend that could not serve the turn is not the card being stuck.
+	// Recorded as the goal's outage it stalls the goal, which drops
+	// nothing and comes back on a resume; recorded as the card's own
+	// failure it costs two lead turns and then the card.
+	if d.eng.NoteBackendOutage(ctx, c.GoalID, r.id, r.err) {
+		d.eng.Drop(r.id)
+		return
+	}
+	detail := "its drive failed"
+	if r.err != nil {
+		detail = "its drive failed: " + r.err.Error()
 	}
 	_ = d.store.AppendPark(ctx, r.id, c.Stage, state.ParkReasonGaveUp, detail, "", time.Now())
 	// A drive that failed leaves nothing working, and the session it was
