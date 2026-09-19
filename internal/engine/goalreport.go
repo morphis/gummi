@@ -143,9 +143,20 @@ type GoalReportExperiment struct {
 }
 
 func reportExperiment(x GoalExperiment) GoalReportExperiment {
-	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem, Runs: len(x.Runs),
+	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem,
 		Green: x.Green, Regressed: x.Regressed, Culprit: x.Culprit}
 	for _, r := range x.Runs {
+		// A run that never took the substrate says nothing about the rig,
+		// one way or the other: it was held, or it could not fit before an
+		// expiry. Counting it as a run that judged nothing is the same
+		// mistake as charging it to the substrate ledger, which
+		// substrateBudgetFrom already declines to make — and here it is
+		// worse, because this figure is the one a reader uses to decide
+		// how far to believe the pass above it.
+		if r.Outcome == experiment.NotRun {
+			continue
+		}
+		out.Runs++
 		out.Minutes += r.Seconds / 60
 		switch {
 		case r.State == experiment.StateRunning:
