@@ -425,8 +425,14 @@ func Execute(ctx context.Context, job Job) Result {
 				r.res.ControlFailed = true
 				return finish(Inconclusive, "the rig failed its own control, so it can judge nothing: "+lastLine(ph.Tail))
 			}
-			if op, did := lease.Reset(ctx, r.logFile(attempt, "reset")); did && !op.OK {
-				return finish(Inconclusive, "the substrate could not be reset after its control")
+			if op, did := lease.Reset(ctx, r.logFile(attempt, "reset")); did {
+				// the control leaves the rig's own reference topology on
+				// the substrate, so putting it back costs a reset cycle
+				// like any other and is charged like one
+				r.noteOps([]substrate.Op{op})
+				if !op.OK {
+					return finish(Inconclusive, "the substrate could not be reset after its control")
+				}
 			}
 		}
 		failed, tempfail := r.attempt(ctx, attempt)

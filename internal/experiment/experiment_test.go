@@ -191,3 +191,28 @@ func TestASubstrateJustProvisionedIsNotProvisionedAgain(t *testing.T) {
 		t.Fatalf("the substrate was provisioned %d times to be given the same lifetime: %v", n, res.Ops)
 	}
 }
+
+// TestEveryResetAControlCostsIsReported: the positive control leaves the
+// rig's own reference topology on the substrate, so putting it back is a
+// reset cycle like any other. On real hardware that is a reimage budget or
+// a snapshot-revert quota, and a hand-over that under-counts them by one
+// per goal is telling its reader the wrong number for the scarcest thing
+// there is.
+func TestEveryResetAControlCostsIsReported(t *testing.T) {
+	j := job(t, config.Experiment{Control: "true", Run: "true"}, config.Substrate{})
+	j.Control = true
+	res := Execute(context.Background(), j)
+	if res.Outcome != Pass {
+		t.Fatalf("%s — %s", res.Outcome, res.Reason)
+	}
+	resets := count(t, j.Root, "resets")
+	var reported int
+	for _, op := range res.Ops {
+		if strings.HasPrefix(op, "reset ") {
+			reported++
+		}
+	}
+	if reported != resets {
+		t.Fatalf("%d resets happened and %d were reported: %v", resets, reported, res.Ops)
+	}
+}
