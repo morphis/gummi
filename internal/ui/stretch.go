@@ -197,6 +197,16 @@ func autopilotStretches(events []state.CardEvent) []autopilotStretch {
 					from: domain.Stage(p.From), at: ev.At,
 				})
 			}
+			if domain.Stage(p.To) == domain.StageDone {
+				// A card inside a goal never parks at the landing gate —
+				// its conductor lands it — so the close that reads
+				// "finished" for every other card was never written, and
+				// the page of a card that landed cleanly opened on
+				// "autopilot stopped without saying so". Crossing to done
+				// unattended IS getting as far as a card is allowed to go
+				// on its own.
+				closeWith(i, ev.At, stretchFinished, "")
+			}
 
 		case state.EventAsk:
 			var p state.AskPayload

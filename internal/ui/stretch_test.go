@@ -173,6 +173,15 @@ func TestStretchClosers(t *testing.T) {
 			tail: []state.CardEvent{evMessage(string(engine.AuthorUser), "hold on", at(30))},
 			want: stretchTakenBack,
 		},
+		{
+			// A card inside a goal never parks at the landing gate — its
+			// conductor lands it — so the close every other card gets was
+			// never written and the page of a card that landed cleanly
+			// opened on "autopilot stopped without saying so".
+			name: "the goal's own landing, which crosses to done unattended",
+			tail: []state.CardEvent{evGate(domain.StageVerify, domain.StageDone, "goal", at(30))},
+			want: stretchFinished,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
