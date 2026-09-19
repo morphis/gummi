@@ -441,3 +441,53 @@ func TestARefusedGoalPlanSaysWhatIsWrongWithIt(t *testing.T) {
 		t.Errorf("reason = %q, want it to name the item the plan got wrong", reason)
 	}
 }
+
+// The architect is the one who can fix a refused goal plan, and nothing
+// was telling the architect. A goal whose plan the gate refused parked,
+// and every resume ran a whole plan pass, returned "pass", and left the
+// doc exactly as it was — three passes for no change, with no way out
+// but a person editing the file. An unattended run now sends the
+// refusal back as a replan round.
+func TestARefusedGoalPlanGoesBackToTheArchitect(t *testing.T) {
+	h := goalHarness(t)
+	ctx := context.Background()
+	bad := strings.Replace(driverGoalDoc,
+		"- title: offline flag\n  serves: [DW-2]\n  depends_on: [local cache]\n",
+		"- title: offline flag\n  serves: [DW-9]\n", 1)
+	inner := h.fake.Responder
+	var toArchitect []string
+	h.fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleArchitect {
+			toArchitect = append(toArchitect, msg)
+		}
+		return inner(opts, msg)
+	}
+	d := h.driver(Options{Envelope: 4000, Autonomous: true, GateApproval: GateAutopilot, GoalDoc: bad})
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Drive(ctx, g); err != nil {
+		t.Fatalf("drive: %v\n%s", err, h.buf.String())
+	}
+	var told bool
+	for _, m := range toArchitect {
+		if strings.Contains(m, "DW-9") {
+			told = true
+		}
+	}
+	if !told {
+		t.Errorf("the architect was never told what the gate refused; it got %d messages\n%s",
+			len(toArchitect), h.buf.String())
+	}
+	// and it is one round, not a loop: the same refusal twice parks
+	var replans int
+	for _, ev := range h.events() {
+		if ev["event"] == "stage" && ev["result"] == "replanning" {
+			replans++
+		}
+	}
+	if replans != 1 {
+		t.Errorf("replans = %d, want exactly one — the same refusal twice is a person's problem", replans)
+	}
+}

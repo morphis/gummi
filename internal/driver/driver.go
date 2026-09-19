@@ -90,9 +90,14 @@ type Driver struct {
 	// (which records the ask's round trip and closes the decision) rather
 	// than Send (a plain turn, what --request-changes sends).
 	openingIsAnswer bool
-	bounceNote      string       // one-shot addendum to the next plan/implement kickoff after a --bounce resume
-	curStage        domain.Stage // stage currently being driven (for verbose activity lines)
-	activityCur     int          // cursor into the live session's activity feed
+	bounceNote      string // one-shot addendum to the next plan/implement kickoff after a --bounce resume
+	// replannedFor is the goal-plan refusal the architect has already been
+	// sent back with. A gate refusal it has not seen is worth another
+	// plan round; the same one twice means the architect cannot fix it
+	// and a person has to.
+	replannedFor string
+	curStage     domain.Stage // stage currently being driven (for verbose activity lines)
+	activityCur  int          // cursor into the live session's activity feed
 	// resumePrimed is the one-shot "skip what is already there" flag a
 	// resume sets before it streams anything. See emitActivity.
 	resumePrimed bool
@@ -1624,8 +1629,24 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		// workspace does not manage, an envelope that is not a number.
 		// Without this case it fell to the default below, which reports
 		// "unexpected gate status" and drops the one sentence that says
-		// what to fix: a goal whose architect wrote `envelope: ""`
-		// stopped the whole run with nothing to act on.
+		// what to fix.
+		//
+		// Telling the operator is not enough, because the one who can
+		// fix it is the architect and nothing was telling the architect.
+		// A goal whose plan said `envelope: ""` was refused, parked, and
+		// refused again on every resume: each one ran a whole plan pass,
+		// returned "pass", and left the doc exactly as it was. So an
+		// unattended run sends the refusal back as a replan round, and
+		// parks only when the same refusal comes back — which means the
+		// architect has seen it and a person is needed.
+		if d.opts.GateApproval == GateAutopilot && res.Reason != "" && d.replannedFor != res.Reason {
+			d.replannedFor = res.Reason
+			if err := d.eng.RunWith(f, verdict.ReplanNote+"\n\nThe plan gate refused this plan: "+res.Reason); err != nil {
+				return Outcome{}, err
+			}
+			d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage), Result: "replanning"})
+			return d.awaitRework(ctx, f)
+		}
 		d.recordBlocked(f, res.Reason)
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
