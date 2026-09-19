@@ -58,6 +58,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -371,7 +372,29 @@ type Input struct {
 	// run; 0 reads as 1 — whenever the substrate is idle and the heads are
 	// unproven, because an idle scarce resource is pure waste.
 	IntegrateEvery int
+	// Quiet is how long it has been since anything happened in this goal —
+	// a landing, a lead turn, a card event, a run. It is the backstop's
+	// only input, and zero (an unsupplied clock) disarms it.
+	Quiet time.Duration
 }
+
+// MaxQuiet is how long a goal may produce nothing at all — no landing, no
+// lead turn, no card event, no run heartbeat — before it says so.
+//
+// It deliberately does NOT require that nothing is running. A card the
+// conductor reads as running is the one thing no rule here will touch, so
+// a card that is running only as far as the snapshot knows is invisible to
+// every other rule and to every stop: that is precisely how a goal came to
+// tick silently for the better part of three hours. What tells a card that
+// is working from one that only looks like it is, is that a card which is
+// working produces events.
+//
+// Longer than the stage timeout (20 minutes by default) on purpose, so a
+// stage that is genuinely silent is timed out by its driver — which is an
+// event — before this is reached. A run in flight is covered twice over:
+// its heartbeat is one of the times this measures, and anyRunning holds
+// the goal open besides.
+const MaxQuiet = 30 * time.Minute
 
 // MaxLeadFailures is how many lead turns in a row may fail before the goal
 // stops relying on its lead and wraps up.
@@ -862,6 +885,19 @@ func Decide(in Input) []Action {
 			reason = fmt.Sprintf("%d card(s) dropped", n)
 		}
 		out = append(out, Action{Kind: Finish, Reason: reason})
+	}
+	// The backstop. Every rule above has had its turn and none of them
+	// found anything to do; nothing is running, no run is in flight and no
+	// lead turn is pending. A goal in that state is finished, stalled or
+	// waiting for a person — it is never simply quiet, and a goal that IS
+	// simply quiet is a goal nobody will ever be told about. Saying so
+	// costs a stop a resume clears; not saying so cost one goal 2h49m.
+	if !wrap && len(out) == 0 && in.Quiet > MaxQuiet && !anyRunning(in) {
+		return []Action{{Kind: Stall, Reason: fmt.Sprintf(
+			"nothing has happened in this goal for %s: no landing, no lead turn, no card event, "+
+				"no run — and the conductor found nothing to do. A card that is working produces "+
+				"events, so something this goal is holding is not what it reads as",
+			in.Quiet.Round(time.Minute))}}
 	}
 	return out
 }

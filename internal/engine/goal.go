@@ -376,6 +376,16 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	}
 
 	now := e.now()
+	// newest is when anything last happened in this goal — its own log, any
+	// card's events, any run. Decide's backstop is the only reader: a goal
+	// that produces nothing for MaxQuiet with nothing running is a goal
+	// something is wrong with, and it must say so rather than tick on.
+	var newest time.Time
+	for _, en := range v.Log {
+		if en.At.After(newest) {
+			newest = en.At
+		}
+	}
 	if outage == "" && stalled != "" && now.Sub(stalledAt) < goalOutageRetry {
 		// Already reported, and the backend is unlikely to have come back
 		// in the last few seconds. Staying stopped keeps the goal from
@@ -402,6 +412,9 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 			}
 		}
 		marks, merr := e.cfg.Store.LatestCardMarks(ctx, c.ID)
+		if marks.Last.At.After(newest) {
+			newest = marks.Last.At
+		}
 		if merr != nil {
 			return v, merr
 		}
@@ -467,6 +480,16 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 		LeadFailures: failures,
 		LeadOutage:   outage,
 		Reviewing:    e.Get(goal.ID) != nil,
+	}
+	for _, r := range e.ExperimentRuns(goal.ID) {
+		for _, at := range []time.Time{r.Started, r.Ended, r.Heartbeat} {
+			if at.After(newest) {
+				newest = at
+			}
+		}
+	}
+	if !newest.IsZero() {
+		in.Quiet = now.Sub(newest)
 	}
 	in.NeedOwner = v.NeedsOwner.Question
 	for _, t := range v.Tranches {
