@@ -392,3 +392,52 @@ func TestDriveGoalProvedByAnExperiment(t *testing.T) {
 		t.Fatalf("the item's evidence is the run and where its bundle is: %q", ev)
 	}
 }
+
+// A goal plan the gate refuses says what is wrong with it. The gate
+// computes that sentence — an item nothing can check, a card in a
+// repository the workspace does not manage, an envelope that is not a
+// number — and the driver used to throw it away: StatusBlockedGoalPlan
+// was the one blocked status with no case of its own, so it fell to the
+// default and reported "unexpected gate status". A real goal whose
+// architect wrote `envelope: ""` rather than guess a number stopped the
+// whole run with nothing to act on.
+func TestARefusedGoalPlanSaysWhatIsWrongWithIt(t *testing.T) {
+	h := goalHarness(t)
+	ctx := context.Background()
+	// a card list naming a done-when item that does not exist: the gate
+	// refuses it and names it
+	doc := strings.Replace(driverGoalDoc,
+		"- title: offline flag\n  serves: [DW-2]\n  depends_on: [local cache]\n",
+		"- title: offline flag\n  serves: [DW-9]\n", 1)
+	d := h.driver(Options{Envelope: 4000, Autonomous: true, GoalDoc: doc})
+	g, err := d.Create(ctx, domain.CardType{Kind: domain.KindGoal}, "Export works offline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.Drive(ctx, g)
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, h.buf.String())
+	}
+	if out.Status != StatusBlocked {
+		t.Fatalf("status = %s, want blocked\n%s", out.Status, h.buf.String())
+	}
+	var blocked map[string]any
+	for _, ev := range h.events() {
+		if ev["event"] == "blocked" {
+			blocked = ev
+		}
+		if ev["event"] == "escalation" {
+			t.Errorf("escalated instead of reporting the refusal: %v", ev)
+		}
+	}
+	if blocked == nil {
+		t.Fatalf("no blocked event\n%s", h.buf.String())
+	}
+	reason, _ := blocked["reason"].(string)
+	if reason == "" {
+		t.Fatalf("blocked event carries no reason: %v", blocked)
+	}
+	if !strings.Contains(reason, "DW-9") {
+		t.Errorf("reason = %q, want it to name the item the plan got wrong", reason)
+	}
+}

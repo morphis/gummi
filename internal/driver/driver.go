@@ -1618,6 +1618,17 @@ func (d *Driver) autoAdvance(ctx context.Context, f domain.Feature) (Outcome, er
 		d.recordBlocked(f, res.Reason)
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
 		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
+	case engine.StatusBlockedGoalPlan:
+		// The goal plan gate names the first thing wrong with the doc —
+		// an item nothing can check, a card in a repository the
+		// workspace does not manage, an envelope that is not a number.
+		// Without this case it fell to the default below, which reports
+		// "unexpected gate status" and drops the one sentence that says
+		// what to fix: a goal whose architect wrote `envelope: ""`
+		// stopped the whole run with nothing to act on.
+		d.recordBlocked(f, res.Reason)
+		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Reason: res.Reason, Resume: string(f.ID)})
+		return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 	case engine.StatusBlockedUndrafted:
 		d.recordBlocked(f, fmt.Sprintf("undrafted %s blocks %s.", strings.Join(res.Undrafted, ", "), res.From))
 		d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(res.From), Undrafted: res.Undrafted, Resume: string(f.ID)})
