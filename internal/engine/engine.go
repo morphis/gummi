@@ -1718,6 +1718,19 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		if card := e.goalReposCard(ctx, f); card != "" {
 			hints = append(hints, card)
 		}
+		// What a card has actually cost here. An architect asked to size
+		// work it has not done yet is guessing, and one that knows it is
+		// guessing writes nothing: "I have no prior run of this harness
+		// to anchor a number on, so rather than invent one" is what one
+		// wrote into a goal doc, leaving an envelope the gate refused.
+		// The workspace knows the answer and had never been asked.
+		if typical := e.typicalCardCredits(ctx); typical > 0 {
+			hints = append(hints, fmt.Sprintf(
+				"Cards completed in this workspace have cost about %d credits each, "+
+					"median plus headroom. That is the anchor for both the Budget "+
+					"section's ranges and any envelope you put on a gummi-cards row.",
+				typical))
+		}
 	}
 	// The repository orientation card sits directly under the operator's
 	// environment card: the operator's own words lead, because they are a

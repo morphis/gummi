@@ -764,6 +764,61 @@ func (e *Engine) openReviewerFindings(f *domain.Feature) int {
 
 // --- tick ----------------------------------------------------------------
 
+// typicalCardCredits is what a card has actually cost in this workspace:
+// the median spend of completed cards, padded, or 0 when there is no
+// history to learn from. It is the same signal plan-time estimation uses
+// for an ordinary card (DESIGN §5.1), read here for the goal rows whose
+// plan gave no estimate of their own.
+func (e *Engine) typicalCardCredits(ctx context.Context) int {
+	feats, err := e.cfg.Store.ListFeatures(ctx)
+	if err != nil {
+		return 0
+	}
+	var hist []domain.Spend
+	for _, x := range feats {
+		if x.Stage == domain.StageDone && !x.IsGoal() {
+			hist = append(hist, x.Spend)
+		}
+	}
+	env, n := domain.EstimateEnvelope(hist)
+	if n == 0 || env <= 0 {
+		return 0
+	}
+	return int(env)
+}
+
+// sizeUnestimatedRows fills in the rows whose plan gave no envelope with
+// what a card typically costs here, in place.
+//
+// StartEnvelopes gives a card min(estimate, an even share of the pool),
+// and leaves the difference ungiven where the raise machinery can spend
+// it on evidence. A row with no estimate has nothing to take the lesser
+// of, so it takes the share — and on a one-card goal the share is the
+// whole pool. A goal with a 6,000-credit envelope minted its single card
+// at 4,569 and the card spent 115: 76% of the budget committed before it
+// ran a turn, and the card told it had forty times what the work costs.
+//
+// That is the arithmetic StartEnvelopes was written to prevent, in the
+// case its fix does not reach — the estimate being ABSENT rather than
+// wrong. An absent estimate is not a claim that the work is unbounded,
+// so it is read as the ordinary claim instead: this card costs about
+// what cards here cost.
+//
+// With no history there is nothing to read and the rows keep their even
+// share, which is the old behaviour. A workspace that has never finished
+// a card cannot be told what a card costs, and guessing a constant at it
+// would be the invented number this avoids.
+func sizeUnestimatedRows(want []int, typical int) {
+	if typical <= 0 {
+		return
+	}
+	for i, w := range want {
+		if w <= 0 {
+			want[i] = typical
+		}
+	}
+}
+
 // GoalStart is a card the driving loop must start, with the note to start
 // it with (a send-back's reason), empty for a plain start.
 type GoalStart struct {
@@ -2039,6 +2094,7 @@ func (e *Engine) goalPlanProblems(ctx context.Context, goal domain.Feature) stri
 			return fmt.Sprintf("the tbd rows hold %d credits, more than the goal budget leaves for cards at all", tranches)
 		}
 	}
+	sizeUnestimatedRows(want, e.typicalCardCredits(ctx))
 	if _, err := goalpolicy.StartEnvelopes(want, pool); err != nil && len(want) > 0 {
 		if tranches > 0 {
 			return fmt.Sprintf("%v — after the %d credits its tbd rows hold", err, tranches)
@@ -2183,6 +2239,7 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		}
 	}
 	pool := goal.GoalMintPool(goal.Spend.CreditEquivalent(), len(rows)) - float64(tranches)
+	sizeUnestimatedRows(want, e.typicalCardCredits(ctx))
 	envs, err := goalpolicy.StartEnvelopes(want, pool)
 	if err != nil && len(want) > 0 {
 		return err

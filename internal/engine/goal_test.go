@@ -1258,3 +1258,37 @@ func TestABlockedCardIsRetriedWhenTheSubstrateItCitesIsReady(t *testing.T) {
 		t.Fatalf("a person's visit buys another try: %+v", res)
 	}
 }
+
+// A card row whose plan gave no envelope is sized at what a card
+// typically costs here, not at everything the goal has. A one-card goal
+// with a 6,000-credit envelope minted its card at 4,569 and the card
+// spent 115 — the whole pool committed, and the card told it had forty
+// times what the work costs.
+func TestARowWithNoEstimateIsSizedAtWhatCardsCost(t *testing.T) {
+	want := []int{0}
+	sizeUnestimatedRows(want, 300)
+	if want[0] != 300 {
+		t.Errorf("want = %v, want the typical card's 300", want)
+	}
+	envs, err := goalpolicy.StartEnvelopes(want, 4590)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envs[0] != 300 {
+		t.Errorf("minted at %d, want 300 — the rest stays in the pool", envs[0])
+	}
+
+	// an estimate the plan DID give is untouched, high or low
+	given := []int{1200, 0, 50}
+	sizeUnestimatedRows(given, 300)
+	if given[0] != 1200 || given[1] != 300 || given[2] != 50 {
+		t.Errorf("given = %v, want only the zero filled", given)
+	}
+
+	// and with no history nothing is invented: the rows keep their share
+	cold := []int{0, 0}
+	sizeUnestimatedRows(cold, 0)
+	if cold[0] != 0 || cold[1] != 0 {
+		t.Errorf("cold = %v, want untouched with no history to read", cold)
+	}
+}

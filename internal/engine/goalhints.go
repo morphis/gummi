@@ -64,8 +64,10 @@ asking:
 4. Cards — the work, one gummi-cards row each: title, one_liner, kind
    (feature, bug, research or diagnosis), serves (the DW ids it is for — every card
    serves at least one and every item is served), depends_on (titles of
-   rows that must land first), and envelope (credits; leave it out to let
-   the goal split its budget). Where an item is proved by an experiment,
+   rows that must land first), and envelope (credits; OMIT THE KEY
+   ENTIRELY to let the goal size the card from what cards here have
+   actually cost — never write it with an empty or non-numeric value,
+   which the gate cannot parse and will refuse the whole plan for). Where an item is proved by an experiment,
    the goal proves what has LANDED as it goes — an integration run
    whenever the substrate is idle and cards have landed since the last
    one (` + "`integrate_every: N`" + ` in the gummi-goal block batches N landings
@@ -111,8 +113,10 @@ asking:
    credits for even a one-file change. Estimating a two-card goal at "30
    to 60 credits" is not optimism, it is an error of two orders of
    magnitude, and it is the only figure the person sizing this envelope
-   has to go on. If you have no basis for a number, say what it depends on
-   instead of inventing a total. Your estimate does not allocate anything:
+   has to go on. If you have no basis for a total, say here in prose what
+   it depends on rather than inventing one — but that is about THIS
+   section's prose, not about the gummi-cards rows: a row's envelope is
+   a number or an absent key, and there is no third thing to write in it. Your estimate does not allocate anything:
    the goal splits its actual envelope across the cards when they are
    minted, so the number's whole job is to tell a person whether the
    budget they are about to approve is the right order of magnitude.
