@@ -2573,9 +2573,29 @@ three tenths — cards hold their whole envelopes however little they have
 spent, so a lead given a flat tenth runs dry half-way through. A
 card is raised only from `available`; lead turns are capped by it; the
 reserve (the lead's `reserve_set` estimate, else 15% of the budget, at
-least 100) belongs to the goal's own review and verify. `available < 0`
-wraps the goal up. Only a person raises the ceiling, and a raise lifts a
-wrap-up the budget forced.
+least 100) belongs to the goal's own review and verify.
+
+`available < 0` is answered in three steps, because running out of money
+is not a reason to choose which work to abandon (§17.4a). What a card
+that has verified did not spend comes back the moment it lands, so that
+is counted first — a goal short of credits it is already holding is not
+short. Then a waiting card is shrunk to what the goal can still fund.
+Only if it is still short does it stop: `NeedBudget`, naming the card
+whose allocation it cannot cover, keeping every branch, every commit and
+every envelope, with nothing new started until a person answers. It wraps
+up instead only when there is no work to keep — every live card unstarted
+— since a card funded below the floor buys a guaranteed exhaustion rather
+than a chance at the work.
+
+It used to wrap up in every case, which dropped the unfinished cards
+without the raise ever having been offered, and did so or did not
+depending on nothing but how many of them happened to be running at that
+tick: only a waiting card can be shrunk, so the same goal, sixteen
+credits short, carried on with two cards waiting and abandoned all three
+— 470 credits of finished work among them — with two of them running.
+
+Only a person raises the ceiling, and a raise lifts a wrap-up the budget
+forced.
 
 **The second ledger.** Credits buy agent turns. A goal proved by an
 experiment (§17.8) spends something credits cannot buy — time on

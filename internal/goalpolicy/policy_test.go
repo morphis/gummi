@@ -150,7 +150,12 @@ func TestDroppedDependencyStrandsDependents(t *testing.T) {
 	}
 }
 
-func TestBudgetPastReserveWrapsUp(t *testing.T) {
+// A goal past its reserve asks for the ceiling to be raised and keeps
+// everything. It used to wrap up, which dropped the unfinished work in
+// the same tick it landed the verified card whose unspent envelope was
+// coming back — and nobody was ever offered the raise that would have
+// kept it. Which work to abandon is not the goal's decision (§17.4a).
+func TestBudgetPastReserveAsksRatherThanAbandons(t *testing.T) {
 	in := base()
 	in.OwnSpent = 3000
 	in.Cards = []Card{
@@ -158,12 +163,20 @@ func TestBudgetPastReserveWrapsUp(t *testing.T) {
 		{ID: "FD-003", State: Running, Envelope: 500, Spent: 100},
 	}
 	got := acts(in)
-	want := "wrap-up: the budget reached the reserve | drop FD-003: the goal is wrapping up: the budget reached the reserve | land FD-002"
+	want := "need-budget FD-003 → 1000: the goal's cards hold 500 credits more than it has left and it needs about 500 more to go on | land FD-002"
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
-	// once landed and dropped, it finishes partial with the wrap reason
+	// and nothing new starts while the question stands
+	in.Cards = append(in.Cards, Card{ID: "FD-004", State: Waiting, Envelope: 500})
+	for _, a := range Decide(in) {
+		if a.Kind == Start {
+			t.Errorf("started %s while waiting on a raise: %v", a.Card, a)
+		}
+	}
+	// a wrap-up the person asks for still finishes partial
 	in.WrapUp, in.WrapReason = true, "the budget reached the reserve"
+	in.Cards = in.Cards[:2]
 	in.Cards[0].State, in.Cards[1].State = Landed, Dropped
 	if got := acts(in); got != "finish: the budget reached the reserve" {
 		t.Fatalf("got %q", got)
@@ -767,5 +780,55 @@ func TestAQuestionForTheOwnerFreezesOnlyWhatItIsAbout(t *testing.T) {
 	in.NeedOwner = ""
 	if got, want := acts(in), "finish"; got != want {
 		t.Fatalf("answered, it finishes: got %q, want %q", got, want)
+	}
+}
+
+// Whether a goal keeps its work must not depend on how many of its cards
+// happen to be running when the ledger tips. The same envelope, the same
+// spend and the same three cards, 16 credits short: with two of them
+// waiting the goal shrank one and carried on, and with two of them
+// running it wrapped up and dropped all three — 470 credits of finished
+// work among them — because only a waiting card can be shrunk.
+func TestSolvencyDoesNotDependOnWhichCardsAreRunning(t *testing.T) {
+	mk := func(running int) Input {
+		cards := []Card{
+			{ID: "FD-001", State: Running, Envelope: 490, Spent: 470},
+			{ID: "FD-002", State: Waiting, Envelope: 416},
+			{ID: "FD-003", State: Waiting, Envelope: 300},
+		}
+		for i := 1; i <= running; i++ {
+			cards[i].State = Running
+		}
+		return Input{Stage: domain.StageImplement, Envelope: 1800, OwnSpent: 470,
+			Reserve: 140, Lanes: 4, Cards: cards, LeadAvailable: true}
+	}
+	for _, running := range []int{0, 1, 2} {
+		in := mk(running)
+		if got := ComputeLedger(in).Available; got != -16 {
+			t.Fatalf("running=%d: available = %v, want the same −16 every time", running, got)
+		}
+		for _, a := range Decide(in) {
+			if a.Kind == Drop || a.Kind == WrapUp {
+				t.Errorf("running=%d: 16 credits short and it %s", running, a)
+			}
+		}
+	}
+}
+
+// A goal is not short of credits it is about to be handed. This one is
+// 16 down and holding a verified card whose landing returns 240, and it
+// used to drop the other two in the same tick as the landing.
+func TestAVerifiedCardsReturnIsCountedBeforeTheGoalIsCalledShort(t *testing.T) {
+	in := Input{
+		Stage: domain.StageImplement, Envelope: 1800, OwnSpent: 470, Reserve: 140,
+		Lanes: 4, LeadAvailable: true,
+		Cards: []Card{
+			{ID: "FD-001", State: Verified, Envelope: 490, Spent: 250},
+			{ID: "FD-002", State: Running, Envelope: 416, Spent: 400},
+			{ID: "FD-003", State: Running, Envelope: 300, Spent: 100},
+		},
+	}
+	if got, want := acts(in), "land FD-001"; got != want {
+		t.Fatalf("got %q, want %q — the landing, and nothing else", got, want)
 	}
 }

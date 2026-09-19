@@ -599,6 +599,14 @@ func Decide(in Input) []Action {
 		state[c.ID] = c.State
 	}
 
+	// needBudget: the goal has asked a person to raise the ceiling.
+	// Nothing new starts meanwhile — another card started now would
+	// exhaust on its first session and ask the same question twice —
+	// but everything already in hand carries on, and a verified card
+	// still lands, because landing it banks both the work and the
+	// credits it did not spend.
+	needBudget := false
+
 	if !wrap && ledger.Available < 0 {
 		// Before giving up on the work, try making room for it.
 		//
@@ -627,9 +635,50 @@ func Decide(in Input) []Action {
 				}
 			}
 		}
+		// What a verified card did not spend comes back the moment it
+		// lands, and this tick is about to land one. A goal short of
+		// credits it is already holding is not short: it dropped two
+		// cards for want of 16 credits in the same tick it banked 240,
+		// which is the arithmetic done in the wrong order rather than a
+		// goal out of money.
 		if ledger.Available < 0 {
-			wrap, wrapReason = true, "the budget reached the reserve"
-			out = append(out, Action{Kind: WrapUp, Reason: wrapReason})
+			ledger.Available += unlandedReturn(cards)
+		}
+		if ledger.Available < 0 {
+			// Still short. Which work to abandon is not the goal's
+			// decision (§17.4a), and a wrap-up here took that decision:
+			// it dropped every unfinished card, finished work included,
+			// without anybody having been offered the raise that would
+			// have kept it. Worse, it did so or did not depending on
+			// nothing but how many cards happened to be running at that
+			// tick, since only a waiting card can be shrunk — the same
+			// goal, the same budget and the same shortfall shrank and
+			// carried on with two cards waiting, and abandoned all three
+			// with two of them running.
+			//
+			// So it stops and asks, keeping everything, exactly as an
+			// exhausted card does. The card named is the one whose
+			// allocation the goal cannot cover — the largest holder —
+			// and what it asks for is that allocation plus the
+			// shortfall, so a top-up sized from it clears the ledger.
+			// Unless there is no work to keep. A goal holding nothing
+			// but unstarted allocations loses nothing by stopping, and
+			// a card funded below the floor buys a guaranteed
+			// exhaustion rather than a chance at the work — so that
+			// case keeps the wrap-up it always had, and only a goal
+			// with work in flight is worth a person's attention.
+			if c, ok := largestHolder(cards); ok && workInFlight(cards) {
+				short := int(math.Ceil(-ledger.Available))
+				out = append(out, Action{Kind: NeedBudget, Card: c.ID, To: c.Envelope + short,
+					Reason: fmt.Sprintf("the goal's cards hold %.0f credits more than it has left and it needs about %d more to go on",
+						-ledger.Available, short)})
+				needBudget = true
+			} else {
+				// Nothing live to keep, so there is nothing to ask for
+				// and nothing to lose by stopping.
+				wrap, wrapReason = true, "the budget reached the reserve"
+				out = append(out, Action{Kind: WrapUp, Reason: wrapReason})
+			}
 		}
 	}
 
@@ -698,11 +747,7 @@ func Decide(in Input) []Action {
 	}
 
 	available := ledger.Available
-	// needBudget: the envelope is spent and a person has been asked to
-	// raise it. Nothing new starts meanwhile — another card started now
-	// would exhaust on its first session and ask the same question twice.
-	needBudget := false
-	if !wrap {
+	if !wrap && !needBudget {
 		for _, c := range cards {
 			if c.TakenOver || c.Frozen {
 				continue
@@ -1119,6 +1164,63 @@ func StartEnvelopes(want []int, pool float64) ([]int, error) {
 		out[i] = int(start)
 	}
 	return out, nil
+}
+
+// unlandedReturn is what the goal gets back when the cards that have
+// already verified land: the part of each of their envelopes they did
+// not spend. A verified card's work is done and its allocation is no
+// longer a promise about anything — it is credits in transit.
+func unlandedReturn(cards []Card) float64 {
+	var back float64
+	for _, c := range cards {
+		if c.State != Verified {
+			continue
+		}
+		if spare := float64(c.Envelope) - c.Spent; spare > 0 {
+			back += spare
+		}
+	}
+	return back
+}
+
+// workInFlight reports that some live card has spent credits or already
+// verified: work a raise would preserve and a wrap-up would throw away.
+// It is the difference between a goal that should stop and ask and one
+// that has nothing to lose by stopping.
+func workInFlight(cards []Card) bool {
+	for _, c := range cards {
+		if c.State == Landed || c.State == Dropped {
+			continue
+		}
+		if c.Spent > 0 || c.State == Verified {
+			return true
+		}
+	}
+	return false
+}
+
+// largestHolder is the unfinished card holding most of the goal's
+// budget: the allocation a goal that has run short cannot cover, and
+// therefore the one to name when it asks for more. Ties go to the first
+// id, so the same shortfall always names the same card and the ask is
+// not re-opened every tick.
+//
+// A verified card is not a candidate. It is about to land and stop
+// holding anything, and its unspent envelope has already been counted
+// as coming back — naming it would ask for credits to fund work that is
+// finished.
+func largestHolder(cards []Card) (Card, bool) {
+	var best Card
+	var found bool
+	for _, c := range cards {
+		if c.State == Landed || c.State == Dropped || c.State == Verified {
+			continue
+		}
+		if !found || c.Held() > best.Held() {
+			best, found = c, true
+		}
+	}
+	return best, found
 }
 
 // reclaimFromWaiting frees `need` credits by lowering the envelopes of
