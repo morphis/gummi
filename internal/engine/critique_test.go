@@ -34,7 +34,7 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 	}
 
 	var names []string
-	for _, td := range stageTools(domain.StagePlan, flavorCritique) {
+	for _, td := range stageTools(domain.StagePlan, flavorCritique, nil) {
 		names = append(names, td.Name)
 	}
 	got := strings.Join(names, ",")
@@ -42,7 +42,7 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 		t.Errorf("critique tools = %s, want submit_verdict + spec_annotate", got)
 	}
 	var writerNames []string
-	for _, td := range stageTools(domain.StagePlan, flavorStage) {
+	for _, td := range stageTools(domain.StagePlan, flavorStage, nil) {
 		writerNames = append(writerNames, td.Name)
 	}
 	writer := strings.Join(writerNames, ",")

@@ -251,7 +251,7 @@ func (ep *mcpEndpoint) dispatch(conn net.Conn, wmu *sync.Mutex, req *mcp.Request
 // session's stageHints/toolHint, so the tool list it advertises matches
 // what that pass's prompt told the model existed.
 func (ep *mcpEndpoint) listTools() (json.RawMessage, error) {
-	defs := stageTools(ep.feature.Stage, ep.flavor)
+	defs := stageTools(ep.feature.Stage, ep.flavor, ep.engine.decidingHeadings(&ep.feature))
 	return mcp.MarshalTools(defs)
 }
 

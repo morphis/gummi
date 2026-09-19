@@ -26,7 +26,7 @@ func TestRebaseHintsAndTools(t *testing.T) {
 		t.Error("stage hints leaked the rebase contract")
 	}
 
-	if stageTools(domain.StageVerify, flavorRebase) != nil {
+	if stageTools(domain.StageVerify, flavorRebase, nil) != nil {
 		t.Error("rebase session unexpectedly offered client tools")
 	}
 	if toolHint(domain.StageVerify, flavorRebase) != "" {

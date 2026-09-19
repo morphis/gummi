@@ -479,7 +479,7 @@ func TestSubmitVerdictRecorded(t *testing.T) {
 // The verify stage gets its own submit_verdict flavor
 // (pass|fail|blocked) and a "fail" verdict is recorded like any other.
 func TestVerifyVerdictToolAndFailRecorded(t *testing.T) {
-	tools := stageTools(domain.StageVerify, flavorStage)
+	tools := stageTools(domain.StageVerify, flavorStage, nil)
 	if len(tools) != 3 || tools[0].Name != "submit_verdict" {
 		t.Fatalf("verify tools = %+v, want submit_verdict first", tools)
 	}
@@ -858,7 +858,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 	want := []string{"ask_user", "spec_annotate", "spec_view", "spec_replace_section"}
 	for _, st := range []domain.Stage{domain.StagePlan, domain.StagePlan, domain.StagePlan, domain.StagePlan} {
 		var names []string
-		for _, td := range stageTools(st, flavorStage) {
+		for _, td := range stageTools(st, flavorStage, nil) {
 			names = append(names, td.Name)
 		}
 		if !slices.Equal(names, want) {
@@ -868,16 +868,16 @@ func TestArchitectStageToolSurface(t *testing.T) {
 	// the worktree stages carry submit_verdict/resolve_annotation plus the
 	// artifact access tools, so a backend caged to the worktree never has to
 	// read or write the spec through raw file access
-	if got := stageTools(domain.StageVerify, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
+	if got := stageTools(domain.StageVerify, flavorStage, nil); len(got) != 3 || got[0].Name != "submit_verdict" {
 		t.Errorf("review tools changed: %+v", got)
 	}
-	if got := stageTools(domain.StageVerify, flavorStage); len(got) != 3 || got[0].Name != "submit_verdict" {
+	if got := stageTools(domain.StageVerify, flavorStage, nil); len(got) != 3 || got[0].Name != "submit_verdict" {
 		t.Errorf("verify tools changed: %+v", got)
 	}
-	if got := stageTools(domain.StageImplement, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
+	if got := stageTools(domain.StageImplement, flavorStage, nil); len(got) != 3 || got[0].Name != "resolve_annotation" {
 		t.Errorf("implement tools changed: %+v", got)
 	}
-	if got := stageTools(domain.StageImplement, flavorStage); len(got) != 3 || got[0].Name != "resolve_annotation" {
+	if got := stageTools(domain.StageImplement, flavorStage, nil); len(got) != 3 || got[0].Name != "resolve_annotation" {
 		t.Errorf("fix tools changed: %+v", got)
 	}
 }
@@ -891,7 +891,7 @@ func TestArchitectStageToolSurface(t *testing.T) {
 func TestWorktreeStagesOfferArtifactTools(t *testing.T) {
 	for _, st := range []domain.Stage{domain.StageImplement, domain.StageImplement, domain.StageVerify, domain.StageVerify, domain.StagePlan} {
 		names := map[string]bool{}
-		for _, td := range stageTools(st, flavorStage) {
+		for _, td := range stageTools(st, flavorStage, nil) {
 			names[td.Name] = true
 		}
 		if !names[specViewToolName] || !names[specReplaceSectionToolName] {
@@ -922,7 +922,7 @@ func TestReadOnlyResearchKeepsItsDocumentTools(t *testing.T) {
 		{domain.StageVerify, []string{"submit_verdict", "spec_view", "spec_replace_section"}},
 	} {
 		names := map[string]bool{}
-		for _, td := range stageTools(tc.stage, flavorStage) {
+		for _, td := range stageTools(tc.stage, flavorStage, nil) {
 			names[td.Name] = true
 		}
 		for _, w := range tc.want {
@@ -933,7 +933,7 @@ func TestReadOnlyResearchKeepsItsDocumentTools(t *testing.T) {
 	}
 	// A critique judges and files findings: it needs the annotate.
 	names := map[string]bool{}
-	for _, td := range stageTools(domain.StageImplement, flavorCritique) {
+	for _, td := range stageTools(domain.StageImplement, flavorCritique, nil) {
 		names[td.Name] = true
 	}
 	for _, w := range []string{"submit_verdict", "spec_annotate"} {
@@ -1718,5 +1718,63 @@ func TestGateAskHintOnlyWhereAGateStops(t *testing.T) {
 	}
 	if plain := strings.Join(stageHints(attendedPlan, "spec.md", "", flavorStage), "\n"); strings.Contains(plain, `"gate": true`) {
 		t.Error("the plan WRITER was told to ask the gate question; only its critique should be")
+	}
+}
+
+// The schema names this spec's own deciding sections. The runtime
+// refuses a design-stage question that carries no changes_section, and
+// the refusal's whole value was listing the headings the model should
+// have chosen from — so the model learned the rule by being refused.
+// Measured on one goal: eight of ten questions were asked twice, a
+// wasted call, turn and refusal message each, to arrive at a list gummi
+// had all along.
+func TestAskUserNamesThisSpecsDecidingSections(t *testing.T) {
+	deciding := []string{"Chosen approach", "Out of scope"}
+	var ask agent.ToolDef
+	for _, td := range stageTools(domain.StagePlan, flavorStage, deciding) {
+		if td.Name == askToolName {
+			ask = td
+		}
+	}
+	if ask.Name == "" {
+		t.Fatal("no ask_user tool at the design stage")
+	}
+	props := ask.Parameters["properties"].(map[string]any)
+	cs := props["changes_section"].(map[string]any)
+
+	desc := cs["description"].(string)
+	for _, h := range deciding {
+		if !strings.Contains(desc, h) {
+			t.Errorf("description does not name %q: %s", h, desc)
+		}
+	}
+	enum, ok := cs["enum"].([]any)
+	if !ok || len(enum) != 2 || enum[0] != "Chosen approach" {
+		t.Errorf("enum = %v, want this spec's own sections", cs["enum"])
+	}
+
+	// A gate ask is the crossing rather than a decision inside it and
+	// carries no changes_section, so the schema must not demand one.
+	req := ask.Parameters["required"].([]any)
+	for _, r := range req {
+		if r == "changes_section" {
+			t.Error("changes_section is required, which a gate ask cannot satisfy")
+		}
+	}
+
+	// With no artifact to read, the tool is described as it always was
+	// rather than with an invented list.
+	for _, td := range stageTools(domain.StagePlan, flavorStage, nil) {
+		if td.Name != askToolName {
+			continue
+		}
+		p := td.Parameters["properties"].(map[string]any)
+		c := p["changes_section"].(map[string]any)
+		if c["enum"] != nil {
+			t.Errorf("enum = %v with no sections known, want none", c["enum"])
+		}
+		if !strings.Contains(c["description"].(string), "At the design stage, required") {
+			t.Errorf("fallback description lost its rule: %v", c["description"])
+		}
 	}
 }

@@ -1794,7 +1794,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// same way, so its stage sessions still receive the toolHint.
 	var tools []agent.ToolDef
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
-		tools = stageTools(f.Stage, flavor)
+		tools = stageTools(f.Stage, flavor, e.decidingHeadings(&f))
 		// Every session that has the tools is told how to use them,
 		// research included. This used to skip a read-only session,
 		// because its surface had spec_replace_section stripped out from

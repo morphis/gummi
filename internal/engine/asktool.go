@@ -151,7 +151,7 @@ const (
 // on autonomous stages. The plan-critique pass reviews the plan and files
 // findings, so it gets both; the rebase-resolve pass is judged by git
 // state alone and gets none.
-func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
+func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent.ToolDef {
 	switch flavor {
 	case flavorCritique:
 		return []agent.ToolDef{critiqueVerdictTool(), specAnnotateTool()}
@@ -163,7 +163,7 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 		// the design stage: it converges with the user and writes the
 		// artifact, so it keeps ask_user and the annotation tools the
 		// three design stages used to share between them.
-		return []agent.ToolDef{askUserTool(), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
+		return []agent.ToolDef{askUserTool(deciding), specAnnotateTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageVerify:
 		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageImplement:
@@ -202,7 +202,19 @@ func stageTools(stage domain.Stage, flavor runFlavor) []agent.ToolDef {
 // So there is no filter. A stage's gummi surface is stageTools, read-only
 // or not, and the read-only contract means what it says: the repository.
 
-func askUserTool() agent.ToolDef {
+// askUserTool builds the ask_user definition. deciding is this spec's own
+// list of sections an answer could change, which the description names
+// outright when it is known.
+//
+// It is named rather than described in the abstract because the runtime
+// refuses a design-stage question that does not carry changes_section,
+// and the refusal's whole value was listing the headings the model
+// should have chosen from. The schema said the field was optional and
+// the runtime said it was required, so the model learned the rule by
+// being refused: measured on one goal, eight of ten questions were
+// asked twice — a wasted call, a wasted turn and a refusal message
+// each — to arrive at a list gummi could have handed over up front.
+func askUserTool(deciding []string) agent.ToolDef {
 	return agent.ToolDef{
 		Name: askToolName,
 		Description: "Ask the user a question with a small set of options and wait for their " +
@@ -242,21 +254,58 @@ func askUserTool() agent.ToolDef {
 					"description": "Optional: a unique snippet of a spec line this decision belongs to. " +
 						"gummi records the answer as a resolved %% marker under it.",
 				},
-				"changes_section": map[string]any{
-					"type": "string",
-					"description": "At the design stage, required: the name of the spec section whose " +
-						"CONTENT would be different depending on which option is chosen (e.g. " +
-						"\"Chosen approach\", \"Out of scope\", \"Implementation notes\"). It must be a " +
-						"section this stage decides — the Verification plan, Progress and Review are " +
-						"rewritten by later stages, so an answer that only changes one of those changes " +
-						"nothing about the work and is your call, not the user's. If you cannot name a " +
-						"deciding section, this is not a decision for the user — record your " +
-						"recommendation in the spec and carry on.",
-				},
+				"changes_section": changesSectionSchema(deciding),
 			},
 			"required": []any{"question", "options"},
 		},
 	}
+}
+
+// changesSectionDescription names this spec's own deciding sections when
+// they are known, and falls back to the general rule when they are not.
+func changesSectionDescription(deciding []string) string {
+	base := "The name of the spec section whose CONTENT would be different depending on " +
+		"which option is chosen. It must be a section this stage decides — the Verification " +
+		"plan, Progress and Review are rewritten by later stages, so an answer that only " +
+		"changes one of those changes nothing about the work and is your call, not the " +
+		"user's. If you cannot name a deciding section, this is not a decision for the " +
+		"user — record your recommendation in the spec and carry on without asking."
+	if len(deciding) == 0 {
+		return "At the design stage, required. " + base +
+			" (e.g. \"Chosen approach\", \"Out of scope\", \"Implementation notes\")"
+	}
+	return "Required unless gate is true. " + base +
+		" This spec's deciding sections are: " + strings.Join(deciding, ", ") + "."
+}
+
+// changesSectionSchema constrains the field to this spec's own sections, so
+// a backend that validates arguments catches a wrong one before the call
+// is made rather than after it is refused. Nil when the sections are not
+// known, which leaves the field unconstrained rather than guessing.
+//
+// The field stays out of "required" on purpose. A gate ask IS the
+// crossing rather than a decision inside it, carries no changes_section,
+// and is exempted by the runtime for that reason; a schema demanding one
+// outright would make the model invent a section for a question that
+// changes none. Naming the sections and the exemption in the description
+// is the part that costs nothing and was missing.
+func changesSectionSchema(deciding []string) map[string]any {
+	out := map[string]any{
+		"type":        "string",
+		"description": changesSectionDescription(deciding),
+	}
+	if len(deciding) == 0 {
+		// No enum key at all rather than an empty one: a typed nil under
+		// an interface is not absent, and a schema carrying "enum": null
+		// is a schema some backend will read as "no value is valid".
+		return out
+	}
+	vals := make([]any, 0, len(deciding))
+	for _, h := range deciding {
+		vals = append(vals, h)
+	}
+	out["enum"] = vals
+	return out
 }
 
 func specAnnotateTool() agent.ToolDef {
@@ -1420,4 +1469,21 @@ func IsAnswerNote(note string) bool {
 	return note == AnswerCapturedNote ||
 		strings.HasPrefix(note, AnswerAppendedPrefix) ||
 		strings.HasPrefix(note, AnswerNotSavedPrefix)
+}
+
+// decidingHeadings is the sections of a card's artifact whose content an
+// answer could change — what askChangesSomething holds a question to, and
+// therefore what ask_user's schema should have been naming all along.
+// Empty when there is no readable artifact yet, which leaves the tool
+// described in the general terms it always was.
+func (e *Engine) decidingHeadings(f *domain.Feature) []string {
+	path := e.artifactFile(f)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return spec.DecidingHeadings(string(raw))
 }
