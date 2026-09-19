@@ -293,7 +293,14 @@ func money(sess []Session, spend []state.StageSpend, f domain.Feature) Money {
 		m.InputTokens += r.InputTokens
 		m.CachedTokens += r.CachedTokens
 		m.OutputTokens += r.OutputTokens
-		if !passKeys[r.Session] {
+		// A row with no session key predates the keyed rollup and cannot
+		// be attributed either way: it is not evidence of a turn outside
+		// the passes, only of a card recorded before the question could
+		// be asked. Counting it here reported every credit of an old
+		// card as spent on turns that are not passes, while the pass
+		// list held the same credits — the double count this figure
+		// exists to prevent.
+		if r.Session != "" && !passKeys[r.Session] {
 			m.Elsewhere += r.Credits
 			elsewhere[r.Role] += r.Credits
 		}

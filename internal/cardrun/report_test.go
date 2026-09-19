@@ -519,3 +519,27 @@ func TestReportNamesNothingElsewhereWhenEveryPassIsAccountedFor(t *testing.T) {
 		t.Errorf("elsewhere = %v, want nothing", run.Money.Elsewhere)
 	}
 }
+
+// A card recorded before the rollup carried session keys has passes that
+// match nothing, and that is not evidence of a turn outside them. Read
+// the other way it reported every credit of such a card as spent on
+// turns that are not passes — while the pass list held the same credits,
+// which is the double count this figure exists to prevent.
+func TestReportNamesNothingElsewhereOnACardWithNoSessionKeys(t *testing.T) {
+	enter, _ := json.Marshal(map[string]string{"role": "architect", "flavor": "stage"})
+	exit, _ := json.Marshal(map[string]any{"verdict": "pass", "credits": 40.0})
+	evs := []state.CardEvent{
+		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: base, Payload: string(enter)},
+		{Stage: domain.StagePlan, Kind: state.EventStageExit, At: base.Add(time.Minute), Payload: string(exit)},
+	}
+	// the rollup as it was written before session keys: no Session
+	spend := []state.StageSpend{{Stage: domain.StagePlan, Role: "architect", Model: "m", Credits: 40, UpdatedAt: base}}
+	run := Report(Input{Feature: card(40, 500), Events: evs, Spend: spend})
+
+	if run.Money.Elsewhere != 0 {
+		t.Errorf("elsewhere = %v, want nothing — an unkeyed row is not a turn outside the passes", run.Money.Elsewhere)
+	}
+	if got := run.Money.FirstPass + run.Money.Rework + run.Money.Elsewhere; got > run.Money.Credits+0.01 {
+		t.Errorf("first pass + rework + elsewhere = %.2f, more than the card's %.2f", got, run.Money.Credits)
+	}
+}
