@@ -123,8 +123,37 @@ func claudeReadOnlyTools() []string {
 // claudeStageTools is that roster for a normal (worktree, acceptEdits)
 // stage session. MCP tools are not built-ins and are unaffected by
 // --tools; gummi's own reach the session through --mcp-config either way.
-func claudeStageTools() []string {
-	return []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit"}
+//
+// Skill is conditional, and the condition is the whole point. Skill IS a
+// built-in, so --tools gates it: while it was absent from this list, a
+// stage session could not invoke a skill at all — not a forwarded one, and
+// not one the repository itself ships in .claude/skills, sitting in the
+// session's own worktree. That was a silent hole, since a repo's skills
+// need no configuration to be there. Naming it unconditionally would undo
+// what this roster exists for (every extra definition rides every
+// request), so it is named exactly when the session has something to
+// invoke: a skill directory in its worktree, or a forwarded one.
+func claudeStageTools(workDir string, skillDirs []string) []string {
+	tools := []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit"}
+	if claudeSkillsReachable(workDir, skillDirs) {
+		tools = append(tools, "Skill")
+	}
+	return tools
+}
+
+// claudeSkillsReachable reports whether this session has any skill to
+// invoke: one forwarded from the workspace, or one the checked-out branch
+// carries at claude's own project location. A repo without skills keeps
+// the narrow roster it has always had.
+func claudeSkillsReachable(workDir string, skillDirs []string) bool {
+	if len(skillDirs) > 0 {
+		return true
+	}
+	if workDir == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(workDir, ".claude", "skills"))
+	return err == nil && info.IsDir()
 }
 
 // claudeReadOnlyRoster is the same idea for a ReadOnly research session:
@@ -245,7 +274,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// built-ins only, so dropping this line would widen the prompt, never
 	// the permissions.
 	if c.supportsToolRoster() {
-		roster := claudeStageTools()
+		roster := claudeStageTools(opts.WorkDir, opts.SkillDirs)
 		if opts.ReadOnly {
 			roster = claudeReadOnlyRoster()
 		}
