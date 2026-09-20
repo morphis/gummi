@@ -66,6 +66,15 @@ func (e *Engine) forwardedSkillDirs() []string {
 	return e.skillDirs
 }
 
+// ResolveForwardedSkill is resolveSkillDir for callers outside the
+// engine — `gummi doctor`, which must report exactly what a session would
+// get. It is exported so the report and the engine cannot disagree about
+// whether a configured skill resolves: two surfaces answering that
+// differently is worse than one.
+func ResolveForwardedSkill(wsRoot, name string) (string, error) {
+	return resolveSkillDir(wsRoot, name)
+}
+
 // resolveSkillDir turns one configured entry into the absolute directory
 // holding its SKILL.md. A bare name is looked up under the workspace's
 // conventional skill roots in order; an absolute path is taken as given.
@@ -145,8 +154,8 @@ func (e *Engine) warnSkillBackendOnce(backend string) {
 		return
 	}
 	e.warn(fmt.Sprintf("skills.forward is configured, but the %s backend cannot load skills from outside the worktree; "+
-		"those skills will not reach its sessions (point the role at opencode or copilot, or state the rules in "+
-		".gummi/environment.md, which every backend receives)", backend))
+		"those skills will not reach its sessions (point the role at claude, opencode or copilot, or state the "+
+		"rules in .gummi/environment.md, which every backend receives)", backend))
 }
 
 // skillCapable is the sliver of agent.Agent skillDirsFor needs, kept as a

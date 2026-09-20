@@ -19,6 +19,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/envprobe"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/state"
@@ -214,7 +215,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	}
 	checks = append(checks, envChecks(wsCfg, defaultRoot)...)
 	checks = append(checks, substrateChecks(wsCfg, ws)...)
-	checks = append(checks, configLayeringChecks(wsCfg, sources, userPath, ws.ConfigFile())...)
+	checks = append(checks, configLayeringChecks(wsCfg, sources, userPath, ws.ConfigFile(), ws.Root)...)
 
 	// profiles are parsed once and shared by the backend check (they decide
 	// which backends are required) and the profile cross-check below.
@@ -997,7 +998,7 @@ func guardedChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 // which file supplied the winning value, plus one existence check per
 // configured instruction path so bad entries are visible rather than silently
 // skipped.
-func configLayeringChecks(cfg config.Config, sources map[string]string, userPath, workspacePath string) []doctorCheck {
+func configLayeringChecks(cfg config.Config, sources map[string]string, userPath, workspacePath, wsRoot string) []doctorCheck {
 	var checks []doctorCheck
 
 	sourceLabel := func(src string) string {
@@ -1087,6 +1088,23 @@ func configLayeringChecks(cfg config.Config, sources map[string]string, userPath
 		}
 		detail += " (" + sourceLabel(sources["instructions"]) + ")"
 		checks = append(checks, doctorCheck{Name: "config:instructions." + inst, Status: status, Detail: detail})
+	}
+
+	// Forwarded skills are reported by resolving them exactly as the
+	// engine will, so a name that will not reach a session is a failed
+	// check here rather than a skill that quietly never arrives. A
+	// workspace forwarding none stays silent — an opt-in surface reporting
+	// "(unset)" is noise.
+	for _, name := range cfg.Skills.Forward {
+		status, detail := statusOK, ""
+		dir, err := engine.ResolveForwardedSkill(wsRoot, name)
+		if err != nil {
+			status, detail = statusFail, err.Error()
+		} else {
+			detail = name + " → " + dir
+		}
+		detail += " (" + sourceLabel(sources["skills"]) + ")"
+		checks = append(checks, doctorCheck{Name: "config:skills.forward." + name, Status: status, Detail: detail})
 	}
 
 	// Hook scripts are shell commands, not files, so there is nothing to

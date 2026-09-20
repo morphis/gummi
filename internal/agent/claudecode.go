@@ -79,7 +79,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -263,6 +263,24 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath, opts.Workspace)
 		args = append(args, "--strict-mcp-config", "--mcp-config", string(cfg))
 	}
+	// Forwarded workspace skills. The CLI can only be pointed at skills
+	// outside its project scope through a plugin, so gummi generates one
+	// (claude_skills.go) and loads it for this session alone. Nothing is
+	// written when nothing is forwarded. The temp tree is removed at
+	// Close, and on every failure between here and a started child.
+	pluginDir, skillRoot, err := claudeMaterializeSkills(opts)
+	if err != nil {
+		return nil, err
+	}
+	started := false
+	defer func() {
+		if !started && skillRoot != "" {
+			_ = os.RemoveAll(skillRoot)
+		}
+	}()
+	if pluginDir != "" {
+		args = append(args, "--plugin-dir", pluginDir)
+	}
 	// Static allowlist: pre-approving a tool skips its permission checks
 	// entirely, so Edit, Write, and MultiEdit MUST stay off this list —
 	// allowlisting any of them would neutralize acceptEdits' cwd check
@@ -334,6 +352,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		stdin:       stdin,
 		stderr:      stderr,
 		workdir:     opts.WorkDir,
+		skillRoot:   skillRoot,
 		raw:         make(chan Event, 64),
 		events:      make(chan Event),
 		stop:        make(chan struct{}),
@@ -341,6 +360,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		prevCostUSD: map[string]float64{},
 		estimated:   map[string]float64{},
 	}
+	started = true
 	go s.forward()
 	go s.read(stdout)
 
@@ -394,8 +414,12 @@ type claudeSession struct {
 	cmd     *exec.Cmd
 	cancel  context.CancelFunc
 	workdir string // opts.WorkDir, for repo-relative tool-call details
-	stdin   io.WriteCloser
-	stderr  *capWriter // bounded tail of the child's stderr, for crash diagnostics
+	// skillRoot is the temp tree holding the generated skill plugin
+	// (claude_skills.go), removed at Close. Empty when nothing was
+	// forwarded, which is the ordinary case.
+	skillRoot string
+	stdin     io.WriteCloser
+	stderr    *capWriter // bounded tail of the child's stderr, for crash diagnostics
 
 	raw      chan Event
 	events   chan Event
@@ -989,6 +1013,9 @@ func (s *claudeSession) Close() error {
 		case <-time.After(3 * time.Second):
 		}
 		_ = s.reap() // reap (read() may already have)
+		if s.skillRoot != "" {
+			_ = os.RemoveAll(s.skillRoot)
+		}
 	})
 	return nil
 }

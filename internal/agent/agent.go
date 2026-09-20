@@ -260,10 +260,10 @@ type Capabilities struct {
 	// it can point the backend at skill directories outside WorkDir. It
 	// is a per-backend fact, not a gummi choice: opencode takes a
 	// `skills.paths` config key and copilot an SDK field, both additive;
-	// codex has no equivalent at all (its discovery walks cwd up to the
-	// repository root, which for a linked worktree is the worktree); and
-	// claude needs a generated plugin manifest plus Skill on the tool
-	// roster. An adapter that reports false ignores the field, and the
+	// claude takes a generated plugin (claude_skills.go) whose skills are
+	// symlinked into it; and codex has no equivalent at all — its
+	// discovery walks cwd up to the repository root, which for a linked
+	// worktree is the worktree. An adapter that reports false ignores the field, and the
 	// operator is told so rather than left to wonder why a forwarded
 	// skill never arrived.
 	SkillDirs bool
