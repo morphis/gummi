@@ -255,7 +255,7 @@ func TestParseAgentRejectsBogus(t *testing.T) {
 	if err == nil {
 		t.Fatal("bogus agent accepted")
 	}
-	for _, name := range []string{"claude", "codex", "opencode", "copilot"} {
+	for _, name := range []string{"claude", "codex", "opencode", "copilot", "pi"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("unknown-agent error should mention %q, got: %v", name, err)
 		}

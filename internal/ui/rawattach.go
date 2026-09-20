@@ -48,6 +48,8 @@ func defaultAttachCommand() string {
 		return envOr("GUMMI_CODEX_BIN", "codex")
 	case "opencode":
 		return envOr("GUMMI_OPENCODE_BIN", "opencode")
+	case "pi":
+		return envOr("GUMMI_PI_BIN", "pi")
 	case "headless":
 		return strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD"))
 	default:

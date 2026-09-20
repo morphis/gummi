@@ -196,7 +196,7 @@ func runBoard() error {
 // Env config (M1 stand-in for profiles):
 //
 //	GUMMI_MODEL             model id (default "gpt-5")
-//	GUMMI_AGENT             default backend (copilot|claude|codex|opencode|headless)
+//	GUMMI_AGENT             default backend (copilot|claude|codex|opencode|pi|headless)
 //	GUMMI_HEADLESS_CREDITS_PER_1K
 //	                        headless adapter's token→credit rate, for a
 //	                        local endpoint (llama.cpp) that the engine
@@ -387,6 +387,8 @@ func defaultBackendName() string {
 		return "codex"
 	case "headless":
 		return "headless"
+	case "pi":
+		return "pi"
 	}
 	if strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")) != "" {
 		return "headless"
@@ -407,7 +409,7 @@ func defaultBackendName() string {
 // agentcli.Known()/Detect(), not map iteration (which Go randomizes per
 // run and would make the choice differ between two otherwise identical
 // invocations): copilot first, so a machine that has it keeps behaving
-// exactly as every prior release did, then claude, codex, opencode
+// exactly as every prior release did, then claude, codex, opencode, pi
 // in agentcli's own declaration order. copilot remains the answer when
 // nothing at all is detected — a bare machine's behavior, and the error
 // path startAdapter("copilot") takes from there, are both unchanged.
@@ -435,6 +437,8 @@ func startAdapter(name string) (agent.Agent, error) {
 		return agent.NewHeadless(strings.Fields(os.Getenv("GUMMI_AGENT_CMD")))
 	case "copilot":
 		return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
+	case "pi":
+		return agent.NewPi(os.Getenv("GUMMI_PI_BIN"))
 	}
 	return nil, fmt.Errorf("unknown backend %q", name)
 }

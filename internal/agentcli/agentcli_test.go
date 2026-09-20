@@ -52,7 +52,7 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 // happens to be installed — a regression here silently drops a backend
 // from the picker.
 func TestDetectKnownSet(t *testing.T) {
-	want := map[string]bool{"copilot": true, "claude": true, "codex": true, "opencode": true}
+	want := map[string]bool{"copilot": true, "claude": true, "codex": true, "opencode": true, "pi": true}
 	agents := Known()
 	if len(agents) != len(want) {
 		t.Fatalf("Known has %d entries, want %d", len(agents), len(want))

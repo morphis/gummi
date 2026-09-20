@@ -138,6 +138,31 @@ func HostedMCPAttach(backend, execPath, sockPath string) (extraArgv, extraEnv []
 			return nil, nil, noop, fmt.Errorf("hosted MCP: closing opencode config: %w", err)
 		}
 		return nil, []string{"OPENCODE_CONFIG=" + path}, remove, nil
+	case "pi":
+		// pi has no native MCP client; the hosted session reaches gummi's
+		// tools through the generated extension, loaded explicitly with
+		// --extension (explicit paths load despite the stage adapter's
+		// --no-extensions, and the hosted TUI has no such flag anyway).
+		ext, err := buildPiExtension(execPath, "", sockPath, true, nil)
+		if err != nil {
+			return nil, nil, noop, err
+		}
+		cf, err := os.CreateTemp("", "gummi-pi-hosted-*.ts")
+		if err != nil {
+			return nil, nil, noop, fmt.Errorf("hosted MCP: creating pi extension: %w", err)
+		}
+		path := cf.Name()
+		remove := func() { _ = os.Remove(path) }
+		if _, err := cf.Write(ext); err != nil {
+			_ = cf.Close()
+			remove()
+			return nil, nil, noop, fmt.Errorf("hosted MCP: writing pi extension: %w", err)
+		}
+		if err := cf.Close(); err != nil {
+			remove()
+			return nil, nil, noop, fmt.Errorf("hosted MCP: closing pi extension: %w", err)
+		}
+		return []string{"--extension", path}, nil, remove, nil
 	default:
 		// copilot, an unrecognized backend, or a raw GUMMI_ATTACH_CMD's
 		// resolved binary: no known wire format to target, so no wiring —

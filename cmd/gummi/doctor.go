@@ -621,6 +621,8 @@ func backendInfoFor(name string) backendInfo {
 		return backendInfo{name: "opencode", bin: cmp.Or(os.Getenv("GUMMI_OPENCODE_BIN"), "opencode"), login: "opencode auth login"}
 	case "codex":
 		return backendInfo{name: "codex", bin: cmp.Or(os.Getenv("GUMMI_CODEX_BIN"), "codex"), login: "codex login"}
+	case "pi":
+		return backendInfo{name: "pi", bin: cmp.Or(os.Getenv("GUMMI_PI_BIN"), "pi"), login: "run `pi` and /login, or set the provider's API key (e.g. OPENROUTER_API_KEY)"}
 	case "headless":
 		return backendInfo{name: "headless", bin: firstField(os.Getenv("GUMMI_AGENT_CMD")), headless: true}
 	case "copilot":

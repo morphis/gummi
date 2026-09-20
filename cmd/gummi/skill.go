@@ -237,7 +237,7 @@ func commandGrammar() string {
 	b.WriteString("gummi diff <id|ref>\n\n")
 	writeCmd("gummi doctor", flagLines(func(fs *flag.FlagSet) { registerDoctorFlags(fs) }))
 	b.WriteString("\n")
-	b.WriteString("gummi skill show|install|list [--agent claude|codex|opencode|copilot] [--scope user|project] [--force] [--dry-run] [--check]")
+	b.WriteString("gummi skill show|install|list [--agent claude|codex|opencode|copilot|pi] [--scope user|project] [--force] [--dry-run] [--check]")
 	return b.String()
 }
 
@@ -283,6 +283,7 @@ const (
 	agentCodex    skillAgent = "codex"
 	agentOpencode skillAgent = "opencode"
 	agentCopilot  skillAgent = "copilot"
+	agentPi       skillAgent = "pi"
 )
 
 // installTarget is one SKILL.md destination and a human label for output.
@@ -293,7 +294,7 @@ type installTarget struct {
 
 func skillInstall(args []string) error {
 	fs := flag.NewFlagSet("skill install", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "", "target a specific agent: claude|codex|opencode|copilot (default: detect)")
+	agentFlag := fs.String("agent", "", "target a specific agent: claude|codex|opencode|copilot|pi (default: detect)")
 	scopeFlag := fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
 	force := fs.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
 	dryRun := fs.Bool("dry-run", false, "print what would be written, change nothing")
@@ -416,10 +417,10 @@ func skillList(args []string) error {
 	curHash := skillBodyHash()
 	rows := []installTarget{
 		{path: projectSkillPath(ws), label: "project (claude/copilot/opencode)"},
-		{path: codexProjectSkillPath(ws), label: "project (codex)"},
+		{path: codexProjectSkillPath(ws), label: "project (codex, pi)"},
 		{path: userSkillPath(agentClaude), label: "user (claude/opencode)"},
 		{path: userSkillPath(agentCopilot), label: "user (copilot)"},
-		{path: userSkillPath(agentCodex), label: "user (codex)"},
+		{path: userSkillPath(agentCodex), label: "user (codex, pi)"},
 	}
 	for _, r := range rows {
 		fmt.Printf("  %-32s %-12s %s\n", r.label, describeInstall(r.path, curHash), r.path)
@@ -466,6 +467,9 @@ func detectAgents() []skillAgent {
 	if onPath("copilot") || onPath("gh") {
 		out = append(out, agentCopilot)
 	}
+	if onPath("pi") || os.Getenv("PI_CODING_AGENT_DIR") != "" {
+		out = append(out, agentPi)
+	}
 	return out
 }
 
@@ -485,10 +489,10 @@ func hasEnvPrefix(prefix string) bool {
 
 func parseAgent(s string) (skillAgent, error) {
 	switch skillAgent(s) {
-	case agentClaude, agentCodex, agentOpencode, agentCopilot:
+	case agentClaude, agentCodex, agentOpencode, agentCopilot, agentPi:
 		return skillAgent(s), nil
 	default:
-		return "", fmt.Errorf("--agent must be claude, codex, opencode, or copilot, got %q", s)
+		return "", fmt.Errorf("--agent must be claude, codex, opencode, copilot, or pi, got %q", s)
 	}
 }
 
@@ -543,7 +547,7 @@ func resolveTargets(scope, agentFlag, ws string) ([]installTarget, error) {
 		}
 		agents = []skillAgent{a}
 	} else if agents = detectAgents(); len(agents) == 0 {
-		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|codex|opencode|copilot (or use --scope project)")
+		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|codex|opencode|copilot|pi (or use --scope project)")
 	}
 	seen := map[string]bool{}
 	var targets []installTarget
@@ -577,7 +581,11 @@ func userSkillPath(a skillAgent) string {
 	if a == agentCopilot {
 		return filepath.Join(homeDir(), ".copilot", "skills", "gummi", "SKILL.md")
 	}
-	if a == agentCodex {
+	// pi reads the shared agents-skills locations natively (~/.agents/skills
+	// and project .agents/skills), alongside its own ~/.pi/agent/skills —
+	// the codex install is what a pi user wants, so the two share a target
+	// rather than seeding pi a duplicate of the same skill.
+	if a == agentCodex || a == agentPi {
 		return filepath.Join(homeDir(), ".agents", "skills", "gummi", "SKILL.md")
 	}
 	base := os.Getenv("CLAUDE_CONFIG_DIR")

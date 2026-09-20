@@ -51,6 +51,24 @@ review.
   processes through `run --session`, with the same fallback codex has: a
   session opencode cannot find is dropped and the turn re-runs on a fresh
   one.
+- **pi**: the pi coding agent in RPC mode (`GUMMI_PI_BIN` overrides the
+  binary): one `pi --mode rpc` child per session, speaking JSON lines on
+  stdio. Provider and model config is owned by pi itself (`pi` →
+  `/login`, or the provider's API-key env var such as
+  `OPENROUTER_API_KEY`); `GUMMI_PI_PROVIDER` names the provider for model
+  ids that do not carry one (`openrouter/z-ai/glm-flash-latest` carries
+  its own, a bare `claude-sonnet-4.5` does not and would hit pi's
+  built-in default). Conversations carry across gummi processes through
+  `--session <id>`, with the same fallback the other CLI adapters have: a
+  session pi cannot confirm is dropped and the turn re-runs on a fresh
+  one. `--tools` gives pi's read-only research sessions a structural
+  allowlist (bash/edit/write are absent, not merely unapproved). pi has
+  no native MCP client, so gummi's tools reach it through a generated
+  `--extension` (a per-session artifact): the session's tool descriptors
+  register at load, and a spawned `gummi __mcp` child serves the actual
+  calls, so ask_user and friends block exactly as on the MCP-native
+  backends. RPC mode has no approval gate, so guarded collapses to
+  allow-all.
 - **headless**: a generic subprocess adapter for any agent binary speaking
   a small stdio JSON protocol. `GUMMI_AGENT_CMD` is its command line. The
   child inherits gummi's environment and reads its own provider config from
@@ -82,7 +100,7 @@ Scaffolded on first run. Every key is optional.
 | `substrates` | the external environments work is proved on — a test cluster, a device farm — each `{describe, probe, provision, reset, ttl, timeout}`; only `probe` is required. A plan cites one exactly as it cites an env prerequisite (`[env: <name>]`), so a name may not be both. Unlike one, a substrate can be brought up (`provision`) and put back to a known state (`reset`), it expires (`ttl`, a Go duration), and **one job holds it at a time** across every gummi process on the workspace. `timeout` bounds one provision or reset (default 45m, at most 6h). `gummi doctor` reports each one's state and holder. See DESIGN §17.7 |
 | `experiments` | the orchestrated live runs that prove work on a substrate, each `{describe, substrate, inputs, control, deploy, settle, run, collect, timeout}`; `substrate` and `run` are required. A goal's done-when item names one as its means of proof (`experiment: <name>`, optionally `assertions: [ids]`). Every command runs in the workspace root with `GUMMI_EVIDENCE` (a directory to write into — `results.ndjson` there, one `{"id","ok","detail"}` per line, is how a run reports its assertions), `GUMMI_TREE_<REPO>` and `GUMMI_HEAD_<REPO>` for each input (the unnamed default repo is `HOME`), `GUMMI_SUBSTRATE`, `GUMMI_EXPERIMENT`, `GUMMI_RUN`, `GUMMI_PURPOSE` and `GUMMI_ATTEMPT`. Exit 75 from any phase means *this run could not be judged*. `timeout` bounds each phase (default 30m). Operator configuration on purpose: a goal may change the rig it is tested on, and must not thereby change what counts as passing. See DESIGN §17.8 |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
-| `agent` | which installed CLI (`copilot`, `claude`, `codex`, `opencode`) hosts the board's **agent tab**. It has nothing to do with the engine's per-role backends. The first-run picker writes this key without disturbing the rest of the file |
+| `agent` | which installed CLI (`copilot`, `claude`, `codex`, `opencode`, `pi`) hosts the board's **agent tab**. It has nothing to do with the engine's per-role backends. The first-run picker writes this key without disturbing the rest of the file |
 
 ## `.gummi/profiles.yaml`
 
@@ -119,9 +137,10 @@ this file is safe to commit.
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `headless` |
+| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `pi`, `headless` |
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
-| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
+| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN`, `GUMMI_PI_BIN` | a backend's binary, when it is not the default name on PATH |
+| `GUMMI_PI_PROVIDER` | the provider pi routes a session to when its model id does not name one |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_MAX_ACTIVE` | the attended lane pool (default 1) |

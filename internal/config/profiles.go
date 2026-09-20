@@ -18,6 +18,7 @@ var knownBackends = map[string]struct{}{
 	"opencode": {},
 	"codex":    {},
 	"headless": {},
+	"pi":       {},
 }
 
 // RoleConfig maps one role to a concrete backend+model. Backend is optional;
@@ -182,10 +183,11 @@ const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. 
 # so the same process can run cheap or premium, or mix providers. See
 # docs/DESIGN.md §5.
 #
-# backend: (optional) copilot | claude | codex | opencode | headless. Omit to use
+# backend: (optional) copilot | claude | codex | opencode | pi | headless. Omit to use
 # the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
 # The backend owns provider config natively — Claude Code login, Codex login, opencode
-# auth, GUMMI_AGENT_CMD for headless — so no keys or endpoints live here.
+# auth, pi auth (GUMMI_PI_PROVIDER for model ids that don't name a provider), GUMMI_AGENT_CMD
+# for headless — so no keys or endpoints live here.
 
 default: thrifty
 

@@ -101,6 +101,14 @@ func TestDefaultBackendCodex(t *testing.T) {
 	}
 }
 
+func TestDefaultBackendPi(t *testing.T) {
+	t.Setenv("GUMMI_AGENT", "pi")
+	t.Setenv("GUMMI_AGENT_CMD", "")
+	if got := defaultBackendName(); got != "pi" {
+		t.Fatalf("default backend = %q", got)
+	}
+}
+
 // writeFakeAgentBin drops an executable file named name into dir, so
 // agentcli.Detect's exec.LookPath finds it on a fake PATH without
 // needing the real CLI installed in this environment.

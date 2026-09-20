@@ -22,7 +22,7 @@ import (
 // internal/agent/capabilities.go) and the binary Detect actually probes
 // for it.
 type AgentCLI struct {
-	Name      string // "copilot", "claude", "codex", "opencode"
+	Name      string // "copilot", "claude", "codex", "opencode", "pi"
 	Bin       string // the binary name/path actually probed (honors *_BIN overrides)
 	Installed bool   // whether Bin resolved on PATH at detection time
 }
@@ -48,6 +48,7 @@ func Known() []AgentCLI {
 		{Name: "claude", Bin: envOr("GUMMI_CLAUDE_BIN", "claude")},
 		{Name: "codex", Bin: envOr("GUMMI_CODEX_BIN", "codex")},
 		{Name: "opencode", Bin: envOr("GUMMI_OPENCODE_BIN", "opencode")},
+		{Name: "pi", Bin: envOr("GUMMI_PI_BIN", "pi")},
 	}
 }
 

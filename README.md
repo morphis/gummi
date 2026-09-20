@@ -377,7 +377,7 @@ is in [docs/HEADLESS.md](docs/HEADLESS.md).
 
 ## Backends and configuration
 
-Stages run on one of five backends. `GUMMI_AGENT` picks the default, and a
+Stages run on one of six backends. `GUMMI_AGENT` picks the default, and a
 role's `backend:` in `profiles.yaml` overrides it, so one profile can mix
 them.
 
@@ -385,6 +385,7 @@ them.
 - **claude**: the Claude Code CLI. Needs `permissions: allow-all`.
 - **codex**: the Codex CLI. Needs `permissions: allow-all`.
 - **opencode**: the opencode CLI.
+- **pi**: the pi coding agent, in its RPC mode.
 - **headless**: any binary speaking a small stdio JSON protocol.
 
 Each backend owns its own login and provider config. gummi never copies

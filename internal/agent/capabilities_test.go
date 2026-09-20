@@ -15,6 +15,7 @@ func TestCapabilitiesForMatchesAdapters(t *testing.T) {
 		{(&ClaudeCode{}).Name(), (&ClaudeCode{}).Capabilities()},
 		{(&Codex{}).Name(), (&Codex{}).Capabilities()},
 		{(&Opencode{}).Name(), (&Opencode{}).Capabilities()},
+		{(&Pi{}).Name(), (&Pi{}).Capabilities()},
 		{(&Headless{argv: []string{"headless", "--serve"}}).Name(), (&Headless{argv: []string{"headless", "--serve"}}).Capabilities()},
 	}
 	for _, a := range adapters {
@@ -36,12 +37,14 @@ func TestCapabilitiesForUnknown(t *testing.T) {
 
 // TestReadOnlyEnforceBaseMap pins which backends can structurally strip
 // their native write tools for a ReadOnly research session: claude and
-// opencode can (their adapters cage file tools), while copilot, codex,
-// and headless cannot and must be refused at the engine gate instead.
+// opencode can (their adapters cage file tools), pi can (--tools names
+// only the read/navigation built-ins), while copilot, codex, and headless
+// cannot and must be refused at the engine gate instead.
 func TestReadOnlyEnforceBaseMap(t *testing.T) {
 	for name, want := range map[string]bool{
 		"claude":   true,
 		"opencode": true,
+		"pi":       true,
 		"copilot":  false,
 		"codex":    false,
 		"headless": false,
