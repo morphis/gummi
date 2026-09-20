@@ -636,7 +636,7 @@ func TestThreadInputSurvivesTabSwitch(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = typeString(t, m, "not sent yet")
 
-	m = press(t, m, tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt}) // -> inbox tab
+	m = press(t, m, tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}) // -> inbox tab
 	if m.tab != TabInbox {
 		t.Fatalf("tab = %v, want inbox", m.tab)
 	}

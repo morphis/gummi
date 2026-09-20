@@ -14,7 +14,7 @@ import (
 )
 
 // openBoardTab drives a real shell onto the agent tab and waits for its
-// board session to open, through the real key path (alt+3 -> gotoTab ->
+// board session to open, through the real key path (alt+4 -> gotoTab ->
 // ensureBoardSession's command) rather than reaching into m.board
 // directly — the same reasoning openAndAttach (thread_conversation_test
 // .go) gives for driving a card's own attach through real keys instead
@@ -22,7 +22,7 @@ import (
 // ensureBoardSession's command settles synchronously under pump/press.
 func openBoardTab(t *testing.T, m *Shell) *Shell {
 	t.Helper()
-	m = press(t, m, tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
+	m = press(t, m, tea.KeyPressMsg{Code: '4', Mod: tea.ModAlt})
 	if m.tab != TabAgent {
 		t.Fatalf("tab = %v, want TabAgent", m.tab)
 	}
@@ -84,7 +84,7 @@ func TestBoardThreadRendersTranscript(t *testing.T) {
 // gummi out from under a live conversation.
 func TestBoardComposerQDoesNotQuit(t *testing.T) {
 	m := populatedShell(120, 34)
-	m = press(t, m, tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
+	m = press(t, m, tea.KeyPressMsg{Code: '4', Mod: tea.ModAlt})
 	if m.tab != TabAgent {
 		t.Fatalf("tab = %v, want TabAgent", m.tab)
 	}
@@ -148,7 +148,7 @@ func TestBoardAndCardDraftsAreIndependent(t *testing.T) {
 	}
 	m = typeString(t, m, "card draft")
 
-	m = press(t, m, tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}) // -> agent tab
+	m = press(t, m, tea.KeyPressMsg{Code: '4', Mod: tea.ModAlt}) // -> agent tab
 	if !m.boardInput.Focused() {
 		t.Fatal("the board composer should be focused on arrival")
 	}
@@ -205,7 +205,7 @@ func TestBoardPasteGoesToTheBoardComposer(t *testing.T) {
 	if !m.cardOpen || !m.threadInput.Focused() {
 		t.Fatal("enter should have opened the card page with its composer focused")
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt}) // -> agent tab
+	m = press(t, m, tea.KeyPressMsg{Code: '4', Mod: tea.ModAlt}) // -> agent tab
 	if !m.threadInput.Focused() {
 		t.Fatal("precondition: the card composer stays focused across the tab switch")
 	}
@@ -245,7 +245,6 @@ func TestQuitWhileBoardBusyConfirmsFirst(t *testing.T) {
 		t.Error("no confirmation was raised while the board agent was mid-turn")
 	}
 }
-
 
 // composerBottomGap reports how many rows sit between the composer's ┃
 // and the bottom of the rendered frame — the status bar plus whatever

@@ -773,13 +773,19 @@ route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
 The board sits behind a one-row tab bar shared with the status bar:
-`gummi │ board │ inbox │ agent │`. `tab` cycles all three;
-`alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed deliberately
-(the same reasoning as the thread's `alt+o` outputs toggle: a plain
-`ctrl`/bare key a terminal multiplexer or the hosted agent tab's own pty
-might already claim). Both are answered at the top of `handleKey`, above
-whatever surface holds the keyboard, so a tab is always one keystroke
-away from inside a card's thread, its spec view or its diff view.
+`gummi │ board │ stats │ inbox │ agent │`. `tab` cycles all four;
+`alt+1`/`alt+2`/`alt+3`/`alt+4` jump straight to one — alt-prefixed
+deliberately (the same reasoning as the thread's `alt+o` outputs
+toggle: a plain `ctrl`/bare key a terminal multiplexer or the hosted
+agent tab's own pty might already claim). Both are answered at the top
+of `handleKey`, above whatever surface holds the keyboard, so a tab is
+always one keystroke away from inside a card's thread, its spec view or
+its diff view. The stats tab is the board's ledger: the same run
+derivation the card's run tab reads (`cardrun`), folded over every card
+by a pure workspace fold (`fleetrun`) — window and all-time money, the
+clock, and a per-card timeline of sessions, waits and marks. It is a
+tab rather than a board surface for the reason the board is the
+backlog: one list on screen at a time.
 **The keyboard lock.** The agent tab hosts a program with its own
 keymap, which raises the only genuinely hard question in the scheme: a
 hosted CLI wants `tab` for completion, and gummi wants it for the cycle.
@@ -792,10 +798,10 @@ gummi resolves it the way zellij does, with an explicit mode the user
 controls and can see. `ctrl+g` toggles a keyboard **lock** over any
 `tabDef.foreign` tab:
 
-| | board / inbox | agent, unlocked | agent, **locked** |
+| | board / stats / inbox | agent, unlocked | agent, **locked** |
 |---|---|---|---|
 | `ctrl+g` | says what it is for | lock | **unlock** |
-| `tab`, `alt+1/2/3`, `alt+/` | gummi | gummi | hosted CLI |
+| `tab`, `alt+1/2/3/4`, `alt+/` | gummi | gummi | hosted CLI |
 | `?` | gummi (unless typing) | hosted CLI | hosted CLI |
 | `ctrl+c`, `esc`, text | gummi | hosted CLI | hosted CLI |
 | mouse | terminal's own selection | terminal's own selection | hosted CLI |

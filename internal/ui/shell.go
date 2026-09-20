@@ -266,6 +266,11 @@ type Shell struct {
 	// stats is the mounted stats tab (statsview.go), nil when closed:
 	// where the selected card's credits and hours went.
 	stats *statsView
+	// wsstats is the workspace stats tab (wsstats.go), nil until its
+	// first visit mounts it: where the whole board's credits and hours
+	// went, and when — the timeline. The card's own tab is stats; this
+	// is the same question at the scale of the board.
+	wsstats *wsStatsView
 	// foreignTicks counts live-drive probes, pacing the slower full row
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
@@ -1263,6 +1268,11 @@ func (m *Shell) Init() tea.Cmd {
 		// instead of presenting a card it cannot touch as idle.
 		cmds = append(cmds, foreignTick())
 		cmds = append(cmds, goalPollTick())
+		// The stats tab's own slow refresh. It reads the record rather
+		// than the event stream, so nothing wakes it when a running lane
+		// grows or a wait is answered — a tick does, only while the tab
+		// is on screen (updateWsStats).
+		cmds = append(cmds, wsStatsTick())
 		// The stack loop's backstop poll. Stacks mostly wake on engine
 		// events (a session settled, a branch moved); this catches the
 		// changes gummi cannot hear — a hand-run git command, or a PR
@@ -1594,6 +1604,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if cmd, ok := m.updateStack(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateWsStats(msg); ok {
 		return m, cmd
 	}
 	switch msg := msg.(type) {
@@ -2560,7 +2573,7 @@ func (m *Shell) resumeAfterTopUp(id domain.FeatureID) tea.Cmd {
 // handleKey routes one key press. Its shape is the keymap's tiers made
 // literal, read top to bottom:
 //
-//	tier 1  alt+1/2/3 — answered here, above every surface, so a tab is
+//	tier 1  alt+1/2/3/4 — answered here, above every surface, so a tab is
 //	        always one keystroke away no matter what holds the keyboard.
 //	        (ctrl+c is hoisted higher still, above the overlay stack, in
 //	        update.) These used to be answered in boardKey, below the
@@ -2577,8 +2590,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "alt+1":
 		return m.gotoTab(TabBoard)
 	case "alt+2":
-		return m.gotoTab(TabInbox)
+		return m.gotoTab(TabStats)
 	case "alt+3":
+		return m.gotoTab(TabInbox)
+	case "alt+4":
 		return m.gotoTab(TabAgent)
 	case "alt+/":
 		// the help key that is always gummi's. ? is the convenient one,
@@ -2735,6 +2750,12 @@ func (m *Shell) gotoTab(t Tab) tea.Cmd {
 		// focusThreadInput this never refuses.
 		m.boardInput.Focus()
 	}
+	if m.tab == TabStats {
+		// The stats tab measures on first arrival so it never opens on a
+		// page nobody has read yet, and re-arms nothing afterwards — its
+		// tick handles the refresh, and r handles the impatient.
+		return m.ensureWsStats()
+	}
 	if m.tab != TabAgent {
 		return nil
 	}
@@ -2787,9 +2808,12 @@ func (m *Shell) textEntry() bool {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
-	// tab, alt+1/2/3 and ? never arrive here: handleKey answers them above
-	// every surface, which is what makes them global rather than "global
-	// as long as nothing is open".
+	// tab, alt+1/2/3/4 and ? never arrive here: handleKey answers them
+	// above every surface, which is what makes them global rather than
+	// "global as long as nothing is open".
+	if m.tab == TabStats {
+		return m.wsStatsKey(key)
+	}
 	if m.tab == TabInbox {
 		return m.inboxKey(key)
 	}
@@ -4102,6 +4126,8 @@ func (m *Shell) mainView(w, h int) string {
 			return m.boardThreadView(w, h)
 		}
 		return m.boardTabPlaceholder(w, h)
+	case TabStats:
+		return m.wsStatsRender(w, h)
 	case TabInbox:
 		return m.inboxView(w, h)
 	}

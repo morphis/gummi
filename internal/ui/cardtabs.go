@@ -238,9 +238,9 @@ const reservedChords = "tsdjko"
 // citationLetters are the marks, in order: the first nine letters that
 // are not reserved.
 //
-// LETTERS, not digits, and not alt+digits either — alt+1/2/3 are the
-// shell's own board/inbox/agent tabs and are answered above this tier,
-// so a numbered chord would have switched tab instead of opening a
+// LETTERS, not digits, and not alt+digits either — the alt+digits are
+// the shell's own board/stats/inbox/agent tabs, answered above this
+// tier, so a numbered chord would switch tab instead of opening a
 // citation. Footnote letters are the convention anyway, and this leaves
 // the whole digit row to the picker (F14).
 var citationLetters = firstFreeLetters(9)

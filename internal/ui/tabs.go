@@ -21,6 +21,10 @@ const (
 	// shape now that the split kanban+dashboard layout is gone. A fresh
 	// shell always starts here.
 	TabBoard Tab = iota
+	// TabStats is the workspace's ledger (wsstats.go): where every
+	// card's credits and hours went, over a window and over all time,
+	// with the timeline that says when.
+	TabStats
 	// TabInbox is the needs-attention queue, promoted out of its modal
 	// overlay onto a tab of its own (stage 2; a placeholder until then).
 	TabInbox
@@ -28,6 +32,11 @@ const (
 	// engine.BoardSession, not a hosted external program (boardthread.go).
 	TabAgent
 )
+
+// tabChords is the tier-1 chord range that jumps straight to a tab, one
+// per tabDef in order. A fifth tab edits tabDefs and this string, and
+// nothing else — the whole claim tabs.go was built on.
+const tabChords = "alt+1/2/3/4"
 
 // tabDef names one tab in the bar: its identity and its label.
 type tabDef struct {
@@ -39,6 +48,7 @@ type tabDef struct {
 func (m *Shell) tabDefs() []tabDef {
 	return []tabDef{
 		{id: TabBoard, label: "board"},
+		{id: TabStats, label: "stats"},
 		{id: TabInbox, label: "inbox"},
 		{id: TabAgent, label: "agent"},
 	}
@@ -154,7 +164,7 @@ func (m *Shell) tabBarView(w int) string {
 	// full at 120 columns, and it is the wrong place anyway — how to
 	// reach a tab belongs beside the tabs.
 	hint := s.Muted.Render("tab") + s.Faint.Render(" cycle · ") +
-		s.Muted.Render("alt+1/2/3") + s.Faint.Render(" board/inbox/agent")
+		s.Muted.Render(tabChords) + s.Faint.Render(" board/stats/inbox/agent")
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint
 	}

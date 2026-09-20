@@ -93,7 +93,7 @@ func (m *Shell) inboxJump(id domain.FeatureID) tea.Cmd {
 // inboxKey answers the inbox tab's own keys: j/k walk the queue, enter
 // jumps to a card, x dismisses it, and u tops up a budget item in place
 // — nextsteps.go's budget suggestion ("top up (u) ... from there") names
-// this exact key. tab, alt+1/2/3 and ? never reach here: handleKey
+// this exact key. tab, the tab chords and ? never reach here: handleKey
 // answers them above every surface.
 func (m *Shell) inboxKey(key string) tea.Cmd {
 	items := inboxOldestFirst(m.inbox.list())
@@ -180,7 +180,7 @@ func (m *Shell) inboxBindings() []binding {
 		{key: "enter", label: "go", help: "open the card at its decision, clearing this item", bar: true},
 		{key: "x", label: "dismiss", help: "clear this item without acting on it", bar: true},
 		{key: "u", label: "top up", help: "raise the budget and resume (budget items only)"},
-		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
+		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
 		{key: "i", label: "inbox", help: "stay on the needs-attention queue"},
 		// The inbox is a tab, not a modal, so cycling away IS its way out —
 		// there is no esc to hold the position. It therefore goes last, for
@@ -188,7 +188,7 @@ func (m *Shell) inboxBindings() []binding {
 		// the second-to-last backwards, so whatever a surface puts last is
 		// the row that survives (statusbar.Render).
 		{key: "?", label: "help", bar: true},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)", bar: true},
 		{key: "q", label: "quit"},
 	}
 }

@@ -403,84 +403,12 @@ func clock(sess []Session, evs []state.CardEvent, f domain.Feature) Clock {
 }
 
 // openDecisionTime is how long the card stood at a decision nobody had
-// answered yet, as the union of those intervals clamped to [first,last].
-//
-// A decision opens with an EventDecisionOpen carrying an id and closes
-// when a later gate or ask event carries the same id — exactly the rule
-// state.OpenDecisions applies, restated here over the event slice
-// because this package takes no store. One still open at the end of the
-// card's life runs to last: the card really was waiting then, and the
-// alternative is to report the longest wait on the record as no wait at
-// all.
-//
-// The intervals are unioned rather than summed because two decisions can
-// stand open together — an ask raised while a gate waits — and a card
-// cannot wait on two people for twice the time.
+// answered yet, over the card's own life — WaitTime at this horizon.
+// One still open at the end of the card's life runs to last: the card
+// really was waiting then, and the alternative is to report the longest
+// wait on the record as no wait at all.
 func openDecisionTime(evs []state.CardEvent, first, last time.Time) time.Duration {
-	if !last.After(first) {
-		return 0
-	}
-	answeredAt := map[string]time.Time{}
-	for _, ev := range evs {
-		if ev.Kind != state.EventGate && ev.Kind != state.EventAsk {
-			continue
-		}
-		id := correlatingID(ev)
-		if id == "" {
-			continue
-		}
-		if at, seen := answeredAt[id]; !seen || ev.At.Before(at) {
-			answeredAt[id] = ev.At
-		}
-	}
-
-	type span struct{ from, to time.Time }
-	var spans []span
-	for _, ev := range evs {
-		if ev.Kind != state.EventDecisionOpen {
-			continue
-		}
-		var p state.DecisionPayload
-		if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.ID == "" {
-			continue
-		}
-		from, to := ev.At, last
-		if at, ok := answeredAt[p.ID]; ok {
-			if !at.After(from) {
-				// An answer recorded at or before its own question is a
-				// clock skew, not a negative wait.
-				continue
-			}
-			to = at
-		}
-		if from.Before(first) {
-			from = first
-		}
-		if to.After(last) {
-			to = last
-		}
-		if to.After(from) {
-			spans = append(spans, span{from, to})
-		}
-	}
-	if len(spans) == 0 {
-		return 0
-	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i].from.Before(spans[j].from) })
-
-	var total time.Duration
-	cur := spans[0]
-	for _, s := range spans[1:] {
-		if s.from.After(cur.to) {
-			total += cur.to.Sub(cur.from)
-			cur = s
-			continue
-		}
-		if s.to.After(cur.to) {
-			cur.to = s.to
-		}
-	}
-	return total + cur.to.Sub(cur.from)
+	return WaitTime(evs, first, last)
 }
 
 // correlatingID is the decision id a gate or ask event answers, or "" on

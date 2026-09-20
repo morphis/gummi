@@ -47,7 +47,7 @@ import (
 //   - as the inventory. Up on an empty line opens it (the placeholder
 //     says so), and it carries the keyless actions too — gate, duplicate
 //     — which no accelerator ever reached.
-//   - as globals. "/" opens the command menu; tab and alt+1/2/3 are
+//   - as globals. "/" opens the command menu; tab and the alt+digits are
 //     answered above every surface.
 //
 // The blurred accelerator layer still exists (backlog.go's backlogKey),

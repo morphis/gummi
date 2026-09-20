@@ -401,6 +401,39 @@ const appendEventSQL = `
 	VALUES (?,?,?,?,?,?,?,?)
 	ON CONFLICT(feature_id, dedupe) WHERE dedupe <> '' DO NOTHING`
 
+// WorkspaceEvents returns every card's events recorded at or after
+// since, oldest first across the whole workspace. It is the
+// workspace-scale read behind the stats tab's timeline: one query
+// instead of a query per card, for a surface whose first question —
+// which cards moved inside the window at all — must be answered before
+// it can decide which cards are worth reading in full.
+func (s *Store) WorkspaceEvents(ctx context.Context, since time.Time) ([]CardEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT seq, feature_id, stage, kind, status, at, payload, output, dedupe
+		FROM card_events WHERE at >= ? ORDER BY seq`, since.UTC().Format(timeFmt))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []CardEvent
+	for rows.Next() {
+		var ev CardEvent
+		var fid, stage, at string
+		if err := rows.Scan(&ev.Seq, &fid, &stage, &ev.Kind, &ev.Status, &at,
+			&ev.Payload, &ev.Output, &ev.Dedupe); err != nil {
+			return nil, err
+		}
+		ev.Feature = domain.FeatureID(fid)
+		ev.Stage = domain.Stage(stage)
+		if ev.At, err = time.Parse(timeFmt, at); err != nil {
+			return nil, fmt.Errorf("corrupt card_events timestamp %q: %w", at, err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
 // Events returns all events recorded for a card, oldest first.
 func (s *Store) Events(ctx context.Context, id domain.FeatureID) ([]CardEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `

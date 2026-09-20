@@ -84,6 +84,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 	// The inbox has its own table now (inboxview.go); the agent tab is
 	// still stage 3's placeholder — it still has to answer ? and say how
 	// to get back to the board.
+	case m.tab == TabStats:
+		return "stats", m.wsStatsBindings()
 	case m.tab == TabInbox:
 		return "inbox", m.inboxBindings()
 	case m.tab == TabAgent:
@@ -134,8 +136,8 @@ func (m *Shell) agentBindings() []binding {
 		// you enter on the line, because the composer takes every
 		// printable key and there is no chord to name instead.
 		{key: boardClearCommand, label: "clear", help: "start a fresh conversation — the transcript, its context and the running spend all go with the old session"},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)", bar: true},
-		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)", bar: true},
+		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
 	})
 }
 
@@ -361,8 +363,8 @@ func (m *Shell) boardBindings() []binding {
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "open a terminal agent in this card's worktree"},
 		{key: "A", label: "autopilot", help: "set how far this card runs on its own, and start it"},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, inbox, agent)"},
-		{key: "alt+1/2/3", label: "tab", help: "jump straight to board / inbox / agent"},
+		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)"},
+		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
 		{key: "i", label: "inbox", help: "open the needs-you inbox"},
 		{key: "r", label: "rebase", help: "rebase branch onto " + base + " (conflicts go to an agent)"},
 		{key: "m", label: "merge", help: "squash-merge branch into " + base + " (review & approve the drafted message)"},

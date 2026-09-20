@@ -45,17 +45,18 @@ func TestSwitchingTabKeepsTheCardPage(t *testing.T) {
 	m = typeString(t, m, "a draft I have not sent")
 
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if m.tab != TabInbox {
-		t.Fatalf("tab should move to the inbox tab, got %v", m.tab)
+	if m.tab != TabStats {
+		t.Fatalf("tab should move to the stats tab, got %v", m.tab)
 	}
 	// hidden, not closed: the board's own surfaces are not drawn or
 	// listening while another tab is up, which boardSurfacesLive answers
 	// for all of them at once.
 	if m.boardSurfacesLive() {
-		t.Error("the board's surfaces should not be live on the inbox tab")
+		t.Error("the board's surfaces should not be live on the stats tab")
 	}
 
 	// all the way round and back
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.tab != TabBoard {

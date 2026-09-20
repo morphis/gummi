@@ -46,9 +46,9 @@ func openSurfaces(t *testing.T) map[string]*Shell {
 // TestAltTabSwitchReachesEveryOpenSurface is the regression for the
 // severity-2 conflict: handleKey used to hand the keyboard to chat,
 // spec, diff, ingest, bugIngest or deps before any tab key was
-// considered, so alt+1/2/3 did nothing at all from inside a view — you
-// had to esc out first, which meant discarding whatever you were doing
-// just to look at the inbox.
+// considered, so the alt chords did nothing at all from inside a view —
+// you had to esc out first, which meant discarding whatever you were
+// doing just to look at the inbox.
 func TestAltTabSwitchReachesEveryOpenSurface(t *testing.T) {
 	for name, m := range openSurfaces(t) {
 		t.Run(name, func(t *testing.T) {
@@ -56,8 +56,12 @@ func TestAltTabSwitchReachesEveryOpenSurface(t *testing.T) {
 				t.Fatalf("precondition: tab = %v, want TabBoard", m.tab)
 			}
 			m.handleKey(tea.KeyPressMsg{Code: '2', Mod: tea.ModAlt})
+			if m.tab != TabStats {
+				t.Fatalf("alt+2 from an open %s: tab = %v, want TabStats", name, m.tab)
+			}
+			m.handleKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
 			if m.tab != TabInbox {
-				t.Fatalf("alt+2 from an open %s: tab = %v, want TabInbox", name, m.tab)
+				t.Fatalf("alt+3 from an open %s: tab = %v, want TabInbox", name, m.tab)
 			}
 		})
 	}
@@ -150,8 +154,8 @@ func TestTabCycleReachesEveryOpenSurface(t *testing.T) {
 	for name, m := range openSurfaces(t) {
 		t.Run(name, func(t *testing.T) {
 			m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
-			if m.tab != TabInbox {
-				t.Fatalf("tab from an open %s: tab = %v, want TabInbox", name, m.tab)
+			if m.tab != TabStats {
+				t.Fatalf("tab from an open %s: tab = %v, want TabStats", name, m.tab)
 			}
 		})
 	}
@@ -169,6 +173,7 @@ func TestNoSurfaceRebindsTab(t *testing.T) {
 	tables := map[string][]binding{
 		"board":  m.boardBindings(),
 		"inbox":  m.inboxBindings(),
+		"stats":  m.wsStatsBindings(),
 		"spec":   (&specView{f: f, content: content, doc: spec.Parse(content), cursor: 1}).bindings(),
 		"diff":   newDiffView(f, "diff --git a/x b/x\n@@ -1 +1 @@\n+x\n", nil).bindings(),
 		"deps":   (&depPicker{f: f}).bindings(),
@@ -176,13 +181,13 @@ func TestNoSurfaceRebindsTab(t *testing.T) {
 	}
 	for name, bs := range tables {
 		for _, b := range bs {
-			if b.key == "tab" && name != "board" && name != "inbox" {
+			if b.key == "tab" && name != "board" && name != "inbox" && name != "stats" {
 				t.Errorf("%s binds tab to %q — tab cycles the tabs", name, b.label)
 			}
 		}
 	}
-	// board and inbox may list it, but only as the cycle itself.
-	for _, name := range []string{"board", "inbox"} {
+	// board, inbox and stats may list it, but only as the cycle itself.
+	for _, name := range []string{"board", "inbox", "stats"} {
 		for _, b := range tables[name] {
 			if b.key == "tab" && !strings.Contains(b.help, "cycle") {
 				t.Errorf("%s documents tab as %q, not the tab cycle", name, b.help)
@@ -223,7 +228,7 @@ func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
 // arrive, tab is always gummi's.
 func TestTabCycleCoversEveryTab(t *testing.T) {
 	m := populatedShell(100, 30)
-	want := []Tab{TabInbox, TabAgent, TabBoard, TabInbox}
+	want := []Tab{TabStats, TabInbox, TabAgent, TabBoard}
 	for i, w := range want {
 		m.nextTab()
 		if m.tab != w {
@@ -289,14 +294,14 @@ func TestADeadAgentTabAnswersNothing(t *testing.T) {
 	}
 }
 
-// TestAgentTabIsStillReachable: alt+3 goes straight there from anywhere,
+// TestAgentTabIsStillReachable: alt+4 goes straight there from anywhere,
 // which is what makes the tab the user is on never a dead end.
 func TestAgentTabIsStillReachable(t *testing.T) {
 	for name, m := range openSurfaces(t) {
 		t.Run(name, func(t *testing.T) {
-			m.handleKey(tea.KeyPressMsg{Code: '3', Mod: tea.ModAlt})
+			m.handleKey(tea.KeyPressMsg{Code: '4', Mod: tea.ModAlt})
 			if m.tab != TabAgent {
-				t.Fatalf("alt+3 from an open %s: tab = %v, want TabAgent", name, m.tab)
+				t.Fatalf("alt+4 from an open %s: tab = %v, want TabAgent", name, m.tab)
 			}
 		})
 	}

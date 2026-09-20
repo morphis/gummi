@@ -171,8 +171,25 @@ The keys you need first:
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
 | `P` | a goal's page — done-when, its cards (`enter` watches one run), budget, the lead's log |
 | `i` | the needs-attention inbox |
-| `tab`, `alt+1/2/3` | the board, inbox and agent tabs |
+| `tab`, `alt+1/2/3/4` | the board, stats, inbox and agent tabs |
 | `?` or `alt+/` | the full key table |
+
+### The stats tab
+
+`alt+2` leaves the board for its ledger: where every card's credits and
+hours went — over a window (`h`/`l` zooms 6h/24h/7d/30d/all) and over
+all time — with a timeline of the lanes themselves. One row per card
+that moved in the window: a filled block for a stage session (bright
+and growing to the right edge while it runs), `▒` for time it sat
+waiting on you, `◆` a gate, `✔` a landing. `j`/`k` walk the lanes,
+`enter` opens the card, `f` pins the right edge to now. Below the
+timeline: the window's money beside the all-time ledger, the clock
+(agent working, waiting on you, nothing running — and how many lanes
+ran at once at the busiest stretch), and the window's costliest cards
+with the one-line reason each earned its place. The same derivation the
+card's own run tab reads, one scale up: the fold (internal/fleetrun)
+charges a pass to the window it started in, so no window can hold the
+same credits twice.
 
 ### The card page
 

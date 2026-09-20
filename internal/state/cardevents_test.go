@@ -504,3 +504,55 @@ func TestSetGateApprovalRecordsAutopilotEvent(t *testing.T) {
 		t.Fatalf("Events after a rejected mode = %+v, want still exactly one", evs)
 	}
 }
+
+// TestWorkspaceEventsSinceIsOneQueryForEveryCard: the workspace stats
+// read asks "which cards moved in this window" before it can decide
+// which cards to read in full, and it must not pay a query per card to
+// ask. One call returns every card's events at or after the cutoff,
+// oldest first across the workspace, each row still naming its card.
+func TestWorkspaceEventsSince(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f1 := feat(1, "early")
+	f2 := feat(2, "late")
+	for _, f := range []*domain.Feature{f1, f2} {
+		if err := s.CreateFeature(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	at1 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	at2 := at1.Add(time.Minute)
+	at3 := at1.Add(2 * time.Minute)
+	for _, ev := range []CardEvent{
+		{Feature: f1.ID, Stage: domain.StageImplement, Kind: EventStageEnter, At: at1},
+		{Feature: f2.ID, Stage: domain.StageVerify, Kind: EventStageEnter, At: at2},
+		{Feature: f1.ID, Stage: domain.StageImplement, Kind: EventStageExit, At: at3},
+	} {
+		if err := s.AppendEvent(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.WorkspaceEvents(ctx, at2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events since the cutoff, want 2", len(got))
+	}
+	if got[0].Feature != f2.ID || got[1].Feature != f1.ID {
+		t.Errorf("workspace order = %s, %s — want f2's, then f1's later one", got[0].Feature, got[1].Feature)
+	}
+	if got[0].Stage != domain.StageVerify {
+		t.Errorf("stage = %s, want the row's own stage", got[0].Stage)
+	}
+
+	all, err := s.WorkspaceEvents(ctx, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("a zero cutoff returned %d events, want all 3", len(all))
+	}
+}

@@ -46,10 +46,10 @@ import (
 // select the picker's options, deliberately: a digit used to fire an
 // answer outright with no confirm and no undo, and digit-selects-option
 // was the fix (F14, threadinput.go). And it is not an alt+digit either,
-// because alt+1/2/3 are the shell's own board/inbox/agent tabs and are
-// answered above the card's tier — a numbered chord would have switched
-// tab instead of opening the citation. Letters are the footnote
-// convention anyway.
+// because the alt+digits are the shell's own board/stats/inbox/agent
+// tabs, answered above the card's tier — a numbered chord would have
+// switched tab instead of opening the citation. Letters are the
+// footnote convention anyway.
 //
 // The mark carries its key rather than a bare number because the chord
 // is a status-bar hint, and a board-width bar has room for about three

@@ -64,7 +64,8 @@ leaf services.
 | `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |
 | `stack` | Pure policy for a **stack** — a chain of cards whose branches fork from one another. Answers what each card forks from, which are sitting on commits that have moved, and whether one may land yet. No git, no store, no clock. Read by `Engine.StackTick`, the worktree base seam and the board alike. |
-| `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the stats tab, `status --stats` and the week view. |
+| `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the card's run tab, `status --stats` and the week view. |
+| `fleetrun` | Pure fold at the workspace scale: every card's run → the stats tab's report (window and all-time money, the clock, peak concurrency, and the timeline lanes). Charges a pass to the window it started in; reuses `cardrun` per card, so the tab cannot disagree with the cards it is made of. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |
 | `notify` | Terminal bell / desktop notification on needs-attention. |
@@ -195,6 +196,11 @@ still work — the board just stays static. Key env vars are tabled in
   three readers (`internal/ui/statsview.go`, `cmd/gummi/statusstats.go`,
   `internal/ui/week.go`). The derivation lives in one place on purpose: two
   surfaces that disagree about what a card cost are worse than one.
+- "how is the whole board running / the timeline" → `internal/fleetrun`,
+  then its one reader (`internal/ui/wsstats.go`). Same seam, one scale up:
+  the fold reuses `cardrun` per card and states its own attribution rules
+  (a pass is charged to the window it started in; the window clock counts
+  an open session to the right edge).
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - Anything architectural or a "why is it this way" question →
   `docs/DESIGN.md` (its **Decisions** list in §10 is binding).

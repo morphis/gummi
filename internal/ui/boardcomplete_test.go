@@ -190,7 +190,6 @@ func TestBoardTabStillCyclesWithoutAPopup(t *testing.T) {
 	}
 }
 
-
 // TestBoardCommandWithoutValuesTakesFreeText: only a command that
 // actually has a value list opens the second tier, AND — the half this
 // test used to leave unchecked — enter on such a line sends it rather
