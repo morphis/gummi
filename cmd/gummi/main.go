@@ -285,6 +285,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	perm := agent.PermissionAllowAll
 	var sandboxMode string
 	var instructions []string
+	var forwardSkills []string
 	// autopilotLanesCfg is the configured autopilot_lanes value (0 = unset,
 	// resolved to the built-in default of 2 below).
 	var autopilotLanesCfg int
@@ -305,6 +306,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		}
 		sandboxMode = cfg.Sandbox
 		instructions = cfg.Instructions
+		forwardSkills = cfg.Skills.Forward
 		autopilotLanesCfg = cfg.AutopilotLanes
 	}
 	// Adapter selection: GUMMI_AGENT picks the default backend, and any
@@ -363,6 +365,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		Model: model, MaxActive: maxActive, AutopilotLanes: autopilotLanes, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
+		Skills: forwardSkills,
 	})
 	// Teach every worktree manager how to resolve a card's base. Until
 	// this is installed a card forks from whatever the checkout has out,

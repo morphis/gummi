@@ -292,6 +292,37 @@ func TestLoadRejectsRelativeInstructionPath(t *testing.T) {
 	}
 }
 
+// A bare skill name and an absolute path are both legal; a relative path
+// with separators is not, because it would mean a different directory
+// depending on where gummi was started.
+func TestLoadSkillsForward(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("skills:\n  forward:\n    - container-env\n    - /opt/skills/hardware\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := []string{"container-env", "/opt/skills/hardware"}
+	if len(c.Skills.Forward) != 2 || c.Skills.Forward[0] != want[0] || c.Skills.Forward[1] != want[1] {
+		t.Errorf("skills.forward = %v, want %v", c.Skills.Forward, want)
+	}
+}
+
+func TestLoadRejectsRelativeSkillPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("skills:\n  forward:\n    - ./skills/env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "relative path") {
+		t.Fatalf("expected relative-path error naming file, got: %v", err)
+	}
+}
+
 func TestLoadLayeredScalarPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	userPath := filepath.Join(dir, "user.yaml")

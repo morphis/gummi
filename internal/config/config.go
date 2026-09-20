@@ -89,6 +89,11 @@ type Config struct {
 	// order. Every entry must be an absolute path; Load rejects relative or
 	// empty entries so a path cannot silently walk out of the workspace.
 	Instructions []string `yaml:"instructions"`
+	// Skills selects which of the workspace's own skills are forwarded
+	// into the sessions that run inside a card's worktree. See
+	// SkillsConfig for why this is an explicit list rather than a
+	// directory that is swept.
+	Skills SkillsConfig `yaml:"skills"`
 	// Checks supplies workspace-wide default verification checks. When
 	// Checks.Default is non-empty, check discovery bypasses the scribe and
 	// writes the configured list straight into the artifact.
@@ -100,6 +105,33 @@ type Config struct {
 	// entries both run — a personal pager beside a workspace's own
 	// pipeline — in that order.
 	Hooks []hooks.Hook `yaml:"hooks"`
+}
+
+// SkillsConfig selects workspace-level skills to forward into card
+// sessions.
+//
+// Every card runs in a worktree under <workspace>/.gummi/worktrees, which
+// is a sibling of the managed repository rather than a directory inside
+// it. A skill the repository carries is in that worktree and every backend
+// finds it; a skill the OPERATOR keeps at the workspace root — beside
+// .gummi, which in the multi-repo layout (`repos:`) is the only place
+// cross-repo rules can live — is outside every backend's project scope and
+// reaches nothing. Forwarding is how such a skill gets in.
+//
+// It is an explicit list, never "forward everything under .claude/skills",
+// for a specific reason: `gummi skill install --scope project` writes
+// gummi's OWN skill to that directory. Sweeping it would hand every stage
+// session the instructions for driving gummi, against the rule (stated to
+// every session in the stage hints) that a card never spawns a second
+// gummi. Naming what to forward makes that impossible by construction.
+type SkillsConfig struct {
+	// Forward names the skills to forward. An entry is either a bare
+	// skill name, resolved against the workspace's conventional skill
+	// roots (.claude/skills, .agents/skills, .github/skills, in that
+	// order), or an absolute path to a skill directory anywhere on disk.
+	// A relative path is rejected: it would silently mean something
+	// different depending on which directory gummi was started from.
+	Forward []string `yaml:"forward"`
 }
 
 // ChecksConfig holds workspace-wide check settings.
@@ -366,6 +398,18 @@ func Load(path string) (Config, error) {
 		}
 		if !filepath.IsAbs(inst) {
 			return Config{}, fmt.Errorf("%s: instructions: entry %q is not an absolute path", path, inst)
+		}
+	}
+	for i, name := range c.Skills.Forward {
+		if strings.TrimSpace(name) == "" {
+			return Config{}, fmt.Errorf("%s: skills.forward: entry %d is empty", path, i)
+		}
+		// A bare name is resolved later against the workspace's skill
+		// roots; an absolute path is taken as given. A relative path with
+		// separators is neither, so it is refused here rather than
+		// resolving against whatever directory gummi was launched in.
+		if strings.ContainsRune(name, '/') && !filepath.IsAbs(name) {
+			return Config{}, fmt.Errorf("%s: skills.forward: entry %q is a relative path; use a bare skill name or an absolute path", path, name)
 		}
 	}
 	for i, ch := range c.Checks.Default {

@@ -18,10 +18,10 @@ var (
 )
 
 var capsBase = map[string]Capabilities{
-	"copilot":  {Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd},
+	"copilot":  {Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd, SkillDirs: true},
 	"claude":   {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths},
 	"codex":    {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCageCwd},
-	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths},
+	"opencode": {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true},
 	"headless": {Interrupt: true, UsageEvents: true, ClientTools: true, WriteCage: WriteCageCwd},
 	"pi":       {Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCageCwd},
 }

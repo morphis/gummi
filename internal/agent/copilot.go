@@ -69,7 +69,7 @@ func (c *Copilot) Name() string { return "copilot" }
 
 // Capabilities implements Agent. The Copilot SDK provides all of these.
 func (c *Copilot) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd, SkillDirs: true}
 }
 
 // CreditRate implements Agent: Copilot self-reports per-model AI-credit
@@ -110,6 +110,15 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		cfg.SystemMessage = &copilot.SystemMessageConfig{
 			Content: strings.Join(opts.SystemHints, "\n\n"),
 		}
+	}
+	// Skills the operator forwards from the workspace root. The SDK field
+	// is additive: EnableConfigDiscovery is left alone, so what the CLI
+	// finds under the worktree (.github/skills, .agents/skills,
+	// .claude/skills) still loads and these join it rather than replacing
+	// it — which is what makes forwarding safe to turn on for a repo that
+	// already carries skills of its own.
+	if len(opts.SkillDirs) > 0 {
+		cfg.SkillDirectories = opts.SkillDirs
 	}
 	// Allow-all is gummi's default (sandbox assumption). In guarded
 	// mode we leave OnPermissionRequest nil so requests surface as

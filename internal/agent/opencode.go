@@ -60,7 +60,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage, and can be interrupted by killing
 // the turn's process.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step
@@ -92,7 +92,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
 	}
-	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.Workspace)
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.Workspace, opts.SkillDirs)
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}

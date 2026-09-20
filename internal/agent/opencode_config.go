@@ -34,7 +34,11 @@ import "encoding/json"
 // requires process-level confinement, which is out of scope for this feature
 // (see FD-014 sandbox mode). opencode strips // comments from its JSON config,
 // so this note lives in the Go source only.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly, workspace bool) ([]byte, error) {
+// skillDirs is placed last, after the two bools, on purpose: it and
+// extraReadAllows are both []string, and separating them means a caller
+// that transposes the two fails to compile instead of silently opening a
+// read allowance where a skill path was meant.
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly, workspace bool, skillDirs []string) ([]byte, error) {
 	worktreeOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
 
 	permission := map[string]any{
@@ -60,6 +64,13 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	}
 
 	out := map[string]any{"permission": permission}
+	// Skills forwarded from the workspace root. opencode's own discovery
+	// does not climb out of the worktree, so a skill beside .gummi is
+	// invisible without this; `skills.paths` is additive, so the
+	// worktree's own skills keep loading alongside them.
+	if len(skillDirs) > 0 {
+		out["skills"] = map[string]any{"paths": skillDirs}
+	}
 	if mcpSock != "" && (featureID != "" || workspace) {
 		command := []string{execPath, "__mcp", "--feature", featureID}
 		if workspace {

@@ -8,7 +8,7 @@ import (
 
 func buildConfig(t *testing.T, extra []string) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, false)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, false, nil)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, false)
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, false, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +88,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 // command shape: ["execPath","__mcp","--workspace"], no "--feature", and
 // featureID (passed as junk here) is not consulted.
 func TestBuildOpencodeConfigWorkspace(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/ws.sock", "should-be-ignored", "/opt/gummi", nil, false, true)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/ws.sock", "should-be-ignored", "/opt/gummi", nil, false, true, nil)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 // pattern map), while read stays open — the deny is structural, so
 // enforce/warn/off sandbox modes cannot re-arm the write tools.
 func TestBuildOpencodeConfigReadOnly(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, false)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, false, nil)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -198,5 +198,48 @@ func TestBuildHostedOpencodeMCPConfig(t *testing.T) {
 	}
 	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/ws.sock" {
 		t.Errorf("environment.GUMMI_MCP_SOCK = %v, want /tmp/mcp/ws.sock", env["GUMMI_MCP_SOCK"])
+	}
+}
+
+// A session with no forwarded skills must emit no skills block at all:
+// opencode merges this file over the operator's own opencode.jsonc, so an
+// empty `skills` key here would overwrite a global skills config with
+// nothing — the config gummi writes is a per-session addition, never a
+// reset of what the operator set up.
+func TestOpencodeConfigOmitsSkillsWhenNoneForwarded(t *testing.T) {
+	m := buildConfig(t, nil)
+	if _, present := m["skills"]; present {
+		t.Errorf("skills block present with no forwarded dirs: %v", m["skills"])
+	}
+}
+
+// Forwarded skills reach opencode as `skills.paths`. The key is additive
+// on opencode's side (the worktree's own skills still load), which is why
+// forwarding is safe to turn on for a repo that carries skills already.
+func TestOpencodeConfigForwardsSkillPaths(t *testing.T) {
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, false, false,
+		[]string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"})
+	if err != nil {
+		t.Fatalf("buildOpencodeConfig: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
+	}
+	skills, ok := m["skills"].(map[string]any)
+	if !ok {
+		t.Fatalf("skills block missing or wrong type: %v", m["skills"])
+	}
+	paths, ok := skills["paths"].([]any)
+	if !ok {
+		t.Fatalf("skills.paths missing or wrong type: %v", skills["paths"])
+	}
+	got := make([]string, 0, len(paths))
+	for _, p := range paths {
+		got = append(got, p.(string))
+	}
+	want := []string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("skills.paths = %v, want %v", got, want)
 	}
 }
