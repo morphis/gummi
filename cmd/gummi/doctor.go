@@ -1089,6 +1089,18 @@ func configLayeringChecks(cfg config.Config, sources map[string]string, userPath
 		checks = append(checks, doctorCheck{Name: "config:instructions." + inst, Status: status, Detail: detail})
 	}
 
+	// Hook scripts are shell commands, not files, so there is nothing to
+	// stat — the report is the command and where it was configured. A
+	// workspace with none configured stays silent: reporting "(unset)"
+	// for an opt-in surface is noise, not diagnostics.
+	for i, h := range cfg.Hooks {
+		checks = append(checks, doctorCheck{
+			Name:   fmt.Sprintf("config:hooks.%d", i),
+			Status: statusOK,
+			Detail: h.Describe() + " (" + sourceLabel(sources["hooks"]) + ")",
+		})
+	}
+
 	return checks
 }
 

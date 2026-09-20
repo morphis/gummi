@@ -133,6 +133,53 @@ architect, for example.
 (endpoints, keys, credit rates) stays in each backend's native store, so
 this file is safe to commit.
 
+## Hooks
+
+`hooks:` in either config file runs a script when the board changes —
+the script surface beside `GUMMI_NOTIFY`'s bell/desktop toast. Each
+entry is a shell command, executed via `sh -c` in the workspace root,
+with:
+
+- the **event name** as `$1`,
+- a **JSON payload** on stdin (flat, `event`/`id`/`stage`/`branch`/
+  `title`/… — every field but `event` is omitempty),
+- `GUMMI_EVENT`, `GUMMI_CARD` and `GUMMI_WORKSPACE` in the environment,
+
+```yaml
+hooks:
+  - run: ~/bin/gummi-notify            # every event
+  - run: page-oncall.sh
+    events: [gate.waiting, budget.exhausted]
+```
+
+An entry without `events:` fires on every event; with it, only on the
+events named. User-level and workspace entries **both** run, in that
+order — a personal pager beside the workspace's own pipeline.
+
+The event vocabulary (closed; a config typo is rejected at load):
+
+| event | fires when |
+|---|---|
+| `card.created` | a card was minted (creation, ingest, bugs import) |
+| `stage.enter` | a card crossed a stage edge (`from`/`to`/`actor` name it) |
+| `card.verified` | the card reached done with a verified branch — the landing moment |
+| `card.parked` | the card stopped and waits (`reason`: needs-you, gave-up, blocked, quit) |
+| `card.merged` | the branch was squash-merged onto its base (`commit` is the sha) |
+| `gate.waiting` | the card blocked on a design-gate approval |
+| `question.waiting` | the card's agent asked and awaits an answer |
+| `budget.exhausted` | the card's envelope is spent |
+| `card.failed` | a failing verify, a rebase conflict, or an idle stop (`decision_kind` distinguishes) |
+
+The contract is advisory end to end: hooks run detached from the caller's
+path (a full queue drops the event, a hung script is killed after 15
+seconds), a hook's exit status and output are its own business, and no
+hook failure can fail the run that raised the event. Events fire where
+they are committed — the store reports crossings, parks, decisions and
+creations; the worktree layer reports squash-merges — so a hook fires
+once per committed row, from whichever process drove it, and the store's
+dedupe keys apply (a re-raised decision that deduped to a no-op raises
+nothing).
+
 ## Environment variables
 
 | variable | effect |
@@ -153,3 +200,4 @@ this file is safe to commit.
 | `GUMMI_NOTIFY` | needs-attention hook: `bell` (default), `desktop`, `off` |
 | `GUMMI_MOTION` | `off` freezes every activity glyph and stops the clock tick |
 | `GUMMI_ATTACH_CMD` | command for the board's raw-attach (`a`) and the agent tab, ahead of `GUMMI_AGENT` and the `agent:` key |
+| `GUMMI_EVENT`, `GUMMI_CARD`, `GUMMI_WORKSPACE` | exported to `hooks:` scripts: the event name, the card id, the workspace root |

@@ -602,3 +602,81 @@ func TestSubstratesLayerLikeEnv(t *testing.T) {
 		t.Fatal("an env prerequisite in one file and a substrate in the other under one name is refused")
 	}
 }
+
+func TestLoadHooks(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	content := `hooks:
+  - run: ~/bin/gummi-hook
+  - run: page-oncall.sh
+    events: [gate.waiting, budget.exhausted]
+`
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Hooks) != 2 {
+		t.Fatalf("got %d hooks, want 2", len(c.Hooks))
+	}
+	if c.Hooks[0].Run != "~/bin/gummi-hook" || len(c.Hooks[0].Events) != 0 {
+		t.Errorf("hook 0 = %+v, want the catch-all", c.Hooks[0])
+	}
+	if c.Hooks[1].Run != "page-oncall.sh" ||
+		len(c.Hooks[1].Events) != 2 || c.Hooks[1].Events[0] != "gate.waiting" || c.Hooks[1].Events[1] != "budget.exhausted" {
+		t.Errorf("hook 1 = %+v", c.Hooks[1])
+	}
+}
+
+func TestLoadHooksRejectsEmptyRun(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(p, []byte("hooks:\n  - events: [gate.waiting]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "entry 0 has an empty run") {
+		t.Fatalf("expected empty-run error naming file, got: %v", err)
+	}
+}
+
+func TestLoadHooksRejectsUnknownEvent(t *testing.T) {
+	for _, ev := range []string{"card", "gate-waiting", "Card.Created", "stage.exit"} {
+		dir := t.TempDir()
+		p := filepath.Join(dir, "config.yaml")
+		body := fmt.Sprintf("hooks:\n  - run: x.sh\n    events: [%q]\n", ev)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(p)
+		if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "unknown event") {
+			t.Fatalf("event %q: expected unknown-event error naming file, got: %v", ev, err)
+		}
+	}
+}
+
+func TestLoadLayeredHooksConcat(t *testing.T) {
+	dir := t.TempDir()
+	userPath := filepath.Join(dir, "user.yaml")
+	wsPath := filepath.Join(dir, "ws.yaml")
+	if err := os.WriteFile(userPath, []byte("hooks:\n  - run: personal.sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wsPath, []byte("hooks:\n  - run: pipeline.sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, sources, err := LoadLayered(userPath, wsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// both layers run, user first: a personal pager beside the
+	// workspace's own pipeline is two hooks, not a conflict
+	if len(merged.Hooks) != 2 || merged.Hooks[0].Run != "personal.sh" || merged.Hooks[1].Run != "pipeline.sh" {
+		t.Errorf("hooks = %+v, want personal then pipeline", merged.Hooks)
+	}
+	if sources["hooks"] != userPath+","+wsPath {
+		t.Errorf("hooks source = %q, want %s,%s", sources["hooks"], userPath, wsPath)
+	}
+}

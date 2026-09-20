@@ -34,6 +34,10 @@ var ErrForkPointStamped = errors.New("fork point already stamped")
 // Store persists features and their transition history in SQLite.
 type Store struct {
 	db *sql.DB
+	// observer, when installed (SetObserver), hears every committed
+	// hookable event. It is set once, before the store is handed to any
+	// concurrent writer, so it is read without a lock.
+	observer Observer
 }
 
 const schema = `
@@ -789,6 +793,15 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
+	// The observer-only created event: the features row is the record,
+	// but a hook hearing "a card was minted" should not have to poll for
+	// it. CreatedAt is the card's own truth; the observer carries no
+	// payload — enrichment reads the row it just landed in.
+	created := f.CreatedAt
+	if created.IsZero() {
+		created = time.Now().UTC()
+	}
+	s.observe(CardEvent{Feature: f.ID, Stage: f.Stage, Kind: EventCreated, At: created})
 	return nil
 }
 
@@ -1656,7 +1669,9 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	// sees all of them. The crossing answers the newest still-open gate
 	// decision, looked up in this same transaction so the crossing and its
 	// answer commit together.
-	if err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, s.newestOpenGateDecisionTx(ctx, tx, id)); err != nil {
+	answerID := s.newestOpenGateDecisionTx(ctx, tx, id)
+	gateInserted, err := appendGateEventTx(ctx, tx, id, f.Stage, to, actor, now, answerID)
+	if err != nil {
 		return f, err
 	}
 	// A goal arriving at implement is being put back to work, so it is no
@@ -1679,6 +1694,14 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	}
 	if err := tx.Commit(); err != nil {
 		return f, err
+	}
+	// Post-commit reporting to hooks: the crossing (when its log row was
+	// actually inserted) and, when the card crossed to done carrying the
+	// verified stamp Advance left at the gate, the verified landing. The
+	// stamp was read before the update, so it is this crossing's truth.
+	if gateInserted {
+		s.observeTransition(id, f.Stage, to, actor, now, answerID,
+			to == domain.StageDone && !f.VerifiedAt.IsZero())
 	}
 	f.Stage = to
 	f.UpdatedAt = now

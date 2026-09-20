@@ -20,6 +20,7 @@ import (
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/hooks"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/state"
@@ -73,6 +74,30 @@ func run(args []string) error {
 	return rootCmd.Execute()
 }
 
+// wireHooks loads the layered hooks config and installs the dispatcher on
+// the store (committed card events) and the pool (squash-merge landings).
+// It returns the dispatcher for the caller to Close — nil-safe — and nil
+// itself when no hooks are configured. Loading here, at each command's
+// store-construction site, is what keeps the TUI, the headless driver and
+// the CLI verbs on one hook surface; the store reports its own writes, so
+// each process fires only for what it drove.
+func wireHooks(st *state.Store, pool *worktree.Pool, ws state.Workspace) *hooks.Dispatcher {
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, ws.ConfigFile())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		return nil
+	}
+	d := hooks.New(cfg.Hooks, ws.Root, st)
+	st.SetObserver(d.Observe)
+	pool.SetMergeHook(d.Merged)
+	return d
+}
+
 func runBoard() error {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -104,6 +129,8 @@ func runBoard() error {
 	if err != nil {
 		return err
 	}
+	hookd := wireHooks(store, pool, ws)
+	defer hookd.Close()
 	// GUMMI_THEME selects the palette (dark|light|neon); default dark.
 	th, _ := theme.ByName(cmp.Or(os.Getenv("GUMMI_THEME"), "dark"))
 	shell := ui.NewShell(th, version())

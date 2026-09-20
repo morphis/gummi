@@ -348,12 +348,19 @@ type CardEvent struct {
 	Dedupe string
 }
 
-// AppendEvent inserts one card event, honoring ev.Dedupe.
+// AppendEvent inserts one card event, honoring ev.Dedupe, and reports
+// the committed row to the installed observer. A deduped no-op inserts
+// nothing and reports nothing — a re-raised decision is not a new
+// attention event, and the hook surface keeps the log's honesty.
 func (s *Store) AppendEvent(ctx context.Context, ev CardEvent) error {
-	if _, err := s.db.ExecContext(ctx, appendEventSQL,
+	res, err := s.db.ExecContext(ctx, appendEventSQL,
 		string(ev.Feature), string(ev.Stage), ev.Kind, ev.Status,
-		ev.At.UTC().Format(timeFmt), ev.Payload, ev.Output, ev.Dedupe); err != nil {
+		ev.At.UTC().Format(timeFmt), ev.Payload, ev.Output, ev.Dedupe)
+	if err != nil {
 		return fmt.Errorf("appending event for %s: %w", ev.Feature, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		s.observe(ev)
 	}
 	return nil
 }
@@ -361,7 +368,8 @@ func (s *Store) AppendEvent(ctx context.Context, ev CardEvent) error {
 // AppendEvents inserts a batch of card events in a single transaction —
 // the engine mirror's per-save call, so a save never leaves a partial
 // batch visible to a concurrent reader. Each event honors its own
-// Dedupe, same as AppendEvent.
+// Dedupe, same as AppendEvent, and each committed row reports to the
+// installed observer.
 func (s *Store) AppendEvents(ctx context.Context, evs []CardEvent) error {
 	if len(evs) == 0 {
 		return nil
@@ -372,15 +380,23 @@ func (s *Store) AppendEvents(ctx context.Context, evs []CardEvent) error {
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after commit
 
+	committed := make([]CardEvent, 0, len(evs))
 	for _, ev := range evs {
-		if _, err := tx.ExecContext(ctx, appendEventSQL,
+		res, err := tx.ExecContext(ctx, appendEventSQL,
 			string(ev.Feature), string(ev.Stage), ev.Kind, ev.Status,
-			ev.At.UTC().Format(timeFmt), ev.Payload, ev.Output, ev.Dedupe); err != nil {
+			ev.At.UTC().Format(timeFmt), ev.Payload, ev.Output, ev.Dedupe)
+		if err != nil {
 			return fmt.Errorf("appending event for %s: %w", ev.Feature, err)
+		}
+		if n, err := res.RowsAffected(); err == nil && n > 0 {
+			committed = append(committed, ev)
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("appending events: %w", err)
+	}
+	for _, ev := range committed {
+		s.observe(ev)
 	}
 	return nil
 }
@@ -653,7 +669,10 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 // transaction, so the event and the transition it describes commit
 // together or not at all. Unlike the best-effort mirror writes, a failure
 // here fails the crossing: a history that silently skipped a gate would
-// under-report exactly the crossings nobody watched.
+// under-report exactly the crossings nobody watched. It reports whether
+// the row was actually inserted (a deduped retried crossing inserts
+// nothing), so the caller reports the crossing to hooks only when the
+// log took it.
 //
 // answerID, when non-empty, correlates the crossing to the open
 // EventDecisionOpen it answers — the newest still-open gate decision,
@@ -663,21 +682,23 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 // cannot leave two events behind, and two crossings of the same edge can
 // no longer collide on a shared timestamp; crossings with no open
 // decision to answer keep the crossing's own timestamp as their key.
-func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) error {
+func appendGateEventTx(ctx context.Context, tx *sql.Tx, id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) (bool, error) {
 	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor, ID: answerID})
 	if err != nil {
-		return fmt.Errorf("encoding gate event for %s: %w", id, err)
+		return false, fmt.Errorf("encoding gate event for %s: %w", id, err)
 	}
 	dedupe := "gate:" + string(from) + "->" + string(to) + ":" + at.Format(timeFmt)
 	if answerID != "" {
 		dedupe = "decision:" + answerID
 	}
-	if _, err := tx.ExecContext(ctx, appendEventSQL,
+	res, err := tx.ExecContext(ctx, appendEventSQL,
 		string(id), string(from), EventGate, "", at.Format(timeFmt),
-		string(payload), "", dedupe); err != nil {
-		return fmt.Errorf("recording gate event for %s: %w", id, err)
+		string(payload), "", dedupe)
+	if err != nil {
+		return false, fmt.Errorf("recording gate event for %s: %w", id, err)
 	}
-	return nil
+	inserted, err := res.RowsAffected()
+	return inserted > 0, err
 }
 
 // AppendPark records a card coming to a stop and waiting for someone,

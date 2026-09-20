@@ -166,6 +166,8 @@ func withLandingWorkspace(fn func(context.Context, *driver.Driver, *state.Store,
 	if err != nil {
 		return err
 	}
+	hookd := wireHooks(store, pool, ws)
+	defer hookd.Close()
 	// no agents: the driver's Merge/HandOff/Clean never run a session.
 	eng := engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	defer func() { _ = eng.Close() }()

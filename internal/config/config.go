@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/hooks"
 )
 
 // Config is the parsed .gummi/config.yaml.
@@ -92,6 +93,13 @@ type Config struct {
 	// Checks.Default is non-empty, check discovery bypasses the scribe and
 	// writes the configured list straight into the artifact.
 	Checks ChecksConfig `yaml:"checks"`
+	// Hooks are the scripts run on board events (the notification surface
+	// beside GUMMI_NOTIFY's bell/desktop). Each entry runs on every event,
+	// or on the events its filter names; see internal/hooks for the
+	// vocabulary and the advisory contract. User-level and workspace
+	// entries both run — a personal pager beside a workspace's own
+	// pipeline — in that order.
+	Hooks []hooks.Hook `yaml:"hooks"`
 }
 
 // ChecksConfig holds workspace-wide check settings.
@@ -368,6 +376,17 @@ func Load(path string) (Config, error) {
 			return Config{}, fmt.Errorf("%s: checks.default: entry %d: %w", path, i, err)
 		}
 	}
+	for i, h := range c.Hooks {
+		if strings.TrimSpace(h.Run) == "" {
+			return Config{}, fmt.Errorf("%s: hooks: entry %d has an empty run", path, i)
+		}
+		for _, ev := range h.Events {
+			if !hooks.ValidEvent(ev) {
+				return Config{}, fmt.Errorf("%s: hooks: entry %d names unknown event %q (known: %s)",
+					path, i, ev, strings.Join(hooks.AllEvents, ", "))
+			}
+		}
+	}
 	return c, nil
 }
 
@@ -561,6 +580,23 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["checks.default"] = "default"
 	}
 
+	// hooks layer like instructions: user entries then workspace entries,
+	// both running — a personal notification script beside the workspace's
+	// own pipeline is not a conflict to resolve but two hooks to run.
+	merged.Hooks = make([]hooks.Hook, 0, len(user.Hooks)+len(ws.Hooks))
+	merged.Hooks = append(merged.Hooks, user.Hooks...)
+	merged.Hooks = append(merged.Hooks, ws.Hooks...)
+	switch {
+	case len(user.Hooks) > 0 && len(ws.Hooks) > 0:
+		sources["hooks"] = userPath + "," + workspacePath
+	case len(user.Hooks) > 0:
+		sources["hooks"] = userPath
+	case len(ws.Hooks) > 0:
+		sources["hooks"] = workspacePath
+	default:
+		sources["hooks"] = "default"
+	}
+
 	return merged, sources, nil
 }
 
@@ -728,4 +764,19 @@ permissions: allow-all
 # repos:
 #   lxd: git/lxd
 #   incus: git/incus
+
+# hooks: — scripts run when the board changes (the notification surface
+# beside GUMMI_NOTIFY's bell/desktop). Each entry runs via "sh -c" in the
+# workspace root with the event name as "$1" and a JSON payload on stdin
+# (GUMMI_EVENT, GUMMI_CARD and GUMMI_WORKSPACE carry the identity too).
+# An entry without "events:" fires on every event; with it, only on the
+# events named. Hooks are advisory: exit codes and output are the
+# script's business, a slow script is killed after 15s, and none of it
+# can fail a run. Event vocabulary: card.created, stage.enter,
+# card.verified, card.parked, card.merged, gate.waiting,
+# question.waiting, budget.exhausted, card.failed.
+# hooks:
+#   - run: ~/bin/gummi-hook            # every event
+#   - run: page-oncall.sh
+#     events: [gate.waiting, budget.exhausted]
 `

@@ -240,6 +240,8 @@ func withRunEngine(fn func(context.Context, *driver.Driver, *state.Store, state.
 	if err != nil {
 		return err
 	}
+	hookd := wireHooks(store, pool, ws)
+	defer hookd.Close()
 	eng, agents, _, err := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
 		if err != nil {

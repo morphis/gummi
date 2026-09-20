@@ -281,10 +281,20 @@ func (s *Store) CloseGoalDropped(ctx context.Context, card domain.FeatureID, act
 		string(card), string(f.Stage), string(domain.StageDone), actor, now); err != nil {
 		return fmt.Errorf("recording transition for %s: %w", card, err)
 	}
-	if err := appendGateEventTx(ctx, tx, card, f.Stage, domain.StageDone, actor, at.UTC(), ""); err != nil {
+	gateInserted, err := appendGateEventTx(ctx, tx, card, f.Stage, domain.StageDone, actor, at.UTC(), "")
+	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// The dropped card's stop is a crossing like any other to the hook
+	// surface: report it when the log took it. No verified event — a
+	// dropped card ended with its branch kept, nothing landed.
+	if gateInserted {
+		s.observeTransition(card, f.Stage, domain.StageDone, actor, at.UTC(), "", false)
+	}
+	return nil
 }
 
 // SetFoundBy records that goal filed card as found along the way.

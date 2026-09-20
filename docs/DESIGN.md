@@ -401,7 +401,12 @@ stream-json) and **codex** (Codex CLI, `codex exec --json`).
   Interactive stages only run when you attach.
 - **Needs-attention queue**: gates, agent questions, budget exhaustion, and
   failures — plus permission requests when running in `guarded` mode — land
-  in one inbox, newest-first, with desktop-bell/notification hooks.
+  in one inbox, newest-first, with desktop-bell/notification hooks. A
+  `hooks:` list in config.yaml runs user scripts on the same events —
+  the event vocabulary is closed, the contract advisory (a hook can
+  never block or fail a run), and the reporting rides the store's own
+  committed rows, so the TUI and the headless driver fire hooks from one
+  seam rather than each growing call sites (internal/hooks).
 - **Persistence**: feature state + session transcripts in
   `.gummi/state/` (SQLite via `modernc.org/sqlite`, no cgo). Specs live in
   git; state is machinery. gummi must be fully restartable: on launch it

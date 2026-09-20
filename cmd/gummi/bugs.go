@@ -56,6 +56,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	if eng == nil {
 		eng = engine.New(engine.Config{Store: store, Pool: pool, Workspace: ws})
 	}
+	hookd := wireHooks(store, pool, ws)
 	prof := profile
 	if prof == "" && len(names) > 0 {
 		prof = names[0]
@@ -71,6 +72,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	return &bugEnv{
 		eng: eng, profile: prof, env: env,
 		cleanup: func() {
+			hookd.Close()
 			_ = eng.Close()
 			closeAgents(agents)
 			_ = store.Close()

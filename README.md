@@ -397,7 +397,8 @@ Two files in `.gummi/`, both scaffolded on first run:
   `autopilot_lanes`, `repo` and `repos` when `.gummi` sits above the
   repository, `checks.default` to fix the verify commands instead of
   discovering them, `env` prerequisites the verification plan can cite,
-  `instructions` files, and `agent` for the agent tab.
+  `instructions` files, `hooks` scripts run on board events, and `agent`
+  for the agent tab.
 - **`profiles.yaml`**: named profiles mapping each role to
   `{backend, model}`, and which one is the default.
 
@@ -413,6 +414,27 @@ The environment variables you meet first:
 
 Every backend's specifics, every config key and the full environment
 table are in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## Hooks — scripts on board events
+
+`GUMMI_NOTIFY` rings the bell; `hooks:` in `config.yaml` runs your
+script instead of (or beside) it. Each entry is a shell command run when
+the board changes — with the event name as `$1` and a JSON payload on
+stdin, in the workspace root:
+
+```yaml
+hooks:
+  - run: ~/bin/gummi-notify            # every event
+  - run: page-oncall.sh
+    events: [gate.waiting, budget.exhausted]   # or filter
+```
+
+The event vocabulary: `card.created`, `stage.enter`, `card.verified`,
+`card.parked`, `card.merged`, `gate.waiting`, `question.waiting`,
+`budget.exhausted`, `card.failed`. Hooks are advisory: a slow script is
+killed after 15 seconds, a failing one changes nothing, and none of it
+can stall a run. The full contract is in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Try it without your repo
 

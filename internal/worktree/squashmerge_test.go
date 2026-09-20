@@ -178,6 +178,43 @@ func TestSquashMergeMissingBranch(t *testing.T) {
 	}
 }
 
+// TestSquashMergeMergeHook pins the landing reporter: a successful
+// SquashMerge calls it once with the feature and the landed sha; every
+// failure path calls it never. This is the seam the hooks dispatcher's
+// card.merged rides.
+func TestSquashMergeMergeHook(t *testing.T) {
+	root := newRepo(t)
+	m, f, _ := committedFeature(t, root)
+
+	var landed []struct {
+		id     domain.FeatureID
+		commit string
+	}
+	m.SetMergeHook(func(f *domain.Feature, commit string) {
+		landed = append(landed, struct {
+			id     domain.FeatureID
+			commit string
+		}{f.ID, commit})
+	})
+
+	sha, err := m.SquashMerge(ctx, f, "FD-009: land me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(landed) != 1 || landed[0].id != f.ID || landed[0].commit != sha {
+		t.Errorf("merge hook = %+v, want one call with (%s, %s)", landed, f.ID, sha)
+	}
+
+	// a failed merge (already landed) reports nothing
+	landed = nil
+	if _, err := m.SquashMerge(ctx, f, "FD-009: again"); err == nil {
+		t.Fatal("re-merge accepted")
+	}
+	if len(landed) != 0 {
+		t.Errorf("failed merge reported: %+v", landed)
+	}
+}
+
 func TestDeleteLandedBranch(t *testing.T) {
 	root := newRepo(t)
 	m, f, _ := committedFeature(t, root)

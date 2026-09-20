@@ -77,6 +77,11 @@ type Manager struct {
 	// package must not import it.
 	baseLookup BaseLookup
 
+	// mergeHook reports a successful squash-merge landing. Nil means
+	// unreported, which is what every test fixture keeps doing. Same
+	// callback-for-a-wider-signature reasoning as baseLookup above.
+	mergeHook MergeHook
+
 	// mainMu serializes gummi-initiated mutations of the main checkout
 	// (squash merges).
 	mainMu sync.Mutex
@@ -93,6 +98,18 @@ type BaseLookup func(ctx context.Context, f *domain.Feature) (string, error)
 // SetBaseLookup installs the base resolver. Called once at pool
 // construction; a nil lookup leaves every card on the checkout's HEAD.
 func (m *Manager) SetBaseLookup(l BaseLookup) { m.baseLookup = l }
+
+// MergeHook reports a successful landing: the card's branch was
+// squash-merged onto its base as one commit, sha the landed commit.
+// Both landing surfaces — the board's merge and the headless driver's —
+// funnel through SquashMerge, so this one callback sees every landing.
+// It runs on the merging goroutine and must be non-blocking (the hooks
+// dispatcher's queue-or-drop contract); a nil hook is a no-op.
+type MergeHook func(f *domain.Feature, commit string)
+
+// SetMergeHook installs the landing reporter. Called once at wiring;
+// nil leaves merges unreported.
+func (m *Manager) SetMergeHook(h MergeHook) { m.mergeHook = h }
 
 // baseRev is THE chokepoint for "the revision this card forks from and
 // lands on" — what this package used to spell as a bare "HEAD" against
@@ -1211,6 +1228,9 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	// content-equality guess to fall back on.
 	if err := m.forkStore.SetLandedSHA(ctx, f.ID, sha); err != nil {
 		return "", fmt.Errorf("recording landed commit for %s: %w", f.ID, err)
+	}
+	if m.mergeHook != nil {
+		m.mergeHook(f, sha)
 	}
 	return sha, nil
 }

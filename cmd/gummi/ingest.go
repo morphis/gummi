@@ -77,6 +77,8 @@ func runIngest(args []string) error {
 	if err != nil {
 		return err
 	}
+	hookd := wireHooks(store, pool, ws)
+	defer hookd.Close()
 	eng, agents, names, err := newEngineFromEnv(store, pool, ws)
 	if eng == nil {
 		if err != nil {

@@ -44,6 +44,10 @@ type Pool struct {
 	// every manager the pool builds. Nil leaves every card on its repo's
 	// HEAD, which is what happened before bases were selectable.
 	baseLookup BaseLookup
+	// mergeHook reports a successful squash-merge landing, installed on
+	// every manager the pool builds the same way baseLookup is. Nil
+	// leaves landings unreported.
+	mergeHook MergeHook
 }
 
 // SetBaseLookup installs the base resolver on the pool and on every
@@ -62,6 +66,22 @@ func (p *Pool) SetBaseLookup(l BaseLookup) {
 	p.baseLookup = l
 	for _, m := range p.byRoot {
 		m.SetBaseLookup(l)
+	}
+}
+
+// SetMergeHook installs the landing reporter on the pool and on every
+// manager it has already built, so a hook registered after launch
+// reaches the eagerly-created default manager too. Nil-safe like
+// SetBaseLookup.
+func (p *Pool) SetMergeHook(h MergeHook) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mergeHook = h
+	for _, m := range p.byRoot {
+		m.SetMergeHook(h)
 	}
 }
 
@@ -213,9 +233,13 @@ func (p *Pool) manager(ctx context.Context, root string) (*Manager, error) {
 	}
 	p.mu.Lock()
 	lookup := p.baseLookup
+	hook := p.mergeHook
 	p.mu.Unlock()
 	if lookup != nil {
 		m.SetBaseLookup(lookup)
+	}
+	if hook != nil {
+		m.SetMergeHook(hook)
 	}
 	if p.exclude {
 		if untracked, xerr := m.EnsureGummiExcluded(ctx); xerr != nil {
