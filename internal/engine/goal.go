@@ -2194,18 +2194,42 @@ func (e *Engine) reportPlanChanges(ctx context.Context, goal *domain.Feature, it
 	if err != nil {
 		return // no submitted plan: the conversation wrote the whole thing
 	}
-	was := string(raw)
-	wasItems, _, err := spec.ParseDoneWhen(was)
-	if err != nil {
+	changes := planChanges(string(raw), items, rows, lanes)
+	if len(changes) == 0 {
 		return
 	}
-	wasRows, _, err := spec.ParseGoalCards(was, wasItems)
+	e.goalLog(ctx, goal.ID, state.GoalPayload{
+		Action: state.GoalNote, By: ActorGoal,
+		Detail: "the plan gate approved a plan that differs from the one submitted: " + strings.Join(changes, "; "),
+	})
+}
+
+// planChanges says what an approved plan does differently from the one
+// the owner submitted.
+//
+// Shaping a plan is the architect's job and most of what it does is an
+// improvement — it turns a prose limit into a checkable item, it merges
+// two cards that were really one. But a plan approved unattended is
+// agreed by nobody who can see it, and some of what gets reshaped is not
+// shape at all: `live: true` is the owner saying how the work must be
+// proved (§17.9), and a merge that drops it opts the goal out of a proof
+// mechanism with nothing anywhere saying so.
+//
+// It reports; it does not refuse or restore. The architect may have been
+// right, and silently putting back a flag it deliberately dropped would
+// be its own kind of wrong. What must not happen is the change going
+// unrecorded.
+func planChanges(submitted string, items []domain.DoneWhen, rows []domain.GoalCardRow, lanes int) []string {
+	wasItems, _, err := spec.ParseDoneWhen(submitted)
 	if err != nil {
-		return
+		return nil
+	}
+	wasRows, _, err := spec.ParseGoalCards(submitted, wasItems)
+	if err != nil {
+		return nil
 	}
 
 	var changes []string
-
 	ids := func(in []domain.DoneWhen) map[string]bool {
 		m := map[string]bool{}
 		for _, it := range in {
@@ -2248,24 +2272,17 @@ func (e *Engine) reportPlanChanges(ctx context.Context, goal *domain.Feature, it
 	}
 	if liveWas > liveNow {
 		changes = append(changes, fmt.Sprintf(
-			"dropped live proof from %d card(s) — the plan asked for %d card(s) to prove themselves on the substrate before landing, the approved plan has %d",
+			"dropped live proof from %d card(s) — the plan asked for %d to prove themselves on the substrate before landing, the approved plan has %d",
 			liveWas-liveNow, liveWas, liveNow))
 	}
 
 	if n, m := len(wasRows), len(rows); n != m {
 		changes = append(changes, fmt.Sprintf("%d cards became %d", n, m))
 	}
-	if wasLanes, lerr := spec.ParseGoalLanes(was); lerr == nil && wasLanes > 0 && lanes > 0 && wasLanes != lanes {
+	if wasLanes, lerr := spec.ParseGoalLanes(submitted); lerr == nil && wasLanes > 0 && lanes > 0 && wasLanes != lanes {
 		changes = append(changes, fmt.Sprintf("lanes %d became %d", wasLanes, lanes))
 	}
-
-	if len(changes) == 0 {
-		return
-	}
-	e.goalLog(ctx, goal.ID, state.GoalPayload{
-		Action: state.GoalNote, By: ActorGoal,
-		Detail: "the plan gate approved a plan that differs from the one submitted: " + strings.Join(changes, "; "),
-	})
+	return changes
 }
 
 func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
