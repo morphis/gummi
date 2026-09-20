@@ -47,13 +47,24 @@ const (
 	Blocked // verify: the environment can't run the plan
 )
 
-var verdictRe = regexp.MustCompile(`(?im)^\s*VERDICT:\s*(pass|changes|fail|blocked)\s*$`)
+// verdictRe finds the verdict on a line of its own.
+//
+// A model writing markdown decorates: "**VERDICT: pass**", "## VERDICT:
+// fail", "- VERDICT: changes", or adds a clause — "VERDICT: pass — every
+// check green". All of those are the same verdict, and a parser that
+// takes only the bare form reads them as no verdict at all.
+//
+// So the line may carry heading or bullet markers, emphasis, and a
+// trailing clause — but only one introduced by a deliberate separator, so
+// that a sentence like "VERDICT: pass would be the wrong call here" is
+// still not a verdict.
+var verdictRe = regexp.MustCompile(`(?im)^[ \t]*[#>*+-]*[ \t]*[*_]{0,2}VERDICT[*_]{0,2}:\s*[*_]{0,2}(pass|changes|fail|blocked)\b[*_]{0,2}[ \t]*(?:[—–:-]\s*\S.*)?$`)
 
 // verdictTailRe catches models that emit the verdict glued to the
 // preceding sentence ("…redundant.VERDICT: changes") with no newline
 // before it — the strict verdictRe misses those. It anchors to the end
 // of the trimmed text, so a stray mid-text mention still doesn't count.
-var verdictTailRe = regexp.MustCompile(`(?i)\bVERDICT:\s*(pass|changes|fail|blocked)\s*$`)
+var verdictTailRe = regexp.MustCompile(`(?i)\bVERDICT[*_]{0,2}:\s*[*_]{0,2}(pass|changes|fail|blocked)\b[*_]{0,2}[ \t]*$`)
 
 // FromTool maps a submit_verdict tool result to a Verdict.
 func FromTool(v string) Verdict {

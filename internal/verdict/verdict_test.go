@@ -1,6 +1,7 @@
 package verdict
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -163,5 +164,46 @@ func TestBlockedByEnvironmentIsTheVerifiersOwnWord(t *testing.T) {
 	said.VerdictFloor = "fail"
 	if BlockedByEnvironment(said) {
 		t.Fatal("a fail floor is true on every machine")
+	}
+}
+
+// A model writing markdown decorates its verdict. Every shape below is
+// the same verdict, and reading one as "unclear" throws away the stage
+// that produced it.
+func TestAVerdictIsReadHoweverAModelDecoratesIt(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want Verdict
+	}{
+		{"VERDICT: pass", Pass},
+		{"**VERDICT: pass**", Pass},
+		{"VERDICT: pass — every check green", Pass},
+		{"## VERDICT: fail", Fail},
+		{"- VERDICT: changes", Changes},
+		{"> VERDICT: blocked", Blocked},
+		{"some prose\n\n**VERDICT: changes**\n", Changes},
+		{"…the helper is redundant.VERDICT: changes", Changes},
+	} {
+		if got := Parse(tc.text); got != tc.want {
+			t.Errorf("Parse(%q) = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}
+
+// Generous about decoration, strict about meaning: a sentence that
+// mentions a verdict is not one. Reading a verdict out of discussion is
+// worse than missing one, because it lands a result nobody reached.
+func TestProseThatMentionsAVerdictIsNotOne(t *testing.T) {
+	for _, text := range []string{
+		"VERDICT: pass would be the wrong call here",
+		"the VERDICT: pass line is what we want to see",
+		"I considered VERDICT: fail but the tests are green, so:\nVERDICT: pass",
+	} {
+		if got := Parse(text); got == Unclear && strings.Contains(text, "so:") {
+			t.Errorf("Parse(%q) = unclear; the real verdict on its own line should win", text)
+		}
+	}
+	if got := Parse("VERDICT: pass would be the wrong call here"); got != Unclear {
+		t.Errorf("a sentence that merely mentions a verdict is not one, got %v", got)
 	}
 }

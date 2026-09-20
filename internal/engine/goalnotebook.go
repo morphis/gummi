@@ -96,7 +96,12 @@ func readOr(path, empty string) (string, error) {
 	return string(raw), err
 }
 
-var discoveryLineRe = regexp.MustCompile(`(?m)^[ \t>*-]*FINDING:\s*\S`)
+// discoveryLineRe finds a card's FINDING line in its spec. Only the lead
+// may put what a card learned where the cards after it will see it
+// (§17.10), so a line that is not recognised is knowledge that silently
+// does not propagate — and the next card rederives it, differently.
+// Headings and emphasis are how a model writes a label.
+var discoveryLineRe = regexp.MustCompile(`(?m)^[ \t>*+#-]*[*_]{0,2}FINDING[*_]{0,2}:\s*\S`)
 
 // reportedDiscoveries counts the FINDING: lines in a card's spec: what it
 // says it found out about the system the goal is building on.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -16,7 +17,13 @@ const estimatePrompt = "Estimate the total cost to implement this feature, in cr
 	"surface, and the overall complexity. Reply with exactly one line and nothing else:\n" +
 	"ESTIMATE: <number>"
 
-var estimateRe = regexp.MustCompile(`(?i)ESTIMATE:\s*\$?\s*([0-9]+(?:\.[0-9]+)?)`)
+// estimateRe finds a card's cost estimate.
+//
+// The thousands separator is the one that bites: "ESTIMATE: 1,200" read
+// by a pattern that stops at the comma is a card budgeted at one credit,
+// which starves immediately and spends the goal's turns being raised.
+// Emphasis and an approximation sign are ordinary ways to write it.
+var estimateRe = regexp.MustCompile(`(?i)[*_]{0,2}ESTIMATE[*_]{0,2}:\s*[*_]{0,2}\s*[~≈]?\s*\$?\s*([0-9][0-9,_]*(?:\.[0-9]+)?)`)
 
 // backendCostFactor scales the scribe's raw estimate per agent backend.
 // The scribe prices work in credits as if a mid-tier hosted model were
@@ -45,7 +52,10 @@ func parseScribeEstimate(text string) (float64, bool) {
 	if len(m) == 0 {
 		return 0, false
 	}
-	v, err := strconv.ParseFloat(m[len(m)-1][1], 64)
+	// The digits may carry grouping separators — "1,200", "1_200" — which
+	// are part of the number and not part of the value.
+	digits := strings.NewReplacer(",", "", "_", "").Replace(m[len(m)-1][1])
+	v, err := strconv.ParseFloat(digits, 64)
 	if err != nil || v <= 0 {
 		return 0, false
 	}

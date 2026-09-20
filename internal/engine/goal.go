@@ -2173,6 +2173,101 @@ func envelopeThatFunds(want []int, tranches int) int {
 // to autopilot — from here it runs itself until it is ready for you.
 // Rows already carrying an id this goal owns are skipped, so a crossing
 // that failed half-way is resumed rather than repeated.
+
+// reportPlanChanges says what the approved plan does differently from the
+// one the owner submitted.
+//
+// Shaping a plan is the architect's job and most of what it does is an
+// improvement — it turns a prose limit into a checkable item, it merges
+// two cards that were really one. But a plan approved unattended is
+// agreed by nobody who can see it, and some of what gets reshaped is not
+// shape at all: `live: true` is the owner saying how the work must be
+// proved (§17.9), and a merge that drops it opts the goal out of a proof
+// mechanism with nothing anywhere saying so.
+//
+// This reports; it does not refuse or restore. The architect may have
+// been right, and silently putting back a flag it deliberately dropped
+// would be its own kind of wrong. What must not happen is the change
+// going unrecorded.
+func (e *Engine) reportPlanChanges(ctx context.Context, goal *domain.Feature, items []domain.DoneWhen, rows []domain.GoalCardRow, lanes int) {
+	raw, err := os.ReadFile(filepath.Join(e.cfg.Workspace.DraftsDir(), string(goal.ID)+".submitted.md"))
+	if err != nil {
+		return // no submitted plan: the conversation wrote the whole thing
+	}
+	was := string(raw)
+	wasItems, _, err := spec.ParseDoneWhen(was)
+	if err != nil {
+		return
+	}
+	wasRows, _, err := spec.ParseGoalCards(was, wasItems)
+	if err != nil {
+		return
+	}
+
+	var changes []string
+
+	ids := func(in []domain.DoneWhen) map[string]bool {
+		m := map[string]bool{}
+		for _, it := range in {
+			m[it.ID] = true
+		}
+		return m
+	}
+	before, after := ids(wasItems), ids(items)
+	var added, gone []string
+	for id := range after {
+		if !before[id] {
+			added = append(added, id)
+		}
+	}
+	for id := range before {
+		if !after[id] {
+			gone = append(gone, id)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(gone)
+	if len(added) > 0 {
+		changes = append(changes, "added done-when "+strings.Join(added, ", "))
+	}
+	if len(gone) > 0 {
+		changes = append(changes, "dropped done-when "+strings.Join(gone, ", "))
+	}
+
+	// The one that is not about shape: live proof the owner asked for.
+	liveWas, liveNow := 0, 0
+	for _, r := range wasRows {
+		if r.Live {
+			liveWas++
+		}
+	}
+	for _, r := range rows {
+		if r.Live {
+			liveNow++
+		}
+	}
+	if liveWas > liveNow {
+		changes = append(changes, fmt.Sprintf(
+			"dropped live proof from %d card(s) — the plan asked for %d card(s) to prove themselves on the substrate before landing, the approved plan has %d",
+			liveWas-liveNow, liveWas, liveNow))
+	}
+
+	if n, m := len(wasRows), len(rows); n != m {
+		changes = append(changes, fmt.Sprintf("%d cards became %d", n, m))
+	}
+	if wasLanes, lerr := spec.ParseGoalLanes(was); lerr == nil && wasLanes > 0 && lanes > 0 && wasLanes != lanes {
+		changes = append(changes, fmt.Sprintf("lanes %d became %d", wasLanes, lanes))
+	}
+
+	if len(changes) == 0 {
+		return
+	}
+	e.goalLog(ctx, goal.ID, state.GoalPayload{
+		Action: state.GoalNote, By: ActorGoal,
+		Detail: "the plan gate approved a plan that differs from the one submitted: " + strings.Join(changes, "; "),
+	})
+}
+
 func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	path := filepath.Join(e.pool.Root(), goal.ArtifactPath())
 	raw, err := os.ReadFile(path)
@@ -2197,6 +2292,7 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 			return err
 		}
 	}
+	e.reportPlanChanges(ctx, goal, items, rows, lanes)
 	// A goal that continues another starts from what that one came to know.
 	// Usually this happened when the goal was created (`--after`), so that
 	// its plan was agreed against it; a plan that only names the goal in its

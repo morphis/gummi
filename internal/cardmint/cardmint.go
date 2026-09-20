@@ -283,6 +283,17 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		if err := atomicfile.Write(draft, []byte(content), 0o600); err != nil {
 			return domain.Feature{}, err
 		}
+		// The draft is what the plan conversation edits, so it stops being
+		// what the owner wrote the moment the architect touches it. Keep
+		// what they submitted, unchanged, so the gate can say what it did
+		// differently — a plan approved unattended is otherwise agreed by
+		// nobody who can see what changed.
+		if strings.TrimSpace(in.GoalDoc) != "" {
+			submitted := filepath.Join(ws.DraftsDir(), string(f.ID)+".submitted.md")
+			if err := atomicfile.Write(submitted, []byte(in.GoalDoc), 0o600); err != nil {
+				return domain.Feature{}, err
+			}
+		}
 	} else if in.Kind == domain.KindResearch {
 		artifact := filepath.Join(ws.Root, f.ArtifactPath())
 		seed := domain.ResearchSeed{Brief: in.Description}
