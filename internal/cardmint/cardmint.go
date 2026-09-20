@@ -149,6 +149,51 @@ type Input struct {
 // MintFeatureNum so a bad --repo never burns a sequence number, matching
 // both callers' pre-existing behavior (createFeature's own comment, and
 // Engine.Materialize's requireRepo pre-flight).
+
+// freeSlug returns a slug whose branch nobody holds.
+//
+// Telling a person to retitle a card is the right answer when a person is
+// naming one: the fix is a word in the title and nothing else. It is the
+// wrong answer to a goal minting its own cards, because there is nobody
+// there to retitle anything — the collision surfaces after the plan gate,
+// with the plan's spend already gone, and a resume runs into it again
+// unless the architect happens to invent a different title. A goal that
+// runs the same shape of work twice in one workspace (the second tier of
+// a programme, a re-run after a wrap-up) will collide by nature: the good
+// title for the work is the title the last one used.
+//
+// So a goal's card takes the next free variant and says nothing; a
+// person's card still gets told.
+func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (string, error) {
+	branchFor := func(s string) string {
+		f := domain.Feature{Kind: in.Kind, Slug: s, BranchScheme: domain.DefaultBranchScheme}
+		return f.BranchName()
+	}
+	owner, taken, err := store.BranchTaken(ctx, in.Repo, branchFor(slug), "")
+	if err != nil {
+		return "", err
+	}
+	if !taken {
+		return slug, nil
+	}
+	if in.Goal == "" {
+		return "", fmt.Errorf(
+			"%s already uses the branch %s — retitle this card so it gets a different one", owner, branchFor(slug))
+	}
+	for n := 2; n <= 50; n++ {
+		cand, serr := domain.Slugify(fmt.Sprintf("%s %d", slug, n))
+		if serr != nil {
+			return "", serr
+		}
+		if _, dup, berr := store.BranchTaken(ctx, in.Repo, branchFor(cand), ""); berr != nil {
+			return "", berr
+		} else if !dup {
+			return cand, nil
+		}
+	}
+	return "", fmt.Errorf("every branch from %s to %s-50 is taken", branchFor(slug), slug)
+}
+
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
 	// the first line is the title for every kind — a multi-line research
 	// brief names itself on its first line exactly as a feature does; the
@@ -170,14 +215,11 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	//
 	// Research cards are exempt: they never cut a branch.
 	if in.Kind != domain.KindResearch {
-		probe := domain.Feature{Kind: in.Kind, Slug: slug, BranchScheme: domain.DefaultBranchScheme}
-		branch := probe.BranchName()
-		if owner, taken, terr := store.BranchTaken(ctx, in.Repo, branch, ""); terr != nil {
+		free, terr := freeSlug(ctx, store, in, slug)
+		if terr != nil {
 			return domain.Feature{}, terr
-		} else if taken {
-			return domain.Feature{}, fmt.Errorf(
-				"%s already uses the branch %s — retitle this card so it gets a different one", owner, branch)
 		}
+		slug = free
 	}
 	num, err := store.MintFeatureNum(ctx, ws.SeqFile())
 	if err != nil {

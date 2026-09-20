@@ -88,6 +88,19 @@ type Job struct {
 	// Roots is the repository each tree was snapshotted from, for whoever
 	// removes the snapshots once the run is over.
 	Roots map[string]string `json:"roots,omitempty"`
+	// Wanted is the assertions the owner's done-when items actually cite,
+	// and it is what this run is judged on. Empty means the whole run, so
+	// a goal whose items are about everything the experiment asserts is
+	// judged exactly as before.
+	//
+	// A goal is usually about part of a matrix — §17.12 recommends cutting
+	// a programme into a sequence of goals, and then every goal but the
+	// last is. Judging such a run on the whole matrix makes its experiment
+	// unpassable by construction, which costs three things that are not
+	// the work's fault: a reproduce attempt on every run, a lead turn for
+	// a "failure" whose items are all met, and the negative control, which
+	// is only ever triggered by heads that pass.
+	Wanted []string `json:"wanted,omitempty"`
 	// Control runs the experiment's positive control first.
 	Control bool `json:"control,omitempty"`
 	// ExpectFail marks a negative control: the inputs are the trunk, and
@@ -137,6 +150,10 @@ type Result struct {
 	// FailedPhase names the phase a fail (or a failure that did not
 	// reproduce) happened in.
 	FailedPhase string `json:"failed_phase,omitempty"`
+	// Scoped says the run passed on what the owner asked about while
+	// something else in the experiment did not hold. It is a real pass and
+	// a narrower one, and a reader is told which.
+	Scoped bool `json:"scoped,omitempty"`
 	// Flaky: an attempt failed and the next passed. The run judged nothing,
 	// and the rate of these is what says whether the rig can be believed.
 	Flaky bool `json:"flaky,omitempty"`
@@ -448,6 +465,12 @@ func Execute(ctx context.Context, job Job) Result {
 		case failed == nil:
 			r.res.Flaky, r.res.FailedPhase = true, first.Name
 			return finish(Inconclusive, fmt.Sprintf("%s failed once and passed on a reset substrate — flaky, so it judged nothing", first.Name))
+		case failed.Name == "run" && r.wantedHeld():
+			// Everything this goal is about held. What did not hold is
+			// outside what anyone agreed it would do, so there is nothing
+			// here to reproduce, escalate, or call a failure.
+			r.res.Scoped = true
+			return finish(Pass, r.scopedReason())
 		case first == nil:
 			first = failed
 			if ctx.Err() != nil {
@@ -485,6 +508,31 @@ func (r *runner) collect(ctx context.Context, attempt int) {
 		r.phase(ctx, attempt, "collect", r.job.Def.Collect)
 	}
 	r.save()
+}
+
+// wantedHeld reports that every assertion the owner cited was reported by
+// this run and held. An assertion nobody reported is not held: a run that
+// never mentioned it proves nothing about it.
+func (r *runner) wantedHeld() bool {
+	if len(r.job.Wanted) == 0 {
+		return false
+	}
+	by := make(map[string]bool, len(r.res.Assertions))
+	for _, a := range r.res.Assertions {
+		by[a.ID] = a.OK
+	}
+	for _, id := range r.job.Wanted {
+		if ok, reported := by[id]; !reported || !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *runner) scopedReason() string {
+	ok, total := r.res.Passed()
+	return fmt.Sprintf("every assertion this goal is about held (%d of them); %d of %d overall, and what did not hold is outside what it agreed to do",
+		len(r.job.Wanted), ok, total)
 }
 
 func (r *runner) passReason() string {

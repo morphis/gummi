@@ -2860,6 +2860,19 @@ tested.
   a matrix that can hold early be *seen* to hold early, and it is judged per
   assertion: an item whose assertions held is met by a run that failed
   elsewhere.
+- **And so is the run.** A goal is usually about part of a matrix — §17.12
+  recommends cutting a programme into a sequence of goals, and then every
+  goal but the last is. Judging such a run on everything the experiment
+  asserts makes its experiment unpassable by construction, and the goal
+  pays for that three times: a reproduce attempt on every run, a lead turn
+  for a "failure" whose every item is met, and no negative control at all,
+  since that one is triggered by heads that pass. So a run is judged on the
+  assertions the goal's items actually cite (`Job.Wanted`): when every one
+  of them held, the run passed, `Scoped` records that it was a narrower
+  pass than the whole matrix, and the reason names what did not hold and
+  that it was outside what the goal agreed to do. An item that names no
+  assertions is about the whole run, and one such item makes the run whole
+  again.
 - **The record is the directory.** `.gummi/evidence/<goal>/<run>/` holds the
   job (with its own copy of the definitions — what a run did is decided when
   it starts), the result as it is written, a log per phase, and whatever

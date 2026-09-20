@@ -214,6 +214,46 @@ type ExperimentStart struct {
 	Card domain.FeatureID
 }
 
+
+// goalWanted is the assertions this goal's done-when items cite for one
+// experiment: what its runs are actually judged on.
+//
+// An item proved by the experiment that names no assertions is about the
+// whole run — so one such item makes the whole run wanted, and the run is
+// judged exactly as it always was. Only a goal that has said, item by
+// item, which assertions it is about gets judged on those.
+func (e *Engine) goalWanted(goal domain.Feature, name string) []string {
+	path := e.artifactFile(&goal)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	items, _, err := spec.ParseDoneWhen(string(raw))
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, it := range items {
+		if it.Experiment != name {
+			continue
+		}
+		if len(it.Assertions) == 0 {
+			return nil // an item about the whole run makes the run whole
+		}
+		for _, a := range it.Assertions {
+			if !seen[a] {
+				seen[a] = true
+				out = append(out, a)
+			}
+		}
+	}
+	return out
+}
+
 // StartExperiment prepares a run for goal and starts its runner. It
 // returns as soon as the runner is started: the run is read back from its
 // directory (ExperimentRuns) by whoever ticks next.
@@ -256,7 +296,8 @@ func (e *Engine) StartExperiment(ctx context.Context, goal domain.Feature, st Ex
 		ID: experiment.NewID(now), Experiment: st.Name, Owner: string(goal.ID), Purpose: st.Purpose,
 		Heads: heads, Roots: roots, Control: st.Control, ExpectFail: st.Trunk,
 		Def: def, Substrate: cfg.Substrates[def.Substrate],
-		Root: e.cfg.Workspace.Root, StateDir: e.cfg.Workspace.StateDir(),
+		Wanted: e.goalWanted(goal, st.Name),
+		Root:   e.cfg.Workspace.Root, StateDir: e.cfg.Workspace.StateDir(),
 	}
 	if st.Card != "" {
 		job.Purpose = PurposeCard + " " + string(st.Card)

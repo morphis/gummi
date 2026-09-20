@@ -231,3 +231,60 @@ func TestARefusalDoesNotRepeatItself(t *testing.T) {
 		t.Fatalf("the refusal says it %d times: %q", n, res.Reason)
 	}
 }
+
+// A goal is usually about part of what its experiment asserts — §17.12
+// recommends cutting a programme into a sequence of goals, and then every
+// goal but the last is. Judging such a run on the whole matrix makes its
+// experiment unpassable by construction, and charges the goal for it.
+func TestARunIsJudgedOnWhatTheGoalIsAbout(t *testing.T) {
+	spec := config.Experiment{
+		Run:     `echo attempt >> attempts; printf '{"id":"a","ok":true}\n{"id":"b","ok":false,"detail":"another tier"}\n' > "$GUMMI_EVIDENCE/results.ndjson"; exit 1`,
+		Collect: "echo collected >> collects",
+	}
+
+	t.Run("everything it cites held", func(t *testing.T) {
+		j := job(t, spec, config.Substrate{})
+		j.Wanted = []string{"a"}
+		res := Execute(context.Background(), j)
+		if res.Outcome != Pass || !res.Scoped {
+			t.Fatalf("a goal about `a` alone is not failed by `b`: %+v", res)
+		}
+		// The point of judging it early: no second attempt to reproduce a
+		// failure that was never this goal's, and no reset to pay for it.
+		if count(t, j.Root, "attempts") != 1 {
+			t.Fatal("it must not reproduce a failure outside what the goal is about")
+		}
+		if held, ok := res.Holds([]string{"a"}); !held || !ok {
+			t.Fatal("and the item it cites is met")
+		}
+	})
+
+	t.Run("one it cites did not", func(t *testing.T) {
+		j := job(t, spec, config.Substrate{})
+		j.Wanted = []string{"a", "b"}
+		res := Execute(context.Background(), j)
+		if res.Outcome != Fail || res.Scoped {
+			t.Fatalf("a goal that cites `b` is failed by `b`: %+v", res)
+		}
+		if count(t, j.Root, "attempts") != 2 {
+			t.Fatal("and that failure is reproduced before it is believed")
+		}
+	})
+
+	t.Run("citing nothing keeps the whole run", func(t *testing.T) {
+		j := job(t, spec, config.Substrate{})
+		res := Execute(context.Background(), j)
+		if res.Outcome != Fail || res.Scoped {
+			t.Fatalf("a goal about the whole run is judged on the whole run: %+v", res)
+		}
+	})
+
+	t.Run("an assertion nobody reported is not held", func(t *testing.T) {
+		j := job(t, spec, config.Substrate{})
+		j.Wanted = []string{"a", "never-mentioned"}
+		res := Execute(context.Background(), j)
+		if res.Outcome != Fail || res.Scoped {
+			t.Fatalf("a run that never mentioned it proves nothing about it: %+v", res)
+		}
+	})
+}
