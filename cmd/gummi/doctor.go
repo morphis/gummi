@@ -48,7 +48,7 @@ func runDoctor(args []string) error {
 	if err != nil {
 		return err
 	}
-	report := buildDoctorReport(cwd, doctorOpts{Deep: *flags.deep, Probe: probeModel, ZZAuthProbe: probeZZAuth})
+	report := buildDoctorReport(cwd, doctorOpts{Deep: *flags.deep, Probe: probeModel})
 	if *flags.json {
 		b, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -126,13 +126,10 @@ type doctorFlags struct {
 
 // doctorOpts configures buildDoctorReport's reachability probe. Deep turns
 // on the live per-role probe; Probe is the injectable seam that runs it
-// (tests substitute a stub), defaulting to the real probeModel. ZZAuthProbe
-// is the analogous seam for the offline `auth:zz` check, defaulting to
-// probeZZAuth.
+// (tests substitute a stub), defaulting to the real probeModel.
 type doctorOpts struct {
-	Deep        bool
-	Probe       ProbeFn
-	ZZAuthProbe zzAuthProbeFn
+	Deep  bool
+	Probe ProbeFn
 }
 
 // ProbeFn runs one per-role reachability probe against a backend and model,
@@ -374,45 +371,13 @@ const nestingGuidance = "steer to a cost-tiered profile: frontier models for arc
 // native store now (Claude Code login, `opencode auth`, headless child's
 // env), so an interactive-login backend degrades to "unknown" with the exact
 // command a human runs (G2); a headless backend delegates to its own child.
-// zz is the exception: it can answer its own config offline via `zz status`,
-// so opts.ZZAuthProbe (defaulting to probeZZAuth) supplies a real check.
 func authCheck(bi backendInfo, opts doctorOpts) doctorCheck {
 	if bi.headless {
 		return doctorCheck{Name: "auth:" + bi.name, Status: statusOK, Detail: "handled by the headless command (" + bi.bin + ")"}
 	}
-	if bi.name == "zz" {
-		probe := opts.ZZAuthProbe
-		if probe == nil {
-			probe = probeZZAuth
-		}
-		res := probe(bi.bin, zzAuthProbeTimeout)
-		// Detail is derived from Status alone, never from the probe's
-		// free-text Summary: probeZZAuth's own Summary values are drawn from
-		// a small safe set, but authCheck must not blindly trust an
-		// injected probe (production or test) to uphold that contract.
-		check := doctorCheck{Name: "auth:zz", Status: res.Status, Detail: zzAuthDetail(res.Status)}
-		if res.Status != statusOK {
-			check.Remediation = "zz setup"
-		}
-		return check
-	}
 	return doctorCheck{
 		Name: "auth:" + bi.name, Status: statusUnknown, Detail: bi.name + " auth state is not checked offline",
 		Remediation: "if runs fail on auth, have the human run: " + bi.login,
-	}
-}
-
-// zzAuthDetail renders auth:zz's Detail from the probe's classified Status
-// only — a fixed, enumerable string per status, so no probe implementation
-// (including a misbehaving one) can smuggle probe output into the report.
-func zzAuthDetail(status string) string {
-	switch status {
-	case statusOK:
-		return "zz reports a configured provider"
-	case statusFail:
-		return "zz reports no provider configured"
-	default:
-		return "zz auth state could not be determined offline"
 	}
 }
 
@@ -658,8 +623,6 @@ func backendInfoFor(name string) backendInfo {
 		return backendInfo{name: "codex", bin: cmp.Or(os.Getenv("GUMMI_CODEX_BIN"), "codex"), login: "codex login"}
 	case "headless":
 		return backendInfo{name: "headless", bin: firstField(os.Getenv("GUMMI_AGENT_CMD")), headless: true}
-	case "zz":
-		return backendInfo{name: "zz", bin: cmp.Or(os.Getenv("GUMMI_ZZ_BIN"), "zz"), login: "zz setup"}
 	case "copilot":
 		return backendInfo{name: "copilot", bin: "copilot", login: "gh auth login  (authenticate GitHub Copilot)"}
 	}
@@ -939,7 +902,7 @@ func sandboxChecks(cfg config.Config, profiles config.Profiles) []doctorCheck {
 // make. That mode refuses backends without tool coverage; it confines
 // nothing. What actually keeps a role's writes in its worktree is the
 // backend's own file-tool policy,
-// and that varies: claude, opencode and zz pin their file tools to the
+// and that varies: claude and opencode pin their file tools to the
 // session's working directory, while copilot, codex and headless are
 // merely started there. A weaker model routed at the second tier is held
 // by the prompt alone — which is how a reviewer once wrote a feature's
@@ -975,7 +938,7 @@ func writeCageCheck(name string, resolved config.Profile, caps map[string]agent.
 		Name:   "write-cage:" + name,
 		Status: statusWarn,
 		Detail: "file tools uncaged for " + strings.Join(uncaged, ", ") + " — started in the worktree, free to write outside it; " + shellNote,
-		Remediation: "route these roles at a backend that pins its file tools to the working directory (claude, opencode, zz) " +
+		Remediation: "route these roles at a backend that pins its file tools to the working directory (claude, opencode) " +
 			"if you want worktree discipline held by the harness rather than by the model",
 	}
 }

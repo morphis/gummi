@@ -232,8 +232,6 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		Permission:     consultPermission,
 		Tools:          tools,
 		OutputTokenMax: c.rc.OutputTokenMax,
-		Provider:       c.rc.Provider,
-		Think:          c.rc.Think,
 		FeatureID:      string(c.id),
 		MCPSockPath:    mcpPath,
 		// No ArtifactPath, no MaxCredits: a consult session has no spec

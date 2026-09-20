@@ -290,8 +290,6 @@ func (e *Engine) leadSession(ctx context.Context, lt *leadTurn, prompt string) (
 		ArtifactPath:    docPath,
 		Role:            agent.RoleLead,
 		Model:           rc.Model,
-		Provider:        rc.Provider,
-		Think:           rc.Think,
 		OutputTokenMax:  rc.OutputTokenMax,
 		Permission:      e.cfg.Permission,
 		SystemHints:     hints,
@@ -1536,7 +1534,7 @@ func (e *Engine) resolveConflicts(ctx context.Context, goal domain.Feature, dir,
 	tctx, cancel := context.WithTimeout(ctx, leadTurnTimeout)
 	defer cancel()
 	sess, err := ag.NewSession(tctx, agent.SessionOpts{
-		WorkDir: dir, Role: agent.RoleImplementer, Model: rc.Model, Provider: rc.Provider, Think: rc.Think,
+		WorkDir: dir, Role: agent.RoleImplementer, Model: rc.Model,
 		Permission: e.cfg.Permission, MaxCredits: min(view.Ledger.OwnBudget(), 200) * capHeadroom,
 		SystemHints: []string{hint},
 	})

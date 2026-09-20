@@ -215,33 +215,6 @@ func TestHostedMCPAttachOpencode(t *testing.T) {
 	}
 }
 
-func TestHostedMCPAttachZZ(t *testing.T) {
-	argv, env, cleanup, err := HostedMCPAttach("zz", "/opt/gummi", "/tmp/mcp/ws.sock")
-	if err != nil {
-		t.Fatalf("HostedMCPAttach: %v", err)
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup is nil")
-	}
-	want := []string{"--mcp", "/opt/gummi __mcp --workspace"}
-	if !reflect.DeepEqual(argv, want) {
-		t.Errorf("argv = %#v, want %#v", argv, want)
-	}
-	if env != nil {
-		t.Errorf("env = %#v, want nil", env)
-	}
-}
-
-func TestHostedMCPAttachZZWhitespaceExecPath(t *testing.T) {
-	_, _, cleanup, err := HostedMCPAttach("zz", "/opt/gu mmi", "/tmp/mcp/ws.sock")
-	if err == nil {
-		t.Fatal("expected an error for a whitespace execPath")
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup is nil")
-	}
-}
-
 func TestHostedMCPAttachUnknownBackend(t *testing.T) {
 	for _, backend := range []string{"copilot", "some-unknown-backend", "/usr/local/bin/mycli"} {
 		argv, env, cleanup, err := HostedMCPAttach(backend, "/opt/gummi", "/tmp/mcp/ws.sock")

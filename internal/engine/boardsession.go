@@ -11,9 +11,9 @@ import (
 
 // boardPermission is the fixed tool-call policy every board session
 // spawns with. It is never PermissionGuarded, and not merely as a matter
-// of taste: claude and zz reject PermissionGuarded outright from
-// NewSession (see claudecode.go, zz.go — TestClaudeCodeRejectsGuarded,
-// TestZZRefusesGuarded), and copilot/opencode/codex accept it but nothing
+// of taste: claude rejects PermissionGuarded outright from
+// NewSession (see claudecode.go — TestClaudeCodeRejectsGuarded),
+// and copilot/opencode/codex accept it but nothing
 // in this codebase ever emits agent.EventPermission (grep confirms the
 // EventKind is declared and documented but never produced by any
 // adapter) — so a guarded board session on one of those three would
@@ -242,8 +242,6 @@ func (e *Engine) spawnBoardLocked(ctx context.Context, opts BoardOpts) (*BoardSe
 		Permission:     boardPermission,
 		Tools:          tools,
 		OutputTokenMax: rc.OutputTokenMax,
-		Provider:       rc.Provider,
-		Think:          rc.Think,
 		MCPSockPath:    mcpPath,
 		// Workspace tells an MCP-reaching adapter's `gummi __mcp` child to
 		// dial in --workspace mode rather than --feature <id> — there is

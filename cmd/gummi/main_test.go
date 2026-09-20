@@ -140,7 +140,7 @@ func TestFallbackBackendNameOneInstalled(t *testing.T) {
 
 // TestFallbackBackendNamePrefersDocumentedOrder proves several installed
 // CLIs resolve through the fixed order documented on
-// fallbackBackendName (copilot, claude, codex, opencode, zz) rather than
+// fallbackBackendName (copilot, claude, codex, opencode) rather than
 // Go's randomized map iteration, which would make the answer differ
 // from run to run for the exact same machine.
 func TestFallbackBackendNamePrefersDocumentedOrder(t *testing.T) {
@@ -148,16 +148,15 @@ func TestFallbackBackendNamePrefersDocumentedOrder(t *testing.T) {
 	fake := t.TempDir()
 	t.Setenv("PATH", fake)
 
-	writeFakeAgentBin(t, fake, "zz")
 	writeFakeAgentBin(t, fake, "opencode")
 	writeFakeAgentBin(t, fake, "codex")
 	if got := defaultBackendName(); got != "codex" {
-		t.Fatalf("defaultBackendName() = %q, want codex (first of codex/opencode/zz in the documented order)", got)
+		t.Fatalf("defaultBackendName() = %q, want codex (first of codex/opencode in the documented order)", got)
 	}
 
 	writeFakeAgentBin(t, fake, "claude")
 	if got := defaultBackendName(); got != "claude" {
-		t.Fatalf("defaultBackendName() = %q, want claude (ahead of codex/opencode/zz once it's installed too)", got)
+		t.Fatalf("defaultBackendName() = %q, want claude (ahead of codex/opencode once it's installed too)", got)
 	}
 
 	writeFakeAgentBin(t, fake, "copilot")

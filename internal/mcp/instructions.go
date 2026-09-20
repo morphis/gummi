@@ -20,7 +20,7 @@ func WorkspaceInstructions() string {
 
 // FeatureInstructions is the initialize "instructions" content for a
 // per-feature stage session (`gummi __mcp --feature <id>`): the scripted
-// turn a stage adapter (claude/codex/opencode/zz) runs while implementing,
+// turn a stage adapter (claude/codex/opencode) runs while implementing,
 // reviewing, or verifying one card.
 func FeatureInstructions(featureID string) string {
 	return fmt.Sprintf(

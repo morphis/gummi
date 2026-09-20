@@ -8,7 +8,6 @@ func TestGuardedSupportMatrix(t *testing.T) {
 		want bool
 	}{
 		{"claude", false},
-		{"zz", false},
 		{"copilot", true},
 		{"opencode", true},
 		{"codex", true},

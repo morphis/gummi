@@ -30,7 +30,6 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 	t.Setenv("PATH", fakePath)
 	t.Setenv("GUMMI_CODEX_BIN", codexOverride)
 	t.Setenv("GUMMI_OPENCODE_BIN", "")
-	t.Setenv("GUMMI_ZZ_BIN", "")
 
 	got := map[string]bool{}
 	for _, a := range Detect() {
@@ -42,7 +41,7 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 	if !got["codex"] {
 		t.Error("codex should be detected via GUMMI_CODEX_BIN, which bypasses PATH entirely")
 	}
-	for _, name := range []string{"copilot", "opencode", "zz"} {
+	for _, name := range []string{"copilot", "opencode"} {
 		if got[name] {
 			t.Errorf("%s should not be detected (not on the fake PATH, no override)", name)
 		}
@@ -53,7 +52,7 @@ func TestDetectRespectsPathAndBinOverrides(t *testing.T) {
 // happens to be installed — a regression here silently drops a backend
 // from the picker.
 func TestDetectKnownSet(t *testing.T) {
-	want := map[string]bool{"copilot": true, "claude": true, "codex": true, "opencode": true, "zz": true}
+	want := map[string]bool{"copilot": true, "claude": true, "codex": true, "opencode": true}
 	agents := Known()
 	if len(agents) != len(want) {
 		t.Fatalf("Known has %d entries, want %d", len(agents), len(want))

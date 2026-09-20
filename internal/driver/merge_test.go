@@ -227,7 +227,7 @@ func TestCleanRemovesLandedBranch(t *testing.T) {
 	}
 }
 
-// Clean removes the cleaned card's durable zz session transcripts (FD-104)
+// Clean removes the cleaned card's durable session transcripts (FD-104)
 // but leaves a co-resident card's transcripts alone.
 func TestCleanRemovesTranscripts(t *testing.T) {
 	h, d, id := driveVerified(t)

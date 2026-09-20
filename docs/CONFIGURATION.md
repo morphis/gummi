@@ -56,34 +56,12 @@ review.
   child inherits gummi's environment and reads its own provider config from
   there. `GUMMI_HEADLESS_CREDITS_PER_1K` prices a local endpoint's token
   spend into credits so it meters against the same envelope.
-- **zz**: the zz CLI (`GUMMI_ZZ_BIN` overrides the binary), a small Rust
-  coding agent that fronts any OpenAI-compatible endpoint (local llama.cpp,
-  OpenRouter, a self-hosted gateway). zz's `-p ask` mode is
-  process-per-turn with no stdin form, so gummi resumes a session through a
-  `--session` transcript file rather than an in-process handle. zz owns
-  provider selection through its own `~/.config/zz/config.toml`; a role's
-  `provider:` field in `profiles.yaml` names one of that file's
-  `[providers.<name>]` stanzas and gummi forwards it as `--provider`, so
-  different roles under one zz binary can hit different endpoints. A role's
-  `think:` field is forwarded as `--think <level>`, an opaque value the
-  provider stanza declares. Requires `permissions: allow-all` (zz has no
-  approval callback) and cannot run a read-only research session (zz has
-  no flag to disable its write, edit and bash tools); point research roles
-  at `claude` or `opencode`. Its prompt travels as a positional argv
-  string, so a turn is bounded well under Linux's 128 KiB argv limit. Every
-  invocation carries `--max-turns` (default 200, `GUMMI_ZZ_MAX_TURNS`) as a
-  runaway-loop backstop; the real spend limiter is the credit envelope, so
-  this only catches a session that never converges, and hitting it ends
-  the turn with an error naming the cap and the knob. `GUMMI_ZZ_CREDITS_PER_1K`
-  prices its token spend into credits, as headless does.
 
 gummi suppresses operator-level config that could hijack a stage (codex
 gets `--ignore-user-config`, claude gets `--strict-mcp-config` and a
 scrubbed session env). It does not suppress repo-level agent instructions:
 no adapter disables `AGENTS.md`, `CLAUDE.md` or project skills, because
-those are the repository's own guidance for agents working in it. zz
-follows the same rule; gummi passes neither `--no-skills` nor
-`--no-agents-md`.
+those are the repository's own guidance for agents working in it.
 
 No usable agent leaves the board static. Creation, specs, worktrees and
 gates all still work.
@@ -104,7 +82,7 @@ Scaffolded on first run. Every key is optional.
 | `substrates` | the external environments work is proved on — a test cluster, a device farm — each `{describe, probe, provision, reset, ttl, timeout}`; only `probe` is required. A plan cites one exactly as it cites an env prerequisite (`[env: <name>]`), so a name may not be both. Unlike one, a substrate can be brought up (`provision`) and put back to a known state (`reset`), it expires (`ttl`, a Go duration), and **one job holds it at a time** across every gummi process on the workspace. `timeout` bounds one provision or reset (default 45m, at most 6h). `gummi doctor` reports each one's state and holder. See DESIGN §17.7 |
 | `experiments` | the orchestrated live runs that prove work on a substrate, each `{describe, substrate, inputs, control, deploy, settle, run, collect, timeout}`; `substrate` and `run` are required. A goal's done-when item names one as its means of proof (`experiment: <name>`, optionally `assertions: [ids]`). Every command runs in the workspace root with `GUMMI_EVIDENCE` (a directory to write into — `results.ndjson` there, one `{"id","ok","detail"}` per line, is how a run reports its assertions), `GUMMI_TREE_<REPO>` and `GUMMI_HEAD_<REPO>` for each input (the unnamed default repo is `HOME`), `GUMMI_SUBSTRATE`, `GUMMI_EXPERIMENT`, `GUMMI_RUN`, `GUMMI_PURPOSE` and `GUMMI_ATTEMPT`. Exit 75 from any phase means *this run could not be judged*. `timeout` bounds each phase (default 30m). Operator configuration on purpose: a goal may change the rig it is tested on, and must not thereby change what counts as passing. See DESIGN §17.8 |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
-| `agent` | which installed CLI (`copilot`, `claude`, `codex`, `opencode`, `zz`) hosts the board's **agent tab**. It has nothing to do with the engine's per-role backends. The first-run picker writes this key without disturbing the rest of the file |
+| `agent` | which installed CLI (`copilot`, `claude`, `codex`, `opencode`) hosts the board's **agent tab**. It has nothing to do with the engine's per-role backends. The first-run picker writes this key without disturbing the rest of the file |
 
 ## `.gummi/profiles.yaml`
 
@@ -118,7 +96,7 @@ profiles:
     architect:   { backend: claude,  model: claude-opus-5 }
     implementer: { backend: copilot, model: gpt-5 }
     reviewer:    { backend: claude,  model: claude-sonnet-5 }
-    scribe:      { backend: zz, model: qwen2.5-coder-32b, provider: local-llama-cpp }
+    scribe:      { backend: headless, model: qwen2.5-coder-32b }
 ```
 
 A fifth role, `lead`, runs a goal's judgment (see the README's goals
@@ -133,20 +111,18 @@ mid-size model is usually enough for it:
 architect, for example.
 
 `backend:` is optional; a role without one uses `GUMMI_AGENT`.
-`output_token_max` caps a role's output tokens per turn. `provider:` and
-`think:` are zz-only, described above. Provider config (endpoints, keys,
-credit rates) stays in each backend's native store, so this file is safe
-to commit.
+`output_token_max` caps a role's output tokens per turn. Provider config
+(endpoints, keys, credit rates) stays in each backend's native store, so
+this file is safe to commit.
 
 ## Environment variables
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `headless`, `zz` |
+| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `headless` |
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
-| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN`, `GUMMI_ZZ_BIN` | a backend's binary, when it is not the default name on PATH |
-| `GUMMI_HEADLESS_CREDITS_PER_1K`, `GUMMI_ZZ_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
-| `GUMMI_ZZ_MAX_TURNS` | zz's runaway-turn backstop (default 200) |
+| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
+| `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_MAX_ACTIVE` | the attended lane pool (default 1) |
 | `GUMMI_ENVELOPE` | default credit envelope for new cards, and a floor under the estimated one. Unset, the board prefills 2000 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |

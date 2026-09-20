@@ -666,7 +666,7 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	// Durable zz session transcripts (FD-104) live outside the worktree,
+	// Durable session transcripts (FD-104) live outside the worktree,
 	// under the workspace state dir; a cleaned card must leave no
 	// conversation state behind. Scoped to this card's featureID prefix so
 	// a co-resident card's transcripts are untouched. A refused clean above

@@ -61,8 +61,6 @@ func (e *Engine) oneShot(ctx context.Context, f domain.Feature, prompt string, h
 		ArtifactPath: specPath,
 		Role:         agent.RoleScribe,
 		Model:        rc.Model,
-		Provider:     rc.Provider,
-		Think:        rc.Think,
 		Permission:   e.cfg.Permission,
 		SystemHints: append([]string{
 			"You are reading this card read-only; do not modify any file.",

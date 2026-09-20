@@ -276,7 +276,7 @@ func boardHeader(s *theme.Styles, snap engine.Snapshot) string {
 	}
 	// boardPermission (engine/boardsession.go) is fixed at allow-all for
 	// every backend a board session can spawn — PermissionGuarded is
-	// refused outright by claude/zz and would hang the others, since no
+	// refused outright by claude and would hang the others, since no
 	// adapter in this codebase ever emits agent.EventPermission to answer
 	// it (that file's own comment has the full case). This is not a live
 	// read of anything the session reports; it is what the engine

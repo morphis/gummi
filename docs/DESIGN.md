@@ -379,20 +379,7 @@ headless adapter** (spawn `<cmd> -p "<prompt>"`, capture output) as the
 lowest common denominator for one-shot autonomous stages with any CLI agent.
 
 Shipped alongside the above: **claude** (Claude Code CLI, streaming
-stream-json), **codex** (Codex CLI, `codex exec --json`), and **zz** — a
-small Rust coding agent that fronts any OpenAI-compatible endpoint (local
-llama.cpp, OpenRouter, a self-hosted gateway). zz's CLI is one process per
-turn with no server mode and no stdin form, so its adapter follows codex's
-process-per-turn shape, resuming via a `--session` transcript file instead
-of an in-process thread id. A role's `provider:` field in `profiles.yaml`
-selects which `[providers.<name>]` stanza of the operator's own zz config
-that role's session hits, forwarded as `--provider`; omitted, the session
-falls back to zz's own default. A sibling `think:` field forwards an
-opaque thinking level as `--think`, letting an architect role reason at a
-high level while a scribe role runs at none. Every zz session also
-carries an unconditional `--max-turns` (default 200, overridable via
-`GUMMI_ZZ_MAX_TURNS`) as a runaway-loop backstop distinct from the credit
-envelope that is gummi's real spend limiter.
+stream-json) and **codex** (Codex CLI, `codex exec --json`).
 
 ### 4.2 Orchestrator
 
@@ -485,7 +472,7 @@ than they keep and an operator routing a role deserves the real shape:
   the three confines a write.** The mode is about tool coverage, not
   containment.
 - **File-tool confinement is the backend's**, and it comes in two tiers.
-  claude, opencode and zz pin their file-writing tools to the session's
+  claude and opencode pin their file-writing tools to the session's
   working directory, so a write naming somewhere else is refused by the
   backend. copilot, codex and headless are merely *started* there — their
   tools may name any path, and nothing notices. `gummi doctor`

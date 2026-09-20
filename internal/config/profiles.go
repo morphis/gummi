@@ -18,7 +18,6 @@ var knownBackends = map[string]struct{}{
 	"opencode": {},
 	"codex":    {},
 	"headless": {},
-	"zz":       {},
 }
 
 // RoleConfig maps one role to a concrete backend+model. Backend is optional;
@@ -32,18 +31,6 @@ type RoleConfig struct {
 	// its hardcoded 32000 default; opencode.jsonc's limit.output can only
 	// lower the cap, never raise it). Other backends ignore it.
 	OutputTokenMax int `yaml:"output_token_max"`
-	// Provider, when set, names a `[providers.<name>]` stanza in the
-	// operator's own ~/.config/zz/config.toml. Only the zz backend honors
-	// it (forwarded as `--provider <name>`); every other adapter ignores
-	// it. No credentials, URLs or keys live here — the value is a NAME,
-	// nothing more.
-	Provider string `yaml:"provider"`
-	// Think, when set, is forwarded verbatim as `--think <level>`. Only
-	// the zz backend honors it; every other adapter ignores it. The
-	// valid levels are declared by the operator's own provider stanza,
-	// not a fixed enum gummi can validate, so the value is opaque —
-	// treated exactly like Model.
-	Think string `yaml:"think"`
 }
 
 // Profile maps role names (architect/implementer/reviewer/scribe) to
@@ -124,7 +111,7 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 				if _, has := rcm["byok"]; has {
 					return Profiles{}, fmt.Errorf("%s: profile %q role %q uses the removed `byok:` field; "+
 						"per-role BYOK is gone — configure the endpoint in the backend itself "+
-						"(claude/opencode/headless/zz) and pick it with `backend:` instead", path, name, role)
+						"(claude/opencode/headless) and pick it with `backend:` instead", path, name, role)
 				}
 			}
 		}
@@ -177,20 +164,12 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 			}
 			if rc.Backend != "" {
 				if _, ok := knownBackends[rc.Backend]; !ok {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless|zz",
+					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless",
 						path, name, role, rc.Backend)
 				}
 			}
 			if rc.OutputTokenMax < 0 {
 				return Profiles{}, fmt.Errorf("%s: profile %q role %q output_token_max %d is negative", path, name, role, rc.OutputTokenMax)
-			}
-			if rc.Provider != "" && rc.Backend != "" && rc.Backend != "zz" {
-				return Profiles{}, fmt.Errorf("%s: profile %q role %q sets provider %q but backend %q is not zz; "+
-					"provider: is only honored by the zz backend", path, name, role, rc.Provider, rc.Backend)
-			}
-			if rc.Think != "" && rc.Backend != "" && rc.Backend != "zz" {
-				return Profiles{}, fmt.Errorf("%s: profile %q role %q sets think %q but backend %q is not zz; "+
-					"think: is only honored by the zz backend", path, name, role, rc.Think, rc.Backend)
 			}
 		}
 	}
@@ -203,7 +182,7 @@ const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. 
 # so the same process can run cheap or premium, or mix providers. See
 # docs/DESIGN.md §5.
 #
-# backend: (optional) copilot | claude | codex | opencode | headless | zz. Omit to use
+# backend: (optional) copilot | claude | codex | opencode | headless. Omit to use
 # the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
 # The backend owns provider config natively — Claude Code login, Codex login, opencode
 # auth, GUMMI_AGENT_CMD for headless — so no keys or endpoints live here.
@@ -235,14 +214,4 @@ profiles:
   #   implementer: { backend: headless, model: qwen2.5-coder-32b }
   #   reviewer: { backend: headless, model: qwen2.5-coder-32b }
   #   scribe: { backend: copilot, model: gpt-5-mini }
-
-  # zz-mixed: zz drives any OpenAI-compatible endpoint; provider: names a
-  # [providers.<name>] stanza in your own ~/.config/zz/config.toml, so
-  # different roles can hit different endpoints under one zz binary.
-  # think: forwards a thinking level to the provider stanza (opaque to
-  # gummi, so any value the provider declares is accepted).
-  #
-  # zz-mixed:
-  #   architect: { backend: zz, model: gpt-5, provider: hosted-gateway, think: high }
-  #   implementer: { backend: zz, model: qwen2.5-coder-32b, provider: local-llama-cpp }
 `

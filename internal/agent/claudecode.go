@@ -517,7 +517,7 @@ func claudeProjectSlug(dir string) string {
 // so a reattach — a restored question, a chat picked up after a restart —
 // opens a blank conversation and spends its first turns re-reading what
 // the session before it had open. Every other process-backed adapter
-// (copilot, codex, zz) exposes this; the claude adapter captured the id
+// (copilot, codex) exposes this; the claude adapter captured the id
 // for its metering and never published it.
 func (s *claudeSession) SessionID() string {
 	s.mu.Lock()

@@ -504,8 +504,6 @@ func (e *Engine) draftCommitMessage(ctx context.Context, f domain.Feature, verif
 		WorkDir:    workDir,
 		Role:       agent.RoleScribe,
 		Model:      rc.Model,
-		Provider:   rc.Provider,
-		Think:      rc.Think,
 		Permission: e.cfg.Permission,
 		SystemHints: append([]string{
 			"You are composing a commit message read-only; do not modify any files.",

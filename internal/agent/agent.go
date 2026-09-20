@@ -137,15 +137,6 @@ type SessionOpts struct {
 	// Only the opencode adapter honors it (exported as
 	// OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX); other backends ignore it.
 	OutputTokenMax int
-	// Provider names the backend's provider/endpoint stanza. Only the zz
-	// adapter consumes it (forwarded as `--provider <name>`); other
-	// adapters ignore it.
-	Provider string
-	// Think names a thinking level. Only the zz adapter consumes it
-	// (forwarded as `--think <level>`); other adapters ignore it. The
-	// value is opaque — valid levels are declared by the operator's own
-	// provider stanza, not a set gummi validates.
-	Think string
 	// MCPSockPath is the absolute unix socket path of the session's
 	// inbound MCP endpoint, stamped by the engine when the backend's
 	// Capabilities().ClientTools is false so the child can serve gummi's
@@ -337,7 +328,7 @@ var ErrBusy = errors.New("a turn is already in progress")
 // rather than parsing them back out of a string. A caller that only
 // wants the traditional one-line summary can still call Error().
 type RunFailure struct {
-	// Backend names the adapter ("opencode", "codex", "claude", "zz",
+	// Backend names the adapter ("opencode", "codex", "claude",
 	// "copilot", the headless command's basename) for Error()'s prefix.
 	Backend string
 	// Diagnostic is the bounded, sanitized detail captured from the

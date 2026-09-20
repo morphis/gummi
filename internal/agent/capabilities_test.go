@@ -16,7 +16,6 @@ func TestCapabilitiesForMatchesAdapters(t *testing.T) {
 		{(&Codex{}).Name(), (&Codex{}).Capabilities()},
 		{(&Opencode{}).Name(), (&Opencode{}).Capabilities()},
 		{(&Headless{argv: []string{"headless", "--serve"}}).Name(), (&Headless{argv: []string{"headless", "--serve"}}).Capabilities()},
-		{(&ZZ{}).Name(), (&ZZ{}).Capabilities()},
 	}
 	for _, a := range adapters {
 		got, ok := CapabilitiesFor(a.name)

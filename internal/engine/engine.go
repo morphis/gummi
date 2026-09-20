@@ -1838,8 +1838,6 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		MaxCredits:     maxCredits,
 		Tools:          tools,
 		OutputTokenMax: rc.OutputTokenMax,
-		Provider:       rc.Provider,
-		Think:          rc.Think,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(f.ID),
 		ReadOnly:       readOnly,

@@ -138,13 +138,6 @@ func HostedMCPAttach(backend, execPath, sockPath string) (extraArgv, extraEnv []
 			return nil, nil, noop, fmt.Errorf("hosted MCP: closing opencode config: %w", err)
 		}
 		return nil, []string{"OPENCODE_CONFIG=" + path}, remove, nil
-	case "zz":
-		if zzExecPathHasWhitespace(execPath) {
-			return nil, nil, noop, fmt.Errorf("hosted MCP: gummi executable path %q contains whitespace; "+
-				"zz splits --mcp on whitespace with no quoting, so this session cannot register MCP tools; "+
-				"move the gummi binary to a path without spaces, or accept this session runs without MCP", execPath)
-		}
-		return []string{"--mcp", execPath + " __mcp --workspace"}, nil, noop, nil
 	default:
 		// copilot, an unrecognized backend, or a raw GUMMI_ATTACH_CMD's
 		// resolved binary: no known wire format to target, so no wiring —

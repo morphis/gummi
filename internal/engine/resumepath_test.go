@@ -151,7 +151,7 @@ func TestRestoreDoesNotClearTranscript(t *testing.T) {
 
 // resumeStubAgent stands in for a backend that treats SessionOpts.ResumePath
 // as a durable transcript: NewSession appends a stub JSONL line to it (never
-// truncating), the way zz's own --session file grows turn by turn.
+// truncating), the way a durable --session transcript file grows turn by turn.
 type resumeStubAgent struct {
 	*agent.Fake
 	mu       sync.Mutex
