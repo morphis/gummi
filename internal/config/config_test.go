@@ -323,6 +323,31 @@ func TestLoadRejectsRelativeSkillPath(t *testing.T) {
 	}
 }
 
+// skills.forward layers like instructions: both levels contribute, user
+// first. A merge that dropped one silently would leave the whole feature
+// inert, since nothing downstream can tell an unset list from a lost one.
+func TestLoadLayeredMergesSkillsForward(t *testing.T) {
+	dir := t.TempDir()
+	userPath := filepath.Join(dir, "user.yaml")
+	wsPath := filepath.Join(dir, "ws.yaml")
+	if err := os.WriteFile(userPath, []byte("skills:\n  forward:\n    - personal\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wsPath, []byte("skills:\n  forward:\n    - container-env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, sources, err := LoadLayered(userPath, wsPath)
+	if err != nil {
+		t.Fatalf("LoadLayered: %v", err)
+	}
+	if len(merged.Skills.Forward) != 2 || merged.Skills.Forward[0] != "personal" || merged.Skills.Forward[1] != "container-env" {
+		t.Errorf("skills.forward = %v, want [personal container-env]", merged.Skills.Forward)
+	}
+	if want := userPath + "," + wsPath; sources["skills"] != want {
+		t.Errorf("sources[skills] = %q, want %q", sources["skills"], want)
+	}
+}
+
 func TestLoadLayeredScalarPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	userPath := filepath.Join(dir, "user.yaml")

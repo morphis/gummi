@@ -475,7 +475,7 @@ func UserConfigPath() (string, error) {
 // merged Config plus a source map describing which file supplied each value.
 // A missing user config is treated as an empty Config. The returned map has
 // one entry per top-level field: "permissions", "sandbox", "autopilot_lanes",
-// "agent", "repo", "repos", "instructions", and "env.<name>" for each
+// "agent", "repo", "repos", "instructions", "skills", and "env.<name>" for each
 // distinct env key. Scalar fields that are unset in both files use the
 // literal "default". Instructions list both contributing paths when both
 // files supply entries.
@@ -610,6 +610,24 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["instructions"] = workspacePath
 	default:
 		sources["instructions"] = "default"
+	}
+
+	// skills.forward layers like instructions: both levels contribute, user
+	// first. A personal skill an operator wants in every workspace and a
+	// skill this workspace defines are both legitimate, and neither should
+	// silence the other.
+	merged.Skills.Forward = make([]string, 0, len(user.Skills.Forward)+len(ws.Skills.Forward))
+	merged.Skills.Forward = append(merged.Skills.Forward, user.Skills.Forward...)
+	merged.Skills.Forward = append(merged.Skills.Forward, ws.Skills.Forward...)
+	switch {
+	case len(user.Skills.Forward) > 0 && len(ws.Skills.Forward) > 0:
+		sources["skills"] = userPath + "," + workspacePath
+	case len(user.Skills.Forward) > 0:
+		sources["skills"] = userPath
+	case len(ws.Skills.Forward) > 0:
+		sources["skills"] = workspacePath
+	default:
+		sources["skills"] = "default"
 	}
 
 	// checks.default is layered like permissions/sandbox: a workspace list
