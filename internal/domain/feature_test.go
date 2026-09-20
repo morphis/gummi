@@ -506,3 +506,39 @@ func TestBranchNameCollidesOnEqualSlugs(t *testing.T) {
 		t.Error("a bug and a feature with the same slug should not share a branch")
 	}
 }
+
+// A slug already at the cap truncates back to itself when a suffix is
+// slugified onto it, so every "alternative" is the original and a caller
+// hunting a free branch concludes they are all taken. That is not a
+// hypothetical: it stopped a goal after its plan gate.
+func TestSlugVariantMakesRoomForItsSuffix(t *testing.T) {
+	long := "unnumbered-dual-tor-bgp-with-rack-local-ecmp" // over the cap
+	base, err := Slugify(long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{base: true}
+	for n := 2; n <= 12; n++ {
+		got, err := SlugVariant(base, n)
+		if err != nil {
+			t.Fatalf("SlugVariant(%q, %d): %v", base, n, err)
+		}
+		if seen[got] {
+			t.Fatalf("SlugVariant(%q, %d) = %q, which is not new", base, n, got)
+		}
+		if err := ValidateSlug(got); err != nil {
+			t.Errorf("SlugVariant produced an invalid slug %q: %v", got, err)
+		}
+		if len(got) > 40 {
+			t.Errorf("SlugVariant(%q, %d) = %q, over the cap", base, n, got)
+		}
+		seen[got] = true
+	}
+}
+
+func TestSlugVariantLeavesShortSlugsAlone(t *testing.T) {
+	got, err := SlugVariant("tidy", 2)
+	if err != nil || got != "tidy-2" {
+		t.Fatalf("SlugVariant(\"tidy\", 2) = %q, %v", got, err)
+	}
+}

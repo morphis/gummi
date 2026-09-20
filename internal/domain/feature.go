@@ -977,6 +977,27 @@ func Slugify(title string) (string, error) {
 	return s, nil
 }
 
+// SlugVariant is the nth alternative to a slug, for when the branch a
+// slug wants is already taken.
+//
+// It cannot be built by slugifying "<title> 2": a slug is capped at
+// maxSlugLen, and a title already at the cap truncates straight back to
+// the same string — so every "alternative" is the original, and a caller
+// looking for a free one concludes that all of them are taken. The room
+// for the suffix has to be made before the cap, not after.
+func SlugVariant(slug string, n int) (string, error) {
+	suffix := "-" + strconv.Itoa(n)
+	base := slug
+	if len(base)+len(suffix) > maxSlugLen {
+		base = strings.Trim(base[:maxSlugLen-len(suffix)], "-")
+	}
+	out := base + suffix
+	if err := ValidateSlug(out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
 // ValidateSlug enforces the slug allowlist ([a-z0-9] with single
 // dashes). Everything that reaches a branch name, worktree path, or
 // spec filename must pass this.

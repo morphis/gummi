@@ -181,7 +181,7 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 			"%s already uses the branch %s — retitle this card so it gets a different one", owner, branchFor(slug))
 	}
 	for n := 2; n <= 50; n++ {
-		cand, serr := domain.Slugify(fmt.Sprintf("%s %d", slug, n))
+		cand, serr := domain.SlugVariant(slug, n)
 		if serr != nil {
 			return "", serr
 		}
@@ -191,7 +191,7 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 			return cand, nil
 		}
 	}
-	return "", fmt.Errorf("every branch from %s to %s-50 is taken", branchFor(slug), slug)
+	return "", fmt.Errorf("%s is taken, and so is every variant of it up to 50", branchFor(slug))
 }
 
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
