@@ -64,6 +64,7 @@ func runResume(args []string) error {
 	opts := driver.Options{
 		Envelope:      *rv.envelope,
 		SubstrateRuns: *rv.runs, SubstrateMinutes: *rv.minutes,
+		Retake:       *rv.retake,
 		GateApproval: gate, GateApprovalSet: isSet(fs, "gate-approval"),
 		StageTimeout: *rv.timeout,
 		Autonomous:   *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
@@ -126,6 +127,7 @@ type resumeFlagValues struct {
 	verbose                      *bool
 	envelope                     *int
 	runs, minutes                *int
+	retake                       *string
 	timeout                      *time.Duration
 	goalNote, reverse            *string
 	wrapUp                       *bool
@@ -153,6 +155,7 @@ func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
 		wrapUp:         fs.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped"),
 		runs:           fs.Int("runs", 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)"),
 		minutes:        fs.Int("minutes", 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)"),
+		retake:         fs.String("retake", "", "goals: declare the evidence of an experiment's conclusive runs stale (\"*\" for all), so the goal takes them again — for when the substrate, not the code, was what failed"),
 	}
 }
 

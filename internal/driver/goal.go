@@ -460,6 +460,17 @@ func (d *Driver) resumeGoal(ctx context.Context, f domain.Feature, in ResumeInpu
 			return Outcome{}, true, err
 		}
 	}
+	if d.opts.Retake != "" {
+		name := d.opts.Retake
+		if name == "*" {
+			name = ""
+		}
+		ids, err := d.eng.RetakeGoalRuns(ctx, f.ID, name)
+		if err != nil {
+			return Outcome{}, true, err
+		}
+		d.out.emit(retakenEvent{Event: "retaken", ID: string(f.ID), Runs: ids})
+	}
 	if f.Stage == domain.StageImplement {
 		// someone is here: a card that stopped to wait for its environment
 		// is worth another verify now, and only now
@@ -702,4 +713,13 @@ func goalReviewPartial(reason string) string {
 	default:
 		return "its review asked for changes with no card left to make them"
 	}
+}
+
+// retakenEvent says which runs an owner declared stale. The runs are kept
+// where they are — the directory is the record, and the substrate time
+// was really spent — they just stop being evidence about anything.
+type retakenEvent struct {
+	Event string   `json:"event"`
+	ID    string   `json:"id"`
+	Runs  []string `json:"runs"`
 }

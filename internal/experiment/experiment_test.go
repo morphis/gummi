@@ -288,3 +288,44 @@ func TestARunIsJudgedOnWhatTheGoalIsAbout(t *testing.T) {
 		}
 	})
 }
+
+// A run that failed because the substrate was steadily wrong reproduces
+// faithfully and is recorded as a verdict on the work. Fixing the
+// substrate does not move the heads, so without a way to say the
+// evidence is stale the goal would never take the run again — and would
+// hand over reporting an item unmet on evidence nobody believes.
+func TestARetakenRunIsKeptButStopsBeingEvidence(t *testing.T) {
+	j := job(t, config.Experiment{Run: "exit 1"}, config.Substrate{})
+	res := Execute(context.Background(), j)
+	if res.Outcome != Fail {
+		t.Fatalf("want a conclusive failure to retake, got %+v", res)
+	}
+	root := filepath.Dir(j.Dir)
+
+	marked, err := Retake(root, "matrix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(marked) != 1 || marked[0] != res.ID {
+		t.Fatalf("Retake marked %v, want [%s]", marked, res.ID)
+	}
+
+	got := List(root)
+	if len(got) != 1 {
+		t.Fatalf("the run must still be there — the directory is the record; got %d", len(got))
+	}
+	if !got[0].Retaken {
+		t.Error("and it must read as retaken")
+	}
+	if got[0].Outcome != Fail {
+		t.Error("what it concluded is not rewritten; it just stops counting")
+	}
+
+	// Idempotent, and it never touches another experiment's runs.
+	if again, _ := Retake(root, "matrix"); len(again) != 0 {
+		t.Errorf("retaking twice marked %v", again)
+	}
+	if other, _ := Retake(root, "something-else"); len(other) != 0 {
+		t.Errorf("retaking another experiment marked %v", other)
+	}
+}

@@ -43,8 +43,14 @@ type Options struct {
 	// resume; zero leaves that ceiling where it is. Like Envelope they only
 	// ever raise.
 	SubstrateRuns, SubstrateMinutes int
-	Profile                         string
-	GateApproval                    string // GateAttended (default) | GateAutopilot
+	// Retake declares the evidence of a goal's conclusive runs stale
+	// before it resumes: the named experiment's, or every experiment's
+	// when it is "*". Only an owner knows this — a run that failed
+	// because the substrate was steadily wrong reproduces faithfully and
+	// is recorded as a verdict on the work.
+	Retake       string
+	Profile      string
+	GateApproval string // GateAttended (default) | GateAutopilot
 	// GateApprovalSet reports that the caller passed --gate-approval
 	// explicitly on this invocation. A resume uses it to decide between
 	// overriding the card's persisted mode (set) and inheriting it (unset),

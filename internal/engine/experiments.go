@@ -197,6 +197,13 @@ func (e *Engine) ExperimentRuns(owner domain.FeatureID) []experiment.Result {
 	return experiment.List(e.cfg.Workspace.EvidenceDir(owner))
 }
 
+// RetakeGoalRuns declares a goal's conclusive runs stale — the named
+// experiment's, or every experiment's when name is empty — and returns
+// the run ids it marked. The runs stay where they are.
+func (e *Engine) RetakeGoalRuns(ctx context.Context, goal domain.FeatureID, name string) ([]string, error) {
+	return experiment.Retake(e.cfg.Workspace.EvidenceDir(goal), name)
+}
+
 // ExperimentStart describes a run to make.
 type ExperimentStart struct {
 	Name    string
@@ -213,7 +220,6 @@ type ExperimentStart struct {
 	// Card is the card a run is for, when it is for one.
 	Card domain.FeatureID
 }
-
 
 // goalWanted is the assertions this goal's done-when items cite for one
 // experiment: what its runs are actually judged on.
@@ -666,6 +672,11 @@ func (e *Engine) goalExperiments(ctx context.Context, goal domain.Feature, items
 				continue
 			}
 			x.Runs = append(x.Runs, r)
+			if r.Retaken {
+				// It still counts as a run made — the substrate time was
+				// really spent — but it says nothing about the code.
+				continue
+			}
 			if r.ExpectFail {
 				// a control is about the trunk, not about the goal
 				if r.Outcome.Conclusive() {

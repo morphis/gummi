@@ -165,6 +165,13 @@ type Result struct {
 	Assertions []Assertion `json:"assertions,omitempty"`
 	// Ops lists what was done to the substrate to make it ready.
 	Ops []string `json:"substrate_ops,omitempty"`
+	// Retaken says an owner declared this run's evidence stale: the
+	// substrate it ran on was wrong in a way the run could not see, and
+	// the verdict it reached is about that rather than about the code.
+	// The run stays where it is — the directory is the record, and what
+	// it cost was still spent — but it is no longer evidence about
+	// anything, so the goal takes the run again.
+	Retaken bool `json:"retaken,omitempty"`
 	// PhaseGroup is the process group of the phase command running right
 	// now, and PhaseGroupStart identifies its leader against pid reuse.
 	// They are what lets a reader of this record kill a phase whose runner
@@ -237,8 +244,9 @@ func (r Result) About(heads map[string]string) bool {
 }
 
 const (
-	jobFile    = "job.json"
-	resultFile = "result.json"
+	jobFile     = "job.json"
+	resultFile  = "result.json"
+	retakenFile = "retaken"
 )
 
 // NewID mints a run id that sorts by when it was made, to the nanosecond:
@@ -318,6 +326,33 @@ func alive(pid int) bool {
 }
 
 // List reads every run under root (one directory per run), oldest first.
+// Retake marks a run's evidence stale. It returns the runs it marked.
+//
+// Only an owner can know this: a run that failed because the substrate
+// was steadily wrong reproduces faithfully and is recorded as a verdict
+// on the work, and nothing in the run can tell otherwise. Fixing the
+// substrate does not change the heads, so without this the goal would
+// never take the run again and would hand over on evidence nobody
+// believes.
+func Retake(root, experimentName string) ([]string, error) {
+	var marked []string
+	for _, r := range List(root) {
+		if r.Retaken || (experimentName != "" && r.Experiment != experimentName) {
+			continue
+		}
+		if !r.Outcome.Conclusive() {
+			continue // it was never evidence
+		}
+		note := fmt.Sprintf("retaken: the owner declared this run's evidence stale at %s\n",
+			time.Now().UTC().Format(time.RFC3339))
+		if err := os.WriteFile(filepath.Join(r.Dir, retakenFile), []byte(note), 0o600); err != nil {
+			return marked, err
+		}
+		marked = append(marked, r.ID)
+	}
+	return marked, nil
+}
+
 func List(root string) []Result {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -329,6 +364,9 @@ func List(root string) []Result {
 			continue
 		}
 		if r, err := Load(filepath.Join(root, en.Name())); err == nil {
+			if _, statErr := os.Stat(filepath.Join(root, en.Name(), retakenFile)); statErr == nil {
+				r.Retaken = true
+			}
 			out = append(out, r)
 		}
 	}

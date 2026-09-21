@@ -215,6 +215,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	}
 	checks = append(checks, envChecks(wsCfg, defaultRoot)...)
 	checks = append(checks, substrateChecks(wsCfg, ws)...)
+	checks = append(checks, judgeChecks(wsCfg, ws)...)
 	checks = append(checks, configLayeringChecks(wsCfg, sources, userPath, ws.ConfigFile(), ws.Root)...)
 
 	// profiles are parsed once and shared by the backend check (they decide
@@ -845,6 +846,90 @@ func substrateChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
 		checks = append(checks, doctorCheck{Name: "substrate:" + name, Status: status, Detail: detail, Remediation: fix})
 	}
 	return checks
+}
+
+// judgeChecks asks whether the work can edit what judges it.
+//
+// §17.8 makes experiments and substrates operator configuration for one
+// reason: a goal may well change the harness it is tested on — that is
+// often part of the work — but it must not thereby change what counts as
+// passing. The config file is outside every worktree, which settles the
+// definitions. It does not settle the *scripts* they name: a command
+// that lives inside a managed repository is a judge a card can rewrite
+// on its own branch, and the run that then passes proves nothing.
+//
+// Reading is a separate matter and not checkable here. Nothing cages an
+// agent's shell (see the write-cage check), so the rig's own state is
+// readable by the work whatever this says. Operator config is protection
+// against the work *editing* the judge, never against it looking.
+func judgeChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
+	repos := map[string]string{}
+	for name, rel := range cfg.Repos {
+		repos[name] = filepath.Clean(filepath.Join(ws.Root, rel))
+	}
+	if cfg.Repo != "" {
+		repos[""] = filepath.Clean(filepath.Join(ws.Root, cfg.Repo))
+	}
+	if len(repos) == 0 {
+		return nil
+	}
+	inRepo := func(cmd string) string {
+		for _, field := range strings.Fields(cmd) {
+			p := strings.Trim(field, "\"'")
+			if p == "" || strings.HasPrefix(p, "-") {
+				continue
+			}
+			abs := p
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(ws.Root, p)
+			}
+			abs = filepath.Clean(abs)
+			for name, root := range repos {
+				if abs == root || strings.HasPrefix(abs, root+string(filepath.Separator)) {
+					if name == "" {
+						name = "the default repository"
+					}
+					return p + " is in " + name
+				}
+			}
+		}
+		return ""
+	}
+
+	var bad []string
+	for name, x := range cfg.Experiments {
+		for phase, cmd := range map[string]string{
+			"control": x.Control, "deploy": x.Deploy, "settle": x.Settle,
+			"run": x.Run, "collect": x.Collect,
+		} {
+			if cmd == "" {
+				continue
+			}
+			if why := inRepo(cmd); why != "" {
+				bad = append(bad, fmt.Sprintf("experiment %s's %s: %s", name, phase, why))
+			}
+		}
+	}
+	for name, sub := range cfg.Substrates {
+		for phase, cmd := range map[string]string{
+			"probe": sub.Probe, "provision": sub.Provision, "reset": sub.Reset,
+		} {
+			if cmd == "" {
+				continue
+			}
+			if why := inRepo(cmd); why != "" {
+				bad = append(bad, fmt.Sprintf("substrate %s's %s: %s", name, phase, why))
+			}
+		}
+	}
+	if len(bad) == 0 {
+		return []doctorCheck{{Name: "judge", Status: statusOK,
+			Detail: "no experiment or substrate command lives in a managed repository"}}
+	}
+	sort.Strings(bad)
+	return []doctorCheck{{Name: "judge", Status: statusWarn,
+		Detail:      "a command that decides whether work passes is inside a repository the work can edit — " + strings.Join(bad, "; "),
+		Remediation: "move it outside every managed repository, or land its changes yourself before they judge anything (DESIGN §17.8, §17.11)"}}
 }
 
 // sandboxChecks emits one sandbox:<profile> check per defined profile. It

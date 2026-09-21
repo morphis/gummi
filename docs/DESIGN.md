@@ -2848,6 +2848,17 @@ environment's), an **explicit signal** (exit 75, `EX_TEMPFAIL`, from any
 phase), and **reproduce-before-believing**. None of them knows what is being
 tested.
 
+- **And evidence can go stale in a way heads cannot show.** A run that
+  failed because the substrate was steadily wrong reproduces faithfully —
+  reproduce-before-believing catches flakiness, not a rig that is
+  consistently broken — so it is recorded as a verdict on the work.
+  Repairing the substrate does not move the heads, so the goal would
+  never take that run again and would hand over reporting an item unmet
+  on evidence nobody believes. Only an owner can know this, so only an
+  owner says it: `gummi resume GL-NNN --retake <experiment>` (or `*`)
+  marks the conclusive runs stale. They stay where they are — the
+  directory is the record, and the substrate time was really spent — and
+  stop being evidence about anything, so the goal takes them again.
 - **Evidence is about heads.** A run records the commit of every input —
   the goal's trees, and the trunk of any input repository the goal never
   touched — and is evidence only while each is still at that commit
@@ -2891,8 +2902,18 @@ tested.
   do the killing is the one that died. A deploy therefore cannot outlive the
   lease that covered it and go on working a substrate the next holder
   believes it has to itself.
-- **The judge is not the work's to edit.** Experiments are operator config
-  from outside every worktree, as env probes are. A goal may well change the
+- **The judge is not the work's to edit — and that is all it is.**
+  Experiments are operator config from outside every worktree, as env
+  probes are. That settles the *definitions*; it does not settle the
+  scripts they name, and a command that lives inside a managed repository
+  is a judge a card can rewrite on its own branch (`gummi doctor`'s
+  `judge` check says so). Nor does any of it hide the rig: no backend
+  cages an agent's shell, so the work can *read* the experiment's
+  commands, the substrate's state and the evidence directory. That has
+  been useful — a lead once diagnosed a rig that was lying to it by
+  reading the rig — but it must not be mistaken for a guarantee. The rule
+  is that the work cannot change what counts as passing, never that it
+  cannot see it. A goal may well change the
   harness it is tested on — that is part of the work — but the definition of
   passing is not on any branch it can reach.
 
