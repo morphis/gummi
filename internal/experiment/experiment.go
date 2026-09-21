@@ -160,6 +160,13 @@ type Result struct {
 	// ControlFailed: the rig failed its own reference. No amount of work on
 	// the inputs can change that.
 	ControlFailed bool `json:"control_failed,omitempty"`
+	// ControlProved is how many assertions the positive control reported
+	// holding, when one ran. Zero with ControlRan true is the shape F-2
+	// found in the trial harness: a control that asserts nothing cannot
+	// fail, so it proves nothing, and until this was recorded a run backed
+	// by such a control read exactly like one backed by a real rig.
+	ControlRan    bool `json:"control_ran,omitempty"`
+	ControlProved int  `json:"control_proved,omitempty"`
 
 	Phases     []Phase     `json:"phases,omitempty"`
 	Assertions []Assertion `json:"assertions,omitempty"`
@@ -483,6 +490,11 @@ func Execute(ctx context.Context, job Job) Result {
 				r.res.ControlFailed = true
 				return finish(Inconclusive, "the rig failed its own control, so it can judge nothing: "+lastLine(ph.Tail))
 			}
+			// What the control asserted is as much the question as whether
+			// it passed: a control that reported nothing held has not shown
+			// the rig can turn anything green.
+			r.res.ControlRan = true
+			r.res.ControlProved = len(readAssertions(filepath.Join(r.job.Dir, "evidence", "results.ndjson")))
 			if op, did := lease.Reset(ctx, r.logFile(attempt, "reset")); did {
 				// the control leaves the rig's own reference topology on
 				// the substrate, so putting it back costs a reset cycle

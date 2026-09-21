@@ -374,6 +374,12 @@ func writeExperimentResult(r experiment.Result) error {
 // GoalExperiment is one experiment a goal's done-when items name, and what
 // the goal's runs of it say about the heads the goal has now.
 type GoalExperiment struct {
+	// ControlConfigured says the experiment names a positive control at
+	// all. Without one nothing ever asks whether the rig can turn an
+	// assertion green, and the run proceeds regardless — so a reader of
+	// the hand-over needs to be told.
+	ControlConfigured bool
+
 	Name      string
 	Substrate string
 	Items     []string // the done-when ids it proves
@@ -683,6 +689,7 @@ func (e *Engine) goalExperiments(ctx context.Context, goal domain.Feature, items
 			x.Problem = fmt.Sprintf("no experiment %q is configured", name)
 		default:
 			x.Substrate = def.Substrate
+			x.ControlConfigured = strings.TrimSpace(def.Control) != ""
 			heads, _, err := e.goalInputs(ctx, goal, def)
 			if err != nil {
 				x.Problem = err.Error()

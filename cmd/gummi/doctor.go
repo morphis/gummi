@@ -870,8 +870,32 @@ func judgeChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
 	if cfg.Repo != "" {
 		repos[""] = filepath.Clean(filepath.Join(ws.Root, cfg.Repo))
 	}
+	// Whether an experiment proves the rig is not a question about
+	// repositories, so it is asked before the ones that are.
+	var checks []doctorCheck
+	var noControl []string
+	for name, x := range cfg.Experiments {
+		if strings.TrimSpace(x.Control) == "" {
+			noControl = append(noControl, name)
+		}
+	}
+	sort.Strings(noControl)
+	if len(noControl) > 0 {
+		// A rig that cannot prove itself judges everything anyway: a
+		// missing control is skipped silently and the run proceeds. Seven
+		// of eight harness defects in the trials made the rig look
+		// healthier than it was, and the control is the only mechanism
+		// that catches that.
+		checks = append(checks, doctorCheck{Name: "control", Status: statusWarn,
+			Detail: "no positive control, so nothing ever asks whether the rig can turn an assertion green: " +
+				strings.Join(noControl, ", "),
+			Remediation: "give each a control: command that proves the rig against its own reference on a freshly reset substrate (DESIGN §17.8)"})
+	} else if len(cfg.Experiments) > 0 {
+		checks = append(checks, doctorCheck{Name: "control", Status: statusOK,
+			Detail: fmt.Sprintf("every experiment (%d) proves the rig against its own reference first", len(cfg.Experiments))})
+	}
 	if len(repos) == 0 {
-		return nil
+		return checks
 	}
 	inRepo := func(cmd string) string {
 		for _, field := range strings.Fields(cmd) {
@@ -923,13 +947,13 @@ func judgeChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
 		}
 	}
 	if len(bad) == 0 {
-		return []doctorCheck{{Name: "judge", Status: statusOK,
-			Detail: "no experiment or substrate command lives in a managed repository"}}
+		return append(checks, doctorCheck{Name: "judge", Status: statusOK,
+			Detail: "no experiment or substrate command lives in a managed repository"})
 	}
 	sort.Strings(bad)
-	return []doctorCheck{{Name: "judge", Status: statusWarn,
+	return append(checks, doctorCheck{Name: "judge", Status: statusWarn,
 		Detail:      "a command that decides whether work passes is inside a repository the work can edit — " + strings.Join(bad, "; "),
-		Remediation: "move it outside every managed repository, or land its changes yourself before they judge anything (DESIGN §17.8, §17.11)"}}
+		Remediation: "move it outside every managed repository, or land its changes yourself before they judge anything (DESIGN §17.8, §17.11)"})
 }
 
 // sandboxChecks emits one sandbox:<profile> check per defined profile. It

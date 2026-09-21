@@ -124,6 +124,14 @@ type GoalReportExperiment struct {
 	Passed   int    `json:"assertions_held,omitempty"`
 	Total    int    `json:"assertions,omitempty"`
 	Running  string `json:"running,omitempty"`
+	// Control says how far the rig was ever shown to be a judge: whether
+	// an experiment configures one, whether it ran, and how many
+	// assertions it proved. §17.8 gives the hand-over the job of saying
+	// how far the rig could be believed, and without these a result from
+	// a proved rig and one from a rig nobody ever checked read the same.
+	ControlConfigured bool `json:"control_configured,omitempty"`
+	ControlRan        bool `json:"control_ran,omitempty"`
+	ControlProved     int  `json:"control_proved,omitempty"`
 	// Runs, Conclusive, Inconclusive and Flaky count every run the goal
 	// made of it; Minutes is the substrate time they held.
 	Runs         int     `json:"runs"`
@@ -144,7 +152,8 @@ type GoalReportExperiment struct {
 
 func reportExperiment(x GoalExperiment) GoalReportExperiment {
 	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem,
-		Green: x.Green, Regressed: x.Regressed, Culprit: x.Culprit}
+		Green: x.Green, Regressed: x.Regressed, Culprit: x.Culprit,
+		ControlConfigured: x.ControlConfigured}
 	for _, r := range x.Runs {
 		// A run that never took the substrate says nothing about the rig,
 		// one way or the other: it was held, or it could not fit before an
@@ -153,6 +162,12 @@ func reportExperiment(x GoalExperiment) GoalReportExperiment {
 		// substrateBudgetFrom already declines to make — and here it is
 		// worse, because this figure is the one a reader uses to decide
 		// how far to believe the pass above it.
+		if r.ControlRan {
+			out.ControlRan = true
+			if r.ControlProved > out.ControlProved {
+				out.ControlProved = r.ControlProved
+			}
+		}
 		if r.Outcome == experiment.NotRun {
 			continue
 		}
@@ -632,6 +647,21 @@ func RenderGoalReport(r GoalReport) string {
 				fmt.Fprintf(&b, " (%d of them a failure that did not reproduce)", x.Flaky)
 			}
 			fmt.Fprintf(&b, "; %.0f substrate minutes\n", x.Minutes)
+			// §17.8 gives the hand-over the job of saying how far the rig
+			// could be believed, and the first question is whether anyone
+			// ever asked it. A control that asserted nothing cannot fail,
+			// so it proves nothing — and until this line existed, a result
+			// from such a rig read exactly like one from a proved rig.
+			switch {
+			case !x.ControlConfigured:
+				fmt.Fprintf(&b, "  - the rig was never proved: %s configures no control\n", x.Name)
+			case !x.ControlRan:
+				fmt.Fprintf(&b, "  - the rig was never proved: %s has a control and no run made it\n", x.Name)
+			case x.ControlProved == 0:
+				fmt.Fprintf(&b, "  - the rig's control passed but asserted nothing, so it proved nothing\n")
+			default:
+				fmt.Fprintf(&b, "  - the rig proved itself first: its control held %d assertion(s)\n", x.ControlProved)
+			}
 			for _, a := range x.Assertions {
 				if !a.OK {
 					fmt.Fprintf(&b, "  - ✗ %s %s\n", a.ID, a.Detail)

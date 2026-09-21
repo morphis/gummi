@@ -21,13 +21,13 @@ func TestDoctorNoticesAJudgeTheWorkCanEdit(t *testing.T) {
 			"matrix": {Run: "git/lxd/test/rig.sh --all"},
 		},
 	}
-	got := judgeChecks(cfg, ws)
-	if len(got) != 1 || got[0].Status != statusWarn {
-		t.Fatalf("want one warning, got %+v", got)
+	got := named(t, judgeChecks(cfg, ws), "judge")
+	if got.Status != statusWarn {
+		t.Fatalf("want a warning, got %+v", got)
 	}
-	if !strings.Contains(got[0].Detail, "experiment matrix's run") ||
-		!strings.Contains(got[0].Detail, "is in lxd") {
-		t.Errorf("the warning must name the command and the repository; got %q", got[0].Detail)
+	if !strings.Contains(got.Detail, "experiment matrix's run") ||
+		!strings.Contains(got.Detail, "is in lxd") {
+		t.Errorf("the warning must name the command and the repository; got %q", got.Detail)
 	}
 }
 
@@ -42,8 +42,7 @@ func TestDoctorIsQuietWhenTheJudgeIsOutOfReach(t *testing.T) {
 			"rig": {Probe: "sim/simctl probe"},
 		},
 	}
-	got := judgeChecks(cfg, ws)
-	if len(got) != 1 || got[0].Status != statusOK {
+	if got := named(t, judgeChecks(cfg, ws), "judge"); got.Status != statusOK {
 		t.Fatalf("a harness outside every managed repo is fine; got %+v", got)
 	}
 }
@@ -56,11 +55,48 @@ func TestDoctorNoticesASubstrateCommandInARepo(t *testing.T) {
 		Repo:       "git/lxd",
 		Substrates: map[string]config.Substrate{"rig": {Reset: "git/lxd/tools/reset.sh"}},
 	}
-	got := judgeChecks(cfg, ws)
-	if len(got) != 1 || got[0].Status != statusWarn {
-		t.Fatalf("want one warning, got %+v", got)
+	got := named(t, judgeChecks(cfg, ws), "judge")
+	if got.Status != statusWarn {
+		t.Fatalf("want a warning, got %+v", got)
 	}
-	if !strings.Contains(got[0].Detail, "substrate rig's reset") {
-		t.Errorf("got %q", got[0].Detail)
+	if !strings.Contains(got.Detail, "substrate rig's reset") {
+		t.Errorf("got %q", got.Detail)
 	}
+}
+
+// A rig that cannot prove itself judges everything anyway: a missing
+// control is skipped silently and the run proceeds. Seven of eight
+// harness defects in the trials made the rig look healthier than it was,
+// and the control is the only mechanism that catches that.
+func TestDoctorNoticesAnExperimentWithNoControl(t *testing.T) {
+	ws := state.Workspace{Root: "/ws"}
+	cfg := config.Config{
+		Experiments: map[string]config.Experiment{
+			"proved":   {Run: "sim/simctl test", Control: "sim/simctl control"},
+			"unproved": {Run: "sim/simctl test"},
+		},
+	}
+	control := named(t, judgeChecks(cfg, ws), "control")
+	if control.Status != statusWarn {
+		t.Fatalf("want a control warning, got %+v", control)
+	}
+	if !strings.Contains(control.Detail, "unproved") {
+		t.Errorf("it must name the experiment; got %q", control.Detail)
+	}
+	if strings.Contains(control.Detail, "proved,") || strings.Contains(control.Detail, ", proved") {
+		t.Errorf("and not the one that has a control; got %q", control.Detail)
+	}
+}
+
+// named picks one check out of the set by name, so a test asserting
+// about the judge does not break when a control check joins it.
+func named(t *testing.T, checks []doctorCheck, name string) doctorCheck {
+	t.Helper()
+	for _, c := range checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no %q check among %+v", name, checks)
+	return doctorCheck{}
 }
