@@ -832,3 +832,39 @@ func TestAVerifiedCardsReturnIsCountedBeforeTheGoalIsCalledShort(t *testing.T) {
 		t.Fatalf("got %q, want %q — the landing, and nothing else", got, want)
 	}
 }
+
+// A card whose verification wants a substrate run can never pass on its
+// own: only the goal's runs and live cards take the substrate. Waiting
+// for it to land before making the run leaves the goal holding the very
+// thing the card is blocked on, and the goal stalls with its own proof
+// undone. Observed on GL-008.
+func TestABlockedCardDoesNotHoldUpTheGoalsOwnProof(t *testing.T) {
+	in := Input{
+		Stage: domain.StageImplement, LeadAvailable: true,
+		Cards: []Card{
+			{ID: "FD-001", State: Landed},
+			// The lead has already had its one look (rule 6a).
+			{ID: "FD-002", State: Blocked, LeadTries: 1, Reason: "no run exists for this head"},
+		},
+		Experiments: []Experiment{{Name: "matrix"}},
+		Substrate:   SubstrateBudget{Runs: 10},
+	}
+	acts := Decide(in)
+	if !hasKind(acts, Run) {
+		t.Fatalf("the goal must make its run with a card blocked on one; got %v", acts)
+	}
+	if hasKind(acts, Finish) {
+		t.Error("but it must not finish: blocked is unfinished, not dropped")
+	}
+}
+
+// And the other half: nothing blocked, nothing changes.
+func TestAGoalWithNoBlockedCardStillFinishes(t *testing.T) {
+	in := Input{
+		Stage: domain.StageImplement, LeadAvailable: true,
+		Cards: []Card{{ID: "FD-001", State: Landed}},
+	}
+	if acts := Decide(in); !hasKind(acts, Finish) {
+		t.Fatalf("a settled goal with no experiment items finishes; got %v", acts)
+	}
+}

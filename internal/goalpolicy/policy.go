@@ -46,7 +46,11 @@
 //     bisected, and the lead is told which one broke it.
 //  13. A card marked live proves itself on the substrate before it lands.
 //  11. A goal whose items are proved by an experiment does not finish on
-//     heads no conclusive run is about: it makes the run first. A run that
+//     heads no conclusive run is about: it makes the run first. A blocked
+//     card does not hold that run up — only the goal's runs take the
+//     substrate, so a card blocked waiting for one would otherwise be
+//     waiting on the goal that is waiting on it — but it does hold up
+//     finishing, because blocked is unfinished rather than dropped. A run that
 //     failed goes to the lead once before the goal goes on to be judged
 //     on it; runs that keep judging nothing, or a rig that fails its own
 //     control, stall the goal — evidence that cannot be believed is not
@@ -924,9 +928,21 @@ func Decide(in Input) []Action {
 	// Nothing to do and nothing in flight, and a blocked card is why: the
 	// goal stops and says what it is waiting on. It drops nothing, which
 	// is the whole difference from the wrap-up this used to end in.
+	//
+	// Unless the goal still owes itself a run. Only the goal's runs and
+	// live cards take the substrate, so a card blocked for want of one is
+	// blocked on this goal — and stalling here would stop it holding the
+	// thing the card is waiting for. Make the run; if the card is still
+	// blocked afterwards, the next tick stalls with the same words.
 	if !wrap && len(out) == 0 && len(leadReasons) == 0 && count(state, Running) == 0 && !anyRunning(in) {
+		owed := false
+		if provable(cards, state) && !openTranche(in, wrap) {
+			if acts, _ := proveFirst(in); hasKind(acts, Run) {
+				owed = true
+			}
+		}
 		for _, c := range cards {
-			if state[c.ID] == Blocked {
+			if state[c.ID] == Blocked && !owed {
 				return []Action{{Kind: Stall, Card: c.ID,
 					Reason: fmt.Sprintf("%s cannot be verified in this environment: %s", c.ID, c.Reason)}}
 			}
@@ -940,7 +956,7 @@ func Decide(in Input) []Action {
 		return []Action{{Kind: NeedOwner, Reason: in.NeedOwner}}
 	}
 
-	if settled(cards, state) && len(leadReasons) == 0 && !hasKind(out, Land) && !hasKind(out, CloseTranche) && !openTranche(in, wrap) {
+	if provable(cards, state) && len(leadReasons) == 0 && !hasKind(out, Land) && !hasKind(out, CloseTranche) && !openTranche(in, wrap) {
 		// The work has settled. Before it is judged, the items an experiment
 		// proves need evidence about the heads the goal has NOW — and a goal
 		// wrapping up gets the same, because a partial result still has to
@@ -950,6 +966,13 @@ func Decide(in Input) []Action {
 		}
 		if acts, wait := proveFirst(in); wait {
 			return append(out, acts...)
+		}
+		if !settled(cards, state) {
+			// A card is blocked. The run has been made — that is what
+			// getting here means — so the thing it was waiting on now
+			// exists, and its retry can have it. What must not happen is
+			// finishing: blocked is unfinished, not dropped.
+			return out
 		}
 		reason := ""
 		if wrap {
@@ -1103,6 +1126,26 @@ func openTranche(in Input, wrap bool) bool {
 func depsLanded(c Card, state map[domain.FeatureID]CardState) bool {
 	for _, d := range c.DependsOn {
 		if st, ok := state[d]; ok && st != Landed {
+			return false
+		}
+	}
+	return true
+}
+
+// provable reports that no card is going to change what a run would say:
+// each one has landed, been dropped, or is blocked on its environment.
+//
+// Blocked is the difference between this and settled, and the reason it
+// has to be: a card whose verification wants a substrate run can never
+// pass on its own, because only the goal's runs and `live:` cards take
+// the substrate. Waiting for it to land before taking the run leaves the
+// goal holding the very thing the card is blocked on. So the run is
+// taken, and the card's retry can have it.
+//
+// Finishing still needs settled. Blocked is unfinished, not dropped.
+func provable(cards []Card, state map[domain.FeatureID]CardState) bool {
+	for _, c := range cards {
+		if st := state[c.ID]; st != Landed && st != Dropped && st != Blocked {
 			return false
 		}
 	}
