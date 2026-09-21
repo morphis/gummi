@@ -1,6 +1,9 @@
 package spec
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const promiseDoc = "## Plan claims\n" +
 	"\n" +
@@ -144,6 +147,65 @@ func TestUnprovenNoneIsNotAFile(t *testing.T) {
 		got := UnprovenFiles(c.in)
 		if len(got) != 1 || got[0].Path != c.want {
 			t.Errorf("UnprovenFiles(%q) = %+v, want one file %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The audit that produced these (F-14, F-18) stopped at the three parsers
+// goal mode happened to exercise. These two are the same mechanism — a
+// model writes prose, one regex is the whole path — and were still
+// unfixed when a critique went looking.
+func TestInvariantVerdictIsReadHoweverAModelWritesIt(t *testing.T) {
+	for _, tc := range []struct{ line, id, verdict string }{
+		{"INV-1: pass", "INV-1", "pass"},
+		{"**INV-1**: pass", "INV-1", "pass"},
+		{"- INV-2: fail", "INV-2", "fail"},
+		{"INV-3: **blocked**", "INV-3", "blocked"},
+		{"- INV-4 (the MAC scheme is respected): pass", "INV-4", "pass"},
+		{"INV-5 — pass", "INV-5", "pass"},
+		{"## INV-6: fail", "INV-6", "fail"},
+	} {
+		m := invariantVerdictRe.FindStringSubmatch(tc.line)
+		if m == nil {
+			t.Errorf("no verdict read from %q", tc.line)
+			continue
+		}
+		if m[1] != tc.id || m[2] != tc.verdict {
+			t.Errorf("%q read as %q/%q, want %q/%q", tc.line, m[1], m[2], tc.id, tc.verdict)
+		}
+	}
+	// Generous about decoration, strict about meaning.
+	for _, line := range []string{
+		"INV-1 would pass if we relaxed it",
+		"see INV-2: pass in the earlier round",
+	} {
+		if m := invariantVerdictRe.FindStringSubmatch(line); m != nil {
+			t.Errorf("read a verdict from prose: %q -> %q", line, m[2])
+		}
+	}
+}
+
+// The path must keep its hyphens. `[^\s—-]+` stopped at the first ASCII
+// hyphen, so a hyphenated path was recorded as a shorter one that usually
+// also exists — a wrong answer, not a miss, in the parser whose job is
+// recording what verification did not cover.
+func TestUnprovenKeepsHyphenatedPaths(t *testing.T) {
+	for _, tc := range []struct{ line, path, why string }{
+		{"UNPROVEN: internal/engine/goal.go — no toolchain", "internal/engine/goal.go", "no toolchain"},
+		{"UNPROVEN: internal/goal-policy/run.go — no toolchain", "internal/goal-policy/run.go", "no toolchain"},
+		{"UNPROVEN: lxd/network/driver-ovn.go — needs a cluster", "lxd/network/driver-ovn.go", "needs a cluster"},
+		{"- **UNPROVEN**: a/b-c/d-e.go", "a/b-c/d-e.go", ""},
+	} {
+		m := unprovenRe.FindStringSubmatch(tc.line)
+		if m == nil {
+			t.Errorf("no path read from %q", tc.line)
+			continue
+		}
+		if m[1] != tc.path {
+			t.Errorf("%q recorded the path %q, want %q", tc.line, m[1], tc.path)
+		}
+		if strings.TrimSpace(m[2]) != tc.why {
+			t.Errorf("%q recorded the reason %q, want %q", tc.line, m[2], tc.why)
 		}
 	}
 }

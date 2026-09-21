@@ -221,6 +221,29 @@ type ExperimentStart struct {
 	Card domain.FeatureID
 }
 
+// trunkReported says the negative control actually reported on the
+// assertions it is being cited about. A run that failed before its `run`
+// phase — a deploy that would not build, a settle that never converged —
+// has an empty assertion list and proves nothing either way.
+func trunkReported(r experiment.Result, assertions []string) bool {
+	if len(r.Assertions) == 0 {
+		return false
+	}
+	if len(assertions) == 0 {
+		return true
+	}
+	by := make(map[string]bool, len(r.Assertions))
+	for _, a := range r.Assertions {
+		by[a.ID] = true
+	}
+	for _, id := range assertions {
+		if !by[id] {
+			return false
+		}
+	}
+	return true
+}
+
 // goalWanted is the assertions this goal's done-when items cite for one
 // experiment: what its runs are actually judged on.
 //
@@ -736,9 +759,21 @@ func experimentCheckResults(items []domain.DoneWhen, xs []GoalExperiment) []goal
 			if held && x.Trunk != nil {
 				// honest over optimistic: a pass is worth what the same run
 				// says about the trunk
-				if onTrunk, tok := x.Trunk.Holds(it.Assertions); tok && onTrunk {
+				onTrunk, tok := x.Trunk.Holds(it.Assertions)
+				switch {
+				case tok && onTrunk:
 					res.Detail += " — NOTE: run " + x.Trunk.ID + " shows this holding on the trunk too, so it is not this goal's work that made it true"
-				} else if tok {
+				case tok && !trunkReported(*x.Trunk, it.Assertions):
+					// A failing run that never got as far as asserting
+					// anything says nothing about what the trunk holds.
+					// Holds() reads an unreported assertion on a failed run
+					// as "not held" — reasonable for the goal's own run,
+					// where the failure IS the answer, and wrong here: this
+					// is the strongest sentence in the hand-over, and it
+					// would be resting on a run that tested none of it.
+					res.Detail += " — but run " + x.Trunk.ID + " could not be deployed to the trunk (" +
+						x.Trunk.FailedPhase + " failed), so nothing is known about whether the trunk holds it"
+				case tok:
 					res.Detail += " — and run " + x.Trunk.ID + " shows it NOT holding on the trunk"
 				}
 			}

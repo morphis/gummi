@@ -55,11 +55,25 @@ var (
 )
 
 // unprovenRe matches verify's admission line for a file no check covered.
-var unprovenRe = regexp.MustCompile(`(?im)^\s*(?:[-*+]\s+)?(?:\*\*)?UNPROVEN(?:\*\*)?\s*:\s*([^\s—-]+)\s*(?:[—-]+\s*(.*))?$`)
+// The path must not exclude the hyphen. `[^\s—-]+` stops at the first
+// ASCII hyphen, so "UNPROVEN: internal/goal-policy/run.go — why" records
+// the path "internal/goal" — a real file, usually a real directory, and
+// the wrong one. That is not a miss but a wrong answer, in the parser
+// whose job is recording what verification did NOT cover. The separator
+// is an em or en dash, or a spaced hyphen; a hyphen inside a word is part
+// of the word.
+var unprovenRe = regexp.MustCompile(`(?im)^\s*(?:[-*+]\s+)?(?:\*\*)?UNPROVEN(?:\*\*)?\s*:\s*(\S+?)\s*(?:(?:[—–]+|\s-+)\s*(.*))?$`)
 
 // invariantVerdictRe matches verify's answer to one invariant: the id, a
 // colon, and pass or fail.
-var invariantVerdictRe = regexp.MustCompile(`(?im)^\s*(?:[-*+]\s+)?(?:\*\*)?(INV-\d+)(?:\*\*)?\s*:\s*(pass|fail|blocked)\b`)
+// Read the way a model writes it: heading or bullet markers, a
+// parenthetical gloss naming what the invariant was, emphasis on either
+// the id or the verdict, and an em dash for the colon. Strict about the
+// part that carries meaning — the line begins with the id and the verdict
+// follows a separator — so a sentence mentioning an invariant is not a
+// verdict on it. Same shape as goalreport's judged-item line, and found
+// by the same audit.
+var invariantVerdictRe = regexp.MustCompile(`(?im)^\s*[#>*+-]*\s*(?:\*\*)?(INV-\d+)(?:\*\*)?\s*(?:\([^)\n]*\))?\s*[:—–]\s*[*_]{0,2}(pass|fail|blocked)\b`)
 
 // Invariant is one thing the change must not break, with the id verify
 // answers it by.
