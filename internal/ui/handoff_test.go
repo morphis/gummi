@@ -7,6 +7,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // A clean verify asks how the work leaves gummi, and the branch's own
@@ -81,7 +82,7 @@ func TestFailedVerifyOffersNoEnding(t *testing.T) {
 // the branch is the whole reason anyone reaches for this.
 func TestHandOffDetailNamesWhatIsKept(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	d := handOffDetail(f, "main", nil)
+	d := handOffDetail(f, "main", nil, nil)
 	for _, want := range []string{f.BranchName(), f.WorktreePath(), "kept", "nothing lands"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("confirm detail does not mention %q:\n%s", want, d)
@@ -97,13 +98,35 @@ func TestHandOffDetailNamesWhatIsKept(t *testing.T) {
 // branch that does not contain this work.
 func TestHandOffDetailNamesDependents(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	one := handOffDetail(f, "main", []domain.FeatureID{"BG-051"})
+	one := handOffDetail(f, "main", []domain.FeatureID{"BG-051"}, nil)
 	if !strings.Contains(one, "BG-051 depends on this and will start from main") {
 		t.Errorf("single dependent not named in the singular:\n%s", one)
 	}
-	two := handOffDetail(f, "main", []domain.FeatureID{"BG-051", "FD-060"})
+	two := handOffDetail(f, "main", []domain.FeatureID{"BG-051", "FD-060"}, nil)
 	if !strings.Contains(two, "BG-051, FD-060 depend on this") {
 		t.Errorf("two dependents not named in the plural:\n%s", two)
+	}
+}
+
+// A base that moved out from under the branch is not a reason to refuse
+// the hand-off — the branch leaves as it is either way — but the reader
+// is about to push it somewhere, so the confirm says the base moved and
+// that nothing here rebased it.
+func TestHandOffDetailNamesDrift(t *testing.T) {
+	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
+	drift := &worktree.ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(),
+		Recorded: "a8854cb68f693f0043cdb12564bdfdd85ae63df2", MainHead: "3fed2f2", Base: "add-improvements-v2"}
+	d := handOffDetail(f, "add-improvements-v2", nil, drift)
+	for _, want := range []string{"add-improvements-v2 moved", "a8854cb", "kept as is", "rebase it yourself"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("confirm detail does not say %q:\n%s", want, d)
+		}
+	}
+	if strings.Contains(d, drift.Recorded) {
+		t.Errorf("a forty-character sha in a confirm sentence:\n%s", d)
+	}
+	if plain := handOffDetail(f, "main", nil, nil); strings.Contains(plain, "moved") {
+		t.Errorf("an undrifted card was told its base moved:\n%s", plain)
 	}
 }
 

@@ -576,6 +576,14 @@ func TestForkDriftErrorMessage(t *testing.T) {
 			t.Errorf("message %q does not name %q", msg, want)
 		}
 	}
+	// the base is named, not assumed: a card of a goal forks from the
+	// goal branch, and a master repo has never been called main
+	if fe.Base != "main" {
+		t.Errorf("Base = %q, want the checked-out branch, main", fe.Base)
+	}
+	if !strings.Contains(msg, "main's history") {
+		t.Errorf("message %q does not name the base's history", msg)
+	}
 }
 
 // A drifted worktree with an uncommitted edit recovers in one gesture: the

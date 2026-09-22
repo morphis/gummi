@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // HandOff ends a card without landing it: the branch stays exactly where
@@ -58,11 +60,21 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 	// A landed branch has already left by the other door. Saying so beats
 	// stamping a hand-off onto a card that is on main, which would then
 	// badge as handed off forever (nothing re-reads git for a done card).
+	//
+	// Fork drift is not a refusal here. Landed declines to answer when
+	// the base was rewritten past the recorded fork, because the landing
+	// path must not trust a bool that may be wrong. A hand-off asks the
+	// same question for a weaker reason — only to avoid stamping a card
+	// that is already on the base — and a drifted branch is by definition
+	// not sitting on it. The person is taking the branch as it is; what
+	// the base did since the fork is theirs to reconcile before they push,
+	// and the confirm says so. Refusing would offer exactly two exits, a
+	// rebase and a delete, neither of which is the verb they chose.
 	wt, err := e.mgr(ctx, &f)
 	if err != nil {
 		return AdvanceResult{}, err
 	}
-	if landed, err := wt.Landed(ctx, &f); err != nil {
+	if landed, err := landedOrDrifted(ctx, wt, &f); err != nil {
 		return AdvanceResult{}, err
 	} else if landed {
 		// the branch it landed on, not the literal "main": a card of a goal
@@ -74,7 +86,10 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 	if exists, err := wt.Exists(ctx, &f); err != nil {
 		return AdvanceResult{}, err
 	} else if exists {
-		if _, err := wt.CommitAll(ctx, &f, string(id)+": final checkpoint"); err != nil {
+		// AsIs: the ordinary checkpoint refuses on fork drift, to keep a
+		// landing coherent. Nothing lands here, and the loose work would
+		// otherwise be lost with the branch the person is about to take.
+		if _, err := wt.CommitAllAsIs(ctx, &f, string(id)+": final checkpoint"); err != nil {
 			return AdvanceResult{}, err
 		}
 	}
@@ -90,4 +105,17 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 	}
 	res.Feature.HandedOffAt = now
 	return res, nil
+}
+
+// landedOrDrifted is Landed with fork drift read as "not landed": the
+// answer a hand-off needs, since a branch whose fork the base no longer
+// carries cannot be sitting on that base. Every other error is the
+// caller's to report.
+func landedOrDrifted(ctx context.Context, wt *worktree.Manager, f *domain.Feature) (bool, error) {
+	landed, err := wt.Landed(ctx, f)
+	var drift *worktree.ForkDriftError
+	if errors.As(err, &drift) {
+		return false, nil
+	}
+	return landed, err
 }

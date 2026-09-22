@@ -749,6 +749,29 @@ func (m *Manager) CommitAll(ctx context.Context, f *domain.Feature, message stri
 	if err := m.AssertNoForkDrift(ctx, f); err != nil {
 		return false, err
 	}
+	return m.commitLoose(ctx, p, message)
+}
+
+// CommitAllAsIs is CommitAll without the fork-drift refusal: the final
+// checkpoint of a branch that is leaving gummi as it is. A hand-off keeps
+// the branch exactly where it stands, drifted base or not, and loose work
+// left uncommitted there is lost to the next clean or delete — so the
+// coherence argument CommitAll makes (do not stack on a base main no
+// longer shares) has no landing to protect here, while the work does.
+func (m *Manager) CommitAllAsIs(ctx context.Context, f *domain.Feature, message string) (bool, error) {
+	if strings.TrimSpace(message) == "" {
+		return false, fmt.Errorf("refusing checkpoint commit for %s: empty message", f.ID)
+	}
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return false, err
+	}
+	return m.commitLoose(ctx, p, message)
+}
+
+// commitLoose stages and commits whatever is loose in the worktree at p,
+// reporting whether a commit was made.
+func (m *Manager) commitLoose(ctx context.Context, p, message string) (bool, error) {
 	if _, err := runGit(ctx, p, "add", "-A"); err != nil {
 		return false, err
 	}
@@ -1434,6 +1457,19 @@ type ForkDriftError struct {
 	// from under it, rather than main being rewritten. Empty when no such
 	// branch exists, which is the rewound-main case the remedy assumes.
 	ForkedFrom string
+	// Base names the branch the card forks from — the one whose history
+	// lost the recorded fork. A card of a goal forks from the goal branch,
+	// and a `master` repo has never been called main, so the sentence
+	// names it rather than assuming. Empty reads as DefaultBaseBranchName.
+	Base string
+}
+
+// base is the branch name the message uses for the card's base.
+func (e *ForkDriftError) base() string {
+	if e.Base == "" {
+		return DefaultBaseBranchName
+	}
+	return e.Base
 }
 
 func (e *ForkDriftError) Error() string {
@@ -1442,11 +1478,11 @@ func (e *ForkDriftError) Error() string {
 		// forked from the goal branch, whose commits main has never seen.
 		// Nothing happened to main, so the reflog advice below would send
 		// a reader hunting for a rewind that never occurred.
-		return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is not in main's history because the branch forked from %s, which has not landed; main points at %s. Land %s first, or rebase this branch onto main and re-anchor it (r in the board)",
-			e.FeatureID, e.Branch, e.Recorded, e.ForkedFrom, e.MainHead, e.ForkedFrom)
+		return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is not in %s's history because the branch forked from %s, which has not landed; %s points at %s. Land %s first, or rebase this branch onto %s and re-anchor it (r in the board)",
+			e.FeatureID, e.Branch, e.Recorded, e.base(), e.ForkedFrom, e.base(), e.MainHead, e.ForkedFrom, e.base())
 	}
-	return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is no longer in main's history; main now points at %s (likely a rebase, amend, or reset on main). %s",
-		e.FeatureID, e.Branch, e.Recorded, e.MainHead, ForkDriftRemedy)
+	return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is no longer in %s's history; %s now points at %s (likely a rebase, amend, or reset on %s). %s",
+		e.FeatureID, e.Branch, e.Recorded, e.base(), e.base(), e.MainHead, e.base(), ForkDriftRemedy)
 }
 
 // AssertNoForkDrift refuses a diff-based operation when the feature's
@@ -1507,8 +1543,12 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	if err != nil {
 		return err
 	}
+	baseName := base
+	if base == "HEAD" {
+		baseName = m.BaseBranch(ctx)
+	}
 	return &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead,
-		ForkedFrom: m.branchCarrying(ctx, recorded, f.BranchName())}
+		ForkedFrom: m.branchCarrying(ctx, recorded, f.BranchName()), Base: baseName}
 }
 
 // branchCarrying names a local branch that still has sha in its history,

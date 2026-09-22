@@ -1934,7 +1934,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cancelLabel:  "Cancel",
 			confirmLabel: "Hand off",
 			question:     "hand off " + string(f.ID) + "?",
-			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents),
+			detail:       handOffDetail(f, m.baseBranch(f), msg.dependents, msg.drift),
 			onConfirm:    func() tea.Cmd { return m.handOffFeature(f) },
 		})
 		return m, nil

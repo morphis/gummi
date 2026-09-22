@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -190,5 +191,59 @@ func TestHandOffRefusesAResearchCard(t *testing.T) {
 		t.Fatal("hand-off accepted a research card")
 	} else if !strings.Contains(err.Error(), "no branch") {
 		t.Fatalf("refusal does not say why: %v", err)
+	}
+}
+
+// TestHandOffTolerantOfForkDrift: a base rewritten past the recorded fork
+// stops a landing, because the landing path must not trust a "landed"
+// answer that may be wrong. It must not stop a hand-off. The person is
+// taking the branch exactly as it is, and a drifted branch is by
+// definition not sitting on the base — so the only question hand-off
+// asks ("is it already landed?") has its answer. Before this, the verb
+// whose whole point is "gummi stops touching the branch" refused with a
+// remedy of rebase-or-delete, the two things the person was declining.
+func TestHandOffTolerantOfForkDrift(t *testing.T) {
+	ctx := context.Background()
+	e, ws, store, wt := advanceEngine(t)
+	f := verifiedCardWithWork(t, e, store, wt, 3)
+
+	rewindMain(t, ws.Root)
+	wtDir := filepath.Join(wt.Root(), f.WorktreePath())
+	if err := os.WriteFile(filepath.Join(wtDir, "late.txt"), []byte("uncommitted\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// the precondition: the landing path really does refuse this card
+	if _, err := wt.Landed(ctx, &f); err == nil {
+		t.Fatal("Landed answered on a drifted branch — the fixture did not drift")
+	}
+
+	res, err := e.HandOff(ctx, f.ID, "user")
+	if err != nil {
+		t.Fatalf("HandOff refused a drifted branch: %v", err)
+	}
+	if res.Status != StatusAdvanced || res.To != domain.StageDone {
+		t.Fatalf("handoff: status=%d to=%s, want advanced/done", res.Status, res.To)
+	}
+	got, err := store.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.HandedOff() || got.Stage != domain.StageDone {
+		t.Fatalf("after hand-off: stage=%s handedOff=%v, want done/true", got.Stage, got.HandedOff())
+	}
+	if exists, err := wt.BranchExists(ctx, &got); err != nil || !exists {
+		t.Fatalf("branch gone after hand-off (exists=%v err=%v) — keeping it is the point", exists, err)
+	}
+	// and nobody rebased it on the way out: the tip still carries the
+	// work commit on top of the original fork, not the rewound main.
+	if err := exec.CommandContext(ctx, "git", "-C", wt.Root(), "merge-base", "--is-ancestor", "main", got.BranchName()).Run(); err == nil {
+		t.Fatal("hand-off rebased the branch onto the rewound main")
+	}
+	// and the loose work went with the branch rather than staying behind
+	// for the next clean to lose: the ordinary checkpoint refuses on
+	// drift, the hand-off's must not.
+	if out := gitOut(t, wtDir, "status", "--porcelain"); strings.TrimSpace(out) != "" {
+		t.Fatalf("loose work left uncommitted on a handed-off branch:\n%s", out)
 	}
 }
