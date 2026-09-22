@@ -24,6 +24,16 @@ type MaterializeOpts struct {
 	// Base is the branch the created cards' work forks from and lands on
 	// ("" for whatever the repository has checked out).
 	Base string
+	// Adopt is an existing branch to mint the card ONTO (DESIGN §10 D22).
+	// It is only meaningful for a batch of exactly one — a branch belongs
+	// to one card, so there is nothing sensible for a second card in the
+	// same batch to do with it — and MaterializeBugs refuses any larger
+	// batch that carries it rather than picking a winner.
+	Adopt string
+	// AdoptedWork is what that branch already carries, as the caller's
+	// inspector reported it, seeded into the card's report so its first
+	// stage opens onto the inherited diff rather than a blank one.
+	AdoptedWork domain.AdoptedWork
 }
 
 // Materialize turns an approved IngestResult into real cards (DESIGN

@@ -409,6 +409,8 @@ func bindRunFlags(cmd *cobra.Command) {
 	f.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)")
 	f.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
 	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
+	f.String("adopt", "", "mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it")
+	f.String("pr", "", "mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations")
 }
 
 // bindResearchFlags mirrors the flags registerResearchFlags defines on
@@ -511,6 +513,8 @@ func bindBugsNewFlags(cmd *cobra.Command) {
 	f.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)")
 	f.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
+	f.String("adopt", "", "mint the bug onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it")
+	f.String("pr", "", "mint the bug onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations")
 	f.Bool("yes", false, "create without the confirmation prompt")
 }
 

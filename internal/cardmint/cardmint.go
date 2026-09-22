@@ -98,6 +98,25 @@ type Input struct {
 	// stacked card above the bottom ignores it — its base is the branch
 	// of the card below it.
 	Base string
+	// Adopt is an existing branch to mint this card ONTO rather than
+	// cutting one for it (DESIGN §10 D22): the card's branch becomes this
+	// ref verbatim, and its first stage opens onto the work already there.
+	// Empty mints an ordinary card, which is nearly all of them.
+	Adopt string
+	// InspectAdopted answers, for Adopt, the two questions cardmint cannot:
+	// is that branch really there, and what is on it. It is a callback for
+	// the same reason RequireRepo is — cardmint imports no git and holds no
+	// worktree manager, and the caller that does is the one able to say.
+	//
+	// It returns the work the card is inheriting, which is seeded into the
+	// draft so the architect reads the branch before planning against it.
+	// An error refuses the mint, before a sequence number is spent: a card
+	// minted onto a branch that is not there could never cut one either.
+	//
+	// A nil callback with a non-empty Adopt fails closed, exactly as
+	// RequireRepo does, since minting onto an unverified ref is the bug the
+	// check exists to catch.
+	InspectAdopted func(branch string) (domain.AdoptedWork, error)
 	// ExternalRef is an optional external correlation id (e.g. a GitHub
 	// issue reference), persisted as Feature.ExternalRef and echoed by
 	// callers that track it.
@@ -194,6 +213,52 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 	return "", fmt.Errorf("%s is taken, and so is every variant of it up to 50", branchFor(slug))
 }
 
+// adoptedWork validates an adoption and returns what the card inherits.
+//
+// Two checks, and they are the inverse of the ones an ordinary mint runs.
+// freeSlug asks whether a derived branch name is free and refuses when it
+// is taken; adoption asks whether the named ref EXISTS (the caller's
+// business, via InspectAdopted) and whether any card already holds it
+// (gummi's business, via the same BranchTaken). Two cards on one branch
+// would be two cards committing over each other with no way to tell whose
+// work a diff belonged to — a worse failure than a naming collision,
+// since nothing about it looks wrong until the work is lost.
+func adoptedWork(ctx context.Context, store *state.Store, in Input) (domain.AdoptedWork, error) {
+	if err := domain.ValidateAdoptedBranch(in.Adopt); err != nil {
+		return domain.AdoptedWork{}, err
+	}
+	if in.Kind == domain.KindResearch {
+		return domain.AdoptedWork{}, fmt.Errorf("a research card runs in a scratch tree and has no branch, so it cannot adopt %s", in.Adopt)
+	}
+	if owner, taken, err := store.BranchTaken(ctx, in.Repo, in.Adopt, ""); err != nil {
+		return domain.AdoptedWork{}, err
+	} else if taken {
+		return domain.AdoptedWork{}, fmt.Errorf("%s already has %s — one branch, one card", owner, in.Adopt)
+	}
+	if in.InspectAdopted == nil {
+		return domain.AdoptedWork{}, fmt.Errorf("branch %q cannot be verified: no branch inspector was wired", in.Adopt)
+	}
+	w, err := in.InspectAdopted(in.Adopt)
+	if err != nil {
+		return domain.AdoptedWork{}, err
+	}
+	if w.Branch == "" {
+		w.Branch = in.Adopt
+	}
+	return w, nil
+}
+
+// adoptedFor is the inherited work as a template argument: a pointer for
+// an adopted card, nil for every other, so the draft renderers can keep
+// treating "no inherited work" as the absence of a value rather than as a
+// zero struct they must each know how to recognise.
+func adoptedFor(in Input, w domain.AdoptedWork) *domain.AdoptedWork {
+	if in.Adopt == "" {
+		return nil
+	}
+	return &w
+}
+
 func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input) (domain.Feature, error) {
 	// the first line is the title for every kind — a multi-line research
 	// brief names itself on its first line exactly as a feature does; the
@@ -213,8 +278,20 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	// could never cut its branch — and say what to do about it, since the
 	// fix is a word in the title and nothing else.
 	//
-	// Research cards are exempt: they never cut a branch.
-	if in.Kind != domain.KindResearch {
+	// Research cards are exempt: they never cut a branch. So are adopted
+	// cards, for the opposite reason — their branch name does not come
+	// from the slug at all, so two of them may slugify alike without ever
+	// wanting the same ref. What they need instead is the same uniqueness
+	// question asked about the ref itself, which adoptedWork does.
+	var inherited domain.AdoptedWork
+	switch {
+	case in.Adopt != "":
+		w, aerr := adoptedWork(ctx, store, in)
+		if aerr != nil {
+			return domain.Feature{}, aerr
+		}
+		inherited = w
+	case in.Kind != domain.KindResearch:
 		free, terr := freeSlug(ctx, store, in, slug)
 		if terr != nil {
 			return domain.Feature{}, terr
@@ -254,6 +331,11 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		// later change to the default never renames this card's branch —
 		// which by then exists in checkouts this process cannot see.
 		BranchScheme: domain.DefaultBranchScheme,
+	}
+	if in.Adopt != "" {
+		// The adopted card is the one case where the branch is not derived
+		// at all: it has a name already, given by whoever cut it.
+		f.BranchScheme, f.Branch = domain.BranchSchemeAdopted, in.Adopt
 	}
 	if in.Kind == domain.KindBug {
 		f.Severity = in.Severity
@@ -308,7 +390,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		if err := atomicfile.Write(artifact, []byte(content), 0o600); err != nil {
 			return domain.Feature{}, err
 		}
-	} else if seed != "" || in.Acceptance != "" || (in.Kind == domain.KindBug && in.Discussion != "") {
+	} else if seed != "" || in.Acceptance != "" || in.Adopt != "" || (in.Kind == domain.KindBug && in.Discussion != "") {
 		// seed the draft before persisting: the description's overflow fills
 		// the Problem section (a title-sized description seeds nothing
 		// there), and Acceptance fills the Verification plan (D10). Either
@@ -333,13 +415,13 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		if in.Kind == domain.KindBug {
 			report := domain.ParseBugBody(seed)
 			report.Discussion = in.Discussion
-			content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: in.Source, ExternalRef: in.ExternalRef}, in.Severity)
+			content = spec.SeededBugTemplate(&f, report, domain.BugProvenance{Source: in.Source, ExternalRef: in.ExternalRef, Adopted: adoptedFor(in, inherited)}, in.Severity)
 		} else {
 			problem, acceptance := domain.SplitAcceptance(seed)
 			if in.Acceptance != "" {
 				acceptance = in.Acceptance
 			}
-			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: problem, Acceptance: acceptance}, domain.DraftProvenance{Source: in.Source})
+			content = spec.SeededTemplate(&f, domain.DraftSeed{Problem: problem, Acceptance: acceptance}, domain.DraftProvenance{Source: in.Source, Adopted: adoptedFor(in, inherited)})
 		}
 		if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
 			return domain.Feature{}, err

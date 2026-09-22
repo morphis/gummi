@@ -103,9 +103,18 @@ type DraftProvenance struct {
 	Source    string   // .gummi/ingest/<name>.md, relative to the repo root
 	Refs      []string // source section headings / ranges
 	DependsOn []string // resolved dependency labels, e.g. "FD-002 payment-webhooks"
+	// Adopted is the work this card was minted on top of, when it was
+	// minted onto an existing branch. Nil for every card gummi cut a
+	// branch for, which is nearly all of them.
+	Adopted *AdoptedWork
 }
 
 // Empty reports whether there is no provenance to render.
+//
+// Adopted is deliberately not part of this: the inherited work renders as
+// its own section rather than in the ingested-from header, so a card that
+// was adopted but not ingested has an empty provenance and must not emit
+// a header saying it came from nowhere.
 func (p DraftProvenance) Empty() bool {
 	return p.Source == "" && len(p.Refs) == 0 && len(p.DependsOn) == 0
 }

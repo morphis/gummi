@@ -91,8 +91,25 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 	// of the rest of this batch. A GitHub import is a batch of titles
 	// nobody wrote with branch names in mind, so two issues that slugify
 	// the same are a normal occurrence rather than an edge case.
+	// An adoption names one branch, so it can only ever describe one card.
+	// Refusing rather than applying it to the first proposal keeps a
+	// GitHub import from quietly minting one adopted bug and nine ordinary
+	// ones off a flag the caller meant for a single fix.
+	if opts.Adopt != "" && len(props) != 1 {
+		return nil, fmt.Errorf("--adopt names one branch but this would mint %d bugs; adopt a branch for a single bug", len(props))
+	}
 	batch := map[string]int{}
 	for i, p := range props {
+		if opts.Adopt != "" {
+			owner, taken, terr := e.cfg.Store.BranchTaken(ctx, opts.Repo, opts.Adopt, "")
+			if terr != nil {
+				return nil, terr
+			}
+			if taken {
+				return nil, fmt.Errorf("%s already has %s — one branch, one card", owner, opts.Adopt)
+			}
+			continue
+		}
 		probe := domain.Feature{Kind: domain.KindBug, Slug: slugs[i], BranchScheme: domain.DefaultBranchScheme}
 		branch := probe.BranchName()
 		if first, dup := batch[branch]; dup {
@@ -142,9 +159,12 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 			// rows rather than rows a reader has to tell apart.
 			BranchScheme: domain.DefaultBranchScheme,
 		}
+		if opts.Adopt != "" {
+			f.BranchScheme, f.Branch = domain.BranchSchemeAdopted, opts.Adopt
+		}
 		// Draft first so a write failure aborts before the bug exists — a
 		// persisted bug with no draft would be reseeded blank on first open.
-		if err := e.writeSeededBugDraft(f, p); err != nil {
+		if err := e.writeSeededBugDraft(f, p, opts); err != nil {
 			return created, err
 		}
 		if err := e.cfg.Store.CreateFeature(ctx, &f); err != nil {
@@ -158,12 +178,17 @@ func (e *Engine) MaterializeBugs(ctx context.Context, props []domain.BugProposal
 // writeSeededBugDraft materializes a bug's pre-populated report under
 // .gummi/state/drafts/ (where drafts live until the diagnosis is approved
 // and a worktree is created).
-func (e *Engine) writeSeededBugDraft(f domain.Feature, p domain.BugProposal) error {
+func (e *Engine) writeSeededBugDraft(f domain.Feature, p domain.BugProposal, opts MaterializeOpts) error {
 	dir := e.cfg.Workspace.DraftsDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, spec.DraftFilename(&f))
-	content := spec.SeededBugTemplate(&f, p.Report, p.Provenance(), p.Severity)
+	prov := p.Provenance()
+	if opts.Adopt != "" {
+		w := opts.AdoptedWork
+		prov.Adopted = &w
+	}
+	content := spec.SeededBugTemplate(&f, p.Report, prov, p.Severity)
 	return atomicfile.Write(path, []byte(content), 0o600)
 }

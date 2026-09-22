@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -336,6 +337,13 @@ func (m *Manager) Exists(ctx context.Context, f *domain.Feature) (bool, error) {
 // still on disk" apart from "there is no disk to leave anything on".
 var ErrNoWorktree = errors.New("no worktree")
 
+// ErrAdoptedBranch marks a refusal to destroy a branch gummi did not cut
+// (DESIGN §10 D22). Callers match on it to distinguish "gummi declined,
+// correctly, and the cleanup around it should carry on" from a git
+// failure: `clean` still removes an adopted card's worktree and simply
+// leaves its branch alone.
+var ErrAdoptedBranch = errors.New("adopted branch: gummi did not cut it and will not delete it")
+
 // requireWorktree returns the worktree path, erroring clearly when the
 // directory is absent (git's own "cannot change to directory" is
 // opaque). The error wraps ErrNoWorktree so callers can distinguish
@@ -456,6 +464,149 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	return p, nil
 }
 
+// Attach is Create's counterpart for an ADOPTED card (DESIGN §10 D22):
+// the branch already exists, was cut by somebody else, and the card is
+// being minted onto it rather than given one of its own.
+//
+// It is deliberately the same shape as Create with one line swapped —
+// `worktree add -- <path> <branch>` instead of `worktree add -b` — because
+// everything downstream of that line is already right for an inherited
+// branch and needed no thought at all:
+//
+//   - the fork point Create records is merge-base(base, branch), not the
+//     base's head, so stamping it here describes where the adopted work
+//     actually forked however long ago that was;
+//   - Diff compares against that same merge base, so the card's first
+//     diff is the whole inherited change rather than an empty one, and
+//     the base's later commits never show up as spurious reversals;
+//   - AssertNoForkDrift asks whether the recorded fork is still an
+//     ancestor of the base, which is the right question for an old branch
+//     and answers "no drift" for one that is merely behind.
+//
+// What differs is the failure handling. Create rolls back by deleting the
+// branch it just made; this must never do that — the branch is the thing
+// being adopted, and it existed before gummi did. A failed Attach removes
+// the worktree it added and leaves the ref untouched.
+func (m *Manager) Attach(ctx context.Context, f *domain.Feature) (string, error) {
+	if !f.Adopted() {
+		return "", fmt.Errorf("%s was not minted onto an existing branch; use Create", f.ID)
+	}
+	p, branch, err := m.featurePaths(f)
+	if err != nil {
+		return "", err
+	}
+	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "HEAD"); err != nil {
+		return "", fmt.Errorf("repository has no commits yet: %w", err)
+	}
+	if _, err := os.Stat(p); err == nil {
+		return "", fmt.Errorf("worktree path %s already exists", p)
+	}
+	// The branch must BE there — the exact inverse of Create's check, and
+	// the common failure is a typo or a branch that only exists on the
+	// remote, so say both.
+	if ok, err := gitOK(ctx, m.repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return "", err
+	} else if !ok {
+		return "", fmt.Errorf("no local branch %s to adopt — check the spelling, or fetch it first (git fetch origin %s:%s)", branch, branch, branch)
+	}
+	// git's own refusal here names a path and a ref with no explanation of
+	// what the caller should do, and the answer is nearly always "you have
+	// it checked out in the repo you are standing in".
+	if at, err := m.branchCheckedOutAt(ctx, branch); err != nil {
+		return "", err
+	} else if at != "" {
+		return "", fmt.Errorf("%s is checked out at %s — check out something else there before adopting it", branch, at)
+	}
+	base := m.baseRev(ctx, f)
+	// No merge base means the branch shares no history with what the card
+	// would land on. Everything downstream — the diff, drift detection,
+	// the merge — is defined against that point, so a card adopting such a
+	// branch would be broken in a way that only surfaces stages later.
+	forkPoint, err := runGit(ctx, m.repo, "merge-base", base, branch)
+	if err != nil {
+		return "", fmt.Errorf("%s shares no history with %s, so there is nothing to diff it against: %w", branch, base, err)
+	}
+	if err := os.MkdirAll(m.worktreesDir(), 0o750); err != nil {
+		return "", err
+	}
+	// The same prune-and-retry Create does, and for the same reason: a
+	// directory removed out of band leaves a registration that makes git
+	// refuse a fresh checkout at that path. Create's second half — dropping
+	// a half-made branch — has no counterpart here, since `worktree add`
+	// without -b creates no ref to drop.
+	if _, err := runGit(ctx, m.repo, "worktree", "add", "--", p, branch); err != nil {
+		if _, perr := runGit(ctx, m.repo, "worktree", "prune"); perr != nil {
+			return "", err
+		}
+		if _, rerr := runGit(ctx, m.repo, "worktree", "add", "--", p, branch); rerr != nil {
+			return "", rerr
+		}
+	}
+	// Only bites when the adopted branch actually tracks .gummi, which a
+	// branch cut in a gummi-initialized repo does not. Where it does bite
+	// it adds one commit to the adopted branch — a write, not a rewrite,
+	// and the alternative is every commit the implementer makes sweeping
+	// workspace state in.
+	if err := untrackGummiInWorktree(ctx, m.wsRoot, m.repo, p); err != nil {
+		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+		return "", fmt.Errorf("untracking .gummi in adopted worktree: %w", err)
+	}
+	if err := m.forkStore.SetForkPoint(ctx, f.ID, forkPoint); err != nil && !errors.Is(err, state.ErrForkPointStamped) {
+		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+		return "", fmt.Errorf("recording fork point for %s: %w", f.ID, err)
+	}
+	return p, nil
+}
+
+// branchCheckedOutAt reports the worktree path that currently has branch
+// checked out, or "" when nothing does. git refuses to check one ref out
+// in two worktrees, so this is what turns that refusal into a sentence
+// naming the directory to go and fix.
+func (m *Manager) branchCheckedOutAt(ctx context.Context, branch string) (string, error) {
+	out, err := runGit(ctx, m.repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	var at string
+	for line := range strings.Lines(out) {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "worktree "); ok {
+			at = rest
+			continue
+		}
+		if rest, ok := strings.CutPrefix(line, "branch "); ok {
+			if rest == "refs/heads/"+branch {
+				return at, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// BehindBase reports how many commits the card's base carries that its
+// own branch does not — "this branch is 40 commits behind main".
+//
+// It exists because of the rule in D22 that gummi leaves an inherited
+// branch where it stands: having decided not to act on staleness, gummi
+// owes the reader the number instead. Zero for a branch that is current,
+// and for one whose base cannot be resolved (there is nothing useful to
+// say, and this is never worth failing a mint over).
+func (m *Manager) BehindBase(ctx context.Context, f *domain.Feature) int {
+	_, branch, err := m.featurePaths(f)
+	if err != nil {
+		return 0
+	}
+	out, err := runGit(ctx, m.repo, "rev-list", "--count", branch+".."+m.baseRev(ctx, f))
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // ForkPoint returns the feature's recorded fork-point SHA, or the empty
 // string if none is stamped yet (a worktree that predates drift
 // detection, or one that never had a worktree at all).
@@ -489,6 +640,15 @@ func (m *Manager) Recreate(ctx context.Context, f *domain.Feature) (string, erro
 		return "", err
 	}
 	if !branchExists {
+		// For an ordinary card, cutting a fresh branch is the right
+		// recovery: the branch was gummi's, and a new one from the same
+		// base is what it would have made anyway. For an adopted card it
+		// would be a quiet catastrophe — a new empty branch wearing the
+		// name of the inherited work, which nothing downstream could tell
+		// apart from the real thing.
+		if f.Adopted() {
+			return "", fmt.Errorf("%s adopted %s and that branch is gone; recover the ref (git reflog) before running this card again", f.ID, branch)
+		}
 		return m.Create(ctx, f)
 	}
 	if err := os.MkdirAll(m.worktreesDir(), 0o750); err != nil {
@@ -639,8 +799,12 @@ func (m *Manager) unregisterStaleWorktree(ctx context.Context, f *domain.Feature
 }
 
 // DeleteBranch removes the feature's branch. Without force it refuses
-// branches that are not fully merged into HEAD (git -d semantics).
+// branches that are not fully merged into HEAD (git -d semantics), and
+// always refuses an adopted one: see ErrAdoptedBranch.
 func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force bool) error {
+	if f.Adopted() {
+		return fmt.Errorf("%s: %w", f.ID, ErrAdoptedBranch)
+	}
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return err
@@ -670,7 +834,14 @@ func (m *Manager) DeleteBranch(ctx context.Context, f *domain.Feature, force boo
 // via the recorded landed-sha lineage check and only then force-deletes.
 // That check only ever passes for a branch gummi itself squash-merged, so
 // nothing unlanded can slip through the -D.
+//
+// An adopted branch is refused even here, where the work demonstrably
+// landed: "its content is on main" is an argument about content, and the
+// branch is still somebody else's ref, possibly with a PR open on it.
 func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) error {
+	if f.Adopted() {
+		return fmt.Errorf("%s: %w", f.ID, ErrAdoptedBranch)
+	}
 	_, branch, err := m.featurePaths(f)
 	if err != nil {
 		return err

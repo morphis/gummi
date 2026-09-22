@@ -329,6 +329,26 @@ func (p *Pool) Create(ctx context.Context, f *domain.Feature) (string, error) {
 	return wt.Create(ctx, f)
 }
 
+// Attach is Create's counterpart for an adopted card (Manager.Attach).
+func (p *Pool) Attach(ctx context.Context, f *domain.Feature) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.Attach(ctx, f)
+}
+
+// BehindBase reports how far the card's branch trails its base, as
+// Manager.BehindBase does; 0 when the card's repo cannot be resolved,
+// since this is reporting, never a gate.
+func (p *Pool) BehindBase(ctx context.Context, f *domain.Feature) int {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return 0
+	}
+	return wt.BehindBase(ctx, f)
+}
+
 func (p *Pool) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {

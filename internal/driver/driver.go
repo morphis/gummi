@@ -69,6 +69,9 @@ type Options struct {
 	// ("" for whatever the repository has checked out, which is what
 	// every card did before bases were selectable).
 	Base string
+	// Adopt is an existing branch to mint the card ONTO instead of cutting
+	// one for it (--adopt, DESIGN §10 D22). Empty creates an ordinary card.
+	Adopt string
 	// GoalDoc, for a goal, is a complete goal doc to start the plan from
 	// (--plan-file) instead of the template seeded with the objective.
 	GoalDoc string
@@ -669,8 +672,16 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	if err := wt.RemoveScratch(ctx, &f); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
-	if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
-		return d.fail(ctx, string(id), err)
+	// An adopted branch is left standing (DESIGN §10 D22): the worktree
+	// above was gummi's to remove, the ref underneath it never was. The
+	// clean still succeeds — the card is cleaned, and the branch surviving
+	// is the intended outcome, not a partial failure — and the `cleaned`
+	// event says the branch was kept so a script can tell the two apart.
+	keptBranch := f.Adopted()
+	if !keptBranch {
+		if err := wt.DeleteLandedBranch(ctx, &f); err != nil {
+			return d.fail(ctx, string(id), err)
+		}
 	}
 	// Durable session transcripts (FD-104) live outside the worktree,
 	// under the workspace state dir; a cleaned card must leave no
@@ -685,7 +696,7 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 		}
 	}
 	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName(),
-		Cards: idStrings(swept.Took), Kept: idStrings(swept.Left)})
+		Cards: idStrings(swept.Took), Kept: idStrings(swept.Left), BranchKept: keptBranch})
 	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
@@ -2306,9 +2317,19 @@ func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc str
 	return cardmint.Mint(ctx, d.store, d.ws, cardmint.Input{
 		Kind: ct.Kind, Mode: ct.Mode, Description: desc, Profile: d.opts.Profile, Envelope: d.opts.Envelope,
 		Repo: repo, RequireRepo: d.eng.RequireRepo, Base: d.opts.Base,
+		Adopt: d.opts.Adopt, InspectAdopted: d.eng.AdoptInspector(ctx, repo, d.opts.Base),
 		ExternalRef: d.opts.Ref, Acceptance: d.opts.Acceptance, GateApproval: d.opts.GateApproval,
 		GoalDoc: d.opts.GoalDoc,
 	})
+}
+
+// Worktrees resolves the worktree manager for a card's own repository.
+// It is exposed for the adoption path in cmd/gummi, which has to attach a
+// freshly minted card's branch worktree before it can anchor a pull
+// request's review comments onto its diff — the one thing that has to
+// happen between a mint and the first stage run.
+func (d *Driver) Worktrees(ctx context.Context, f *domain.Feature) (*worktree.Manager, error) {
+	return d.eng.WorktreesFor(ctx, f)
 }
 
 // enterStage resets per-stage state. The activity cursor is reset here

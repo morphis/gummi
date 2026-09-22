@@ -156,6 +156,12 @@ func (m *Manager) RemoveScratch(ctx context.Context, f *domain.Feature) error {
 // Allocation is lazy, at the first stage RUN rather than at card
 // creation, so a backlog of todo cards is not a backlog of checkouts.
 // It is idempotent: an existing tree is returned as-is.
+//
+// This is also the single seam where adoption enters the running system
+// (DESIGN §10 D22): an adopted card attaches to its existing branch
+// instead of cutting one, and every caller that asks for a card's
+// worktree — engine, driver, TUI alike — gets that for free without
+// knowing adoption exists.
 func (m *Manager) Ensure(ctx context.Context, f *domain.Feature) (string, error) {
 	p, _, err := m.featurePaths(f)
 	if err != nil {
@@ -165,6 +171,9 @@ func (m *Manager) Ensure(ctx context.Context, f *domain.Feature) (string, error)
 		return p, nil
 	} else if !os.IsNotExist(err) {
 		return "", err
+	}
+	if f.Adopted() {
+		return m.Attach(ctx, f)
 	}
 	return m.Create(ctx, f)
 }

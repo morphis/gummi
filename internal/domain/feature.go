@@ -129,6 +129,12 @@ const (
 	// work — `feat/`, `bug/`, `goal/` — which is the convention most
 	// repos, changelog tools and PR templates already expect.
 	BranchSchemeKind = "kind"
+	// BranchSchemeAdopted means the card did not get a spelling at all:
+	// it was minted onto a branch that already existed (DESIGN §10 D22),
+	// and Branch holds that ref verbatim. It is the one scheme whose name
+	// is stored rather than derived, because there is nothing to derive it
+	// from — the branch was named by whoever cut it, which was not gummi.
+	BranchSchemeAdopted = "adopted"
 )
 
 // DefaultBranchScheme is what a newly minted card gets.
@@ -332,8 +338,19 @@ type Feature struct {
 	// spelling change for new cards without renaming a branch that already
 	// exists in someone's checkout.
 	BranchScheme string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Branch is the ref an ADOPTED card was minted onto, and is empty for
+	// every other card. It is the one branch name gummi stores rather than
+	// derives, for the reason BranchSchemeAdopted gives: an adopted branch
+	// was named by somebody else, so there is no (scheme, id, slug) to
+	// recover it from and the ref itself is the only record.
+	//
+	// It is also the field that makes "gummi did not cut this" a fact the
+	// code can ask about rather than a convention — Adopted() reads it, and
+	// the rules that keep custody from becoming ownership (never delete it,
+	// never rewrite it unasked) hang off that one question.
+	Branch    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 	// VerifiedAt is stamped when the item's verify gate passes and its
 	// branch becomes ready to land — the headless driver's stop-at-verified
 	// terminal state (DESIGN §12). Zero until then. Distinct from reaching
@@ -719,11 +736,25 @@ func (f *Feature) Ending(landedOnBase bool) Ending {
 // some other route. The worktree path is still keyed by id
 // (.gummi/worktrees/FD-042), so two cards may safely share a slug as
 // long as they are in different repositories.
+// An adopted card is the exception to every sentence above: its name was
+// not constructed here and is not derivable, so BranchName hands back the
+// ref it was minted onto (see BranchSchemeAdopted).
 func (f *Feature) BranchName() string {
+	if f.BranchScheme == BranchSchemeAdopted {
+		return f.Branch
+	}
 	if f.BranchScheme == BranchSchemeKind {
 		return f.kind().branchPrefix() + "/" + f.Slug
 	}
 	return "gummi/" + string(f.ID) + "-" + f.Slug
+}
+
+// Adopted reports whether this card was minted onto a branch gummi did
+// not cut (DESIGN §10 D22). It is the question the custody rules ask:
+// cleanup must not delete this branch, and a rebase of it rewrites
+// history someone may already have pushed.
+func (f *Feature) Adopted() bool {
+	return f.BranchScheme == BranchSchemeAdopted
 }
 
 // WorktreePath is the feature's worktree directory relative to the
@@ -833,7 +864,29 @@ func (f *Feature) Validate() error {
 	if err := ValidateBaseBranch(f.Base); err != nil {
 		return fmt.Errorf("feature %s: %w", f.ID, err)
 	}
-	if f.BranchScheme != BranchSchemeGummi && f.BranchScheme != BranchSchemeKind {
+	switch f.BranchScheme {
+	case BranchSchemeGummi, BranchSchemeKind:
+		if f.Branch != "" {
+			return fmt.Errorf("feature %s: carries a stored branch %q but its name is derived", f.ID, f.Branch)
+		}
+	case BranchSchemeAdopted:
+		if err := ValidateAdoptedBranch(f.Branch); err != nil {
+			return fmt.Errorf("feature %s: %w", f.ID, err)
+		}
+		// Adopting the branch the card lands on would put the implementer's
+		// commits straight onto it, with no diff to review and nothing to
+		// merge. It is the one adoption that is never a mistake worth
+		// tolerating, so it is refused at the domain edge rather than left
+		// to git.
+		if f.Base != "" && f.Branch == f.Base {
+			return fmt.Errorf("feature %s: cannot adopt %q — it is the branch this card lands on", f.ID, f.Branch)
+		}
+		// A research card runs in a detached scratch tree and never cuts or
+		// holds a branch, so there is nothing for it to adopt onto.
+		if f.kind() == KindResearch {
+			return fmt.Errorf("feature %s: a research card has no branch, so it cannot adopt one", f.ID)
+		}
+	default:
 		return fmt.Errorf("feature %s: unknown branch scheme %q", f.ID, f.BranchScheme)
 	}
 	if f.StackID != "" {
@@ -1029,20 +1082,40 @@ func ValidateBaseBranch(b string) error {
 	if b == "" {
 		return nil
 	}
+	return validateRefName("base branch", b)
+}
+
+// ValidateAdoptedBranch is ValidateBaseBranch's counterpart for the ref an
+// adopted card was minted onto. The rules are identical — the value is
+// handed to git as a revision either way — but empty is a failure rather
+// than a default: "whatever the checkout has out" is a sensible base and
+// a meaningless thing to adopt.
+func ValidateAdoptedBranch(b string) error {
+	if b == "" {
+		return fmt.Errorf("adopted branch is empty")
+	}
+	return validateRefName("adopted branch", b)
+}
+
+// validateRefName rejects the values that must never reach git as a
+// revision: a leading dash (git reads it as an option), whitespace,
+// refspec and revision syntax, and the characters git itself refuses in a
+// ref. label names the field so the error says which one was wrong.
+func validateRefName(label, b string) error {
 	if strings.TrimSpace(b) != b {
-		return fmt.Errorf("base branch %q has surrounding whitespace", b)
+		return fmt.Errorf("%s %q has surrounding whitespace", label, b)
 	}
 	if strings.HasPrefix(b, "-") {
-		return fmt.Errorf("base branch %q starts with a dash", b)
+		return fmt.Errorf("%s %q starts with a dash", label, b)
 	}
 	if strings.HasPrefix(b, "/") || strings.HasSuffix(b, "/") || strings.HasSuffix(b, ".lock") {
-		return fmt.Errorf("base branch %q is not a valid ref name", b)
+		return fmt.Errorf("%s %q is not a valid ref name", label, b)
 	}
 	if strings.Contains(b, "..") || strings.Contains(b, "@{") {
-		return fmt.Errorf("base branch %q contains revision syntax", b)
+		return fmt.Errorf("%s %q contains revision syntax", label, b)
 	}
 	if strings.ContainsAny(b, " \t\n\\~^:?*[") {
-		return fmt.Errorf("base branch %q contains characters git refuses in a ref", b)
+		return fmt.Errorf("%s %q contains characters git refuses in a ref", label, b)
 	}
 	return nil
 }

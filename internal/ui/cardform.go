@@ -59,6 +59,15 @@ type cardForm struct {
 	base       string
 	baseCands  []string
 	baseCursor int
+	// adopt is an existing branch to mint this card ONTO rather than
+	// cutting one for it (DESIGN §10 D22). Empty — the default, and what
+	// every card does — means gummi cuts the branch.
+	//
+	// It shares baseCands: the branches on offer to adopt are the same
+	// branches on offer to fork from, because they are simply the
+	// repository's branches. What differs is what the card then does with
+	// the one it is given, which the row's own label says.
+	adopt string
 	// stackOnto names the card this one is being stacked on top of, set
 	// when the form was opened with S. stackInto names an existing stack
 	// to join instead. Both empty is a standalone card.
@@ -161,6 +170,7 @@ const (
 	cardStopSeverity
 	cardStopAfter
 	cardStopBase
+	cardStopAdopt
 	cardStopStack
 	cardStopButtons
 )
@@ -300,6 +310,11 @@ func (d *cardForm) stops() []int {
 		s = append(s, cardStopAfter)
 		if len(d.baseCands) > 1 {
 			s = append(s, cardStopBase)
+		}
+		// Adopting needs a branch to adopt, and a research card has no
+		// branch of its own to put one on.
+		if len(d.baseCands) > 0 && d.ct.Kind != domain.KindResearch {
+			s = append(s, cardStopAdopt)
 		}
 		s = append(s, cardStopStack)
 	} else {
@@ -531,6 +546,12 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case cardStopBase:
 		if delta, ok := selectCycleDelta(k); ok {
 			d.cycleBase(delta)
+		} else if k == "enter" {
+			return d.submit(false)
+		}
+	case cardStopAdopt:
+		if delta, ok := selectCycleDelta(k); ok {
+			d.cycleAdopt(delta)
 		} else if k == "enter" {
 			return d.submit(false)
 		}
@@ -789,7 +810,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	res := formResult{
 		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
-		Base: d.base, StackOnto: d.stackOnto, StackInto: d.stackInto,
+		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start: start, FromPicker: d.fromPicker,
 	}
 	if d.ct.Kind == domain.KindBug {
@@ -1246,6 +1267,11 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
 			d.baseIdx(), width, maxLines)...)
 	}
+	if len(d.baseCands) > 0 && d.ct.Kind != domain.KindResearch {
+		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopAdopt, "works on"), optionLabelW,
+			choiceCells(s, d.focus == cardStopAdopt, d.adoptChoices(), d.adoptIdx(), "", false),
+			d.adoptIdx(), width, maxLines)...)
+	}
 	stackLine := optionLabel(s, d.focus == cardStopStack, "stack")
 	switch {
 	case d.stackOnto != "":
@@ -1462,6 +1488,8 @@ func (d *cardForm) hint() string {
 		return "type to filter · ↑/↓ move · enter add · backspace remove last · alt+o collapse · tab next · esc cancel"
 	case cardStopBase:
 		return "←/→ choose the branch it forks from · alt+o collapse · tab next · esc cancel"
+	case cardStopAdopt:
+		return "←/→ work on an existing branch instead of cutting one · alt+o collapse · tab next · esc cancel"
 	case cardStopStack:
 		return "←/→ stack it or leave it standalone · alt+o collapse · tab next · esc cancel"
 	case cardStopButtons:
@@ -1557,6 +1585,42 @@ func (d *cardForm) baseIdx() int {
 		}
 	}
 	return 0
+}
+
+// adoptChoices is the adopt row's cells: cutting a fresh branch, which is
+// the default and reads first, then every branch that could be adopted
+// instead.
+func (d *cardForm) adoptChoices() []string {
+	out := make([]string, 0, len(d.baseCands)+1)
+	out = append(out, "a new branch")
+	return append(out, d.baseCands...)
+}
+
+// adoptIdx is the selected cell of adoptChoices.
+func (d *cardForm) adoptIdx() int {
+	if d.adopt == "" {
+		return 0
+	}
+	for i, b := range d.baseCands {
+		if b == d.adopt {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// cycleAdopt moves the adopt row by dir over adoptChoices.
+func (d *cardForm) cycleAdopt(dir int) {
+	choices := d.adoptChoices()
+	i := (d.adoptIdx() + dir) % len(choices)
+	if i < 0 {
+		i += len(choices)
+	}
+	if i == 0 {
+		d.adopt = ""
+		return
+	}
+	d.adopt = choices[i]
 }
 
 // cycleBase moves the base row by dir over baseChoices.

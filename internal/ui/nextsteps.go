@@ -147,6 +147,11 @@ type nextInput struct {
 	// a reader about to go push something is not left to derive it. Empty
 	// only in a test scaffold, where keptBranch() says "the branch".
 	branch string
+	// adopted marks a card minted onto a branch gummi did not cut
+	// (DESIGN §10 D22), which changes which ending leads: handing an
+	// inherited branch back is the default, and squashing somebody else's
+	// commits onto the trunk is the deliberate second answer.
+	adopted bool
 
 	// --- what a finished card says about itself -------------------------
 	//
@@ -337,6 +342,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		excusedChecks:    m.excusedChecks[r.F.ID],
 		base:             m.baseBranch(r.F),
 		branch:           r.F.BranchName(),
+		adopted:          r.F.Adopted(),
 		ending:           r.F.Ending(r.Landed),
 		commit:           r.F.LandedSHA,
 		spend:            r.F.Spend.Credits,
@@ -1029,6 +1035,22 @@ func stageActions(in nextInput) []nextAction {
 			// for your own `git pull` is not a workflow step.
 			keep = nextStep("handoff", "h", "hand off",
 				"close the card now — the PR carries it from here")
+		}
+		// On an adopted card the two swap places. Landing squashes
+		// somebody else's commits into one of yours on the trunk, which is
+		// a real answer but never the assumed one; handing the branch back
+		// is what the card was for. The rows are the same rows — this
+		// changes which is recommended, not what is available.
+		if in.adopted && in.pullRequest.Empty() {
+			keep = nextStep("handoff", "h", "hand off",
+				"close the card and keep "+in.keptBranch()+" — it was never gummi's branch, and it is yours to push")
+			gate = nextStep("advance", "g", "land on "+in.landBase()+" anyway",
+				"squash the inherited commits and yours into one commit on "+in.landBase())
+			return append([]nextAction{
+				keep,
+				gate,
+				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
+			}, stopOrResume(in)...)
 		}
 		return append([]nextAction{
 			gate,

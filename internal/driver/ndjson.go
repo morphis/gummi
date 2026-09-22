@@ -416,6 +416,10 @@ type cleanedEvent struct {
 	// Both are empty for every card but a goal (Engine.CleanGoalCards).
 	Cards []string `json:"cards,omitempty"`
 	Kept  []string `json:"kept,omitempty"`
+	// BranchKept marks a clean that deliberately left the card's branch
+	// alone because gummi did not cut it (DESIGN §10 D22). Absent on every
+	// ordinary clean, where the branch went with the worktree.
+	BranchKept bool `json:"branch_kept,omitempty"`
 }
 
 // handedOffEvent reports a successful `gummi handoff`: the card moved to

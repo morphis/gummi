@@ -61,7 +61,7 @@ leaf services.
 | `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
 | `engine` | The orchestrator. Binds stages to agent sessions, schedules autonomous runs across attention slots, routes turns, streams activity. Start here to trace behavior. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
-| `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. |
+| `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. `adopt.go` is the other half: attaching to a branch gummi did **not** cut, and the custody rules that follow from that. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |
 | `stack` | Pure policy for a **stack** — a chain of cards whose branches fork from one another. Answers what each card forks from, which are sitting on commits that have moved, and whether one may land yet. No git, no store, no clock. Read by `Engine.StackTick`, the worktree base seam and the board alike. |
 | `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the card's run tab, `status --stats` and the week view. |
@@ -161,6 +161,15 @@ still work — the board just stays static. Key env vars are tabled in
   (scope guards) and §10 (Decisions — binding). Stacks (§18) replay
   branches locally and print the `git push --force-with-lease` they need;
   they still never push, create a PR, or retarget one.
+- **An adopted branch is held, never owned.** A card can be minted onto a
+  branch gummi did not cut (`--adopt`, `--pr`; DESIGN §10 D22). gummi may
+  add commits to it and nothing else: it never deletes one (`clean` keeps
+  it), never rebases or force-pushes one, and never holds the card
+  responsible for what was already failing on it. An adopted card still
+  walks the whole graph — the plan stage reads the inherited diff and
+  designs the rework — because the alternative is the first hole in the
+  quality floor. `TestAnAdoptedCardWalksTheWholeGraph` and
+  `TestAnAdoptedBranchIsNeverDeleted` assert the two halves.
 - **A stack is topology; a dependency is scheduling.** A stack position
   says "my branch forks from that card's branch" and must never gate a
   card from running — a dependency is met only at `StageDone`, so a
@@ -201,6 +210,9 @@ still work — the board just stays static. Key env vars are tabled in
   the fold reuses `cardrun` per card and states its own attribution rules
   (a pass is charged to the window it started in; the window clock counts
   an open session to the right edge).
+- "can gummi work on a branch it did not cut" → `internal/worktree/adopt.go`
+  (attach + inspect), `internal/cardmint` for the mint-time half, and
+  `adoptedHint` in `internal/engine/hints.go` for what the stages are told.
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - Anything architectural or a "why is it this way" question →
   `docs/DESIGN.md` (its **Decisions** list in §10 is binding).

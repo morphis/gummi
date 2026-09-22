@@ -353,6 +353,7 @@ it. `gummi status` says by how much when it happens.
 | `pr link\|unlink\|status\|comments` | land through a PR you opened; gummi never writes to GitHub |
 | `deps add\|rm\|list` | dependency edges between cards |
 | `ingest`, `bugs ingest\|new` | bring in existing work |
+| `run\|bugs new --adopt <branch>` / `--pr <url\|number>` | mint the card onto a branch gummi did not cut, and rework it |
 | `init`, `doctor`, `skill` | set up, check readiness, install the calling-agent skill |
 
 | exit | status | meaning |
@@ -505,3 +506,39 @@ gummi prints the `git push --force-with-lease` and never runs it.
 
 A card can also fork from a branch that is not checked out — pick it on the
 creation dialog's `forks from` row, or pass `--base release-2.1`.
+
+## Picking up work that already exists
+
+A card does not have to start from an empty branch. Point one at a branch
+somebody already started — a colleague's half-finished work, a pull request
+sitting under review — and gummi runs the ordinary workflow on top of it:
+
+```sh
+gummi run --adopt feat/their-parser --envelope 500 "finish the empty-case handling"
+gummi run --pr 412 --envelope 500 "address the review comments"
+```
+
+`--pr` does three things in one go: it finds the branch behind the pull
+request (fetching it for you, forks included), links the card to the PR, and
+pulls the unresolved review threads in as annotations on the card's diff —
+so the plan stage reads the reviewers' own words before it designs anything.
+In the board, the creation dialog's `works on` row offers the same choice.
+
+The card's first stage opens onto the inherited diff rather than a blank
+branch, and its artifact starts with an `Inherited work` section naming the
+branch, its commits and how far behind it has fallen. From there it is an
+ordinary card: it plans, implements and verifies, and you comment on its
+diff with `c` exactly as you would on any other.
+
+What gummi will **not** do to a branch it did not cut:
+
+- **delete it.** `clean` removes the worktree and leaves the branch.
+- **rewrite it.** No rebase, no reset, no force-push — it may already be
+  pushed and being read. gummi says how far behind the branch is and works
+  where it stands; catching it up is your call.
+- **blame the card for it.** Whatever was already failing when you adopted
+  it is recorded at the plan gate, and verify holds the card only to what
+  the rework changed.
+
+Because the branch is yours, the default ending is `h` — hand it back —
+rather than a squash onto main. Landing it is still there if you want it.

@@ -506,6 +506,7 @@ func renderDraft(f *domain.Feature, seed domain.DraftSeed, prov domain.DraftProv
 		fmt.Fprintf(&b, "> %s\n\n", f.OneLiner)
 	}
 	renderProvenance(&b, prov)
+	renderAdopted(&b, prov.Adopted)
 
 	// Problem, plus any ingested open questions. Each question is its own
 	// content line (a bullet) with a %% flag threaded under it, so each is
@@ -596,6 +597,45 @@ func renderProvenance(b *strings.Builder, p domain.DraftProvenance) {
 	b.WriteString("\n")
 }
 
+// renderAdopted writes the `## Inherited work` section an adopted card's
+// artifact opens with (DESIGN §10 D22) — the branch, how stale it is, the
+// commits already on it and their shape.
+//
+// It goes near the top, ahead of Problem, because it is the one thing the
+// architect must read before anything else in the document makes sense:
+// the card is not a blank branch with a request attached, it is somebody
+// else's work with a request attached, and a plan written without looking
+// at it would be a plan for the wrong starting point.
+//
+// It is prose, not a checklist, and deliberately carries no %% markers:
+// these are facts about the branch rather than questions for the reader,
+// and a marker here would open a thread nobody can resolve.
+func renderAdopted(b *strings.Builder, a *domain.AdoptedWork) {
+	if a.Empty() {
+		return
+	}
+	b.WriteString("## Inherited work\n\n")
+	fmt.Fprintf(b, "This card was minted onto the existing branch `%s`, which gummi did not\ncreate. Its commits are below; the work asked of this card is on top of\nthem, and they are not to be discarded without saying so.\n\n", a.Branch)
+	fmt.Fprintf(b, "- branch: `%s` (%s)\n", a.Branch, a.Staleness())
+	if a.PR != "" {
+		fmt.Fprintf(b, "- pull request: %s\n", a.PR)
+	}
+	b.WriteString("\n")
+	if len(a.Commits) > 0 {
+		b.WriteString("Commits already on it:\n\n```\n")
+		for _, c := range a.Commits {
+			b.WriteString(oneLine(c) + "\n")
+		}
+		b.WriteString("```\n\n")
+	}
+	// TrimRight, not TrimSpace: `git diff --stat` indents every line by one
+	// space, and trimming the leading one off the first line alone would
+	// leave the block ragged against the rest of itself.
+	if stat := strings.TrimRight(a.Stat, " \t\n"); strings.TrimSpace(stat) != "" {
+		b.WriteString("What they changed:\n\n```\n" + stat + "\n```\n\n")
+	}
+}
+
 // Bug report prompts: the %% guidance a blank bug report carries. The
 // root-cause and fix sections stay open until the plan and
 // implement stages fill them — a source seeds symptoms, not the why or the how.
@@ -634,6 +674,7 @@ func renderBug(f *domain.Feature, r domain.BugReport, prov domain.BugProvenance,
 		fmt.Fprintf(&b, "> %s\n\n", f.OneLiner)
 	}
 	renderBugProvenance(&b, prov, sev)
+	renderAdopted(&b, prov.Adopted)
 
 	// Summary, plus any open questions the source or triage flagged. Each
 	// question is its own thread (a content line + %% flag), matching the

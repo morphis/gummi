@@ -268,7 +268,51 @@ func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []
 			hints = append(hints, verifyHint(f.Kind))
 		}
 	}
+	// An adopted card's every stage opens onto work it did not write, and
+	// the contract above was written for a branch that started empty. This
+	// says what is different, once, after the stage's own contract rather
+	// than inside each kind's copy of it.
+	if f.Adopted() {
+		hints = append(hints, adoptedHint(f))
+	}
 	return hints
+}
+
+// adoptedHint is what a stage is told when its card was minted onto a
+// branch gummi did not cut (DESIGN §10 D22).
+//
+// The contracts above all assume a branch that began empty: plan writes a
+// design for work not yet done, implement writes that work, verify proves
+// it. On an adopted card each of those meets code that was already there,
+// written by somebody with reasons this conversation never heard — so the
+// failure mode to guard against is not sloppiness, it is confidence: an
+// agent that reads unfamiliar code as wrong and rewrites it, losing the
+// point of the branch while every check still passes.
+func adoptedHint(f domain.Feature) string {
+	return strings.TrimSpace(`
+This card was minted onto the existing branch ` + "`" + f.BranchName() + "`" + `, which
+gummi did not create and which already carries somebody else's commits
+(see the artifact's "Inherited work" section, and read the diff before
+anything else — it is the real starting point, not a blank branch).
+
+What that changes:
+  - The work you were asked for is ON TOP of what is there. Existing
+    commits are not yours to discard, rewrite wholesale, or "clean up"
+    in passing. Where the inherited approach looks wrong, say so — in
+    the spec at plan, in a marker thread later — and let the human
+    decide; do not silently replace it.
+  - Never rebase, reset, amend, force-push or otherwise rewrite this
+    branch's history. It may already be pushed, and other people may be
+    reading it. Add commits; that is all.
+  - Anything already broken here is not this card's fault and not this
+    card's job. gummi recorded what was failing when the branch was
+    adopted and will hold you only to what the rework changes. Fixing
+    an unrelated pre-existing failure is scope you were not given —
+    note it instead.
+  - Where diff annotations are present, they are review comments from
+    the branch's own pull request. Treat them as the human's words,
+    because they are, and address them as written rather than as you
+    would have written them.`)
 }
 
 // verificationPlanHint is the Verification plan rubric, shared by both

@@ -179,7 +179,7 @@ func runBugIngest(args []string) error {
 				return nil
 			}
 		}
-		return materializeBugs(ctx, be, []domain.BugProposal{prop}, *f.targetRepo, "")
+		return materializeBugs(ctx, be, []domain.BugProposal{prop}, *f.targetRepo, "", adoption{})
 	}
 
 	renderBugProposals(os.Stdout, res)
@@ -194,7 +194,7 @@ func runBugIngest(args []string) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo, "")
+	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo, "", adoption{})
 }
 
 // selectIssue resolves a GitHub issue number against a single
@@ -235,6 +235,7 @@ func ingestGitHubSource(repo, label, state string, comments bool, dir string) en
 type bugNewFlagValues struct {
 	title, oneLiner, severity, repro, expected, actual, env, desc *string
 	profile, repo, base                                           *string
+	adopt, pr                                                     *string
 	envelope                                                      *int
 	yes                                                           *bool
 }
@@ -257,6 +258,8 @@ func registerBugsNewFlags(fs *flag.FlagSet) *bugNewFlagValues {
 		envelope: fs.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
 		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)"),
 		base:     fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)"),
+		adopt:    fs.String("adopt", "", "mint the bug onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it"),
+		pr:       fs.String("pr", "", "mint the bug onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations"),
 		yes:      fs.Bool("yes", false, "create without the confirmation prompt"),
 	}
 }
@@ -267,7 +270,7 @@ func runBugNew(args []string) error {
 	fs := flag.NewFlagSet("bugs new", flag.ContinueOnError)
 	f := registerBugsNewFlags(fs)
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--repo r] [--base b] [--envelope n] [--yes]")
+		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--repo r] [--base b] [--adopt branch | --pr url] [--envelope n] [--yes]")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -276,6 +279,10 @@ func runBugNew(args []string) error {
 	if strings.TrimSpace(*f.title) == "" {
 		fs.Usage()
 		return fmt.Errorf("bugs new needs a --title")
+	}
+	adopted, err := resolveAdoption(*f.adopt, *f.pr, *f.repo)
+	if err != nil {
+		return err
 	}
 
 	be, err := openBugEnv(*f.profile, *f.envelope)
@@ -309,12 +316,23 @@ func runBugNew(args []string) error {
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, *f.repo, *f.base)
+	return materializeBugs(ctx, be, res.Proposals, *f.repo, *f.base, adopted)
 }
 
 // materializeBugs mints the proposals and prints what was created.
-func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo, base string) error {
-	created, err := be.eng.MaterializeBugs(ctx, props, engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo, Base: base})
+func materializeBugs(ctx context.Context, be *bugEnv, props []domain.BugProposal, repo, base string, adopt adoption) error {
+	opts := engine.MaterializeOpts{Profile: be.profile, Envelope: be.env, Repo: repo, Base: base, Adopt: adopt.Branch}
+	if adopt.Branch != "" {
+		// The same inspection cardmint's callers run, asked here because
+		// this mint path does not go through cardmint: the branch has to
+		// exist and carry work before a bug is minted onto it.
+		w, ierr := be.eng.AdoptInspector(ctx, repo, base)(adopt.Branch)
+		if ierr != nil {
+			return ierr
+		}
+		opts.AdoptedWork = w
+	}
+	created, err := be.eng.MaterializeBugs(ctx, props, opts)
 	for _, f := range created {
 		fmt.Printf("  %s  %s\n", f.ID, clean(f.Title))
 	}

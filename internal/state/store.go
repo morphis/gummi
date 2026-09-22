@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS features (
 	research_mode   TEXT NOT NULL DEFAULT '',
 	base            TEXT NOT NULL DEFAULT '',
 	branch_scheme   TEXT NOT NULL DEFAULT '',
+	branch          TEXT NOT NULL DEFAULT '',
 	stack_id        TEXT NOT NULL DEFAULT '',
 	stack_pos       INTEGER NOT NULL DEFAULT 0
 );
@@ -734,6 +735,10 @@ var migrations = []string{
 	// and why an existing card's branch is never renamed underneath it.
 	`ALTER TABLE features ADD COLUMN base TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN branch_scheme TEXT NOT NULL DEFAULT ''`,
+	// The ref an adopted card was minted onto (DESIGN §10 D22). Empty
+	// means the card's branch is derived from its scheme, which is every
+	// card written before adoption existed — so again, no backfill.
+	`ALTER TABLE features ADD COLUMN branch TEXT NOT NULL DEFAULT ''`,
 	// Stack membership and order (internal/domain/stack.go). Empty stack
 	// id reads as "not stacked", which every pre-existing card is.
 	`ALTER TABLE features ADD COLUMN stack_id TEXT NOT NULL DEFAULT ''`,
@@ -775,8 +780,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			pr_repo, pr_number, pr_url, pr_head_sha,
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode,
-			base, branch_scheme, stack_id, stack_pos)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			base, branch_scheme, branch, stack_id, stack_pos)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -789,7 +794,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
 		string(f.Mode),
-		f.Base, f.BranchScheme, string(f.StackID), f.StackPos)
+		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -814,7 +819,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	pr_repo, pr_number, pr_url, pr_head_sha,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
-	base, branch_scheme, stack_id, stack_pos`
+	base, branch_scheme, branch, stack_id, stack_pos`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -854,7 +859,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
-		&f.Base, &f.BranchScheme, &stackID, &f.StackPos)
+		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos)
 	if err != nil {
 		return f, err
 	}

@@ -63,7 +63,7 @@ Other `run` flags:
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
 | `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands (a goal not yet ready is abandoned) |
-| `gummi clean <id\|ref>` | remove a landed card's worktree and branch (a goal: its cards' come out with it) |
+| `gummi clean <id\|ref>` | remove a landed card's worktree and branch (a goal: its cards' come out with it; an adopted card keeps its branch) |
 | `gummi pr link\|unlink\|status\|comments <id> [flags]` | link a card to a PR you opened, or read its status and review comments |
 | `gummi deps add\|rm <dependent> <depends-on>`, `gummi deps list <id>` | dependency edges between cards |
 | `gummi ingest [flags] <spec-file>` | decompose a spec into feature proposals and materialize them |
@@ -450,6 +450,40 @@ gummi squash FD-042 -m "feat(export): add a --format=json flag"
 its own branch with your message. It touches no PR, remote or main
 checkout, moves no stage, and has no precondition. A clean worktree is a
 no-op, reported as such.
+
+## Adopting a branch or a PR
+
+A card can be minted **onto** a branch gummi did not cut, and rework it in
+place (DESIGN §10 D22):
+
+```sh
+gummi run --adopt feat/their-parser --envelope 500 "finish the empty-case handling"
+gummi run --pr 412 --envelope 500 "address the review comments"
+gummi bugs new --title "Parser drops empty input" --adopt fix/parser --envelope 300
+```
+
+`--adopt <branch>` takes a local branch as it stands. `--pr <url|number>`
+resolves the pull request, fetches its head branch locally (a fork's
+included — the local copy is named `pr-<N>-<branch>` and the result is a
+branch you own, since gummi cannot write to somebody else's fork), links
+the card to the PR and ingests its unresolved review threads as diff
+annotations before the first stage runs. Both refuse before a card is
+minted if the branch is missing, is checked out elsewhere, carries no
+commits of its own, shares no history with the base, or already belongs to
+another card — one branch, one card.
+
+The card then runs the ordinary graph. There is no fast lane: `plan` reads
+the inherited diff and designs the rework against it, which is what keeps
+the quality floor true for code gummi did not write.
+
+Four rules apply to an adopted branch for as long as the card exists:
+
+| rule | what it means |
+|---|---|
+| never deleted | `clean` removes the worktree and keeps the branch; the `cleaned` event carries `"branch_kept": true` |
+| never rewritten | no rebase, reset or force-push; the card reports how far behind its base it is and works where it stands |
+| not blamed for what it inherited | the approval baseline records what was already failing, and verify holds the card only to what the rework broke |
+| handed back by default | `gummi handoff <id>` is the expected ending; `gummi merge` still works and is a deliberate act |
 
 ## Dependencies
 

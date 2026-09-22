@@ -63,14 +63,29 @@ func runRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	adoption, err := resolveAdoption(*rv.adopt, *rv.pr, *rv.repo)
+	if err != nil {
+		return err
+	}
+	opts.Adopt = adoption.Branch
 
-	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store, ws state.Workspace) (driver.Outcome, error) {
+	return withRunEngine(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		// mint the card first, then take its per-card lock for the drive so
 		// this run is the sole governor of the card it just created (two
 		// runs mint disjoint cards and so never contend on each other's lock).
 		f, err := d.Create(ctx, domain.CardType{Kind: domain.KindFeature}, desc)
 		if err != nil {
 			return driver.Outcome{}, err
+		}
+		// A card adopted from a pull request is linked to it and carries its
+		// review comments before the first stage reads anything — see
+		// linkAdoptedPR for why that ordering is the point.
+		if adoption.HasPR() {
+			if wt, werr := d.Worktrees(ctx, &f); werr == nil {
+				linkAdoptedPR(ctx, store, wt, &f, adoption.PR)
+			} else {
+				fmt.Fprintf(os.Stderr, "warning: %s could not be linked to %s: %v\n", f.ID, adoption.PR.URL, werr)
+			}
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
@@ -98,6 +113,8 @@ type runFlagValues struct {
 	repo, until, base              *string
 	autonomous, verbose            *bool
 	timeout                        *time.Duration
+	adopt                          *string
+	pr                             *string
 }
 
 // registerRunFlags binds `gummi run`'s flags onto fs and returns their
@@ -117,6 +134,8 @@ func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
 		base:       fs.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)"),
 		acceptance: fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)"),
 		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
+		adopt:      fs.String("adopt", "", "mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it"),
+		pr:         fs.String("pr", "", "mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations"),
 	}
 }
 

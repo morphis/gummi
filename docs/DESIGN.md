@@ -1339,7 +1339,16 @@ have.
   annotations — but gummi still never writes to GitHub: no PR creation,
   no push, no merge, no base retarget, no thread resolution, no CI
   gating. Pushing a replayed branch is a `git push --force-with-lease`
-  gummi prints and never runs.
+  gummi prints and never runs. **Adoption** (decision 22) widens which
+  branches gummi may work on without widening what it may do to GitHub: a
+  card can be minted onto a branch gummi did not cut, and for a pull
+  request gummi will fetch that PR's head into a local branch — a read of
+  a remote ref and a write to your own repository, nothing more. It still
+  never pushes, never opens or retargets a PR, never resolves a thread,
+  and — new with adoption — never deletes or rewrites a branch it took
+  custody of. A fork's PR can be adopted and reworked; the result is a
+  local branch you own, and gummi says so rather than implying the work
+  can travel back to a fork it cannot write to.
 - Not a process editor — one workflow, compiled in. If the workflow needs
   changing, that's a gummi release, not a config file.
 - Not a second driver — a hosted agent acts on the running board through
@@ -1679,6 +1688,44 @@ Decided in the design interview (2026-07-03):
     event, because a pass that never compiled three of the branch's
     files is a pass about the other files and the caller cannot
     otherwise tell.
+22. **gummi may take custody of a branch it did not cut**, decided
+    2026-09-22. Until then every branch on the board was one gummi
+    created from a base it chose, and work that arrived any other way —
+    a colleague's half-finished branch, a PR sitting under review — could
+    be reached only by starting a fresh card and hunting the branch down
+    by hand. A card may now be minted **onto** an existing branch
+    (`--adopt <branch>`, or `--pr <url|number>` for the branch behind a
+    pull request): gummi attaches a worktree to that ref instead of
+    cutting a new one, and the card's stages read and extend the work
+    already there. Six rules bound it, and together they are what keep
+    *custody* from becoming *ownership*:
+    - **It works on the branch itself, not a copy.** A copy would be the
+      safer-looking choice and the wrong one: the branch a reviewer is
+      reading is the branch the rework has to improve, and a second
+      branch beside it is a reconciliation problem handed back to the
+      person who asked for help.
+    - **It never deletes one.** `clean` removes a landed card's worktree
+      and its branch; for an adopted card it removes the worktree and
+      stops. The branch was never gummi's to destroy.
+    - **It never rewrites one unasked.** An inherited branch is usually
+      old, and gummi says how far behind its base it is rather than
+      catching it up: a rebase here rewrites commits that may already be
+      pushed and read by other people. Catching up stays the manual
+      rebase it always was, with a warning naming the risk.
+    - **It still walks the whole graph.** `todo → plan → implement →
+      verify`, unchanged and unskipped. The plan stage reconstructs the
+      spec by reading the diff it inherited — which is what keeps
+      decision 3's floor true for code gummi did not write, rather than
+      carving the first hole in it.
+    - **The ending is the hand-off, not the squash.** An adopted card
+      finishes at a verified branch that is handed back (§14's `handoff`);
+      landing it is still available and still a deliberate act. Squashing
+      somebody else's commits into one of yours is not a default.
+    - **What was already broken is not the card's fault.** The approval
+      baseline (decision 7) runs the checks on the worktree before the
+      card changes anything, which for an adopted card is precisely the
+      state it inherited — so verify holds it to what the rework broke
+      and no more, and the hand-off says plainly what was red on arrival.
 
 Still open:
 

@@ -70,10 +70,12 @@ failure can never be mistaken for a drive's typed status.
 ```
 gummi run [flags] "<description>"
     --acceptance string       acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)
+    --adopt string            mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --base string             branch the card's work forks from and lands on (default: whatever the repository has checked out)
     --envelope int            credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)
+    --pr string               mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
     --repo string             managed repository to create the card in (a configured repos: name; required when repos: is configured)
