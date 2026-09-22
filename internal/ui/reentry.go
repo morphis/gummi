@@ -105,6 +105,17 @@ func (m *Shell) routeReentry(r featureRow, fallback, note string) tea.Cmd {
 	if sess := m.sessionFor(r.F.ID); sess != nil && sess.Live() {
 		return m.sendThreadMessage(r.F, note)
 	}
+	if fallback == "newbug" {
+		// "open a bug from this" is not a sentence to be read first. The
+		// row IS the composer's words (decision.go's wordConsumer), and
+		// the card it is offered on has ended: there is no stage to
+		// rewind to, no rerun edge out of done, and nobody live to turn
+		// the line into. Every intent the classifier can name routes
+		// nowhere from here, so reading it bought a scribe turn and some
+		// seconds to arrive back at this same row — and, before the case
+		// below existed, to fall off the end of it.
+		return m.fixedSendBack(r, fallback, note)
+	}
 	eng := m.engine
 	if eng == nil {
 		return m.fixedSendBack(r, fallback, note)
@@ -369,11 +380,11 @@ func (m *Shell) commitRewind(f domain.Feature, out reentry.Outcome) tea.Cmd {
 // not run.
 //
 // It switches on the row's own id rather than on the stage, because the
-// id IS the delivery (nextsteps.go's sendBack comment) and these three
-// are exactly the three deliveries deliverDecisionWords has always
-// known. An id that is none of them routes nowhere rather than picking
-// one — a fallback that guessed would be the invented action §6.3
-// forbids, only harder to notice.
+// id IS the delivery (nextsteps.go's sendBack comment) and these four
+// are exactly the four deliveries deliverDecisionWords knows. An id that
+// is none of them routes nowhere rather than picking one — a fallback
+// that guessed would be the invented action §6.3 forbids, only harder to
+// notice.
 func (m *Shell) fixedSendBack(r featureRow, id, note string) tea.Cmd {
 	switch id {
 	case "bounce":
@@ -385,6 +396,15 @@ func (m *Shell) fixedSendBack(r featureRow, id, note string) tea.Cmd {
 			return nil
 		}
 		return m.sendThreadMessage(r.F, note)
+	case "newbug":
+		// The follow-up is a delivery like the other three, and it was
+		// the one this switch did not know: wordConsumer aims a typed
+		// line at the row, the row relabels itself "with your words" and
+		// the bar names it, and then enter fell through here and returned
+		// nil. The line cleared the composer and nothing at all happened.
+		// An empty note keeps the row's own answer (followup.go says what
+		// it wants), rather than the silence every other id here avoids.
+		return m.bugFromLine(r, note)
 	}
 	return nil
 }

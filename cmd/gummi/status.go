@@ -168,8 +168,9 @@ type statusView struct {
 	// passes as one figure. Rounds above says how many passes that is, and
 	// `stats` (under --stats) says what each of them cost.
 	StageSpend []statusStageSpend `json:"stage_spend,omitempty"`
-	// GoalID is the goal this card belongs to; FoundBy the goal that filed
-	// it as found along the way. Both absent on an ordinary card.
+	// GoalID is the goal this card belongs to; FoundBy the card this one
+	// was filed from — a goal that found it along the way, or the finished
+	// card this is a follow-up to. Both absent on an ordinary card.
 	GoalID  string `json:"goal_id,omitempty"`
 	FoundBy string `json:"found_by,omitempty"`
 	// Stats is where this card's credits and hours went — its passes, what

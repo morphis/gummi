@@ -149,8 +149,10 @@ type Input struct {
 	// goal branch and its budget is carved out of the goal's. Empty mints
 	// an open-board card. A goal cannot be minted into a goal.
 	Goal domain.FeatureID
-	// FoundBy records the goal that filed this open-board card as found
-	// along the way. Ignored when Goal is set.
+	// FoundBy records the card that filed this one: a goal that found the
+	// work along the way, or a finished card whose follow-up this is.
+	// Provenance only — it blocks and schedules nothing. Ignored when
+	// Goal is set.
 	FoundBy domain.FeatureID
 	// GoalDoc, for a goal, is a complete goal doc to start from (headless
 	// --plan-file) instead of the template seeded with the description.

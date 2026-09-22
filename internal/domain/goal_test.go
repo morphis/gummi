@@ -51,6 +51,23 @@ func TestFeatureValidateGoalLinks(t *testing.T) {
 	if err := f.Validate(); err != nil {
 		t.Fatalf("found-by a goal is valid: %v", err)
 	}
+	// Provenance, not a goal link: a finished card's follow-up is filed
+	// from that card, and this used to refuse it — which refused every
+	// bug the closing block's "open a bug from this" row minted.
+	f = base()
+	f.FoundBy = "FD-001"
+	if err := f.Validate(); err != nil {
+		t.Fatalf("found-by a card is valid: %v", err)
+	}
+	f.FoundBy = "FD-002"
+	if err := f.Validate(); err == nil || !strings.Contains(err.Error(), "the card itself") {
+		t.Fatalf("found-by the card itself must be refused, got %v", err)
+	}
+	f.FoundBy = "nonsense"
+	if err := f.Validate(); err == nil {
+		t.Fatalf("found-by a non-id must be refused")
+	}
+	f = base()
 	f.Goal.Lanes = -1
 	if err := f.Validate(); err == nil {
 		t.Fatalf("negative lanes must be refused")

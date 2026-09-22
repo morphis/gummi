@@ -848,8 +848,19 @@ func (f *Feature) Validate() error {
 		}
 	}
 	if f.FoundBy != "" {
-		if _, err := ParseFeatureID(string(f.FoundBy)); err != nil || f.FoundBy.Kind() != KindGoal {
-			return fmt.Errorf("feature %s: found-by %q is not a goal id", f.ID, f.FoundBy)
+		// Any card id, not a goal's: the field means "this came out of
+		// that" (its doc comment above), and a finished card's follow-up
+		// is as much a filing as a goal's is. It was goal-only while a
+		// goal was the only thing that filed cards, and the check outlived
+		// that by a feature — a bug minted from a done card was refused
+		// here, which is the whole "open a bug from this" row.
+		if _, err := ParseFeatureID(string(f.FoundBy)); err != nil {
+			return fmt.Errorf("feature %s: found-by %q is not a card id", f.ID, f.FoundBy)
+		}
+		// Filed from itself is a mint that lost track of its parent, and
+		// it would read as a card that is its own provenance.
+		if f.FoundBy == f.ID {
+			return fmt.Errorf("feature %s: found-by names the card itself", f.ID)
 		}
 	}
 	if f.Goal.Lanes < 0 || f.Goal.Reserve < 0 {
