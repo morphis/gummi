@@ -25,6 +25,15 @@
 // carries no per-sample time — so the window's money is the passes'
 // money, and says so by never claiming to be the total.
 //
+// Tokens follow the credits they were spent with, at both scales: the
+// window's token count covers exactly the passes its credit figure
+// covers, and the all-time count comes off the same rollup rows the
+// all-time credits are read from. They are reported beside credits and
+// never converted into them — a report that quietly priced tokens would
+// be inventing the one figure only a provider can state — and the cache
+// share is named because a window served from the prompt cache spent
+// tokens the bill never saw.
+//
 // The window clock is the card-run clock re-derived over the window
 // rather than summed from the per-card clocks, for one reason: the
 // per-card clock stops a card's life at its last closed session, which

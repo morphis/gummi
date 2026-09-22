@@ -348,3 +348,76 @@ func TestAnAllHistoryRateRunsFromFirstActivity(t *testing.T) {
 		t.Errorf("credits = %.2f, want 2", rep.Credits)
 	}
 }
+
+// TestTokensAreChargedWhereTheCreditsAre pins the token side to the
+// credit side at both scales. The window's tokens must cover exactly
+// the passes its credit figure covers — a pass that started before the
+// window is drawn and charged to neither — while the all-time count is
+// read off the rollup rows, so spend no pass claims (a one-shot's) is
+// in it. The two columns disagreeing is the point: they answer
+// different questions, and each must answer its own the same way its
+// credits do.
+func TestTokensAreChargedWhereTheCreditsAre(t *testing.T) {
+	c := wsCard(10, "metered")
+	pre := base.Add(-2 * time.Hour)
+	inside := base.Add(time.Hour)
+	c.Events = append(c.Events,
+		ev(c, domain.StagePlan, state.EventStageEnter, enterFor("architect"), pre),
+		ev(c, domain.StagePlan, state.EventStageExit, exitPayloadFor(4), pre.Add(time.Hour)),
+		ev(c, domain.StageImplement, state.EventStageEnter, enterFor("implementer"), inside),
+		ev(c, domain.StageImplement, state.EventStageExit, exitPayloadFor(6), inside.Add(time.Hour)),
+	)
+	rows := []state.StageSpend{
+		{Stage: domain.StagePlan, Session: "s1", Role: "architect", Model: "m",
+			Credits: 4, InputTokens: 5000, OutputTokens: 900, UpdatedAt: pre},
+		{Stage: domain.StageImplement, Session: "s2", Role: "implementer", Model: "m",
+			Credits: 6, InputTokens: 1000, CachedTokens: 400, OutputTokens: 200, UpdatedAt: inside},
+		// A one-shot: no session key, so no pass holds it. All-time has
+		// it; the window cannot, having nothing to date it by.
+		{Stage: domain.StageImplement, Role: "scribe", Model: "m",
+			Credits: 1, InputTokens: 300, OutputTokens: 50, UpdatedAt: inside},
+	}
+	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Events: c.Events, Spend: rows})
+	c.Feature.Spend = domain.Spend{Credits: 11}
+
+	rep := fold([]Card{c}, AllTimeRow{Feature: c.Feature, StageSpend: rows})
+
+	want := Tokens{Input: 1000, Cached: 400, Output: 200}
+	if rep.Tokens != want {
+		t.Errorf("window tokens = %+v, want %+v — only the pass that started inside", rep.Tokens, want)
+	}
+	if l := laneOf(t, rep, c.Feature.ID); l.Tokens != want {
+		t.Errorf("lane tokens = %+v, want the same %+v the report summed", l.Tokens, want)
+	}
+	if got, want := rep.Tokens.CacheReadRatio(), 400.0/1400.0; got != want {
+		t.Errorf("cache read ratio = %.4f, want %.4f", got, want)
+	}
+	all := Tokens{Input: 6300, Cached: 400, Output: 1150}
+	if rep.AllTime.Tokens != all {
+		t.Errorf("all-time tokens = %+v, want %+v — every rollup row, the one-shot included", rep.AllTime.Tokens, all)
+	}
+	if rep.AllTime.Tokens.Total() != 7850 {
+		t.Errorf("all-time total = %d, want 7850", rep.AllTime.Tokens.Total())
+	}
+}
+
+// TestATokenlessBackendSaysNothingRatherThanZero: a backend that never
+// reports cache reads must not be made to say its cache missed. The
+// ratio is zero either way; Zero is what tells a display which of the
+// two it is holding.
+func TestATokenlessBackendSaysNothingRatherThanZero(t *testing.T) {
+	c := wsCard(11, "silent")
+	c.Events = append(c.Events,
+		ev(c, domain.StageImplement, state.EventStageEnter, enterFor("implementer"), base.Add(time.Hour)),
+		ev(c, domain.StageImplement, state.EventStageExit, exitPayloadFor(3), base.Add(2*time.Hour)),
+	)
+	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Events: c.Events})
+
+	rep := fold([]Card{c})
+	if rep.Credits != 3 {
+		t.Fatalf("credits = %.2f, want 3 — the pass still cost what it cost", rep.Credits)
+	}
+	if !rep.Tokens.Zero() || rep.Tokens.CacheReadRatio() != 0 {
+		t.Errorf("tokens = %+v, want nothing said", rep.Tokens)
+	}
+}

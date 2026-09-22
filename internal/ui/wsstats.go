@@ -443,17 +443,25 @@ func wsWindowLabel(d time.Duration) string {
 // wsHeadlineLines is the one line that says how the fleet is doing, and
 // the estimated footnote when there is one. Every clause is conditional:
 // a board with nothing running reads as quiet, not as a row of zeros.
-// The unit is credits throughout — the columns below print credits, and
-// a headline that converted to dollars over them would be the one
-// figure on the page in a unit none of its arithmetic uses.
+// The arithmetic is credits throughout; the money is printed beside it
+// and never instead of it, the same pairing the ledger below uses, so
+// the page never carries a figure in a unit nothing else on it adds up
+// in.
 func (m *Shell) wsHeadlineLines(rep *fleetrun.Report) []string {
 	s := m.styles
 	var parts []string
 	if rep.Credits > 0 {
-		parts = append(parts, s.CardTitle.Render(fmt.Sprintf("%.2f credits", rep.Credits)))
+		head := fmt.Sprintf("%.2f credits", rep.Credits)
+		if d := wsDollars(rep.Credits); d != "" {
+			head += " " + d
+		}
+		parts = append(parts, s.CardTitle.Render(head))
 		if rep.RateSpan > 0 {
 			parts = append(parts, fmt.Sprintf("%.1f/h", rep.Credits/(rep.RateSpan.Hours())))
 		}
+	}
+	if tok := rep.Tokens.Total(); tok > 0 {
+		parts = append(parts, s.Muted.Render(humanTokens(tok)+" tok"))
 	}
 	if rep.Rework > 0 && rep.Credits > 0 {
 		parts = append(parts, s.Muted.Render(fmt.Sprintf("rework %.0f%%", rep.Rework/rep.Credits*100)))
@@ -769,7 +777,7 @@ func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, laneW int) s
 // doc owns both sentences).
 func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 	s := m.styles
-	if rep.Credits == 0 && rep.AllTime.Credits == 0 {
+	if rep.Credits == 0 && rep.AllTime.Credits == 0 && rep.Tokens.Zero() && rep.AllTime.Tokens.Zero() {
 		return nil
 	}
 	out := []string{" " + s.PaneTitleActive.Render("WHERE IT WENT") +
@@ -796,6 +804,7 @@ func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 		}
 		out = append(out, padRightANSI(l, colW)+r)
 	}
+	out = append(out, m.wsTotalLines(rep, w)...)
 	foot := "  "
 	if rep.Rework > 0 {
 		foot += fmt.Sprintf("rework %.2f of %.2f (%.0f%%) — %.2f corrected · %.2f re-proved",
@@ -803,6 +812,71 @@ func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 		out = append(out, s.Muted.Render(foot))
 	}
 	return out
+}
+
+// wsTotalLines is what the two columns come to: the credits, the money
+// they are worth, and the tokens they were spent with — one row per
+// column, full width rather than inside the columns, because a token
+// clause squeezed into half a modest terminal is the clause that gets
+// truncated first.
+//
+// The rows are labelled "window" and "all-time" for the reason the
+// columns above are: the two figures are attributed differently on
+// purpose (fleetrun's doc owns both rules), so a reader who finds them
+// disagreeing is reading two answers to two questions, not one error.
+func (m *Shell) wsTotalLines(rep *fleetrun.Report, w int) []string {
+	s := m.styles
+	// The figure sits in the bucket rows' own credits column — a total
+	// that did not line up under the rows it totals is one a reader has
+	// to check by eye instead of by adding.
+	row := func(label string, credits float64, tok fleetrun.Tokens) string {
+		line := fmt.Sprintf("  %-10s %s %8.2f credits", label, strings.Repeat(" ", 12), credits)
+		if d := wsDollars(credits); d != "" {
+			line += "  " + d
+		}
+		if c := wsTokenClause(tok); c != "" {
+			line += s.Faint.Render("  ·  ") + s.Muted.Render(c)
+		}
+		return ansi.Truncate(line, max(w-1, 10), "…")
+	}
+	var out []string
+	if rep.Credits > 0 || !rep.Tokens.Zero() {
+		out = append(out, row("window", rep.Credits, rep.Tokens))
+	}
+	if rep.AllTime.Credits > 0 || !rep.AllTime.Tokens.Zero() {
+		out = append(out, row("all-time", rep.AllTime.Credits, rep.AllTime.Tokens))
+	}
+	return out
+}
+
+// wsTokenClause names a token count the way a reader spends it: what
+// went in, what of that the prompt cache served, and what came back.
+// The cache share is there because it is the one part of a token figure
+// that changes what the credits beside it mean — a window mostly served
+// from cache bought its tokens far cheaper than its count suggests. A
+// backend that reports no cache reads says nothing rather than "0%",
+// which would read as a cache that missed.
+func wsTokenClause(t fleetrun.Tokens) string {
+	if t.Zero() {
+		return ""
+	}
+	in := humanTokens(t.Input+t.Cached) + " in"
+	if t.Cached > 0 {
+		in += fmt.Sprintf(" (%.0f%% cached)", t.CacheReadRatio()*100)
+	}
+	return in + " · " + humanTokens(t.Output) + " out"
+}
+
+// wsDollars is a credit figure as money, or empty when it is too small
+// for domain.FormatDollars to render as money at all — that fallback
+// prints credits, and a "(0.05 credits)" beside a credits figure would
+// say the same thing twice.
+func wsDollars(credits float64) string {
+	d := domain.FormatDollars(credits)
+	if !strings.HasPrefix(d, "$") {
+		return ""
+	}
+	return d
 }
 
 // wsBucketLines is one column's rows: name, a magnitude bar, the

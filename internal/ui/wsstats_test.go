@@ -288,3 +288,63 @@ func TestStatsTabArrivesMeasured(t *testing.T) {
 		t.Error("the tab is still marked measuring after its report landed")
 	}
 }
+
+// TestTheStatsTabPrintsCostAndTokens: the ledger has to answer what the
+// board cost in money and what it spent in tokens, for the window and
+// for all time. Credits alone are a unit nobody is billed in, and a
+// token figure without its cache share overstates what was paid for.
+func TestTheStatsTabPrintsCostAndTokens(t *testing.T) {
+	w := wsTestWindow()
+	c := wsTestCard(1, "dark mode")
+	c.Events = append(c.Events,
+		wsTestEvent(c, domain.StageImplement, state.EventStageEnter, wsEnter("implementer"), wsTestBase),
+		wsTestEvent(c, domain.StageImplement, state.EventStageExit, wsExit(120), wsTestBase.Add(2*time.Hour)),
+	)
+	rows := []state.StageSpend{{
+		Stage: domain.StageImplement, Session: "s1", Role: "implementer", Model: "fake-model",
+		Credits: 120, InputTokens: 600_000, CachedTokens: 400_000, OutputTokens: 50_000,
+		UpdatedAt: wsTestBase,
+	}}
+	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Events: c.Events, Spend: rows})
+	c.Feature.Spend = domain.Spend{Credits: 120}
+	rep := fleetrun.Fold(fleetrun.Input{
+		Now: w.To, Window: w, Cards: []fleetrun.Card{c},
+		Rows: []fleetrun.AllTimeRow{{Feature: c.Feature, StageSpend: rows}},
+	})
+
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.wsstats = &wsStatsView{preset: wsDefaultPreset, follow: true, rep: &rep}
+	out := stripANSI(m.wsStatsRender(120, 40))
+
+	for _, want := range []string{
+		"$1.20",              // 120 credits, in the unit the bill uses
+		"1.0M in",            // fresh input plus what the cache served
+		"(40% cached)",       // the share that changes what the credits mean
+		"50.0k out",          //
+		"window", "all-time", // one row per column, attributed apart
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("ledger lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestTheLedgerSaysNothingAboutACacheItWasNeverTold: a backend that
+// reports no cache reads leaves the clause off entirely — "(0% cached)"
+// would read as a cache that missed every time.
+func TestTheLedgerSaysNothingAboutACacheItWasNeverTold(t *testing.T) {
+	if got := wsTokenClause(fleetrun.Tokens{Input: 1000, Output: 200}); got != "1.0k in · 200 out" {
+		t.Errorf("token clause = %q, want no cache clause", got)
+	}
+	if got := wsTokenClause(fleetrun.Tokens{}); got != "" {
+		t.Errorf("token clause of nothing = %q, want empty", got)
+	}
+	// A figure too small to be money reads as credits already; printing
+	// the fallback beside the credits would say it twice.
+	if got := wsDollars(0.01); got != "" {
+		t.Errorf("sub-cent dollars = %q, want nothing", got)
+	}
+	if got := wsDollars(120); got != "$1.20" {
+		t.Errorf("dollars = %q, want $1.20", got)
+	}
+}

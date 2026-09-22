@@ -105,6 +105,11 @@ type Lane struct {
 	// on its own run tab.
 	Credits, Redo float64
 
+	// Tokens is what those same passes spent in tokens. It is charged by
+	// the lane and on the same condition as Credits, so the two can
+	// never come to cover different passes.
+	Tokens Tokens
+
 	// Running is whether a session is still live at the right edge.
 	Running bool
 
@@ -118,6 +123,43 @@ type Lane struct {
 	Note string
 }
 
+// Tokens is a token count split the way the adapters report it: input
+// the provider read fresh, input it served from the prompt cache, and
+// output. It is a separate figure from credits and not a second way of
+// spelling them — a provider bills what it bills, and a window whose
+// cache did the work costs less than its token count suggests.
+type Tokens struct {
+	Input, Cached, Output int64
+}
+
+// Total is every token the report accounts for, both sides of the
+// conversation.
+func (t Tokens) Total() int64 { return t.Input + t.Cached + t.Output }
+
+// Zero reports a count with nothing in it — a window whose passes ran
+// on a backend that never said, as much as one where nothing ran.
+func (t Tokens) Zero() bool { return t.Total() == 0 }
+
+// CacheReadRatio is the share of the input side served from the prompt
+// cache. It is cardrun.Money.CacheReadRatio one scale up, deliberately
+// the same arithmetic: two surfaces that meant different things by
+// "cached" would be worse than one that said nothing. Zero when the
+// backend reports no cache reads, which is not the same as a cache that
+// never hit.
+func (t Tokens) CacheReadRatio() float64 {
+	in := t.Input + t.Cached
+	if in <= 0 {
+		return 0
+	}
+	return float64(t.Cached) / float64(in)
+}
+
+func (t *Tokens) add(o Tokens) {
+	t.Input += o.Input
+	t.Cached += o.Cached
+	t.Output += o.Output
+}
+
 // AllTime is the ledger the window sits beside: the workspace's own
 // counters, folded over every card the board holds. Unlike the window
 // figures it needs no attribution rule — the counters are already
@@ -127,6 +169,11 @@ type AllTime struct {
 	ByEnding               map[domain.Ending]int
 	Credits, Estimated     float64
 	ByStage, ByModel       []cardrun.Bucket
+
+	// Tokens is every token the board's rollup rows hold, which is the
+	// token side of the same counters Credits comes from: whole-card
+	// totals, no attribution rule, non-pass turns included.
+	Tokens Tokens
 }
 
 // Report is the workspace's fold: the window money, the window clock,
@@ -145,6 +192,12 @@ type Report struct {
 	Credits, Estimated          float64
 	Rework, Corrected, Reproved float64
 	ByStage, ByModel            []cardrun.Bucket
+
+	// Tokens is what the window's passes spent in tokens, summed off the
+	// lanes. It covers the passes Credits covers and nothing else, which
+	// is why it may read lower than the all-time column's token figure
+	// on a board whose spend is not all passes.
+	Tokens Tokens
 
 	// The window clock, summed across the window's cards: agent working,
 	// waiting on a person, nothing running and nobody asked, and the
@@ -201,6 +254,7 @@ func Fold(in Input) Report {
 	for _, l := range rep.Lanes {
 		rep.Credits += l.Credits
 		rep.Rework += l.Redo
+		rep.Tokens.add(l.Tokens)
 		if l.Running {
 			rep.Running++
 		}
@@ -294,6 +348,7 @@ func buildLane(c Card, w Window, now time.Time) (Lane, bool) {
 		// package doc owns the rule), and the lane keeps its own share.
 		if w.Contains(s.Started) {
 			l.Credits += s.Credits
+			l.Tokens.add(Tokens{Input: s.InputTokens, Cached: s.CachedTokens, Output: s.OutputTokens})
 			if s.Redo {
 				l.Redo += s.Credits
 			}
@@ -612,9 +667,15 @@ func allTime(rows []AllTimeRow) AllTime {
 		}
 		a.Credits += r.Feature.Spend.Credits
 		a.Estimated += r.Feature.Spend.EstimatedCredits
+		// Tokens come off the rollup rows rather than the feature's own
+		// counters, which carry no cached figure: one source for all
+		// three numbers beats a total and a cache share that were
+		// measured differently. The rows are written beside every
+		// AddSpend, so the two agree on what they both hold.
 		for _, s := range r.StageSpend {
 			bs[string(s.Stage)] += s.Credits
 			bm[s.Model] += s.Credits
+			a.Tokens.add(Tokens{Input: s.InputTokens, Cached: s.CachedTokens, Output: s.OutputTokens})
 		}
 	}
 	a.ByStage, a.ByModel = cardrun.Buckets(bs), cardrun.Buckets(bm)
