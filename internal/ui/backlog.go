@@ -95,6 +95,60 @@ func (m *Shell) stepCard(delta int) tea.Cmd {
 		m.saveThreadDraft(from.F.ID)
 	}
 	m.moveSel(delta)
+	return m.arriveOnCard()
+}
+
+// jumpToCard lands on id's page from wherever the reader is — the same
+// arrival J/K performs, aimed at a named card rather than at a
+// direction. It opens the page when there is not one open already, since
+// the act that asks for a jump can be raised from the board as well.
+//
+// It answers false for a card the board does not hold, so a caller can
+// say so rather than silently leaving the reader where they were. Every
+// caller reaches this AFTER a row load: a card minted by a command does
+// not exist on this board until its reload lands (shell.go's
+// openOnLoad).
+func (m *Shell) jumpToCard(id domain.FeatureID) (tea.Cmd, bool) {
+	at := -1
+	for i := range m.rows {
+		if m.rows[i].F.ID == id {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return nil, false
+	}
+	if from, ok := m.selected(); ok && from.F.ID != id {
+		// leaving a card is leaving its conversation, the way picking a
+		// row is (decision.go's answerDecision) — the next line typed on
+		// the card arrived at is read, not continued from a thread it was
+		// never part of.
+		m.saveThreadDraft(from.F.ID)
+		m.endChat(from.F.ID)
+	}
+	m.sel = at
+	if !m.cardOpen {
+		// openCard clears the surface's notice on arrival, which is right
+		// for a keystroke that opens a page and wrong for a jump: the
+		// message that CAUSED the jump ("BG-002 created") is the one the
+		// reader needs on the page they land on, and it was raised a tick
+		// earlier by whatever asked for the jump.
+		notice := m.notice
+		cmd := m.openCard()
+		m.notice = notice
+		return cmd, true
+	}
+	return m.arriveOnCard(), true
+}
+
+// arriveOnCard is the per-card half of opening a page, for a cursor that
+// has already moved: the action list resets, the thread opens at its own
+// end with its own draft in the box, a tail left running on the card
+// being left is stopped, and the newly selected card's event log is
+// fetched. stepCard and jumpToCard share it so a card reached by a jump
+// cannot arrive in a different state from one reached with J/K.
+func (m *Shell) arriveOnCard() tea.Cmd {
 	m.actionCursor = 0
 	m.actionsExpanded = false
 	// the next card is a different conversation; it opens at its own end

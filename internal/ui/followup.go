@@ -130,6 +130,10 @@ func (m *Shell) mintBugFromCard(parent domain.Feature, line string, landed bool)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return cardCreatedMsg{f: f}
+		// open: the follow-up is the card the reader is now working on —
+		// the sentence they just typed is its whole content, and the card
+		// they typed it at has ended. Leaving the cursor on the finished
+		// card would answer a mint with a page that cannot act on it.
+		return cardCreatedMsg{f: f, open: true}
 	}
 }

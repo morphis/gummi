@@ -139,6 +139,9 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	if msg.fromPicker && m.bugIngest != nil {
 		m.bugIngest.markOnBoard(msg.f.ExternalRef, msg.f.ID)
 	}
+	if msg.open {
+		m.openOnLoad = msg.f.ID
+	}
 	cmds := []tea.Cmd{m.loadRows}
 	if msg.start {
 		cmds = append(cmds, m.openAutopilot(msg.f))

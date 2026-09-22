@@ -405,6 +405,14 @@ type cardCreatedMsg struct {
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
 	warn  string // a dependency edge that could not be written
+	// open asks the shell to land on the new card once the reload that
+	// puts it on the board arrives (shell.go's openOnLoad). Set by the
+	// follow-up, which is minted from the page of the card it came out
+	// of: the reader typed what is wrong with finished work, and the
+	// card holding that sentence is the one they are now on. A card
+	// created from the board's own form leaves it false — the form was
+	// opened from the board and answers back to it.
+	open bool
 }
 
 // createCard mints a card of any kind through cardmint.Mint — the same

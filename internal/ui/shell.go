@@ -126,6 +126,13 @@ type Shell struct {
 	// closeCard stashes on the way out. Without this a line typed on one
 	// card was still sitting in the box on the next one (F5).
 	threadDrafts map[domain.FeatureID]string
+	// openOnLoad is a card to land on once the next row load arrives,
+	// empty when the cursor simply stays where it was. A card minted by a
+	// command does not reach m.rows until that reload lands, so the act
+	// that created it cannot select it itself — it names it here instead
+	// and the rowsMsg arm performs the jump (followup.go's mint is the
+	// one writer).
+	openOnLoad domain.FeatureID
 
 	// bounceNotes holds the line the composer aimed at a decision's
 	// bounce answer: the card is rewound now, but its reborn work stage
@@ -1676,6 +1683,16 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rows = msg.rows
 		m.stackRows = msg.stacks
 		m.restoreSel(was)
+		var jump tea.Cmd
+		if id := m.openOnLoad; id != "" {
+			// A card minted since the last load: this is the first moment
+			// it is on the board, so it is the first moment it can be
+			// landed on. Cleared whether or not it is there — a card that
+			// failed to appear must not have every later reload yank the
+			// cursor off whatever the reader has since selected.
+			m.openOnLoad = ""
+			jump, _ = m.jumpToCard(id)
+		}
 		// the action cursor belongs to whichever card is selected, so it
 		// resyncs whether or not the selection survived.
 		m.syncActionFocus()
@@ -1689,7 +1706,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// worktree is far too expensive to repeat on every reload, and a
 		// figure that is one landing stale is still the right order of
 		// magnitude for the decision it informs.
-		var cmds []tea.Cmd
+		cmds := []tea.Cmd{jump}
 		if n := landedRows(m.rows); n != m.sizedFor {
 			m.sizedFor = n
 			cmds = append(cmds, m.refreshWorktreeSize())

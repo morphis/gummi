@@ -82,6 +82,33 @@ func TestFollowUpTakesTheTypedLine(t *testing.T) {
 	if bug.FoundBy != "FD-001" {
 		t.Errorf("bug FoundBy = %q, want the card it came from", bug.FoundBy)
 	}
+
+	// the reader is on the new card, not on the finished one they filed
+	// it from: the sentence they typed is this card's whole content, and
+	// the page they were on cannot act on it
+	if !m.cardOpen {
+		t.Error("the mint left the card page")
+	}
+	if got := m.selectedID(); got != bug.ID {
+		t.Errorf("selected %s after the mint, want the new card %s", got, bug.ID)
+	}
+}
+
+// The jump waits for the reload that puts the card on the board, and it
+// is spent there: a card that never appeared must not have every later
+// reload yank the cursor off whatever the reader has since selected.
+func TestFollowUpJumpIsSpentOnce(t *testing.T) {
+	m := handedOffCard(t)
+	m.openOnLoad = "BG-404" // a card no reload will ever carry
+
+	model, _ := m.Update(m.loadRows())
+	m = model.(*Shell)
+	if m.openOnLoad != "" {
+		t.Errorf("openOnLoad survived the load it was meant for: %q", m.openOnLoad)
+	}
+	if got := m.selectedID(); got != "FD-001" {
+		t.Errorf("a jump to a card that is not there moved the cursor to %s", got)
+	}
 }
 
 // The follow-up never spends a classification turn. There is no rerun
