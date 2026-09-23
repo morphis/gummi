@@ -311,6 +311,14 @@ func (m *Shell) handleBoardCompletionKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			m.setBoardLine(c.acceptRow(row))
 			return nil, true
 		}
+		// Recorded the way the typed path records its own line
+		// (handleBoardInputKey's enter): a command chosen from the popup is
+		// still a line the user submitted, and ↑ that skipped it would make
+		// recall depend on whether the popup happened to be open. It goes in
+		// as acceptRow would have spelled it — "/profile fast", not the
+		// "/prof" that was in the box — because the whole point of recall is
+		// getting a runnable line back.
+		m.rememberBoardLine(strings.TrimSpace(c.acceptRow(row)))
 		m.boardComplete = nil
 		m.boardInput.Reset()
 		return m.runBoardCompletion(row), true

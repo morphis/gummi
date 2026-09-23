@@ -192,6 +192,15 @@ type noticeMsg struct {
 	// line is handed off, so the one path that can fail after that hands
 	// it back here.
 	restore string
+	// restoreBoard is restore for the agent tab's composer (boardInput).
+	// It is a second field rather than a flag beside restore because the
+	// two composers are two Shell fields on purpose (see the struct's own
+	// comment): a refused board turn must not be handed back into
+	// whichever card page happens to be open, and a refused card turn must
+	// not appear on the agent tab. The sender knows which composer its
+	// line came from; nothing downstream has to guess from m.tab, which by
+	// then may have moved.
+	restoreBoard string
 }
 
 // boardOpenedMsg carries the result of engine.OpenBoard — boardthread.go's

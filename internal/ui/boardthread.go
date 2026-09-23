@@ -2,12 +2,14 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
@@ -228,7 +230,12 @@ func (m *Shell) boardThreadRender(w, h int, measure bool) string {
 			}
 		}
 		if snap.Busy {
-			add("  " + s.Info.Render(m.spinner()+" thinking…"))
+			// The interrupt hint rides the spinner rather than living in the
+			// key bar alone: this line is where the eye already is while a
+			// turn runs, and a turn running is the only moment the key is
+			// wanted. Faint, because it is an aside to the state, not part
+			// of it.
+			add("  " + s.Info.Render(m.spinner()+" thinking…") + " " + s.Faint.Render("(esc to interrupt)"))
 		}
 	}
 	if len(body) == 0 {
@@ -390,6 +397,121 @@ func (m *Shell) boardOutputsBinding() binding {
 	return binding{key: "alt+o", label: label, help: help, bar: true}
 }
 
+// boardEscBinding is the board composer's esc row. esc has exactly one
+// job on this surface — interrupt a live turn — so the row takes a bar
+// slot only while there is one to interrupt: a bar reading "esc
+// interrupt" over an idle conversation names a key that will do nothing,
+// which is the same promise-a-key-cannot-keep the tab's own chrome is
+// meant to avoid. It stays in the help table in either state, because
+// "esc does not leave this tab" is worth being able to look up.
+//
+// esc deliberately does not clear the draft, though some of the CLIs this
+// surface is modelled on let it: in gummi leaving never discards — the
+// card thread's esc keeps its draft, and so does every tab switch — so an
+// esc that silently emptied this composer would be the one key in the
+// program that throws typing away. ctrl+c is the clear key, and the bar
+// names it as such the moment there is something to clear.
+func (m *Shell) boardEscBinding() binding {
+	return binding{
+		key:   "esc",
+		label: "interrupt",
+		help:  "interrupt the board's in-flight turn — it never leaves the tab and never clears the line (ctrl+c does that)",
+		bar:   m.board != nil && m.board.Snapshot().Busy,
+	}
+}
+
+// boardNewlineBinding is the composer's newline row, in the bar only
+// while there is a draft for a second line to join — the same
+// state-dependent rule boardCancelBinding follows, and for the same
+// reason: on an empty composer the key is trivia, and mid-paragraph it is
+// the thing the user is looking for.
+func (m *Shell) boardNewlineBinding() binding {
+	return binding{
+		key:   "alt+enter",
+		label: "newline",
+		help:  "a line break without sending — ctrl+j and shift+enter do the same, for terminals that report them",
+		bar:   m.boardInput.Value() != "",
+	}
+}
+
+// boardCancelBinding is the board composer's ctrl+c row, naming what the
+// NEXT press of it will do rather than the key's general rule — the same
+// thing boardOutputsBinding does for the outputs toggle, and for the same
+// reason the keyboard-lock badge states what is true now (DESIGN §6): a
+// bar naming a key's other meaning is a bar telling you to press the
+// wrong thing.
+//
+// Only the clear state takes a bar slot. The other two would be naming a
+// key the row above already names (esc, while a turn is in flight) or the
+// one thing every terminal program does anyway (quit), and the row fits
+// about six hints — so those two live in the help table alone, where the
+// full contract is written out once.
+func (m *Shell) boardCancelBinding() binding {
+	switch {
+	case m.boardInput.Value() != "":
+		return binding{
+			key:   "ctrl+c",
+			label: "clear",
+			help:  "empty the composer — the draft is dropped, nothing is sent, and with the line empty the same key interrupts a live turn (or quits when there is none)",
+			bar:   true,
+		}
+	case m.board != nil && m.board.Snapshot().Busy:
+		return binding{
+			key:  "ctrl+c",
+			help: "interrupt the in-flight turn, the same as esc — with nothing typed to clear, the turn is what there is to cancel",
+		}
+	default:
+		return binding{
+			key:  "ctrl+c",
+			help: "quit gummi — with an empty composer and no turn in flight there is nothing on this surface left to cancel",
+		}
+	}
+}
+
+// boardCancelKey answers ctrl+c while the agent tab's composer has the
+// keyboard, and reports whether it claimed the key. It is reached from
+// update's hoisted ctrl+c branch, above the overlay stack, because that
+// is the only place the key is ever seen — handleKey never gets it.
+//
+// The contract is the one every modern coding CLI converged on, read as
+// "cancel what is in front of you", narrowing by what there is to cancel:
+//
+//	a draft in the composer → empty it, and nothing else
+//	nothing typed, a turn in flight → interrupt it (esc's job, same key)
+//	nothing typed, nothing running → quit (the caller's fall-through)
+//
+// The draft wins over the turn deliberately: the line is the thing the
+// user just typed and the only one of the two that is unrecoverable —
+// an interrupted turn can be asked again, a cleared line that was never
+// stored anywhere cannot be got back. Before this, ctrl+c on this surface
+// was quit and only quit, so a composer holding a half-written paragraph
+// had no clear key at all: ctrl+u (the widget's own) deletes to the
+// cursor rather than emptying the box, and the one key a person reaches
+// for out of habit exited the program mid-sentence instead.
+//
+// An open dialog keeps the key: the hoist exists so a modal can never
+// trap the one key every terminal program is expected to answer, and a
+// picker over this tab (/profile, /model) is exactly such a modal.
+func (m *Shell) boardCancelKey() (tea.Cmd, bool) {
+	if m.tab != TabAgent || !m.boardInput.Focused() || m.Overlay.HasDialogs() {
+		return nil, false
+	}
+	// Value(), not TrimSpace(Value()): a box holding only spaces still has
+	// something in it, and a clear key that quits gummi over whitespace
+	// the user cannot see is the same trap this removes.
+	if m.boardInput.Value() != "" {
+		m.boardInput.Reset()
+		// the popup is derived from the line, and the line is now empty —
+		// the same resync every other path that rewrites it runs.
+		m.syncBoardCompletion()
+		return nil, true
+	}
+	if m.board != nil && m.board.Snapshot().Busy {
+		return m.interruptBoardSession(), true
+	}
+	return nil, false
+}
+
 // handleBoardInputKey routes a key while the board thread's composer has
 // the keyboard (shell.go's handleKey, gated on m.tab == TabAgent &&
 // m.boardInput.Focused()).
@@ -438,6 +560,32 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "pgup", "pgdown":
 		m.scrollBoardThread(msg.String() == "pgup")
 		return nil
+	case "alt+enter", "ctrl+j", "shift+enter":
+		// A line break, because enter sends. The composer is DynamicHeight
+		// up to threadInputMaxHeight — built to grow with a paragraph — and
+		// before this the only way to put a second line in it was to paste
+		// one: the widget's own InsertNewline is bound to enter, which this
+		// handler claims for the send, and nothing else offered a newline.
+		//
+		// Three spellings for one job, because a terminal decides which of
+		// them gummi ever sees: shift+enter needs a terminal that reports
+		// modified enter at all, alt+enter is what the card form already
+		// binds (cardform.go), and ctrl+j is the one every terminal can
+		// send. Binding all three costs nothing and means the key a person
+		// tries first is the one that works.
+		m.boardInput.InsertString("\n")
+		// completeSlash refuses anything holding a newline, so the line
+		// that just became two closes the popup — the same resync every
+		// path that rewrites the text runs.
+		m.syncBoardCompletion()
+		return nil
+	case "up", "down":
+		// Recall, and only when there is somewhere to recall from or back
+		// to: an unclaimed key falls through to the widget below, where ↑/↓
+		// move between the rows of a multi-line draft as they always have.
+		if m.boardHistoryRecall(msg.String() == "up") {
+			return nil
+		}
 	case "esc":
 		// Unlike the card thread, where esc leaves the page (its composer
 		// keeps the keyboard for good — threadinput.go's doc comment), the
@@ -461,6 +609,10 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		if text == "" {
 			return nil
 		}
+		// Recorded before the dispatch and for either kind of line: a
+		// command is something the user typed too, and ↑ after a mistyped
+		// "/profle" is exactly when recall earns itself.
+		m.rememberBoardLine(text)
 		// The popup is already closed here (handleBoardCompletionKey above
 		// claims enter for as long as one is open), which is exactly the
 		// hole a completed-but-dismissed command line falls into: "/inbox "
@@ -483,6 +635,83 @@ func (m *Shell) handleBoardInputKey(msg tea.KeyPressMsg) tea.Cmd {
 	// ctrl+u that clears the line, both of which have to close it.
 	m.syncBoardCompletion()
 	return cmd
+}
+
+// boardHistoryMax caps the composer's recall ring. A board conversation
+// is typed in sentences, not keystrokes, so this is generous by orders of
+// magnitude for one session — it exists so a process left open for days
+// has a bound at all, not because anyone will reach it.
+const boardHistoryMax = 200
+
+// rememberBoardLine records a submitted line and puts ↑/↓ back on the
+// live draft. A line identical to the one before it is not recorded
+// twice: a repeated "go on" should be one entry to walk past, not five.
+func (m *Shell) rememberBoardLine(text string) {
+	if n := len(m.boardHistory); n == 0 || m.boardHistory[n-1] != text {
+		m.boardHistory = append(m.boardHistory, text)
+		if len(m.boardHistory) > boardHistoryMax {
+			m.boardHistory = m.boardHistory[len(m.boardHistory)-boardHistoryMax:]
+		}
+	}
+	m.boardHistoryAt = len(m.boardHistory)
+	m.boardHistoryDraft = ""
+}
+
+// boardHistoryRecall answers ↑/↓ in the board composer and reports
+// whether it claimed the key — the recall every coding CLI (and every
+// shell before them) puts on those two keys, which this surface simply
+// did not have: a sent line existed only in the transcript, where it
+// could be read and not re-sent, so the way to fix a typo in a long
+// message was to type the whole thing again.
+//
+// ↑ walks back only from the composer's first row, so the rows of a
+// multi-line draft stay reachable with the same key — the test every
+// shell-style recall uses. ↓ only ever answers while browsing; off the
+// newest entry it hands back the draft browsing interrupted, and from
+// there it is ordinary cursor movement again.
+//
+// Editing a recalled line does not end browsing: ↑ from it steps further
+// back, as readline does. The position resets on submit
+// (rememberBoardLine) and on /clear, never on a keystroke, so there is
+// one rule for where ↑ goes next and it does not depend on what the user
+// did to the line in between.
+func (m *Shell) boardHistoryRecall(up bool) bool {
+	if up {
+		if m.boardInput.Line() > 0 || m.boardHistoryAt == 0 {
+			return false
+		}
+		if m.boardHistoryAt == len(m.boardHistory) {
+			m.boardHistoryDraft = m.boardInput.Value()
+		}
+		m.boardHistoryAt--
+		m.recallBoardLine(m.boardHistory[m.boardHistoryAt])
+		return true
+	}
+	if m.boardHistoryAt >= len(m.boardHistory) {
+		return false
+	}
+	m.boardHistoryAt++
+	if m.boardHistoryAt == len(m.boardHistory) {
+		m.recallBoardLine(m.boardHistoryDraft)
+		m.boardHistoryDraft = ""
+		return true
+	}
+	m.recallBoardLine(m.boardHistory[m.boardHistoryAt])
+	return true
+}
+
+// recallBoardLine installs a line from the history ring. It is
+// setBoardLine (boardcomplete.go) minus the popup, and the difference is
+// the point: that helper exists for a line being TYPED, where re-deriving
+// the popup is what opens the next tier — but a recalled line is already
+// complete, and a popup over it would take ↑/↓ for its own list
+// (handleBoardCompletionKey claims them first) and strand the reader one
+// step into their own history, unable to walk past a "/clear" they once
+// sent. Typing after the recall syncs the popup as usual.
+func (m *Shell) recallBoardLine(text string) {
+	m.boardInput.SetValue(text)
+	m.boardInput.CursorEnd()
+	m.boardComplete = nil
 }
 
 // interruptBoardSession aborts the board session's in-flight turn. A nil
@@ -546,6 +775,11 @@ func (m *Shell) clearBoardConversation() tea.Cmd {
 	m.boardErr = ""
 	m.boardScroll = 0
 	m.boardInput.Reset()
+	// Reset emptied the box, so browsing has nothing left to be standing
+	// in. The ring itself survives: it is what the user typed, not what
+	// the conversation held (see Shell.boardHistory).
+	m.boardHistoryAt = len(m.boardHistory)
+	m.boardHistoryDraft = ""
 	m.notice = noticeMsg{text: "board conversation cleared"}
 	return m.ensureBoardSession()
 }
@@ -579,6 +813,19 @@ func (m *Shell) sendBoardMessage(text string) tea.Cmd {
 			return noticeMsg{text: "the board session was replaced — that line was not sent", isErr: true}
 		}
 		if err := b.Send(context.Background(), text); err != nil {
+			if errors.Is(err, agent.ErrBusy) {
+				// The backend refused a second turn. The board session has
+				// already undone its own half (the echo is back out of the
+				// transcript — engine/boardsession.go's ErrBusy branch);
+				// this is the other half, and the same answer the card
+				// thread gives (sendThreadMessage): the line comes back to
+				// the composer it was typed in rather than being lost to a
+				// clear that happened before the send was known to fail.
+				return noticeMsg{
+					text:         "the board agent is still mid-turn — your line is back in the composer, send it when the turn ends",
+					restoreBoard: text,
+				}
+			}
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return nil

@@ -316,6 +316,21 @@ func (b *BoardSession) Send(ctx context.Context, msg string) error {
 	b.sess.setBusy(true)
 	b.engine.send(Event{Kind: EventBoard})
 	if err := a.Send(ctx, msg); err != nil {
+		// ErrBusy is the backend refusing a SECOND turn, not a broken
+		// session — Engine.Send's own rule for a card (see its ErrBusy
+		// branch), and it costs more here than there, because setError
+		// clears busy: recording a refusal as the session's error dropped
+		// the spinner off a turn that was still streaming, left the echo
+		// of a line the agent never received sitting in the transcript
+		// above it, and reported "a turn is already in progress" as though
+		// the conversation itself had failed. Undo what this call recorded
+		// and hand the refusal back untouched; the UI offers the line
+		// again (boardthread.go's sendBoardMessage).
+		if errors.Is(err, agent.ErrBusy) {
+			b.sess.dropUnsentUser(msg)
+			b.engine.send(Event{Kind: EventBoard})
+			return err
+		}
 		b.sess.setError(err)
 		b.engine.send(Event{Kind: EventBoard})
 		return err

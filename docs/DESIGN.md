@@ -768,8 +768,8 @@ The board sits behind a one-row tab bar shared with the status bar:
 `gummi │ board │ stats │ inbox │ agent │`. `tab` cycles all four;
 `alt+1`/`alt+2`/`alt+3`/`alt+4` jump straight to one — alt-prefixed
 deliberately (the same reasoning as the thread's `alt+o` outputs
-toggle: a plain `ctrl`/bare key a terminal multiplexer or the hosted
-agent tab's own pty might already claim). Both are answered at the top
+toggle: a plain `ctrl`/bare key a terminal multiplexer might already
+claim, and a bare one the agent tab's composer would simply type). Both are answered at the top
 of `handleKey`, above whatever surface holds the keyboard, so a tab is
 always one keystroke away from inside a card's thread, its spec view or
 its diff view. The stats tab is the board's ledger: the same run
@@ -778,83 +778,69 @@ by a pure workspace fold (`fleetrun`) — window and all-time money, the
 clock, and a per-card timeline of sessions, waits and marks. It is a
 tab rather than a board surface for the reason the board is the
 backlog: one list on screen at a time.
-**The keyboard lock.** The agent tab hosts a program with its own
-keymap, which raises the only genuinely hard question in the scheme: a
-hosted CLI wants `tab` for completion, and gummi wants it for the cycle.
-Both cannot have it, and picking either side loses something real —
-giving it to the CLI makes cycling onto the tab a one-way door (press
-`tab` a third time, nothing happens, nothing says why); keeping it means
-the CLI's completion is unreachable.
+**The agent tab is gummi's own conversation.** It used to host a pty
+running the user's own coding CLI, behind a `ctrl+g` keyboard lock that
+existed to settle one fight: a hosted CLI wants `tab` for completion and
+gummi wants it for the cycle, and neither can have it. The pty, its
+picker, its config key and the lock went together once the tab became a
+**board session** instead — gummi's own workspace-scoped conversation
+(`internal/engine/boardsession.go`), drawn by the same transcript
+machinery a card's thread uses and acting on the board through §16's tool
+contract. With no foreign keymap underneath it there is no key left to
+arbitrate: one composer over one transcript, answerable by one ordinary
+binding table like every other surface.
 
-gummi resolves it the way zellij does, with an explicit mode the user
-controls and can see. `ctrl+g` toggles a keyboard **lock** over any
-`tabDef.foreign` tab:
+What the tab does owe is the composer grammar a person arrives with. It
+is the one surface in gummi that *is* a coding-agent prompt, so it
+answers the keys those CLIs converged on:
 
-| | board / stats / inbox | agent, unlocked | agent, **locked** |
-|---|---|---|---|
-| `ctrl+g` | says what it is for | lock | **unlock** |
-| `tab`, `alt+1/2/3/4`, `alt+/` | gummi | gummi | hosted CLI |
-| `?` | gummi (unless typing) | hosted CLI | hosted CLI |
-| `ctrl+c`, `esc`, text | gummi | hosted CLI | hosted CLI |
-| mouse | terminal's own selection | terminal's own selection | hosted CLI |
+| key | agent tab |
+|---|---|
+| `enter` | send the line — a `/…` command word runs, unclaimed slash prose is still a message |
+| `alt+enter`, `ctrl+j`, `shift+enter` | a line break, since `enter` sends; three spellings because the terminal decides which one gummi ever sees |
+| `↑`/`↓` | recall the lines already sent, from the composer's first row, so a paragraph's own rows stay reachable with the same key |
+| `ctrl+c` | empty the composer; with nothing typed, interrupt the turn; with neither, quit |
+| `esc` | interrupt the in-flight turn — it never leaves the tab and never discards a draft |
+| `pgup`/`pgdn`, `alt+o` | scroll the transcript; fold or expand captured tool outputs |
+| `/clear` | close the session and open a fresh one: transcript, context window and running spend all go with the old one |
 
-The lock is over the *input*, not just the keyboard. Mouse capture
-follows it rather than the tab because taking the mouse is not free:
-while gummi captures it the terminal's own click-drag selection stops
-working, and selecting a block of agent output to copy is something
-people do far more often than clicking inside a CLI. `MouseMode` is a
-per-frame `tea.View` field, so this costs nothing anywhere else — gummi's
-own surfaces are keyboard-only and never ask for the mouse at all.
-Forwarded events are translated into pane coordinates (the child has no
-idea the tab bar exists) and dropped over gummi's own chrome; x/vt
-encodes them for whichever tracking mode the child actually set, and
-drops them entirely if it set none.
+Two of those rows are decisions rather than conventions. `ctrl+c` narrows
+by what there is to cancel, **draft before turn**, because an interrupted
+turn can be asked again and a cleared line cannot be got back; it is
+hoisted above the overlay stack with the rest of `ctrl+c`, so it stands
+down while a dialog is up and quit remains the fall-through. And `esc`
+does *not* clear the line, though several of those CLIs let it: in gummi
+leaving never discards — a card thread keeps its draft through `esc`, and
+a tab switch keeps both composers' — so an `esc` that emptied this one
+would be the single key in the program that throws typing away. The
+recall ring belongs to the composer, not the conversation: `/clear` opens
+a new session and `↑` still reaches what was typed into the old one,
+exactly as a shell's history outlives `clear`.
+
+The bar names whichever of those is live rather than reciting the set:
+`esc interrupt` only while a turn is in flight, `ctrl+c clear` only while
+there is something to clear, `alt+enter newline` only once there is a
+draft for a second line to join. A bar naming a key that will do nothing
+is how the retired lock's own one-way door went unnoticed for as long as
+it did.
 
 **`?` and `alt+/`.** `?` is the convenient help key, but it is ordinary
 punctuation, so it must yield wherever the user types prose: the thread's
-composer, the bug-import filter, and the hosted CLI. Those are exactly
-the surfaces whose key rules are least guessable, so leaving them without
-a route to their own key table was the worst place to leave one. `alt+/`
+composer, the bug-import filter, and the board's own composer. Those are
+exactly the surfaces whose key rules are least guessable, so leaving them
+without a route to their own key table was the worst place to leave one. `alt+/`
 is the help key that is always gummi's — alt-prefixed for the same reason
-`alt+N` is. It is tier-1, not a second `ctrl+g`: a locked keyboard yields
-it too, because "locked keeps exactly one key" stops being true the
-moment there are two.
-
-You *arrive* unlocked, so the cycle always continues and typing at the
-agent works with no extra keystroke — gummi claims only the tab switches
-there. A user who wants the CLI's own `tab` asks for it. `ctrl+g` is the
-one key gummi never yields, in either state and above the overlay stack:
-a lock you can enter but not leave is the trap the mechanism exists to
-remove.
-
-**Saying so before it matters.** A lock nobody knows about is the same as
-no lock, and the hint has to name the trade rather than the mechanism —
-"lock" tells someone who already understands, which is not who needs it.
-So `ctrl+g tab→agent` in the bar, plus a notice at the two moments it is
-worth anything: arriving at the tab (just before you reach for a key
-gummi is holding) and having `tab` move you when you meant completion
-(the strongest reason anyone ever wants the lock). Working the lock once
-retires both — it is an offer, not a nag, and having taken it is proof it
-landed; a user who never tries it keeps being told, because they never
-learned. Teaching never costs the keypress: `tab` still cycles, and the
-notice explains what just happened rather than swallowing it.
-
-Because the lock changes what every other key does, it is never silent:
-the tab wears a `⬤ locked` badge (visible from the other tabs too, since
-the lock outlives a tab switch), the bar's hint becomes `ctrl+g unlock`,
-and the status bar's leading pill turns alert-weighted. Every one of
-those states what is true *now* rather than a general rule — a bar still
-advertising the tab cycle while the keyboard is locked would be telling
-the user to press the one key that cannot work, which is precisely how
-the original one-way door went unnoticed.
+`alt+N` is, and tier-1 with them: it is answered above whatever surface
+holds the keyboard, so the route to a surface's own key table is never
+the thing a surface can swallow.
 
 The board's own overlaying surfaces (spec, diff, ingest review, bug
 import, dependency picker) are scoped to the board tab: each belongs to a
 card, and a card belongs to the board. Leaving the tab hides them and
 returning restores them — never discards, since a card's thread holds an
 unsent composer draft the same way. The inbox tab promotes the
-needs-attention queue out of its modal overlay; the agent tab hosts a
-pty running the user's own coding CLI.
+needs-attention queue out of its modal overlay; the agent tab hosts
+gummi's own board conversation (above).
 
 **The needs-you queue is a query, not a second list.** It is read from
 the open decision rows (§6.3) rather than kept as a queue of its own, so

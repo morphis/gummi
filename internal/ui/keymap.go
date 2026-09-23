@@ -128,7 +128,20 @@ func (m *Shell) agentBindings() []binding {
 	return withHelpKey([]binding{
 		{key: "enter", label: "send", help: "send the line to the board — it can read and act on every card through the same tools a hosted agent reaches", bar: true},
 		{key: "/", label: "commands", help: "on an empty line, open the command list and complete as you type", bar: true},
-		{key: "esc", label: "interrupt", help: "interrupt the board's in-flight turn", bar: true},
+		// The next three are state-dependent, like the outputs row below
+		// them: whether esc has a turn to interrupt, whether there is a
+		// draft for a newline to join, and which of three things ctrl+c
+		// will do. Each binding owns its own wording and decides whether
+		// this state earns a bar slot — the bar says what the next press
+		// does, not what the key means in general.
+		// ctrl+c ahead of the newline row: the bar sheds from the end, and on
+		// an 80-column terminal exactly one of the two survives — it should
+		// be the key that gets a draft out of the way, not the one that puts
+		// a second line into it.
+		m.boardEscBinding(),
+		m.boardCancelBinding(),
+		m.boardNewlineBinding(),
+		{key: "↑/↓", label: "history", help: "recall the lines you have already sent, from the composer's first row"},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the conversation without leaving the line", bar: true},
 		m.boardOutputsBinding(),
 		// Typed, not pressed — the same shape the card thread's own table

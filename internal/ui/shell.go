@@ -104,6 +104,23 @@ type Shell struct {
 	boardInput   textarea.Model
 	boardScroll  int
 	boardOutputs bool
+	// boardHistory is every line submitted from the board composer,
+	// oldest first — messages and commands alike, because ↑ recalls what
+	// you typed and a command line is typed the same way a sentence is.
+	// boardHistoryAt is where ↑/↓ are standing in it, with
+	// len(boardHistory) meaning "not browsing — on the live draft", and
+	// boardHistoryDraft holds whatever was in the box when browsing
+	// started, so ↓ back off the newest entry returns it instead of
+	// leaving the composer holding a sentence the user never finished.
+	//
+	// It is the composer's history, not the conversation's: /clear starts a
+	// fresh session and the ring survives it, the same way a shell's
+	// history outlives `clear`. Session-scoped on purpose — nothing here is
+	// written to disk, so a line typed in one repo's board is never
+	// recalled in another's.
+	boardHistory      []string
+	boardHistoryAt    int
+	boardHistoryDraft string
 	// boardComplete is the slash-completion popup over boardInput
 	// (complete.go, boardcomplete.go), or nil when the line under it is
 	// not a command line. It is rebuilt from the composer's text after
@@ -1743,6 +1760,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// from must not reappear under their cursor.
 			m.threadInput.SetValue(msg.restore)
 		}
+		if msg.restoreBoard != "" && strings.TrimSpace(m.boardInput.Value()) == "" {
+			// the same rule for the agent tab's own composer, into its own
+			// field (see noticeMsg.restoreBoard on why the two are not one).
+			m.boardInput.SetValue(msg.restoreBoard)
+			m.syncBoardCompletion()
+		}
 		if msg.clearInbox != "" {
 			m.inbox.remove(msg.clearInbox)
 		}
@@ -2391,7 +2414,19 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// terminal program is expected to answer, and routing it into an
 		// open dialog's text input (which is what happened) left no way
 		// out of a modal but esc.
+		//
+		// The agent tab's composer gets first refusal on it, because there
+		// the key means what it means in every coding CLI — cancel the
+		// draft, or the turn, before you cancel the program
+		// (boardCancelKey has the full contract). It takes the key only
+		// when there is something on that surface to cancel and only with
+		// no dialog up, so the hoist's own promise is untouched: quit is
+		// still what ctrl+c does everywhere else, and still what it does
+		// here once the composer is empty and nothing is running.
 		if msg.String() == "ctrl+c" {
+			if cmd, took := m.boardCancelKey(); took {
+				return m, cmd
+			}
 			return m, m.quitCmd()
 		}
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {

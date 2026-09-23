@@ -401,3 +401,357 @@ func TestBoardSlashLineWithMoreWordsIsAMessage(t *testing.T) {
 		t.Errorf("the line never reached the board as a message:\n%s", view)
 	}
 }
+
+// TestBoardComposerCtrlCClearsTheDraft: ctrl+c is hoisted above the
+// overlay straight into quitCmd, which left this surface — the one place
+// in gummi where a person types paragraphs — with no way to empty the box
+// at all: the widget's own ctrl+u deletes to the cursor, and the key
+// every coding CLI binds to "clear the line" exited gummi mid-sentence.
+func TestBoardComposerCtrlCClearsTheDraft(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+	m = openBoardTab(t, m)
+	m = typeString(t, m, "half a thought")
+
+	_, cmd := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatal("ctrl+c with a draft in the composer quit gummi")
+		}
+	}
+	if got := m.boardInput.Value(); got != "" {
+		t.Fatalf("board composer = %q, want it emptied", got)
+	}
+	if m.tab != TabAgent {
+		t.Fatalf("ctrl+c left the agent tab: tab = %v, want TabAgent", m.tab)
+	}
+	if !m.boardInput.Focused() {
+		t.Fatal("ctrl+c blurred the board composer")
+	}
+}
+
+// TestBoardComposerCtrlCClosesTheCompletionPopup: the popup is derived
+// from the line, so clearing the line has to re-derive it — otherwise a
+// "/" cleared away leaves its command list hanging over a composer whose
+// text no longer has anything to complete.
+func TestBoardComposerCtrlCClosesTheCompletionPopup(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+	m = openBoardTab(t, m)
+	m = typeString(t, m, "/")
+	if m.boardComplete == nil {
+		t.Fatal("typing / did not open the completion popup")
+	}
+
+	m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if m.boardComplete != nil {
+		t.Error("the completion popup outlived the line it was derived from")
+	}
+}
+
+// TestBoardComposerCtrlCOnEmptyLineInterrupts: with nothing typed, the
+// turn is what there is to cancel — the same thing esc does, reached by
+// the key a person arriving from a coding CLI presses first.
+func TestBoardComposerCtrlCOnEmptyLineInterrupts(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ag := agent.NewFake("working on it")
+	ag.Responder = func(_ agent.SessionOpts, _ string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}
+	var interrupted bool
+	ag.OnInterrupt = func() { interrupted = true }
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+
+	m = typeString(t, m, "do a thing")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.board.Snapshot().Busy {
+		t.Fatal("the board session is not mid-turn with its responder blocked")
+	}
+	if m.boardInput.Value() != "" {
+		t.Fatalf("the composer should have cleared on send, got %q", m.boardInput.Value())
+	}
+
+	_, cmd := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+c on an empty line mid-turn returned no command")
+	}
+	if _, quit := cmd().(tea.QuitMsg); quit {
+		t.Fatal("ctrl+c interrupted nothing and quit gummi mid-turn")
+	}
+	cmd()
+	if !interrupted {
+		t.Fatal("ctrl+c did not reach the board session's Interrupt")
+	}
+}
+
+// TestBoardComposerCtrlCIdleStillQuits: the cancel contract narrows by
+// what there is to cancel, and with an empty composer and no turn in
+// flight there is nothing — so the key must still be the exit it is
+// everywhere else in gummi, not a keystroke that silently does nothing.
+func TestBoardComposerCtrlCIdleStillQuits(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+	m = openBoardTab(t, m)
+	if m.boardInput.Value() != "" || m.board.Snapshot().Busy {
+		t.Skip("the board session is not idle with an empty composer")
+	}
+
+	_, cmd := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+c on an idle, empty composer did nothing at all")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Fatalf("ctrl+c returned %T, want QuitMsg", cmd())
+	}
+}
+
+// TestBoardComposerCtrlCLeavesADialogTheHoistToQuit: the hoist above the
+// overlay exists so a modal can never trap the one key every terminal
+// program answers. A picker over this tab (/profile, /model) is such a
+// modal, so the composer's cancel must stand down while one is up.
+func TestBoardComposerCtrlCLeavesADialogTheHoistToQuit(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+	m = openBoardTab(t, m)
+	m = typeString(t, m, "a draft that must survive the dialog")
+	m.Overlay.Push(&confirmDialog{id: "test-modal", question: "?", onConfirm: func() tea.Cmd { return nil }})
+
+	_, cmd := m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("ctrl+c over a dialog returned no command")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Fatalf("ctrl+c over a dialog returned %T, want QuitMsg", cmd())
+	}
+	if m.boardInput.Value() == "" {
+		t.Error("the draft was cleared by a ctrl+c that belonged to the dialog")
+	}
+}
+
+// TestBoardCancelBindingNamesTheNextPress: the bar is read as "what this
+// key does now", so the ctrl+c row has to track the three states rather
+// than name one of them everywhere.
+func TestBoardCancelBindingNamesTheNextPress(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("hi"))
+	m = openBoardTab(t, m)
+
+	if b := m.boardCancelBinding(); b.label != "" || b.bar {
+		t.Errorf("idle, empty composer: binding = %+v, want an unlabelled help-only row", b)
+	}
+	m = typeString(t, m, "x")
+	b := m.boardCancelBinding()
+	if b.label != "clear" || !b.bar {
+		t.Errorf("with a draft: binding = %+v, want a barred clear row", b)
+	}
+	for _, h := range barHints(m.agentBindings()) {
+		if h.Key == "ctrl+c" && h.Label == "clear" {
+			return
+		}
+	}
+	t.Error("the agent tab's bar never names ctrl+c as the clear key")
+}
+
+// TestBoardComposerNewlineKeys: enter sends here, so the composer needs a
+// key that means "line break" — and had none: the widget's own
+// InsertNewline is bound to the enter this handler claims, so a paragraph
+// could only ever be pasted in. All three spellings a terminal might
+// deliver have to work, since which one arrives is the terminal's choice.
+func TestBoardComposerNewlineKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{"alt+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}},
+		{"ctrl+j", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}},
+		{"shift+enter", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := agentWorkspace(t, agent.NewFake("hi"))
+			m = openBoardTab(t, m)
+			m = typeString(t, m, "first")
+			m = press(t, m, tc.key)
+			m = typeString(t, m, "second")
+
+			if got, want := m.boardInput.Value(), "first\nsecond"; got != want {
+				t.Fatalf("composer = %q, want %q", got, want)
+			}
+			if len(m.board.Snapshot().Transcript) != 0 {
+				t.Fatal("the newline key sent the line instead of breaking it")
+			}
+		})
+	}
+}
+
+// TestBoardHistoryRecallsSentLines: ↑/↓ walk the lines already sent, the
+// recall every shell and every coding CLI has. Without it a sent line
+// lived only in the transcript — readable, not re-sendable — so fixing a
+// typo in a long message meant typing the whole thing again.
+func TestBoardHistoryRecallsSentLines(t *testing.T) {
+	ag := agent.NewFake("ok")
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+	for _, line := range []string{"first thing", "second thing"} {
+		m = typeString(t, m, line)
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		settleBoard(t, m.board)
+	}
+	m = typeString(t, m, "half-written")
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := m.boardInput.Value(); got != "second thing" {
+		t.Fatalf("first ↑ = %q, want the newest sent line", got)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := m.boardInput.Value(); got != "first thing" {
+		t.Fatalf("second ↑ = %q, want the older sent line", got)
+	}
+	// off the oldest entry ↑ holds, rather than wrapping or emptying
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := m.boardInput.Value(); got != "first thing" {
+		t.Fatalf("↑ past the oldest = %q, want to stay put", got)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := m.boardInput.Value(); got != "half-written" {
+		t.Fatalf("↓ back off the newest = %q, want the interrupted draft returned", got)
+	}
+}
+
+// TestBoardHistoryKeepsMultiLineDraftsNavigable: ↑ recalls only from the
+// first row, so the rows of a paragraph the user is still writing stay
+// reachable with the same key.
+func TestBoardHistoryKeepsMultiLineDraftsNavigable(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("ok"))
+	m = openBoardTab(t, m)
+	m = typeString(t, m, "sent line")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+
+	m = typeString(t, m, "one")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
+	m = typeString(t, m, "two")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp}) // into the draft's own first row
+	if got, want := m.boardInput.Value(), "one\ntwo"; got != want {
+		t.Fatalf("↑ inside a multi-line draft replaced it: %q, want %q", got, want)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp}) // now from row 0: recall
+	if got := m.boardInput.Value(); got != "sent line" {
+		t.Fatalf("↑ from the first row = %q, want the recalled line", got)
+	}
+}
+
+// TestBoardHistoryRecordsCommandsAndSurvivesClear: a command is typed the
+// same way a sentence is, so ↑ has to bring it back — and /clear ends the
+// conversation, not the record of what the user typed, exactly as a
+// shell's history outlives `clear`.
+func TestBoardHistoryRecordsCommandsAndSurvivesClear(t *testing.T) {
+	m, _ := agentWorkspace(t, agent.NewFake("ok"))
+	m = openBoardTab(t, m)
+	m = typeString(t, m, "a message")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	settleBoard(t, m.board)
+	m = typeString(t, m, boardClearCommand)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := m.boardInput.Value(); got != "" {
+		t.Fatalf("the composer should be empty after /clear, got %q", got)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := m.boardInput.Value(); got != boardClearCommand {
+		t.Fatalf("↑ after /clear = %q, want the command itself recalled", got)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
+	if got := m.boardInput.Value(); got != "a message" {
+		t.Fatalf("↑ twice = %q, want the line sent before the clear", got)
+	}
+}
+
+// TestBoardRefusedTurnKeepsTheLine: the backend refusing a second turn is
+// "not now", not a failure. The echo comes back out of the transcript
+// (engine's own half), the session is not marked broken, and the line
+// returns to the composer it was typed in — the same contract the card
+// thread has had since ErrBusy stopped killing stages.
+func TestBoardRefusedTurnKeepsTheLine(t *testing.T) {
+	ag := agent.NewFake("ok")
+	ag.SendErr = agent.ErrBusy
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+
+	m = typeString(t, m, "a line the backend will refuse")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if got := m.boardInput.Value(); got != "a line the backend will refuse" {
+		t.Errorf("composer = %q, want the refused line handed back", got)
+	}
+	snap := m.board.Snapshot()
+	if snap.Err != nil {
+		t.Errorf("a refusal was recorded as the session's error: %v", snap.Err)
+	}
+	for _, e := range snap.Transcript {
+		if e.Author == engine.AuthorUser {
+			t.Error("the transcript kept the echo of a line the agent never received")
+		}
+	}
+	if !strings.Contains(m.notice.text, "mid-turn") {
+		t.Errorf("notice = %q, want it to say the turn is still running", m.notice.text)
+	}
+}
+
+// TestBoardBusySpinnerNamesTheInterrupt: the hint belongs on the line the
+// eye is already on while a turn runs, not in the key bar alone.
+func TestBoardBusySpinnerNamesTheInterrupt(t *testing.T) {
+	// A blocked responder rather than a settled one: the busy window of a
+	// fake that answers immediately is a race, and what is being asserted
+	// here is exactly what the screen says DURING it.
+	release := make(chan struct{})
+	defer close(release)
+	ag := agent.NewFake("working on it")
+	ag.Responder = func(_ agent.SessionOpts, _ string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+	m = typeString(t, m, "do a thing")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.board.Snapshot().Busy {
+		t.Fatal("the board session is not mid-turn with its responder blocked")
+	}
+
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "thinking…") {
+		t.Fatalf("no spinner line on screen:\n%s", view)
+	}
+	if !strings.Contains(view, "esc to interrupt") {
+		t.Errorf("the spinner line never names the interrupt key:\n%s", view)
+	}
+}
+
+// TestBoardEscRowOnlyWhileATurnRuns: the bar says what the next press
+// does, so "esc interrupt" over an idle conversation is a key promised
+// and not kept.
+func TestBoardEscRowOnlyWhileATurnRuns(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ag := agent.NewFake("working on it")
+	ag.Responder = func(_ agent.SessionOpts, _ string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}
+	m, _ := agentWorkspace(t, ag)
+	m = openBoardTab(t, m)
+	if m.boardEscBinding().bar {
+		t.Error("idle: the bar offers esc as an interrupt with no turn to interrupt")
+	}
+	if m.boardEscBinding().help == "" {
+		t.Error("esc dropped out of the help table too, where it belongs either way")
+	}
+
+	m = typeString(t, m, "do a thing")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.board.Snapshot().Busy {
+		t.Fatal("the board session is not mid-turn with its responder blocked")
+	}
+	if !m.boardEscBinding().bar {
+		t.Error("mid-turn: the bar never names the interrupt key")
+	}
+}
