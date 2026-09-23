@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
@@ -68,23 +69,32 @@ type cardForm struct {
 	// repository's branches. What differs is what the card then does with
 	// the one it is given, which the row's own label says.
 	adopt string
-	// stackOnto names the card this one is being stacked on top of, set
-	// when the form was opened with S. stackInto names an existing stack
-	// to join instead. Both empty is a standalone card.
+	// stackOnto names the card this one is being stacked on top of, and
+	// stackCands the cards the row can name. stackInto names an existing
+	// stack to join instead. All empty is a standalone card.
 	//
 	// They live in the expanded options rather than the main flow because
 	// the overwhelming majority of cards are standalone, and a row every
 	// reader has to tab past to say "no" is a row that costs more than it
-	// gives. What keeps the S gesture legible is the `becomes` readout,
+	// gives. What keeps the T gesture legible is the `becomes` readout,
 	// which is always visible and names the branch this card will fork
 	// from — so the one case where stacking matters says so without the
 	// reader opening anything.
+	//
+	// The row cycles its candidates rather than opening a searchable list
+	// like `runs after` does, and that is the whole of keeping the two
+	// apart on sight: a stack position is topology and a dependency is
+	// scheduling (DESIGN §18.1), so the row that sets one must not look
+	// like the row that sets the other. T stays the one-key path — it
+	// preselects a card here — but a reader who opened the dialog with
+	// `n` and only then thought of the card below is no longer told to
+	// cancel and start again.
 	stackOnto  domain.FeatureID
 	stackLabel string
 	stackInto  domain.StackID
-	// stackOffer remembers the card S named, so toggling the row back to
-	// "on top of" after saying standalone once restores the offer rather
-	// than losing it.
+	stackCands []stackCand
+	// stackOffer remembers the card T named, so it stays on the row even
+	// when the candidate list would not otherwise carry it.
 	stackOffer domain.FeatureID
 
 	// expanded shows the run options as rows instead of one readout line.
@@ -125,6 +135,17 @@ type afterCand struct {
 	Title string
 	Repo  string
 	Stage domain.Stage
+}
+
+// stackCand is one card the `stack` row can fork from. Touched orders
+// the row; Repo decides whether it is on offer at all, since a stack is
+// one repository (DESIGN §18.1) and the repo row can still move after a
+// card has been chosen here.
+type stackCand struct {
+	ID      domain.FeatureID
+	Title   string
+	Repo    string
+	Touched time.Time
 }
 
 // importedIssue is what alt+g brought into the box: the proposal, the
@@ -316,7 +337,9 @@ func (d *cardForm) stops() []int {
 		if len(d.baseCands) > 0 && d.ct.Kind != domain.KindResearch {
 			s = append(s, cardStopAdopt)
 		}
-		s = append(s, cardStopStack)
+		if d.asksStack() {
+			s = append(s, cardStopStack)
+		}
 	} else {
 		s = append(s, cardStopRuns)
 	}
@@ -783,6 +806,17 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 	title, _, _ := domain.SplitFreeform(desc)
 	if _, err := domain.Slugify(title); err != nil {
 		d.errText = "the first line needs a letter or digit to make a title"
+		return false, nil
+	}
+	// A stack is one repository (DESIGN §18.1), and the repo row can move
+	// after a card has been chosen here. Refusing is the answer rather
+	// than quietly dropping the choice: the store refuses it too
+	// (ErrStackRepoMismatch), and that refusal arrives after the card has
+	// already been created, as a warning about a stack that did not
+	// happen.
+	if c, ok := d.stackCandFor(d.stackOnto); ok && c.Repo != d.formRepo() {
+		d.errText = string(c.ID) + " is in " + stackRepoLabel(c.Repo) + " — a stack is one repository"
+		d.setFocus(cardStopStack)
 		return false, nil
 	}
 	var env *int
@@ -1272,23 +1306,19 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 			choiceCells(s, d.focus == cardStopAdopt, d.adoptChoices(), d.adoptIdx(), "", false),
 			d.adoptIdx(), width, maxLines)...)
 	}
-	stackLine := optionLabel(s, d.focus == cardStopStack, "stack")
-	switch {
-	case d.stackOnto != "":
-		stackLine += "on top of " + s.KeyHint.Render(string(d.stackOnto))
-		if d.stackLabel != "" {
-			stackLine += s.Faint.Render("  " + d.stackLabel)
+	if d.asksStack() {
+		label := optionLabel(s, d.focus == cardStopStack, "stack")
+		if d.stackInto != "" {
+			// Nothing in the TUI sets this; a form carrying one came from
+			// somewhere that did, and the row says so rather than
+			// rendering a cycle its value is not in.
+			rows = append(rows, label+"into "+s.KeyHint.Render(string(d.stackInto)))
+			return rows
 		}
-	case d.stackInto != "":
-		stackLine += "into " + s.KeyHint.Render(string(d.stackInto))
-	case d.stackOffer != "":
-		// Short on purpose: this dialog has to hold at 60 columns, and
-		// the row already has the focused hint line underneath it.
-		stackLine += s.Faint.Render("standalone   ←/→ on " + string(d.stackOffer))
-	default:
-		stackLine += s.Faint.Render("standalone")
+		rows = append(rows, foldedRow(s, label, optionLabelW,
+			choiceCells(s, d.focus == cardStopStack, d.stackChoices(), d.stackIdx(), "", false),
+			d.stackIdx(), width, maxLines)...)
 	}
-	rows = append(rows, stackLine)
 	return rows
 }
 
@@ -1491,7 +1521,13 @@ func (d *cardForm) hint() string {
 	case cardStopAdopt:
 		return "←/→ work on an existing branch instead of cutting one · alt+o collapse · tab next · esc cancel"
 	case cardStopStack:
-		return "←/→ stack it or leave it standalone · alt+o collapse · tab next · esc cancel"
+		// The cells are bare ids, so the title of the chosen card is
+		// named here rather than on the row: the hint line is the one
+		// place with room for it at 60 columns.
+		if d.stackLabel != "" {
+			return "on top of " + d.stackLabel + " · ←/→ choose the card below · alt+o collapse · tab next · esc cancel"
+		}
+		return "←/→ choose a card to stack on, or leave it standalone · alt+o collapse · tab next · esc cancel"
 	case cardStopButtons:
 		return "←/→ buttons · enter activate · tab next · esc cancel"
 	case cardStopRuns:
@@ -1534,10 +1570,116 @@ func (d *cardForm) setBaseCands(branches []string, cur string) {
 }
 
 // stackOn presets the form to stack the new card on top of onto. Called
-// by the S gesture; the label is what the row and the readouts show.
+// by the T gesture; the label is what the row and the readouts show.
 func (d *cardForm) stackOn(onto domain.FeatureID, label string, into domain.StackID) {
 	d.stackOnto, d.stackLabel, d.stackInto = onto, label, into
 	d.stackOffer = onto
+}
+
+// setStackCands installs the cards the stack row may fork from, in the
+// order the row offers them. The sort lives here rather than at the
+// caller so the row's order is the row's own business.
+func (d *cardForm) setStackCands(c []stackCand) {
+	sortStackCands(c)
+	d.stackCands = c
+}
+
+// asksStack is whether the stack row is worth a tab stop: a research
+// card has no branch of its own to fork, and a goal's cards share the
+// goal's branch rather than stacking (DESIGN §18.5).
+func (d *cardForm) asksStack() bool {
+	return d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindGoal
+}
+
+// stackVisible is the row's cycle: the chosen repository's cards, since
+// a stack is one repository, plus whatever the row currently holds even
+// when the repo row has since moved past it. Keeping the held card in
+// the list is what lets the reader see and undo the mismatch the submit
+// refuses, rather than being refused over a card the row stopped
+// showing.
+func (d *cardForm) stackVisible() []stackCand {
+	held := d.stackOnto
+	if held == "" {
+		held = d.stackOffer
+	}
+	out := make([]stackCand, 0, len(d.stackCands))
+	var carried bool
+	for _, c := range d.stackCands {
+		if c.ID == held {
+			carried = true
+		} else if d.repo.needsChoice() || c.Repo != d.repo.name() {
+			// Until the repo row is answered there is no repository to
+			// be one of, so the row offers nothing rather than offering
+			// the unconfigured default's cards under another name.
+			continue
+		}
+		out = append(out, c)
+	}
+	if held != "" && !carried {
+		// T named a card the board's rows no longer carry, or a test
+		// scaffold set one with no candidates at all: the offer is still
+		// the row's answer and has to be reachable.
+		out = append([]stackCand{{ID: held, Title: d.stackLabel, Repo: d.repo.name()}}, out...)
+	}
+	return out
+}
+
+// stackChoices is the cycle's cells: standing alone reads first, because
+// it is the default and what the overwhelming majority of cards do.
+func (d *cardForm) stackChoices() []string {
+	vis := d.stackVisible()
+	out := make([]string, 0, len(vis)+1)
+	out = append(out, "standalone")
+	for _, c := range vis {
+		out = append(out, "on "+string(c.ID))
+	}
+	return out
+}
+
+// stackIdx is the selected cell of stackChoices.
+func (d *cardForm) stackIdx() int {
+	if d.stackOnto == "" {
+		return 0
+	}
+	for i, c := range d.stackVisible() {
+		if c.ID == d.stackOnto {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// stackCandFor finds a candidate by id, for the title the row and the
+// refusal show.
+func (d *cardForm) stackCandFor(id domain.FeatureID) (stackCand, bool) {
+	for _, c := range d.stackCands {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return stackCand{}, false
+}
+
+// stackRepoLabel names a repository for the row's refusal. The empty
+// name is the workspace default, which has no name to print.
+func stackRepoLabel(repo string) string {
+	if repo == "" {
+		return "the default repository"
+	}
+	return repo
+}
+
+// sortStackCands orders candidates most recently touched first, so the
+// card the reader was just looking at is the first one the row offers
+// however many the board holds. Ties fall back to the id, which only
+// matters for the rows a fresh workspace writes in one tick.
+func sortStackCands(c []stackCand) {
+	sort.Slice(c, func(i, j int) bool {
+		if !c[i].Touched.Equal(c[j].Touched) {
+			return c[i].Touched.After(c[j].Touched)
+		}
+		return c[i].ID < c[j].ID
+	})
 }
 
 // forkFrom is the phrase the `becomes` readout uses for where this
@@ -1637,18 +1779,28 @@ func (d *cardForm) cycleBase(dir int) {
 	d.base = choices[i]
 }
 
-// cycleStack moves the stack row: standalone, or on top of the card the
-// S gesture named. It is deliberately not a free picker — a stack is
-// built by stacking onto a card you are looking at, and a row offering
-// every card in the workspace would be a second dependency picker
-// wearing a different label.
+// cycleStack moves the stack row by dir over stackChoices: standing
+// alone, or on top of one of the cards on offer.
+//
+// Joining a whole stack (stackInto) is not part of the cycle — nothing
+// in the TUI sets it, and `gummi stack add` is where that lives — so a
+// form holding one steps off it to standalone and then cycles cards
+// like any other.
 func (d *cardForm) cycleStack(dir int) {
-	if d.stackLabel == "" && d.stackInto == "" {
-		return // nothing on offer: this form was not opened from a card
-	}
-	if d.stackOnto != "" || d.stackInto != "" {
-		d.stackOnto, d.stackInto = "", ""
+	if d.stackInto != "" {
+		d.stackOnto, d.stackInto, d.stackLabel = "", "", ""
 		return
 	}
-	d.stackOnto = d.stackOffer
+	vis := d.stackVisible()
+	if len(vis) == 0 {
+		return // no card on the board this one could fork from
+	}
+	n := len(vis) + 1
+	i := ((d.stackIdx()+dir)%n + n) % n
+	if i == 0 {
+		d.stackOnto, d.stackLabel = "", ""
+		return
+	}
+	c := vis[i-1]
+	d.stackOnto, d.stackLabel = c.ID, c.Title
 }

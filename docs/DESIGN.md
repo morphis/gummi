@@ -3269,6 +3269,30 @@ standalone and a row every reader tabs past to say "no" costs more than it
 gives; what keeps the gesture legible is the always-visible `becomes`
 readout, which names the branch the card will fork from.
 
+The row is **answerable on its own**, not only by `T`. It cycles the
+cards on the board that have a branch to fork from — most recently
+touched first, so the card the reader just left is one `→` away — and a
+dialog opened with `n` by someone who only then thought of the card
+below is not told to cancel and start again. `T` remains the one-key
+path; all it does now is preselect a cell. What keeps the row from
+collapsing into the dependency picker it must not become is its *shape*:
+`runs after` is a filtered list because it names a set out of the whole
+workspace, while `stack` is a cycle because it names one card out of a
+short, repo-local one. A stack position is topology and a dependency is
+scheduling (§18.1), and two rows that set them must not be operated the
+same way.
+
+The row's candidates are the cards that could actually carry the fork:
+no research card (no branch), no goal and no card inside one (a goal's
+cards share the goal's branch, §18.5), and only the chosen repository's,
+since a stack is one repository. A card already **done** stays on offer —
+done is a verified branch, not a landed one, so putting the next slice on
+top of one waiting for review is the case stacks exist for. Because the
+repo row can move after a card has been chosen, the form re-checks at
+submit and refuses; the store refuses it too (`ErrStackRepoMismatch`), but
+only once the card has been created, as a warning about a stack that did
+not happen.
+
 `T` and not `S`: `S` is the severity sort, and one key wearing two meanings
 on one surface is the defect this keymap's own comments keep recording.
 

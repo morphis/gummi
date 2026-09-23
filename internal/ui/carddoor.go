@@ -28,9 +28,36 @@ func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
 	if m.wt != nil {
 		d.originFor = m.repoOriginFor
 	}
+	d.setStackCands(m.stackCands())
 	d.onImport = func(ref domain.IssueRef, repo string) tea.Cmd { return m.fetchIssue(d, ref, repo) }
 	d.onBrowse = func(repo string) tea.Cmd { return m.browseIssues(d, repo) }
 	return d
+}
+
+// stackCands is every card the stack row may fork from; setStackCands
+// puts them in the order the row offers them.
+//
+// It is built apart from afterCands, and deliberately: the two rows
+// answer different questions (DESIGN §18.1 — topology, not scheduling),
+// and what is legal to wait on is not what is legal to fork from. The
+// refusals here are openStackForm's, as rows that never enter the cycle
+// rather than notices after the fact: a research card has no branch, and
+// a goal's cards share the goal's branch instead of stacking.
+//
+// A done card stays on offer. Done means the card reached a verified
+// branch, not that the branch landed (§7), so stacking the next slice on
+// top of one that is waiting for review is exactly the case stacks exist
+// for.
+func (m *Shell) stackCands() []stackCand {
+	var out []stackCand
+	for _, r := range m.rows {
+		f := r.F
+		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal || f.GoalID != "" {
+			continue
+		}
+		out = append(out, stackCand{ID: f.ID, Title: f.Title, Repo: f.Repo, Touched: f.UpdatedAt})
+	}
+	return out
 }
 
 // afterCands is every card not yet done, as the after row offers them.

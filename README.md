@@ -470,7 +470,10 @@ once**, land them one at a time, and take review feedback on the ones
 below — while gummi keeps everything above them rebased.
 
 Press `T` on a card and the next card is created *on top of it*; that is
-the whole setup, and it creates the stack. The board then shows the chain:
+the whole setup, and it creates the stack. If you are already in the new
+card dialog, its `stack` row (under `alt+o`) offers the same thing —
+`←/→` cycles the cards you could fork from, most recently touched first.
+The board then shows the chain:
 
 ```
 ▾ rule-engine · 3 cards · on main
