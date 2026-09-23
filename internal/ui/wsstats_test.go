@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/fleetrun"
@@ -346,5 +348,100 @@ func TestTheLedgerSaysNothingAboutACacheItWasNeverTold(t *testing.T) {
 	}
 	if got := wsDollars(120); got != "$1.20" {
 		t.Errorf("dollars = %q, want $1.20", got)
+	}
+}
+
+// TestTheStatsTabRulesItsSections: every section on the page is
+// preceded by a blank row, the rule statsHeading gives the card's own
+// run tab. Without it the three ledgers run together and a reader has
+// to find the headings by reading them.
+func TestTheStatsTabRulesItsSections(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.wsstats = &wsStatsView{preset: wsDefaultPreset, follow: true, rep: wsTestReport()}
+	lines := strings.Split(stripANSI(m.wsStatsRender(120, 40)), "\n")
+	for _, title := range []string{"THE TIMELINE", "WHERE IT WENT", "THE CLOCK", "TOP CARDS"} {
+		at := -1
+		for i, l := range lines {
+			if strings.Contains(l, title) {
+				at = i
+				break
+			}
+		}
+		if at < 0 {
+			t.Errorf("page lacks the %s section:\n%s", title, strings.Join(lines, "\n"))
+			continue
+		}
+		if at == 0 || strings.TrimSpace(lines[at-1]) != "" {
+			t.Errorf("%s has no rule above it — preceded by %q", title, lines[at-1])
+		}
+	}
+}
+
+// TestTheStatsTabKeepsItsLeftMargin: every row the page draws sits
+// behind the same margin, the timeline's lanes and axis included. A
+// block hanging a column left of the headings above it reads as a
+// second page pasted into this one.
+func TestTheStatsTabKeepsItsLeftMargin(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.wsstats = &wsStatsView{preset: wsDefaultPreset, follow: true, rep: wsTestReport()}
+	for _, l := range strings.Split(stripANSI(m.wsStatsRender(120, 40)), "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if !strings.HasPrefix(l, " ") {
+			t.Errorf("row starts at the pane edge, outside the page's margin: %q", l)
+		}
+	}
+}
+
+// TestTheStatsTabStacksItsLedgersWhenTheColumnsWouldCollide: a bucket
+// row is a fixed grid, so a half-pane narrower than the row cannot hold
+// it. Below that width the window and all-time ledgers go one under the
+// other, each whole, and nothing on the page overruns the pane.
+func TestTheStatsTabStacksItsLedgersWhenTheColumnsWouldCollide(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.wsstats = &wsStatsView{preset: wsDefaultPreset, follow: true, rep: wsTestReport()}
+
+	const narrow = 80
+	stacked := false
+	for _, l := range strings.Split(stripANSI(m.wsStatsRender(narrow, 40)), "\n") {
+		if ansi.StringWidth(l) > narrow {
+			t.Errorf("row overruns an %d-column pane (%d wide): %q", narrow, ansi.StringWidth(l), l)
+		}
+		if strings.Contains(l, "window") && strings.Contains(l, "all-time") {
+			t.Errorf("the two ledgers share a row on a narrow pane: %q", l)
+		}
+		if strings.TrimSpace(l) == "all-time · 2 cards" {
+			stacked = true
+		}
+	}
+	if !stacked {
+		t.Error("the narrow pane never labelled the stacked all-time ledger")
+	}
+	// Wide enough for two columns, they are two columns again.
+	paired := false
+	wide := strings.Split(stripANSI(m.wsStatsRender(140, 40)), "\n")
+	for _, l := range wide {
+		if strings.Contains(l, "window") && strings.Contains(l, "all-time · 2 cards") {
+			paired = true
+		}
+	}
+	if !paired {
+		t.Errorf("a wide pane did not put the two ledgers side by side:\n%s", strings.Join(wide, "\n"))
+	}
+}
+
+// TestTheStatsTabDropsTheAxisWithTheLanes: a pane too short for the
+// timeline gets the sentence and nothing else — a ruler under lanes
+// nobody drew measures nothing, and its legend would be an empty row.
+func TestTheStatsTabDropsTheAxisWithTheLanes(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.wsstats = &wsStatsView{preset: wsDefaultPreset, follow: true, rep: wsTestReport()}
+	out := stripANSI(m.wsStatsRender(120, 16))
+	if !strings.Contains(out, "needs a taller pane") {
+		t.Fatalf("short pane drew a timeline anyway:\n%s", out)
+	}
+	if strings.Contains(out, "└") || strings.Contains(out, "❯") {
+		t.Errorf("the axis outlived the lanes it measures:\n%s", out)
 	}
 }

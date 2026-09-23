@@ -300,6 +300,27 @@ func (m *Shell) wsJump(id domain.FeatureID) tea.Cmd {
 // terminal.
 const wsLabelWidth = 20
 
+// wsLaneWidth is how many cells of a pane w columns wide the raster
+// gets. The page's margin, the label column and the separator come off
+// the left, and the axis's now-marker off the right. The lanes and the
+// ruler under them both read it here: two answers to this would draw a
+// ruler that does not line up with the blocks it measures.
+func wsLaneWidth(w int) int { return max(w-wsLabelWidth-3-wsNowMarkRoom, 10) }
+
+// wsNowMark is the stamp on the right end of the ruler: the window's
+// own right edge, which on a followed window is now.
+//
+// Its room is reserved in wsLaneWidth rather than added after the
+// raster. Hung off a ruler that had already filled the pane it was
+// always the first clause cut, which is why the axis carried a marker
+// nobody ever saw at any width.
+func wsNowMark(to time.Time) string { return "❯ " + to.Format("15:04") }
+
+// wsNowMarkRoom is what that stamp costs the raster: the space before
+// it, the stamp itself, and the column this page keeps clear at its
+// right edge like every other row on it.
+const wsNowMarkRoom = 1 + 7 + 1
+
 // wsOrigin is the left edge the timeline draws from: the window's own —
 // or, on an all-history window whose From is the zero time, the earliest
 // moment the lanes know about. An axis that started in the year one
@@ -336,6 +357,20 @@ func wsOrigin(rep *fleetrun.Report) time.Time {
 	return earliest
 }
 
+// wsHeading is a section rule: a blank row, the section's name, and the
+// clause it qualifies itself by. It is statsHeading's shape (statsview.go)
+// deliberately — the card's own run tab, reached from the same tab bar,
+// separates its ledgers this way, and a page that ran WHERE IT WENT, THE
+// CLOCK and TOP CARDS together would be the one surface on the board
+// whose sections a reader has to find by reading them.
+func wsHeading(s *theme.Styles, title, note string) []string {
+	line := " " + s.PaneTitleActive.Render(title)
+	if note != "" {
+		line += "  " + s.Faint.Render(note)
+	}
+	return []string{"", line}
+}
+
 // wsStatsRender draws the tab, everything on one screen: the timeline
 // gets what the other sections leave, rather than the page growing a
 // second scroll a j/k would have to be aimed at.
@@ -363,25 +398,26 @@ func (m *Shell) wsStatsRender(w, h int) string {
 	tail = append(tail, m.wsMoneyLines(rep, w)...)
 	tail = append(tail, m.wsClockLines(rep)...)
 	tail = append(tail, m.wsTopLines(rep, w)...)
-	// The rows the timeline is fixed to spend: its title above, and the
-	// axis, its tick labels and the legend below. The lanes get what is
-	// left — a timeline that scrolled its own ledgers off the pane would
-	// be a page that needs a second scroll j/k is already spent on.
+	// The rows the timeline is fixed to spend: the rule and title above
+	// it, and the axis, its tick labels and the legend below. The lanes
+	// get what is left — a timeline that scrolled its own ledgers off the
+	// pane would be a page that needs a second scroll j/k is already
+	// spent on. Each section below carries its own rule, so the blanks
+	// are counted where they are drawn and never twice.
 	laneBudget := h - len(head) - 5 - len(tail)
-	var lanes []string
-	var flags wsLegendFlags
-	if laneBudget > 1 {
-		lanes, flags = m.wsLaneLines(rep, w, laneBudget)
-	} else {
-		lanes = []string{" " + s.Faint.Render("the timeline needs a taller pane")}
-	}
 
 	out := append([]string{}, head...)
-	out = append(out, " "+s.PaneTitleActive.Render("THE TIMELINE")+"  "+
-		s.Faint.Render("h/l window · f follow-now · j/k lanes · enter opens"))
-	out = append(out, lanes...)
-	out = append(out, m.wsAxisLines(rep, w, flags)...)
-	out = append(out, "")
+	out = append(out, wsHeading(s, "THE TIMELINE", "h/l window · f follow-now · j/k lanes · enter opens")...)
+	if laneBudget > 1 {
+		lanes, flags := m.wsLaneLines(rep, w, laneBudget)
+		out = append(out, lanes...)
+		// The axis belongs to the lanes: a ruler under a timeline nobody
+		// drew measures nothing, and its legend — rendered from what the
+		// raster painted — would be an empty row besides.
+		out = append(out, m.wsAxisLines(rep, w, flags)...)
+	} else {
+		out = append(out, " "+s.Faint.Render("the timeline needs a taller pane"))
+	}
 	out = append(out, tail...)
 	if len(out) > h {
 		out = out[:h]
@@ -513,7 +549,7 @@ type wsLegendFlags struct {
 // exactly the lane the reader is looking at.
 func (m *Shell) wsLaneLines(rep *fleetrun.Report, w, budget int) ([]string, wsLegendFlags) {
 	s := m.styles
-	laneW := max(w-wsLabelWidth-2, 10)
+	laneW := wsLaneWidth(w)
 	from, to := wsOrigin(rep), rep.Window.To
 	span := to.Sub(from)
 	if span <= 0 {
@@ -590,7 +626,11 @@ func (m *Shell) wsLaneLines(rep *fleetrun.Report, w, budget int) ([]string, wsLe
 		}
 		left := idStyle.Render(string(l.ID)) +
 			s.Faint.Render(" "+clipPlain(l.Title, max(wsLabelWidth-idW-2, 0)))
-		line := padRightANSI(left, wsLabelWidth) + s.Separator.Render("│") + strings.Join(cells, "")
+		// The leading space is the page's left margin, the one every
+		// section title and ledger row on this page already sits behind:
+		// a timeline block hanging a column left of everything above it
+		// reads as a second page pasted into this one.
+		line := " " + padRightANSI(left, wsLabelWidth) + s.Separator.Render("│") + strings.Join(cells, "")
 		if i == m.wsstats.cursor {
 			line = s.Band(line, w, true)
 			if !l.OpenWaitFrom.IsZero() {
@@ -659,7 +699,7 @@ func wsStamp(rep *fleetrun.Report, t time.Time) string {
 // per kind of thing the lanes actually drew.
 func (m *Shell) wsAxisLines(rep *fleetrun.Report, w int, flags wsLegendFlags) []string {
 	s := m.styles
-	laneW := max(w-wsLabelWidth-2, 10)
+	laneW := wsLaneWidth(w)
 	from, to := wsOrigin(rep), rep.Window.To
 	span := to.Sub(from)
 	if span <= 0 {
@@ -678,10 +718,19 @@ func (m *Shell) wsAxisLines(rep *fleetrun.Report, w int, flags wsLegendFlags) []
 		pos := clamp(c-len(label)/2, 0, laneW-len(label))
 		copy(labels[pos:], label)
 	}
-	axis := padRightANSI("", wsLabelWidth) + s.Separator.Render("└"+string(rule)+"┤") +
-		" " + s.Faint.Render("❯ "+to.Format("15:04"))
-	labelRow := padRightANSI("", wsLabelWidth+1) + s.Faint.Render(string(labels))
-	return []string{axis, labelRow, " " + m.wsLegend(rep, flags, laneW)}
+	axis := " " + padRightANSI("", wsLabelWidth) + s.Separator.Render("└"+string(rule)+"┤")
+	// The now-marker hangs off the right end of the ruler, so it only
+	// goes on when the pane has room for it beside the raster. Printed
+	// unconditionally it is the one clause on the page that is always
+	// the one cut off, and a time cut in half is worse than no time.
+	if mark := wsNowMark(to); ansi.StringWidth(axis)+1+ansi.StringWidth(mark) < w {
+		axis += " " + s.Faint.Render(mark)
+	}
+	labelRow := padRightANSI("", wsLabelWidth+2) + s.Faint.Render(string(labels))
+	// The legend is clipped to the pane, not to the raster: it sits
+	// under the label column too, and cut at the raster's width it lost
+	// marks the page had room to name.
+	return []string{axis, labelRow, " " + m.wsLegend(rep, flags, max(w-2, 10))}
 }
 
 // wsTickSteps are the round steps ticks may sit on, smallest first. A
@@ -746,7 +795,7 @@ func wsTickLabel(span time.Duration, t time.Time) string {
 // wsLegend is the timeline's key, rendered from what the lanes drew —
 // the flags the raster collected — so an empty legend never promises a
 // mark nobody can see.
-func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, laneW int) string {
+func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, width int) string {
 	s := m.styles
 	var parts []string
 	for _, st := range domain.Stages {
@@ -767,7 +816,7 @@ func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, laneW int) s
 		parts = append(parts, s.Success.Render("✔ landed"))
 	}
 	line := strings.Join(parts, "  ")
-	return ansi.Truncate(line, max(laneW, 10), "…")
+	return ansi.Truncate(line, max(width, 10), "…")
 }
 
 // wsMoneyLines is where the credits went, two columns of the same
@@ -780,29 +829,44 @@ func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 	if rep.Credits == 0 && rep.AllTime.Credits == 0 && rep.Tokens.Zero() && rep.AllTime.Tokens.Zero() {
 		return nil
 	}
-	out := []string{" " + s.PaneTitleActive.Render("WHERE IT WENT") +
-		"  " + s.Faint.Render(wsWindowName(rep.Window)+" · passes started in the window")}
-	colW := max((w-2)/2-2, 30)
-	barW := 12
-	left := wsBucketLines(s, rep.ByStage, rep.Credits, barW)
-	right := wsBucketLines(s, rep.AllTime.ByStage, rep.AllTime.Credits, barW)
+	out := wsHeading(s, "WHERE IT WENT", wsWindowName(rep.Window)+" · passes started in the window")
+	clip := func(line string) string { return ansi.Truncate(line, max(w-1, 10), "…") }
+	left := wsBucketLines(s, rep.ByStage, rep.Credits)
+	right := wsBucketLines(s, rep.AllTime.ByStage, rep.AllTime.Credits)
 	if len(left) == 0 {
 		left = []string{s.Faint.Render("nothing ran in this window")}
 	}
 	if len(right) == 0 {
 		right = []string{s.Faint.Render("no spend recorded")}
 	}
-	head := padRightANSI(s.Faint.Render("  window"), colW) + s.Faint.Render(fmt.Sprintf("  all-time · %d card%s", rep.AllTime.Cards, plural(rep.AllTime.Cards)))
-	out = append(out, head)
-	for i := 0; i < max(len(left), len(right)); i++ {
-		l, r := "", ""
-		if i < len(left) {
-			l = left[i]
+	allTime := s.Faint.Render(fmt.Sprintf("  all-time · %d card%s", rep.AllTime.Cards, plural(rep.AllTime.Cards)))
+	// Side by side only while a column is wide enough to hold a whole
+	// bucket row. A half-pane narrower than the row it carries does not
+	// shrink the row — the rows are a fixed grid — so the all-time column
+	// would start inside the window column's figures and be cut by the
+	// pane edge. Below that width the two ledgers go one under the other,
+	// each whole, which is what a reader came for.
+	if colW := (w-2)/2 - 2; colW >= wsBucketWidth+2 {
+		out = append(out, padRightANSI(s.Faint.Render("  window"), colW)+allTime)
+		for i := 0; i < max(len(left), len(right)); i++ {
+			l, r := "", ""
+			if i < len(left) {
+				l = left[i]
+			}
+			if i < len(right) {
+				r = right[i]
+			}
+			out = append(out, clip(padRightANSI(l, colW)+r))
 		}
-		if i < len(right) {
-			r = right[i]
+	} else {
+		out = append(out, s.Faint.Render("  window"))
+		for _, l := range left {
+			out = append(out, clip(l))
 		}
-		out = append(out, padRightANSI(l, colW)+r)
+		out = append(out, allTime)
+		for _, r := range right {
+			out = append(out, clip(r))
+		}
 	}
 	out = append(out, m.wsTotalLines(rep, w)...)
 	foot := "  "
@@ -830,7 +894,7 @@ func (m *Shell) wsTotalLines(rep *fleetrun.Report, w int) []string {
 	// that did not line up under the rows it totals is one a reader has
 	// to check by eye instead of by adding.
 	row := func(label string, credits float64, tok fleetrun.Tokens) string {
-		line := fmt.Sprintf("  %-10s %s %8.2f credits", label, strings.Repeat(" ", 12), credits)
+		line := fmt.Sprintf("  %-10s %s %8.2f credits", label, strings.Repeat(" ", wsBarWidth), credits)
 		if d := wsDollars(credits); d != "" {
 			line += "  " + d
 		}
@@ -879,14 +943,26 @@ func wsDollars(credits float64) string {
 	return d
 }
 
+// wsBarWidth is how wide a bucket row's magnitude bar is drawn, and
+// wsBucketWidth what the whole row comes to at that bar — the margin,
+// the name, the bar, the figure and the share, in the widths the format
+// below spends on them. The column layout reads the total rather than
+// guessing it: a row is a fixed grid, and a column narrower than its own
+// row is not a narrower column but two ledgers printed on top of each
+// other.
+const (
+	wsBarWidth    = 12
+	wsBucketWidth = 2 + 10 + 1 + wsBarWidth + 1 + 8 + 2 + 4
+)
+
 // wsBucketLines is one column's rows: name, a magnitude bar, the
 // figure, its share. One hue per bar — these are shares of one total,
 // the rule statsview's own bars state.
-func wsBucketLines(s *theme.Styles, bs []cardrun.Bucket, total float64, barW int) []string {
+func wsBucketLines(s *theme.Styles, bs []cardrun.Bucket, total float64) []string {
 	var out []string
 	for _, b := range bs {
 		out = append(out, fmt.Sprintf("  %-10s %s %8.2f  %3.0f%%",
-			b.Name, wsBar(s, b.Credits, total, barW), b.Credits, share(b.Credits, total)*100))
+			b.Name, wsBar(s, b.Credits, total, wsBarWidth), b.Credits, share(b.Credits, total)*100))
 	}
 	return out
 }
@@ -909,8 +985,7 @@ func (m *Shell) wsClockLines(rep *fleetrun.Report) []string {
 	if rep.Elapsed <= 0 {
 		return nil
 	}
-	out := []string{" " + s.PaneTitleActive.Render("THE CLOCK") +
-		"  " + s.Faint.Render(wsWindowName(rep.Window))}
+	out := wsHeading(s, "THE CLOCK", wsWindowName(rep.Window))
 	peak := ""
 	if rep.PeakLanes > 0 {
 		peak = fmt.Sprintf("peak %d lane%s at once", rep.PeakLanes, plural(rep.PeakLanes))
@@ -945,8 +1020,7 @@ func (m *Shell) wsTopLines(rep *fleetrun.Report, w int) []string {
 	if len(rep.Top) == 0 {
 		return nil
 	}
-	out := []string{" " + s.PaneTitleActive.Render("TOP CARDS") +
-		"  " + s.Faint.Render(wsWindowName(rep.Window))}
+	out := wsHeading(s, "TOP CARDS", wsWindowName(rep.Window))
 	maxCredits := rep.Top[0].Credits
 	for _, l := range rep.Top {
 		bar := wsBar(s, l.Credits, maxCredits, 8)
