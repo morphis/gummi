@@ -292,7 +292,7 @@ func (s *Store) CloseGoalDropped(ctx context.Context, card domain.FeatureID, act
 	// surface: report it when the log took it. No verified event — a
 	// dropped card ended with its branch kept, nothing landed.
 	if gateInserted {
-		s.observeTransition(card, f.Stage, domain.StageDone, actor, at.UTC(), "", false)
+		s.observeTransition(card, f.Stage, domain.StageDone, actor, at.UTC(), "")
 	}
 	return nil
 }

@@ -138,20 +138,25 @@ this file is safe to commit.
 
 `hooks:` in either config file runs a script when the board changes —
 the script surface beside `GUMMI_NOTIFY`'s bell/desktop toast. Each
-entry is a shell command, executed via `sh -c` in the workspace root,
-with:
+entry is a shell **command line**, executed via `sh -c` in the workspace
+root, with:
 
-- the **event name** as `$1`,
 - a **JSON payload** on stdin (flat, `event`/`id`/`stage`/`branch`/
-  `title`/… — every field but `event` is omitempty),
+  `repo`/`title`/… — every field but `event` is omitempty),
 - `GUMMI_EVENT`, `GUMMI_CARD` and `GUMMI_WORKSPACE` in the environment,
+- the event name as the **shell's** `"$1"`.
 
 ```yaml
 hooks:
-  - run: ~/bin/gummi-notify            # every event
-  - run: page-oncall.sh
+  - run: ~/bin/gummi-notify "$1"       # every event
+  - run: page-oncall.sh "$1"
     events: [gate.waiting, budget.exhausted]
 ```
+
+`"$1"` is the shell's first argument, not the script's: `run:` is a
+command line, so a line naming a script and nothing else hands that
+script **no arguments**. Forward it, as above, if the script wants it as
+`argv[1]` — or just read `GUMMI_EVENT`, which needs no forwarding.
 
 An entry without `events:` fires on every event; with it, only on the
 events named. User-level and workspace entries **both** run, in that
@@ -163,7 +168,7 @@ The event vocabulary (closed; a config typo is rejected at load):
 |---|---|
 | `card.created` | a card was minted (creation, ingest, bugs import) |
 | `stage.enter` | a card crossed a stage edge (`from`/`to`/`actor` name it) |
-| `card.verified` | the card reached done with a verified branch — the landing moment |
+| `card.verified` | the verify gate passed and the branch is ready to land — where gummi's job ends, so it fires **there**, not at a later merge that may never come |
 | `card.parked` | the card stopped and waits (`reason`: needs-you, gave-up, blocked, quit) |
 | `card.merged` | the branch was squash-merged onto its base (`commit` is the sha) |
 | `gate.waiting` | the card blocked on a design-gate approval |
@@ -171,15 +176,39 @@ The event vocabulary (closed; a config typo is rejected at load):
 | `budget.exhausted` | the card's envelope is spent |
 | `card.failed` | a failing verify, a rebase conflict, or an idle stop (`decision_kind` distinguishes) |
 
+A stop raises **two** events, general first: `card.parked` (the card
+stopped) then the decision that says how — `gate.waiting`,
+`question.waiting`, `budget.exhausted` or `card.failed`. Key a pager on
+the decision, not on the park. A landing likewise reports `card.merged`
+before the `stage.enter` that crosses to done, because the worktree
+reports the commit before the store commits the crossing. And a run
+stopped by `--until <stage>` raises only `card.parked` — nothing is
+waiting on a human, so no decision is opened.
+
 The contract is advisory end to end: hooks run detached from the caller's
 path (a full queue drops the event, a hung script is killed after 15
-seconds), a hook's exit status and output are its own business, and no
-hook failure can fail the run that raised the event. Events fire where
-they are committed — the store reports crossings, parks, decisions and
-creations; the worktree layer reports squash-merges — so a hook fires
-once per committed row, from whichever process drove it, and the store's
-dedupe keys apply (a re-raised decision that deduped to a no-op raises
-nothing).
+seconds), a hook's exit status is its own business, stdout goes nowhere,
+and no hook failure can fail the run that raised the event. Exiting is
+bounded too: whatever is still queued when the process closes gets 15
+seconds in total to run, and the rest is abandoned rather than held
+against a process that is done. Advisory is not silent, though — failed
+runs and undelivered events are counted and printed in one line at exit:
+
+```
+gummi: hooks: 1 script run failed (last: page-oncall.sh "$1" on gate.waiting:
+exit status 127: sh: page-oncall.sh: not found); 3 queued events abandoned at
+exit (15s drain budget)
+```
+
+`gummi doctor` reports each configured hook and stats the script when the
+line begins with a path or a bare command name, so a typo is visible
+before an event needs it.
+
+Events fire where they are committed — the store reports crossings,
+parks, decisions, creations and the verify stamp; the worktree layer
+reports squash-merges — so a hook fires once per committed row, from
+whichever process drove it, and the store's dedupe keys apply (a
+re-raised decision that deduped to a no-op raises nothing).
 
 ## Environment variables
 

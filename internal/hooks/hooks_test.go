@@ -1,13 +1,17 @@
 package hooks
 
-// The dispatcher's contract, pinned here: scripts get the event name as
-// argv[1] and the JSON payload on stdin, in the workspace root, with the
-// identity in the environment; filters narrow; overflow drops (counted);
-// timeouts kill the process group; Close drains; nil is inert.
+// The dispatcher's contract, pinned here: a run line is a shell command
+// line (the event is the shell's "$1", forwarded or not) fed the JSON
+// payload on stdin, in the workspace root, with the identity in the
+// environment; filters narrow; overflow drops and the exit budget
+// abandons, both counted and reported; timeouts kill the process group;
+// Close drains under one clock; nil is inert.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -252,6 +256,7 @@ func TestDispatcherDropsOnOverflow(t *testing.T) {
 		queue: make(chan Payload, 1),
 		done:  make(chan struct{}),
 	}
+	d.SetWarn(io.Discard) // the drop summary is this test's expected outcome
 	d.wg.Add(1)
 	go d.run()
 
@@ -274,6 +279,7 @@ func TestDispatcherTimeoutKillsScript(t *testing.T) {
 		done:  make(chan struct{}),
 	}
 	d.hookTimeout = 150 * time.Millisecond
+	d.SetWarn(io.Discard) // the kill is counted as a failure; that is the point
 	d.wg.Add(1)
 	go d.run()
 
@@ -357,5 +363,168 @@ func TestValidEvent(t *testing.T) {
 		if ValidEvent(bad) {
 			t.Errorf("ValidEvent(%q) = true, want false", bad)
 		}
+	}
+}
+
+// TestRunLineIsACommandLineNotAProgram pins the contract the docs make:
+// `run:` is fed to `sh -c`, so the event is the *shell's* "$1" and a line
+// naming a script and nothing else hands that script no arguments. The
+// environment carries the event either way. This is the shape every
+// documented example uses, and the one the older tests never covered.
+func TestRunLineIsACommandLineNotAProgram(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hook.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"$GUMMI_EVENT\" >> \"$OUT\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OUT", filepath.Join(dir, "bare.log"))
+
+	bare := New([]Hook{{Run: script}}, dir, nil)
+	bare.Observe(state.CardEvent{Feature: "FD-001", Kind: state.EventCreated, At: time.Now()})
+	bare.Close()
+	if got := readLine(t, filepath.Join(dir, "bare.log")); got != "|"+EventCardCreated {
+		t.Errorf("a bare script line gave argv[1]=%q; want none, with the event only in the environment", got)
+	}
+
+	t.Setenv("OUT", filepath.Join(dir, "fwd.log"))
+	fwd := New([]Hook{{Run: script + ` "$1"`}}, dir, nil)
+	fwd.Observe(state.CardEvent{Feature: "FD-001", Kind: state.EventCreated, At: time.Now()})
+	fwd.Close()
+	if got := readLine(t, filepath.Join(dir, "fwd.log")); got != EventCardCreated+"|"+EventCardCreated {
+		t.Errorf("a forwarding line gave %q, want the event in both argv[1] and the environment", got)
+	}
+}
+
+// TestCloseDrainIsBounded pins the exit contract: a queue of hung scripts
+// is bounded as a whole, not per script. Without it, queueCap hung hooks
+// would hold an exiting process for queueCap × hookTimeout — minutes of
+// stall after the run's own output ended.
+func TestCloseDrainIsBounded(t *testing.T) {
+	dir := t.TempDir()
+	d := &Dispatcher{
+		ws:          dir,
+		hooks:       []Hook{{Run: "sleep 30"}},
+		queue:       make(chan Payload, 16),
+		done:        make(chan struct{}),
+		hookTimeout: 5 * time.Second,
+		drainBudget: 300 * time.Millisecond,
+	}
+	d.SetWarn(io.Discard)
+	d.wg.Add(1)
+	go d.run()
+
+	for range 8 {
+		d.enqueue(Payload{Event: EventStageEnter})
+	}
+	start := time.Now()
+	d.Close()
+	// 8 hung scripts at a 5s timeout each is 40s unbounded; the budget
+	// caps it near 300ms (plus the kill's WaitDelay).
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Close took %v; the drain budget did not bound it", elapsed)
+	}
+	if d.Abandoned() == 0 {
+		t.Error("nothing counted as abandoned; the budget ran out silently")
+	}
+}
+
+// TestFailuresAreCountedAndReported pins that advisory is not silent: a
+// hook that cannot run is counted, named with its stderr tail, and
+// reported in one line at Close. A hook nobody can see failing is a hook
+// nobody can fix.
+func TestFailuresAreCountedAndReported(t *testing.T) {
+	dir := t.TempDir()
+	var summary bytes.Buffer
+	d := New([]Hook{{Run: filepath.Join(dir, "not-there.sh")}}, dir, nil)
+	d.SetWarn(&summary)
+	d.Observe(state.CardEvent{Feature: "FD-001", Kind: state.EventCreated, At: time.Now()})
+	d.Close()
+
+	if d.Failed() != 1 {
+		t.Fatalf("Failed() = %d, want 1", d.Failed())
+	}
+	got := summary.String()
+	if !strings.Contains(got, "1 script run failed") || !strings.Contains(got, EventCardCreated) {
+		t.Errorf("summary = %q, want it to name the failed run and its event", got)
+	}
+	if !strings.Contains(got, "not found") && !strings.Contains(got, "not-there.sh") {
+		t.Errorf("summary = %q, want the shell's own complaint in it", got)
+	}
+}
+
+// TestCleanRunReportsNothing is the other half: silence means every hook
+// ran and every event reached it.
+func TestCleanRunReportsNothing(t *testing.T) {
+	dir := t.TempDir()
+	var summary bytes.Buffer
+	d := New([]Hook{{Run: "true"}}, dir, nil)
+	d.SetWarn(&summary)
+	d.Observe(state.CardEvent{Feature: "FD-001", Kind: state.EventCreated, At: time.Now()})
+	d.Close()
+	if got := summary.String(); got != "" {
+		t.Errorf("a clean run printed %q, want silence", got)
+	}
+}
+
+// TestPayloadCarriesRepo pins the multi-repo field: the script's cwd is
+// always the workspace root, so the payload is what says which managed
+// repository the card's branch lives in.
+func TestPayloadCarriesRepo(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "body.json")
+	feats := stubFeatures{{
+		f: domain.Feature{ID: "FD-011", Num: 11, Kind: domain.KindFeature, Title: "Multi",
+			Slug: "multi", Stage: domain.StageVerify, Repo: "lxd", BranchScheme: domain.BranchSchemeKind},
+	}}
+	d := New([]Hook{{Run: `cat > ` + out}}, dir, feats)
+	defer d.Close()
+
+	d.Observe(state.CardEvent{Feature: "FD-011", Stage: "verify", Kind: state.EventVerified, At: time.Now()})
+
+	var p Payload
+	if err := json.Unmarshal(waitFor(t, func() []byte {
+		b, _ := os.ReadFile(out)
+		return b
+	}, "body.json"), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Repo != "lxd" || p.Event != EventCardVerified {
+		t.Errorf("payload = %+v, want card.verified carrying repo lxd", p)
+	}
+}
+
+// TestCloseBoundsARunningScript pins the other half of the exit bound: a
+// script already running when Close arrives cannot be un-started, but it
+// is still measured against the same budget, so exiting costs the budget
+// once rather than a full per-script timeout on top of it.
+func TestCloseBoundsARunningScript(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	d := &Dispatcher{
+		ws:          dir,
+		hooks:       []Hook{{Run: "touch " + started + "; sleep 30"}},
+		queue:       make(chan Payload, 4),
+		done:        make(chan struct{}),
+		hookTimeout: 30 * time.Second,
+		drainBudget: 300 * time.Millisecond,
+	}
+	d.exiting, d.stopExit = context.WithCancel(context.Background())
+	d.SetWarn(io.Discard)
+	d.wg.Add(1)
+	go d.run()
+
+	d.enqueue(Payload{Event: EventStageEnter})
+	waitFor(t, func() []byte {
+		b, _ := os.ReadFile(started)
+		if _, err := os.Stat(started); err == nil {
+			return []byte("x")
+		}
+		return b
+	}, "the script to start")
+
+	start := time.Now()
+	d.Close()
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Close took %v; the running script outlived the budget", elapsed)
 	}
 }

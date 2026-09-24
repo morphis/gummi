@@ -1,23 +1,33 @@
 // Package hooks runs user-configured scripts when the board changes —
 // the script surface beside the bell/desktop notifier (DESIGN §4.2's
 // needs-attention hooks), driven by the same events from the inside out.
-// A hook is a shell command (config.yaml's `hooks:` list) run on one
-// event with the event name as argv[1] and a JSON payload on stdin:
+// A hook is a shell command line (config.yaml's `hooks:` list) run on
+// one event, with the event in the environment and a JSON payload on
+// stdin:
 //
 //	hooks:
-//	  - run: ~/bin/gummi-notify            # every event
-//	  - run: page-oncall.sh
+//	  - run: ~/bin/gummi-notify "$1"       # every event
+//	  - run: page-oncall.sh "$1"
 //	    events: [gate.waiting, budget.exhausted]
+//
+// The `run:` line is a shell command line, not a program name: it is fed
+// to `sh -c`, where the event name is "$1". A line that names a script
+// and nothing else therefore hands that script no arguments — forward
+// "$1" (as above) if the script wants it as argv[1]. GUMMI_EVENT carries
+// the same name and needs no forwarding.
 //
 // The event vocabulary is closed (see the Event* constants). Two facts
 // shape the contract:
 //
-//   - Hooks are advisory. A hook's exit status, output and very life are
-//     none of gummi's business: scripts run detached from the caller's
-//     path, never block it (the dispatcher is a bounded queue with one
-//     worker; a full queue drops, counted), and never fail the run that
-//     raised the event. A hook's output is discarded — scripts that need
-//     a trail write their own.
+//   - Hooks are advisory. A hook's exit status and output are none of
+//     gummi's business: scripts run detached from the caller's path,
+//     never block it (the dispatcher is a bounded queue with one worker;
+//     a full queue drops, counted), and never fail the run that raised
+//     the event. Stdout is discarded — scripts that need a trail write
+//     their own. Advisory is not silent, though: a run that fails, and
+//     an event that was never delivered, are counted and reported in one
+//     line at Close, because a hook nobody can see failing is a hook
+//     nobody can fix.
 //   - Hooks fire where the event is committed. The store reports
 //     committed card events (Transitions, parks, decisions, creations)
 //     and the worktree layer reports squash-merges; a hook therefore
@@ -31,6 +41,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -142,6 +153,11 @@ type Payload struct {
 	// Stage is the stage the event happened in (for stage.enter: the
 	// stage entered).
 	Stage string `json:"stage,omitempty"`
+	// Repo is the name of the managed repository the card belongs to, on
+	// a workspace that manages several ("" for the default one). The
+	// script's own cwd is always the workspace root, so this is what
+	// tells a multi-repo hook which tree the card's branch is in.
+	Repo string `json:"repo,omitempty"`
 	// Branch is the card's branch name, when it has one.
 	Branch string `json:"branch,omitempty"`
 	// At is the event's commit time (RFC3339).
@@ -176,6 +192,19 @@ const hookTimeout = 15 * time.Second
 // a notification for a stall, backwards for an advisory surface.
 const queueCap = 64
 
+// drainBudget bounds Close's drain as a whole, however deep the queue is.
+// Per-script timeouts alone do not bound it: queueCap hung scripts at
+// hookTimeout each would hold an exiting process for minutes after its
+// own output ended — a stall traded for notifications nobody is waiting
+// on any more. Whatever the budget does not cover is abandoned, counted,
+// and reported.
+const drainBudget = hookTimeout
+
+// stderrTail bounds how much of a failing script's stderr is kept for the
+// summary line. Enough to carry "not found" or a stack's first line;
+// short enough that a chatty script cannot grow the dispatcher.
+const stderrTail = 200
+
 // Dispatcher runs a config's hooks against the board's events. The zero
 // use is fine: all methods are nil-safe no-ops, so a workspace with no
 // hooks configured wires up without conditionals.
@@ -184,16 +213,36 @@ type Dispatcher struct {
 	hooks []Hook
 	feats Features
 
-	// hookTimeout bounds one script's run; the hookTimeout const is the
-	// production default. A field so tests can shrink it.
+	// hookTimeout bounds one script's run and drainBudget bounds Close's
+	// whole drain; the consts of the same names are the production
+	// defaults. Fields so tests can shrink them.
 	hookTimeout time.Duration
+	drainBudget time.Duration
+
+	// warn receives the one-line summary Close prints when something was
+	// lost or failed; nil means os.Stderr.
+	warn io.Writer
 
 	queue chan Payload
 	done  chan struct{}
 	wg    sync.WaitGroup
 
+	// exiting is cancelled once Close's budget is spent, killing whatever
+	// script is still running; deadline is that same instant, shared so
+	// the worker's drain and the running script measure from one clock.
+	exiting    context.Context
+	stopExit   context.CancelFunc
+	deadlineNS atomic.Int64
+
 	closeOnce sync.Once
 	dropped   atomic.Int64
+	abandoned atomic.Int64
+	failed    atomic.Int64
+
+	// lastFail holds the most recent failure's one-line description, for
+	// the summary. Written by the worker, read by Close and Failures.
+	mu       sync.Mutex
+	lastFail string
 }
 
 // New builds a dispatcher for cfg's hooks, running scripts in ws (the
@@ -209,9 +258,11 @@ func New(cfg []Hook, ws string, feats Features) *Dispatcher {
 		hooks:       append([]Hook(nil), cfg...),
 		feats:       feats,
 		hookTimeout: hookTimeout,
+		drainBudget: drainBudget,
 		queue:       make(chan Payload, queueCap),
 		done:        make(chan struct{}),
 	}
+	d.exiting, d.stopExit = context.WithCancel(context.Background())
 	d.wg.Add(1)
 	go d.run()
 	return d
@@ -243,29 +294,127 @@ func (d *Dispatcher) Merged(f *domain.Feature, commit string) {
 		Title:     f.Title,
 		Branch:    f.BranchName(),
 		Stage:     string(f.Stage),
+		Repo:      f.Repo,
 		Commit:    commit,
 		At:        time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
 // Close stops the dispatcher: it stops accepting work and drains what is
-// already queued, bounding each remaining script by hookTimeout. Safe to
-// call more than once and on a nil dispatcher.
+// already queued, bounded as a whole by drainBudget, then reports in one
+// line whatever was lost or failed. A script already running when Close
+// is called still gets its own timeout — it cannot be un-started — so the
+// worst case is one hookTimeout plus the budget, not the queue's depth
+// times either. Safe to call more than once and on a nil dispatcher.
 func (d *Dispatcher) Close() {
 	if d == nil {
 		return
 	}
-	d.closeOnce.Do(func() { close(d.done) })
+	d.closeOnce.Do(func() {
+		// One deadline for the whole exit, fixed here rather than where
+		// the worker notices: a script already running would otherwise
+		// push the drain's own clock out by its full timeout, and the
+		// budget would buy twice what it says.
+		deadline := time.Now().Add(d.budget())
+		d.deadlineNS.Store(deadline.UnixNano())
+		var timer *time.Timer
+		if d.stopExit != nil {
+			timer = time.AfterFunc(time.Until(deadline), d.stopExit)
+		}
+		close(d.done)
+		d.wg.Wait()
+		if timer != nil {
+			timer.Stop()
+			d.stopExit() // release the context, timer fired or not
+		}
+	})
 	d.wg.Wait()
+	d.report()
 }
 
 // Dropped reports how many events were dropped because the queue was
-// full — the one way an advisory surface can lose an event.
+// full — one of the two ways an advisory surface can lose an event.
 func (d *Dispatcher) Dropped() int64 {
 	if d == nil {
 		return 0
 	}
 	return d.dropped.Load()
+}
+
+// Abandoned reports how many queued events Close's drain budget ran out
+// on — the other way one is lost, and the price of not stalling an
+// exiting process behind a hung script.
+func (d *Dispatcher) Abandoned() int64 {
+	if d == nil {
+		return 0
+	}
+	return d.abandoned.Load()
+}
+
+// Failed reports how many hook script runs ended badly — a non-zero exit,
+// a missing interpreter, a kill at the timeout.
+func (d *Dispatcher) Failed() int64 {
+	if d == nil {
+		return 0
+	}
+	return d.failed.Load()
+}
+
+// SetWarn redirects the summary Close prints (default os.Stderr). Call it
+// before any event is queued; tests use it to read the summary back.
+func (d *Dispatcher) SetWarn(w io.Writer) {
+	if d == nil {
+		return
+	}
+	d.warn = w
+}
+
+// report prints the one line that makes an advisory surface accountable:
+// what failed, and what never ran. Silence means every hook ran and every
+// event reached it.
+func (d *Dispatcher) report() {
+	var parts []string
+	if n := d.Failed(); n > 0 {
+		d.mu.Lock()
+		last := d.lastFail
+		d.mu.Unlock()
+		parts = append(parts, fmt.Sprintf("%d script %s failed (last: %s)", n, plural(n, "run"), last))
+	}
+	if n := d.Dropped(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s dropped (queue full)", n, plural(n, "event")))
+	}
+	if n := d.Abandoned(); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d queued %s abandoned at exit (%s drain budget)",
+			n, plural(n, "event"), d.budget()))
+	}
+	if len(parts) == 0 {
+		return
+	}
+	w := d.warn
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintln(w, "gummi: hooks: "+strings.Join(parts, "; "))
+}
+
+// plural renders "1 run" / "2 runs" for the summary.
+func plural(n int64, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+// noteFailure records one bad run for the summary.
+func (d *Dispatcher) noteFailure(h Hook, ev string, err error, stderr []byte) {
+	d.failed.Add(1)
+	msg := h.Run + " on " + ev + ": " + err.Error()
+	if tail := strings.TrimSpace(string(stderr)); tail != "" {
+		msg += ": " + strings.ReplaceAll(tail, "\n", " ")
+	}
+	d.mu.Lock()
+	d.lastFail = msg
+	d.mu.Unlock()
 }
 
 // enqueue offers one payload; a full queue drops it, counted. It never
@@ -282,35 +431,71 @@ func (d *Dispatcher) enqueue(p Payload) {
 	}
 }
 
-// run is the single worker: it drains the queue in order, and after
-// Close keeps draining what is already queued before exiting.
+// run is the single worker: it fires queued events in order until Close,
+// then drains what is left under one budget. Closing is checked before
+// each event, not only when the queue runs dry: a deep queue would
+// otherwise keep the worker in its normal path, and a process trying to
+// exit would wait out a full timeout per hung script rather than one
+// budget for all of them.
 func (d *Dispatcher) run() {
 	defer d.wg.Done()
 	for {
 		select {
-		case p := <-d.queue:
-			d.fire(p)
+		case <-d.done:
+			d.drain(d.exitDeadline())
+			return
 		default:
-			select {
-			case p := <-d.queue:
-				d.fire(p)
-			case <-d.done:
-				for {
-					select {
-					case p := <-d.queue:
-						d.fire(p)
-					default:
-						return
-					}
-				}
-			}
+		}
+		select {
+		case p := <-d.queue:
+			d.fire(p, time.Time{})
+		case <-d.done:
+			d.drain(d.exitDeadline())
+			return
+		}
+	}
+}
+
+// exitDeadline is the instant Close's budget runs out — the one clock the
+// drain and any still-running script both measure against.
+func (d *Dispatcher) exitDeadline() time.Time {
+	if ns := d.deadlineNS.Load(); ns > 0 {
+		return time.Unix(0, ns)
+	}
+	return time.Now().Add(d.budget())
+}
+
+// budget is the drain allowance. A hand-built dispatcher (tests) leaves
+// the field zero; the const is what production means by "the budget".
+func (d *Dispatcher) budget() time.Duration {
+	if d.drainBudget <= 0 {
+		return drainBudget
+	}
+	return d.drainBudget
+}
+
+// drain empties the queue after Close, firing what fits before deadline
+// and counting the rest abandoned.
+func (d *Dispatcher) drain(deadline time.Time) {
+	for {
+		select {
+		case p := <-d.queue:
+			d.fire(p, deadline)
+		default:
+			return
 		}
 	}
 }
 
 // fire runs every hook matching p, in config order. Enrichment happens
-// here — the worker goroutine, never the store's write path.
-func (d *Dispatcher) fire(p Payload) {
+// here — the worker goroutine, never the store's write path. A non-zero
+// deadline is Close's drain budget: an event the budget no longer covers
+// is abandoned whole, so the count stays in events rather than scripts.
+func (d *Dispatcher) fire(p Payload, deadline time.Time) {
+	if !deadline.IsZero() && !time.Now().Before(deadline) {
+		d.abandoned.Add(1)
+		return
+	}
 	d.enrich(&p)
 	body, err := json.Marshal(p)
 	if err != nil {
@@ -320,7 +505,7 @@ func (d *Dispatcher) fire(p Payload) {
 		if !h.matches(p.Event) {
 			continue
 		}
-		d.exec(h, p.Event, body)
+		d.exec(h, p.Event, p.ID, body, deadline)
 	}
 }
 
@@ -347,22 +532,49 @@ func (d *Dispatcher) enrich(p *Payload) {
 		if p.Stage == "" {
 			p.Stage = string(f.Stage)
 		}
+		if p.Repo == "" {
+			p.Repo = f.Repo
+		}
 	}
 	p.Workspace = d.ws
 }
 
 // exec runs one hook script for one event: `sh -c <run> gummi-hook
 // <event>` in the workspace root, JSON on stdin, the identity in the
-// environment. Every failure is swallowed here — advisory end to end.
-func (d *Dispatcher) exec(h Hook, ev string, body []byte) {
-	ctx, cancel := context.WithTimeout(context.Background(), d.hookTimeout)
+// environment. The event is the shell's "$1" (and "gummi-hook" its $0),
+// so a run line reaches its own argv only by forwarding it — see the
+// package doc. No failure here reaches the caller; it is counted and
+// named in Close's summary instead.
+//
+// deadline, when non-zero, is Close's drain budget: the script's own
+// timeout is clamped to what is left of it, so the last event in a queue
+// cannot add a full hookTimeout to an exiting process.
+func (d *Dispatcher) exec(h Hook, ev, card string, body []byte, deadline time.Time) {
+	timeout := d.hookTimeout
+	if !deadline.IsZero() {
+		if left := time.Until(deadline); left < timeout {
+			timeout = left
+		}
+	}
+	if timeout <= 0 {
+		return
+	}
+	// Parented on the exit context so a script that was already running
+	// when Close came is killed with the rest when the budget is spent —
+	// it keeps its own timeout until then, so a slow pager fired by the
+	// last event still gets those seconds to reach anyone.
+	parent := d.exiting
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", h.Run, "gummi-hook", ev) //nolint:gosec // run is operator config (hooks: in config.yaml), not agent/repo input
 	cmd.Dir = d.ws
 	cmd.Env = append(os.Environ(),
 		"GUMMI_EVENT="+ev,
 		"GUMMI_WORKSPACE="+d.ws,
-		"GUMMI_CARD="+gummiCardOf(body),
+		"GUMMI_CARD="+card,
 	)
 	// Run in its own process group and kill the group on cancel: a script
 	// that spawned children (a notifier daemon, a curl) must not orphan
@@ -376,21 +588,36 @@ func (d *Dispatcher) exec(h Hook, ev string, body []byte) {
 	}
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Stdin = bytes.NewReader(body)
+	// Stdout is the script's business and goes nowhere — a hook must never
+	// interleave with the NDJSON stream or the TUI's render surface. A
+	// bounded tail of stderr is kept, and only to name the failure in
+	// Close's summary.
 	cmd.Stdout = nil
-	cmd.Stderr = nil
-	_ = cmd.Run() // advisory: exit status and output are the script's business
+	errTail := &tailBuffer{max: stderrTail}
+	cmd.Stderr = errTail
+	if err := cmd.Run(); err != nil {
+		d.noteFailure(h, ev, err, errTail.bytes())
+	}
 }
 
-// gummiCardOf re-reads the payload's id for the GUMMI_CARD env var. The
-// body is the same struct just marshaled; a decode failure (cannot
-// happen for our own marshal) yields an empty value.
-func gummiCardOf(body []byte) string {
-	var p Payload
-	if err := json.Unmarshal(body, &p); err != nil {
-		return ""
-	}
-	return p.ID
+// tailBuffer keeps the last max bytes written to it: a failing script's
+// stderr tail, bounded so a chatty one cannot grow the dispatcher.
+type tailBuffer struct {
+	max int
+	buf []byte
 }
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.max {
+		t.buf = t.buf[len(t.buf)-t.max:]
+	}
+	return len(p), nil
+}
+
+// bytes returns the kept tail. Safe to call once cmd.Run has returned —
+// exec.Cmd has joined its copying goroutine by then.
+func (t *tailBuffer) bytes() []byte { return t.buf }
 
 // translate maps one committed card event to its hook payload. The event
 // kinds are the store's log vocabulary plus its two observer-only
@@ -441,11 +668,6 @@ func (d *Dispatcher) translate(ev state.CardEvent) (Payload, bool) {
 		return Payload{}, false
 	}
 	return p, true
-}
-
-// EventsFor renders a hook's filter for doctor ("" = all events).
-func (h Hook) Filter() string {
-	return strings.Join(h.Events, ",")
 }
 
 // Describe renders one hook line for doctor's config report.

@@ -952,12 +952,27 @@ func (s *Store) AddDecomposeSpend(ctx context.Context, id domain.FeatureID, cred
 // side-channel (it neither touches updated_at nor moves the stage, which
 // stays "verify" through and after the run), so the engine can record
 // "verified" the moment the gate is reached without a full-feature write.
+//
+// This is also where the verified landing is reported to the observer:
+// the stamp is the moment the branch became ready, and a card can sit
+// stamped at verify forever without anyone merging it. Only a card that
+// was not already stamped reports — a re-verify after the stamp was
+// cleared reports again, because the branch became ready again.
 func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+	var prev, stage string
+	// Read before the write so the report is "became verified", not "is
+	// verified". A missing row leaves both empty and the update below
+	// reports nothing of its own.
+	_ = s.db.QueryRowContext(ctx,
+		`SELECT verified_at, stage FROM features WHERE id = ?`, string(id)).Scan(&prev, &stage)
+	res, err := s.db.ExecContext(ctx,
 		`UPDATE features SET verified_at = ? WHERE id = ?`,
 		t.UTC().Format(timeFmt), string(id))
 	if err != nil {
 		return fmt.Errorf("marking %s verified: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n > 0 && prev == "" {
+		s.observe(CardEvent{Feature: id, Stage: domain.Stage(stage), Kind: EventVerified, At: t.UTC()})
 	}
 	return nil
 }
@@ -1700,13 +1715,12 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	if err := tx.Commit(); err != nil {
 		return f, err
 	}
-	// Post-commit reporting to hooks: the crossing (when its log row was
-	// actually inserted) and, when the card crossed to done carrying the
-	// verified stamp Advance left at the gate, the verified landing. The
-	// stamp was read before the update, so it is this crossing's truth.
+	// Post-commit reporting to hooks: the crossing, when its log row was
+	// actually inserted. The verified landing is not reported here —
+	// SetVerifiedAt reported it at the gate, where the branch became
+	// ready to land, rather than at a merge that may never happen.
 	if gateInserted {
-		s.observeTransition(id, f.Stage, to, actor, now, answerID,
-			to == domain.StageDone && !f.VerifiedAt.IsZero())
+		s.observeTransition(id, f.Stage, to, actor, now, answerID)
 	}
 	f.Stage = to
 	f.UpdatedAt = now

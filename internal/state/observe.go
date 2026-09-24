@@ -23,10 +23,14 @@ import (
 // but a hook hearing "a card was minted" should not have to poll for it.
 const EventCreated = "created"
 
-// EventVerified is the observer-only kind reporting that a card's
-// verify→done crossing landed a verified branch (the stamp Advance left
-// before the crossing). Merge and hand-off both pass through it; the
-// branch lives on the feature the hook enriches from.
+// EventVerified is the observer-only kind reporting that a card's verify
+// gate passed and its branch became ready to land — SetVerifiedAt's
+// stamp, the moment gummi's job is done (DESIGN §7: gummi ends at a
+// verified branch). It fires there, not at the later verify→done
+// crossing, because that crossing needs a merge or a hand-off that may
+// never come: a headless `run` stops at the verified branch, and the one
+// event its caller is waiting for must not wait on a landing. The
+// crossing still reports itself as the gate event it is.
 const EventVerified = "verified"
 
 // Observer receives committed events worth surfacing to hooks, in the
@@ -67,17 +71,15 @@ func (s *Store) observe(ev CardEvent) {
 	s.observer(ev)
 }
 
-// observeTransition reports one committed crossing: the gate event (the
-// same payload the log row holds) and, when the crossing landed a card
-// with a verified stamp already on it, the synthetic verified event.
-// called post-commit, so a failure here could only lose a notification.
-func (s *Store) observeTransition(id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string, verified bool) {
+// observeTransition reports one committed crossing: the gate event, with
+// the same payload the log row holds. Called post-commit, so a failure
+// here could only lose a notification. The verified landing is not
+// reported here — SetVerifiedAt owns it, at the gate where the branch
+// actually became ready.
+func (s *Store) observeTransition(id domain.FeatureID, from, to domain.Stage, actor string, at time.Time, answerID string) {
 	payload, err := json.Marshal(GatePayload{From: string(from), To: string(to), Actor: actor, ID: answerID})
 	if err != nil {
 		return
 	}
 	s.observe(CardEvent{Feature: id, Stage: from, Kind: EventGate, At: at, Payload: string(payload)})
-	if verified {
-		s.observe(CardEvent{Feature: id, Stage: to, Kind: EventVerified, At: at})
-	}
 }

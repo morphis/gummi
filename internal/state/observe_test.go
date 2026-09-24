@@ -62,7 +62,11 @@ func TestObserverTransitionReportsGate(t *testing.T) {
 	}
 }
 
-func TestObserverVerifiedOnLanding(t *testing.T) {
+// TestObserverVerifiedAtTheStamp pins where the verified landing is
+// reported: at the gate that stamped the branch ready, not at a later
+// crossing to done. A headless run stops at the stamp and may never be
+// merged, so a report that waited for the crossing would never arrive.
+func TestObserverVerifiedAtTheStamp(t *testing.T) {
 	s := openStore(t)
 	ctx := context.Background()
 	obs := &observer{}
@@ -77,23 +81,37 @@ func TestObserverVerifiedOnLanding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	obs.events = nil
 	if err := s.SetVerifiedAt(ctx, f.ID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
+	if !slices.Equal(obs.kinds(), []string{EventVerified}) {
+		t.Fatalf("kinds after the stamp = %v, want [verified]", obs.kinds())
+	}
+	v := obs.events[0]
+	if v.Stage != domain.StageVerify {
+		t.Errorf("verified event stage = %q, want verify (the stamp's own stage)", v.Stage)
+	}
+	if v.Payload != "" {
+		t.Errorf("verified payload = %q, want empty (synthetic)", v.Payload)
+	}
+
+	// Re-stamping an already-verified card is not a second landing.
+	obs.events = nil
+	if err := s.SetVerifiedAt(ctx, f.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if len(obs.events) != 0 {
+		t.Errorf("re-stamp reported %v, want nothing", obs.kinds())
+	}
+
+	// ...and the crossing it eventually makes is a crossing, nothing more.
 	obs.events = nil
 	if _, err := s.Transition(ctx, f.ID, domain.StageDone, "user"); err != nil {
 		t.Fatal(err)
 	}
-
-	if !slices.Equal(obs.kinds(), []string{EventGate, EventVerified}) {
-		t.Fatalf("kinds = %v, want [gate verified]", obs.kinds())
-	}
-	v := obs.events[1]
-	if v.Stage != domain.StageDone {
-		t.Errorf("verified event stage = %q, want done", v.Stage)
-	}
-	if v.Payload != "" {
-		t.Errorf("verified payload = %q, want empty (synthetic)", v.Payload)
+	if !slices.Equal(obs.kinds(), []string{EventGate}) {
+		t.Fatalf("kinds on the →done crossing = %v, want [gate]", obs.kinds())
 	}
 }
 
@@ -117,7 +135,7 @@ func TestObserverSilentWithoutVerifiedStamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A →done crossing without the stamp (the hand-off-like shape) is a
-	// crossing, not a verified landing.
+	// crossing, and never the landing SetVerifiedAt reports.
 	if !slices.Equal(obs.kinds(), []string{EventGate}) {
 		t.Fatalf("kinds = %v, want [gate] only", obs.kinds())
 	}

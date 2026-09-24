@@ -828,17 +828,20 @@ permissions: allow-all
 #   incus: git/incus
 
 # hooks: — scripts run when the board changes (the notification surface
-# beside GUMMI_NOTIFY's bell/desktop). Each entry runs via "sh -c" in the
-# workspace root with the event name as "$1" and a JSON payload on stdin
-# (GUMMI_EVENT, GUMMI_CARD and GUMMI_WORKSPACE carry the identity too).
+# beside GUMMI_NOTIFY's bell/desktop). Each entry is a shell command line
+# run via "sh -c" in the workspace root, with a JSON payload on stdin and
+# GUMMI_EVENT/GUMMI_CARD/GUMMI_WORKSPACE in the environment. The event is
+# the shell's "$1": forward it (as below) if the script wants it as an
+# argument — a line naming a script and nothing else passes it none.
 # An entry without "events:" fires on every event; with it, only on the
-# events named. Hooks are advisory: exit codes and output are the
-# script's business, a slow script is killed after 15s, and none of it
-# can fail a run. Event vocabulary: card.created, stage.enter,
-# card.verified, card.parked, card.merged, gate.waiting,
-# question.waiting, budget.exhausted, card.failed.
+# events named. Hooks are advisory: exit codes are the script's business,
+# stdout goes nowhere, a slow script is killed after 15s, and none of it
+# can fail a run — but failures and undelivered events are counted and
+# reported in one line when the process exits. Event vocabulary:
+# card.created, stage.enter, card.verified, card.parked, card.merged,
+# gate.waiting, question.waiting, budget.exhausted, card.failed.
 # hooks:
-#   - run: ~/bin/gummi-hook            # every event
-#   - run: page-oncall.sh
+#   - run: ~/bin/gummi-hook "$1"       # every event
+#   - run: page-oncall.sh "$1"
 #     events: [gate.waiting, budget.exhausted]
 `

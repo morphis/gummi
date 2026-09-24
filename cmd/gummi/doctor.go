@@ -161,7 +161,16 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// A repos:-only workspace has no default: report only the named repos,
 	// and never require the workspace root to be a git toplevel.
 	if rerr != nil {
-		add("repo", statusFail, rerr.Error(), "set `repo:` (and `repos:`) in .gummi/config.yaml to git toplevels inside the workspace")
+		// resolveAllRoots loads the config before it resolves anything, so
+		// a config that does not parse arrives here looking like a repo
+		// problem. It is not: say what is actually wrong and leave the
+		// error itself to config:load below, whose remedy fits it.
+		if configLoadErr(cwd) != nil {
+			add("repo", statusFail, "the configuration does not load, so the managed repository set is unknown",
+				"fix the offending config file — see config:load below")
+		} else {
+			add("repo", statusFail, rerr.Error(), "set `repo:` (and `repos:`) in .gummi/config.yaml to git toplevels inside the workspace")
+		}
 	} else {
 		if defaultRoot != "" {
 			if isGitRepoRoot(defaultRoot) {
@@ -1216,19 +1225,101 @@ func configLayeringChecks(cfg config.Config, sources map[string]string, userPath
 		checks = append(checks, doctorCheck{Name: "config:skills.forward." + name, Status: status, Detail: detail})
 	}
 
-	// Hook scripts are shell commands, not files, so there is nothing to
-	// stat — the report is the command and where it was configured. A
-	// workspace with none configured stays silent: reporting "(unset)"
-	// for an opt-in surface is noise, not diagnostics.
+	// A hook line is a shell command, so most of it cannot be checked
+	// ahead of time — but the common shape is a path to a script, and a
+	// typo there is otherwise invisible forever: the dispatcher discards
+	// what the shell says about it. So when the line starts with
+	// something path-shaped, stat it. A workspace with no hooks stays
+	// silent: reporting "(unset)" for an opt-in surface is noise.
 	for i, h := range cfg.Hooks {
+		status, remedy := statusOK, ""
+		detail := h.Describe()
+		if path, ok := hookScriptPath(h.Run, wsRoot); ok {
+			switch info, err := os.Stat(path); {
+			case err != nil:
+				status = statusFail
+				detail += " — " + path + " is not there"
+				remedy = "fix the path, or drop the entry: a hook that cannot start fails silently"
+			case info.Mode()&0o111 == 0:
+				status = statusFail
+				detail += " — " + path + " is not executable"
+				remedy = "chmod +x " + path
+			}
+		}
 		checks = append(checks, doctorCheck{
-			Name:   fmt.Sprintf("config:hooks.%d", i),
-			Status: statusOK,
-			Detail: h.Describe() + " (" + sourceLabel(sources["hooks"]) + ")",
+			Name:        fmt.Sprintf("config:hooks.%d", i),
+			Status:      status,
+			Detail:      detail + " (" + sourceLabel(sources["hooks"]) + ")",
+			Remediation: remedy,
 		})
 	}
 
 	return checks
+}
+
+// configLoadErr reports the error, if any, from loading the layered config
+// for the workspace containing cwd — the same load resolveAllRoots does
+// before it resolves anything. It exists so the repo check can tell "the
+// config does not load" from "the config loads and names a bad repo".
+func configLoadErr(cwd string) error {
+	ws := cwd
+	if found, ok := findGummiRoot(cwd); ok {
+		ws = found
+	}
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		userPath = ""
+	}
+	_, _, err = config.LoadLayered(userPath, filepath.Join(ws, ".gummi", "config.yaml"))
+	return err
+}
+
+// shellMeta are the characters that would make a `run:` line's first word
+// something other than the literal program the shell starts — an
+// expansion, a quote, a subshell, an assignment prefix. Only the first
+// word is scanned: whatever follows it (arguments, a pipe, a redirect,
+// `&&`) does not change which program runs first, and the documented
+// shape forwards the event as "$1" after the script name.
+const shellMeta = "$`\\\"'|&;<>(){}[]*?!#=\n"
+
+// shellBuiltins are first words that name no file: statting or looking them
+// up would fail on a perfectly good hook line.
+var shellBuiltins = map[string]bool{
+	":": true, ".": true, "true": true, "false": true, "echo": true, "printf": true,
+	"cd": true, "exec": true, "eval": true, "exit": true, "export": true, "read": true,
+	"set": true, "unset": true, "shift": true, "test": true, "trap": true, "wait": true,
+	"source": true, "if": true, "for": true, "while": true, "until": true, "case": true,
+}
+
+// hookScriptPath resolves the file a hook line will run, when that can be
+// known without running it: a path-shaped first word (absolute, ~-relative,
+// ./-relative, or any word with a slash) resolved against wsRoot — the
+// dispatcher's own working directory — or a bare command name looked up on
+// PATH. It gives up (false) on anything the shell could reinterpret, which
+// is the honest answer for a surface whose whole point is shell freedom.
+func hookScriptPath(run, wsRoot string) (string, bool) {
+	first, _, _ := strings.Cut(strings.TrimSpace(run), " ")
+	if first == "" || shellBuiltins[first] || strings.ContainsAny(first, shellMeta) {
+		return "", false
+	}
+	if !strings.Contains(first, "/") {
+		path, err := exec.LookPath(first)
+		if err != nil {
+			return first, true // reported as "not there", which is what sh will say
+		}
+		return path, true
+	}
+	if strings.HasPrefix(first, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		first = filepath.Join(home, first[2:])
+	}
+	if !filepath.IsAbs(first) {
+		first = filepath.Join(wsRoot, first)
+	}
+	return first, true
 }
 
 func sortedStringKeys(m map[string]string) []string {

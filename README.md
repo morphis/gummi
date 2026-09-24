@@ -426,23 +426,27 @@ table are in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 ## Hooks — scripts on board events
 
 `GUMMI_NOTIFY` rings the bell; `hooks:` in `config.yaml` runs your
-script instead of (or beside) it. Each entry is a shell command run when
-the board changes — with the event name as `$1` and a JSON payload on
-stdin, in the workspace root:
+script instead of (or beside) it. Each entry is a shell command line run
+when the board changes — a JSON payload on stdin, the event in
+`GUMMI_EVENT` (and as the shell's `"$1"`, which you forward if the script
+wants it), in the workspace root:
 
 ```yaml
 hooks:
-  - run: ~/bin/gummi-notify            # every event
-  - run: page-oncall.sh
+  - run: ~/bin/gummi-notify "$1"       # every event
+  - run: page-oncall.sh "$1"
     events: [gate.waiting, budget.exhausted]   # or filter
 ```
 
 The event vocabulary: `card.created`, `stage.enter`, `card.verified`,
 `card.parked`, `card.merged`, `gate.waiting`, `question.waiting`,
-`budget.exhausted`, `card.failed`. Hooks are advisory: a slow script is
-killed after 15 seconds, a failing one changes nothing, and none of it
-can stall a run. The full contract is in
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+`budget.exhausted`, `card.failed`. `card.verified` is the one to watch
+for "the branch is ready": it fires at the verify gate, not at a merge.
+Hooks are advisory: a slow script is killed after 15 seconds, a failing
+one changes nothing, and none of it can stall a run — the drain at exit
+is bounded too. What failed or never ran is counted and printed in one
+line when the process exits, and `gummi doctor` checks the script paths.
+The full contract is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Try it without your repo
 
