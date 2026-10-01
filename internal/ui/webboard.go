@@ -75,6 +75,9 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	if live := m.liveCardSpent(f.ID); live > 0 {
 		row.Spend = live
 	}
+	if c := m.liveCardContext(f.ID); c.Tokens > 0 {
+		row.Context = &webapi.AgentContext{Tokens: c.Tokens, Limit: c.Limit}
+	}
 	if f.GoalID != "" {
 		row.Goal = &webapi.RowGoal{ID: string(f.GoalID), Title: titles[f.GoalID]}
 	}

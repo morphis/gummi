@@ -219,6 +219,11 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .spend .bar{width:72px;height:5px;background:var(--line);border-radius:3px;overflow:hidden}
 .spend .bar i{display:block;height:100%;width:var(--pct,0%);background:var(--accent);border-radius:3px}
 .spend.over .bar i{background:var(--err)}
+.ctxm{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg3);font-variant-numeric:tabular-nums}
+.ctxm .bar{width:56px;height:5px;background:var(--line);border-radius:3px;overflow:hidden}
+.ctxm .bar i{display:block;height:100%;width:var(--pct,0%);background:var(--ok);border-radius:3px}
+.ctxm.warn .bar i{background:var(--warn)}
+.ctxm.err .bar i{background:var(--err)}
 .link{color:var(--accent);cursor:pointer;text-decoration:none;border-bottom:1px dotted currentColor;background:none}
 
 .thread{flex:1;overflow-y:auto;padding:20px 20px 12px;min-height:0}

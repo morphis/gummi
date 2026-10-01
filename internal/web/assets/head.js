@@ -2,7 +2,7 @@
 // strip (a past stage jumps to that stage in the thread), branch, waits,
 // and the spend bar against its envelope.
 
-import { $, h, icon, clear, append, kindTag, STAGES, cr } from './dom.js?v=__ASSET_V__'
+import { $, h, icon, clear, append, kindTag, STAGES, cr, ctxMeter } from './dom.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
@@ -57,7 +57,8 @@ function render () {
       c.kind === 'goal' ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: 'Open the goal page: its budget, done-when, cards and log', onclick: () => openView('goal', { id: c.id }) }, 'goal page') : null,
       c.goal ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: c.goal.title ? `Open the goal: ${c.goal.title}` : 'Open the goal', onclick: () => openView('goal', { id: c.goal.id }) }, 'goal ', h('span', { class: 'mono' }, c.goal.id)) : null,
       c.stack ? h('button', { class: ['badge stack', c.stack.stale && 'stale'], type: 'button', testid: 'card-stack', title: `Open the stack ${c.stack.name || c.stack.id}`, onclick: () => openView('stacks', { id: c.stack.id }) }, `stack ${c.stack.pos + 1} of ${c.stack.of}`) : null,
-      spend(c)),
+      spend(c),
+      ctxMeter(c.context, 'card-context')),
     state.cardErr && !state.card ? h('div', { class: 'subline badc', testid: 'card-error' }, state.cardErr.message) : null])
 }
 

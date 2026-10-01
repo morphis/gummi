@@ -8,7 +8,7 @@
 // conversation would be lost: the server answers a "confirm" question with
 // the question, and the page repeats the request with confirm once you agree.
 
-import { h, append, clear, cr, storage, $ } from '../dom.js?v=__ASSET_V__'
+import { h, append, clear, cr, storage, $, ctxMeter } from '../dom.js?v=__ASSET_V__'
 import { markdown } from '../markdown.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { onEvent } from '../events.js?v=__ASSET_V__'
@@ -163,11 +163,7 @@ registerView('agent', {
         if (!m || m === a.model) return
         switchTo({ model: m }, () => { model.value = a.model || '' })
       }
-      const ctxm = a.context && a.context.limit
-        ? h('span', { class: 'ctxm', title: `${a.context.tokens.toLocaleString()} of ${a.context.limit.toLocaleString()} tokens`, testid: 'agent-context' },
-          h('span', { class: 'bar' }, h('i', { style: { '--pct': Math.min(100, a.context.tokens / a.context.limit * 100).toFixed(1) + '%' } })),
-          `${Math.round(a.context.tokens / a.context.limit * 100)}% context`)
-        : null
+      const ctxm = ctxMeter(a.context, 'agent-context')
       append(head, [
         h('label', { class: 'hf' }, h('span', null, 'profile'), pick),
         h('span', { class: 'hf model' }, h('span', null, 'model'), model, models,

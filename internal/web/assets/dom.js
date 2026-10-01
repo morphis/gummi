@@ -150,6 +150,25 @@ export function decisionColor (d, stage) {
 // ---- formatting ----
 export function cr (n) { return (Number(n) || 0).toFixed(1) }
 
+// ctxMeter renders a session's context-window occupancy: a green/yellow/red
+// bar (the same thresholds as the budget nudges, DESIGN §5.1) with a
+// breakdown on hover — tokens used, the limit, and what is left. null while
+// the backend has reported no limit, which every surface that places this
+// takes as "nothing to show".
+export function ctxMeter (ctx, testid = 'ctx-meter') {
+  if (!ctx || !ctx.limit) return null
+  const pct = Math.min(100, ctx.tokens / ctx.limit * 100)
+  const tier = pct >= 95 ? 'err' : pct >= 80 ? 'warn' : 'ok'
+  const left = Math.max(0, ctx.limit - ctx.tokens)
+  const title = [
+    `${ctx.tokens.toLocaleString()} of ${ctx.limit.toLocaleString()} tokens used (${Math.round(pct)}%)`,
+    `${left.toLocaleString()} tokens left`
+  ].join('\n')
+  return h('span', { class: ['ctxm', tier], testid, title },
+    h('span', { class: 'bar' }, h('i', { style: { '--pct': pct.toFixed(1) + '%' } })),
+    `${Math.round(pct)}% context`)
+}
+
 export function clock (t) {
   if (!t) return ''
   const d = new Date(t)

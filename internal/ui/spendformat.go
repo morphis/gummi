@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 )
@@ -105,6 +106,25 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 		return 0
 	}
 	return live
+}
+
+// liveCardContext returns the context-window occupancy of whichever
+// session is live on id — a stage session or, for a freeform card, its
+// one long-running session — or the zero value when none is live or the
+// backend never reported one. Unlike liveCardSpent there is no stored
+// fallback: context occupancy is never persisted to a board row, only
+// ever a fact of the session currently holding it.
+func (m *Shell) liveCardContext(id domain.FeatureID) agent.Context {
+	if m.engine == nil {
+		return agent.Context{}
+	}
+	if s := m.engine.Get(id); s != nil {
+		return s.Snapshot().Context
+	}
+	if ff := m.engine.Freeform(id); ff != nil {
+		return ff.Snapshot().Context
+	}
+	return agent.Context{}
 }
 
 // budgetSummary formats the budget: what the card has spent against what

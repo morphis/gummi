@@ -68,7 +68,8 @@ once choosing), `resume-picked`, `resume-none` ("Not now").
 
 `card-head`, `card-kind`, `card-id`, `card-title`, `card-stages`,
 `stage-<stage>` (a past stage jumps to it in the thread), `card-branch`, `card-scratch` (a research card: scratch tree, no branch),
-`card-spend`, `card-error`, `toggle-panel` (`]`), `card-actions` (menu),
+`card-spend`, `card-context` (context-window meter, shown once the running
+session reports a limit), `card-error`, `toggle-panel` (`]`), `card-actions` (menu),
 `card-actions-menu`, `action-<id>` (menu item), `action-btn-<id>` (pause/resume
 shown as a button), `action-dialog`, `action-question` (what it asks, or the
 server's question (a 202) — verbatim, line breaks kept; an action that asks a
