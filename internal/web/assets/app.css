@@ -364,7 +364,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
    line, and the model picker beside Send (session.js) */
 .draftrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px 0}
 .draftrow .dsel{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--sunk);font-size:12.5px;color:var(--fg2)}
-.draftrow .dsel select{border:0;background:transparent;outline:0;font-size:12.5px;color:var(--fg);max-width:220px}
+.draftrow .dsel select{border:0;background:var(--sunk);outline:0;font-size:12.5px;color:var(--fg);max-width:220px}
 .draftrow .dsel .lbl,.draftrow .dnote-s{font-size:12px;color:var(--fg3)}
 .draftrow .dbtn:hover{border-color:var(--fg4)}
 .draftrow .dbtn b{color:var(--fg);font-weight:600}
