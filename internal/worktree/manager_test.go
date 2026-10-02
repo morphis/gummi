@@ -218,6 +218,45 @@ func TestCreateAndRemove(t *testing.T) {
 	}
 }
 
+// TestCreateLinksWorktreeRelatively covers a workspace reached at two
+// paths — mounted at /project in a container, at its real path on the
+// host. git writes the worktree's .git file as an absolute path, which
+// resolves only under the path the worktree was added from; the checkout
+// must still open once the workspace is found somewhere else, without
+// the repository gaining an extension older git refuses.
+func TestCreateLinksWorktreeRelatively(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	f := feature(42, "Dark mode")
+
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(p, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(string(raw)), "gitdir: ../../../.git/worktrees/FD-042"; got != want {
+		t.Errorf(".git = %q, want %q", got, want)
+	}
+	if _, err := runGit(ctx, root, "config", "extensions.relativeWorktrees"); err == nil {
+		t.Error("repository gained extensions.relativeWorktrees")
+	}
+
+	moved := filepath.Join(filepath.Dir(root), "moved")
+	if err := os.Rename(root, moved); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(moved, ".gummi", "worktrees", "FD-042")
+	if got := mustGit(t, wt, "rev-parse", "--abbrev-ref", "HEAD"); got != "gummi/FD-042-dark-mode" {
+		t.Errorf("worktree branch after move = %s", got)
+	}
+	writeFile(t, wt, "work.txt", "wip\n")
+	mustGit(t, wt, "add", ".")
+	mustGit(t, wt, "commit", "-q", "-m", "wip")
+}
+
 // TestDeleteBranchWithStaleWorktreeMetadata covers the case where the
 // worktree directory was removed outside git (crash, manual rm), leaving
 // git's worktree registration behind. Exists reports false, but branch

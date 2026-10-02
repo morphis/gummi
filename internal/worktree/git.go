@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -87,4 +88,37 @@ func runGitEnv(ctx context.Context, dir string, env []string, args ...string) (s
 		return "", &gitError{args: full, stderr: stderr.String(), err: err}
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// relinkGitFile rewrites the .git file of the worktree at dir so it names
+// the repository's admin directory by a relative path. `worktree add`
+// writes an absolute one, which resolves only where the workspace sits at
+// the path it was created under: a worktree gummi adds inside a container
+// that mounts the workspace at /project cannot be opened from the host,
+// where that path does not exist, so nothing can be committed in it with
+// the host's identity or signing key. A relative link resolves from both.
+//
+// `worktree add --relative-paths` would do this too, but it also sets
+// extensions.relativeWorktrees in the repository's config, and git before
+// 2.46 refuses to open a repository carrying an extension it does not
+// know — every checkout of it, not just this one. A relative .git file on
+// its own needs no extension: git has always resolved it against the
+// file's directory.
+//
+// The admin directory's back-pointer is left absolute, as git wrote it.
+func relinkGitFile(dir string) error {
+	file := filepath.Join(dir, ".git")
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	target, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "gitdir: ")
+	if !ok || !filepath.IsAbs(target) {
+		return nil
+	}
+	rel, err := filepath.Rel(dir, target)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(file, []byte("gitdir: "+rel+"\n"), 0o600)
 }
