@@ -1,0 +1,49 @@
+{
+  "Ref": {
+    "id": "ab12ef34",
+    "name": "shot.png",
+    "mediaType": "image/png",
+    "size": 4096
+  },
+  "Send": {
+    "text": "look at this",
+    "attachments": [
+      "ab12ef34"
+    ]
+  },
+  "CreateCard": {
+    "kind": "feature",
+    "title": "Dark mode",
+    "attachments": [
+      "ab12ef34"
+    ]
+  },
+  "SpecNote": {
+    "line": 3,
+    "text": "see the mock",
+    "attachments": [
+      "ab12ef34"
+    ]
+  },
+  "Composer": {
+    "says": "steers the implementer mid-turn",
+    "route": "steer",
+    "images": true
+  },
+  "ThreadItem": {
+    "key": "you-7",
+    "seq": 7,
+    "t": "you",
+    "time": "2026-09-27T09:12:00Z",
+    "author": "you",
+    "text": "look at this",
+    "attachments": [
+      {
+        "id": "ab12ef34",
+        "name": "shot.png",
+        "mediaType": "image/png",
+        "size": 4096
+      }
+    ]
+  }
+}

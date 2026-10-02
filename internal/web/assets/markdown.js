@@ -10,6 +10,7 @@
 // notes on their own, so they are dropped here.
 
 import { h } from './dom.js?v=__ASSET_V__'
+import { attachmentURL } from './api.js?v=__ASSET_V__'
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+-]*)/
 const INDENTED = /^(?: {4}| {0,3}\t)/
@@ -170,7 +171,13 @@ function list (lines, opts) {
   return el
 }
 
-const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\s](?:[^*]*?[^*\s])?)\*|(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g
+// The image alternative matches only the spec-anchored attachment link
+// grammar (internal/attachment.Link): !\[name\](.gummi/attachments/<id>.<ext>).
+// Any other `![alt](url)` falls through — the `!` renders as text and the
+// `[alt](url)` after it as an ordinary link — so markdown from a spec, a
+// note or an agent's own words can never make the browser fetch an
+// arbitrary third-party URL as an image.
+const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\s](?:[^*]*?[^*\s])?)\*|(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[([^\]\n]*)\]\(\.gummi\/attachments\/([0-9a-f]{64})\.[A-Za-z0-9]+\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g
 
 export function inline (text) {
   const out = []
@@ -191,7 +198,8 @@ export function inline (text) {
     else if (m[5] !== undefined) out.push(h('em', null, inline(m[5])))
     else if (m[7] !== undefined) out.push(h('em', null, inline(m[7])))
     else if (m[8] !== undefined) out.push(link(m[9], inline(m[8])))
-    else if (m[10] !== undefined) out.push(link(m[10], [m[10]]))
+    else if (m[11] !== undefined) out.push(attachmentImage(m[11], m[10]))
+    else if (m[12] !== undefined) out.push(link(m[12], [m[12]]))
     last = re.lastIndex
   }
   if (last < text.length) out.push(...paths(text.slice(last)))
@@ -222,6 +230,11 @@ function fileLink (p, kids) {
   if (!rel || /\n/.test(rel)) return kids
   const href = files.url + rel.split('/').map(encodeURIComponent).join('/')
   return h('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'file' }, kids)
+}
+
+function attachmentImage (id, alt) {
+  return h('a', { class: 'thumb md-img', href: attachmentURL(id), target: '_blank', rel: 'noopener' },
+    h('img', { src: attachmentURL(id), alt: alt || 'attached image', loading: 'lazy' }))
 }
 
 // breaks keeps a hard line break (two trailing spaces or a backslash).

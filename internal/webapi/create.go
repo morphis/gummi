@@ -44,6 +44,11 @@ type CreateCardRequest struct {
 	// kind: a stage takes its agent from the card's profile.
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
+	// Attachments are the ids of images (already uploaded via POST
+	// /api/attachments) to link into the card's seeded description —
+	// stored by reference, so every later stage that reads the spec sees
+	// them too.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // Form is GET /api/form: the choices the new-card form offers.

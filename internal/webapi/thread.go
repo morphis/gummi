@@ -64,6 +64,9 @@ type Item struct {
 	Text string `json:"text,omitempty"`
 	// By names the person behind a you, receipt or decision item.
 	By string `json:"by,omitempty"`
+	// Attachments are the images a you item's turn carried, in order; the
+	// page renders them as thumbnails linking to GET /api/attachments/{id}.
+	Attachments []AttachmentRef `json:"attachments,omitempty"`
 	// Via says how a person's line reached the agent: "steered" or
 	// "answer".
 	Via string `json:"via,omitempty"`

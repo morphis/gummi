@@ -1311,7 +1311,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		return nil
 	}
 	e.retakeSlotAfterAnswer(s)
-	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer)); err != nil {
+	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer), nil); err != nil {
 		defer e.yieldSlotForAsk(s) // the question is open again: so is the lane
 		// Restore the question, exactly as every other failing branch
 		// above does. This is the branch a restored ask always takes, and

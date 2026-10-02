@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
@@ -130,6 +131,18 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	} {
 		if s := strings.TrimSpace(sec[1]); s != "" {
 			body = append(body, "## "+sec[0]+"\n\n"+s)
+		}
+	}
+	if len(req.Attachments) > 0 {
+		if m.engine == nil {
+			return m.noAgent(" (attachments need the workspace's store)")
+		}
+		refs, err := m.engine.Attachments().Resolve(req.Attachments)
+		if err != nil {
+			return err.Error()
+		}
+		for _, ref := range refs {
+			body = append(body, attachment.Link(ref))
 		}
 	}
 	if len(body) > 0 {

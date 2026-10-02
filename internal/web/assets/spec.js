@@ -5,8 +5,8 @@
 // writer (POST …/spec/changes), and the gummi-checks block drawn as a table with each
 // check's last outcome on this branch.
 
-import { h, append, clock, plural } from './dom.js?v=__ASSET_V__'
-import { get, post, cardPath } from './api.js?v=__ASSET_V__'
+import { h, append, clock, plural, clear } from './dom.js?v=__ASSET_V__'
+import { get, post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { changesButton } from './actions.js?v=__ASSET_V__'
@@ -140,10 +140,45 @@ function checksTable (checks) {
 function openNote (h2, sec, ctx) {
   const next = h2.nextElementSibling
   if (next?.classList.contains('draft')) { next.querySelector('textarea')?.focus(); return }
+  // attachments are stored by reference (internal/attachment.Link), so —
+  // unlike the composer's turn — every backend can take one: the note
+  // form always offers the control, never gated on Composer.Images.
+  let attachments = []
   const ta = h('textarea', { testid: 'spec-note-input', 'aria-label': `Note on ${sec.name}`, placeholder: 'Written into the spec as a %% note under your name. The architect answers it on the next pass.' })
+  const chips = h('div', { class: 'chips', testid: 'spec-note-chips', hidden: true })
+  const file = h('input', {
+    type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true,
+    onchange: async (e) => {
+      const files = [...e.target.files]
+      e.target.value = ''
+      for (const f of files) {
+        const chip = { id: null, name: f.name || 'image', pending: true, error: null }
+        attachments.push(chip)
+        renderChips()
+        try {
+          Object.assign(chip, await uploadAttachment(f), { pending: false })
+        } catch (err) {
+          chip.pending = false
+          chip.error = (err.data && err.data.error) || err.message || 'upload failed'
+        }
+        renderChips()
+      }
+    }
+  })
+  const renderChips = () => {
+    clear(chips)
+    chips.hidden = attachments.length === 0
+    for (const a of attachments) {
+      chips.append(h('span', { class: ['chip', a.error && 'err', a.pending && 'pending'] },
+        a.pending ? 'Uploading…' : (a.error || a.name),
+        h('button', { type: 'button', title: 'Remove', onclick: () => { attachments = attachments.filter((x) => x !== a); renderChips() } }, '×')))
+    }
+  }
   const box = h('div', { class: 'annot draft', testid: 'spec-note-draft' },
-    h('div', { class: 'a1' }, h('span', { class: 'who' }, h('b', null, ctx.person || 'you'), ` on ${sec.name}`), ta),
+    h('div', { class: 'a1' }, h('span', { class: 'who' }, h('b', null, ctx.person || 'you'), ` on ${sec.name}`), ta, chips),
     h('div', { class: 'act' },
+      h('button', { class: 'attach', type: 'button', testid: 'spec-note-attach', title: 'Attach an image', onclick: () => file.click() }, '📎'),
+      file,
       h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, 'Cancel'),
       h('button', {
         class: 'btn pri',
@@ -152,10 +187,14 @@ function openNote (h2, sec, ctx) {
         onclick: async (e) => {
           const text = ta.value.trim()
           if (!text) { ta.focus(); return }
+          if (attachments.some((a) => a.pending)) { toast('Still uploading an image — wait a moment and try again'); return }
+          if (attachments.some((a) => a.error)) { toast('Remove the failed attachment before saving', { err: true }); return }
           const btn = e.currentTarget
           btn.disabled = true
           try {
-            const spec = await post(cardPath(ctx.id, 'spec/notes'), { line: sec.line, text })
+            const body = { line: sec.line, text }
+            if (attachments.length) body.attachments = attachments.map((a) => a.id)
+            const spec = await post(cardPath(ctx.id, 'spec/notes'), body)
             toast('Note written into the spec')
             ctx.swap(spec && spec.markdown !== undefined ? spec : null)
           } catch (err) {

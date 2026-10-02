@@ -304,6 +304,13 @@ func (c *ConsultSession) ensureBackend(ctx context.Context) (*Session, error) {
 // in the card's log, via recordConsult, but the session itself has
 // nothing to write).
 func (c *ConsultSession) Send(ctx context.Context, msg string) error {
+	return c.SendTurn(ctx, msg, nil)
+}
+
+// SendTurn is Send's image-carrying form: a turn with images is delivered
+// natively, or refused with agent.ErrImagesUnsupported before anything is
+// appended or recorded.
+func (c *ConsultSession) SendTurn(ctx context.Context, msg string, images []AttachmentRef) error {
 	sess, err := c.ensureBackend(ctx)
 	if err != nil {
 		return err
@@ -312,16 +319,41 @@ func (c *ConsultSession) Send(ctx context.Context, msg string) error {
 	if a == nil {
 		return errors.New("consult session has no live agent")
 	}
-	sess.appendUser(msg, actorOf(ctx))
-	c.engine.recordConsult(c.id, AuthorUser, msg, actorOf(ctx))
+	if len(images) > 0 {
+		if err := c.engine.checkImageCapable(sess); err != nil {
+			return err
+		}
+	}
+	sess.appendUserImages(msg, actorOf(ctx), images)
 	sess.setBusy(true)
 	c.armIdleTimer()
 	c.engine.send(Event{Feature: c.id, Kind: EventUpdated})
-	if err := a.Send(ctx, msg); err != nil {
-		sess.setError(err)
-		c.engine.send(Event{Feature: c.id, Kind: EventUpdated})
-		return err
+	var sendErr error
+	if len(images) > 0 {
+		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: msg, Images: c.engine.turnImages(images)})
+	} else {
+		sendErr = a.Send(ctx, msg)
 	}
+	if sendErr != nil {
+		if errors.Is(sendErr, agent.ErrBusy) || errors.Is(sendErr, agent.ErrImagesUnsupported) {
+			// Same undo Engine.SendTurn gives a live steer: a refusal that
+			// only surfaces this late (a busy backend, or copilot's
+			// per-model vision check, which checkImageCapable's structural
+			// gate can't see) must leave no echo and nothing durably
+			// recorded. recordConsult is called only below, once the send
+			// has actually succeeded, so there is nothing to undo there —
+			// only the live transcript's echo.
+			sess.dropUnsentUser(msg)
+			c.engine.send(Event{Feature: c.id, Kind: EventUpdated})
+			return sendErr
+		}
+		sess.setError(sendErr)
+		c.engine.send(Event{Feature: c.id, Kind: EventUpdated})
+		return sendErr
+	}
+	// Recorded only now: a turn the backend refused must never show up in
+	// the card's log as something that was sent.
+	c.engine.recordConsult(c.id, AuthorUser, msg, actorOf(ctx), images...)
 	return nil
 }
 
@@ -333,15 +365,16 @@ func (c *ConsultSession) Send(ctx context.Context, msg string) error {
 // session, below everything else on the page however early it was asked,
 // and was gone after a restart. The turns seeded from a stage session are
 // never recorded here; they are that stage's, and its own log has them.
-func (e *Engine) recordConsult(id domain.FeatureID, author Author, content, by string) {
+func (e *Engine) recordConsult(id domain.FeatureID, author Author, content, by string, images ...AttachmentRef) {
 	if !e.cfg.Persist || e.cfg.Store == nil || strings.TrimSpace(content) == "" {
 		return
 	}
-	fields := map[string]string{"author": string(author), "content": content}
-	if by != "" {
-		fields["by"] = by
-	}
-	payload, err := json.Marshal(fields)
+	payload, err := json.Marshal(struct {
+		Author  string                `json:"author"`
+		Content string                `json:"content"`
+		By      string                `json:"by,omitempty"`
+		Images  []state.AttachmentRef `json:"images,omitempty"`
+	}{Author: string(author), Content: content, By: by, Images: stateImages(images)})
 	if err != nil {
 		return
 	}

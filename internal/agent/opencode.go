@@ -60,7 +60,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage, and can be interrupted by killing
 // the turn's process.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step
@@ -207,7 +207,15 @@ func (s *opencodeSession) forward() {
 // mapping the JSON event stream to gummi Events. It returns once the
 // process has started; the turn streams asynchronously and ends (idle)
 // when the process exits.
-func (s *opencodeSession) Send(_ context.Context, msg string) error {
+func (s *opencodeSession) Send(ctx context.Context, msg string) error {
+	return s.SendTurn(ctx, Turn{Text: msg})
+}
+
+// SendTurn implements ImageSender: each image becomes a `--file <path>`
+// flag on that turn's `opencode run` invocation, then shares Send's
+// process path.
+func (s *opencodeSession) SendTurn(_ context.Context, turn Turn) error {
+	msg := turn.Text
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -230,6 +238,9 @@ func (s *opencodeSession) Send(_ context.Context, msg string) error {
 	args = append(args, "--auto")
 	if s.sessionID != "" {
 		args = append(args, "--session", s.sessionID)
+	}
+	for _, img := range turn.Images {
+		args = append(args, "--file", img.Path)
 	}
 	// On the first turn, prepend the stage system hints to the message so
 	// opencode's agent has gummi's stage instructions (opencode has no

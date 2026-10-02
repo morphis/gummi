@@ -215,7 +215,7 @@ func TestWebSpecNotes(t *testing.T) {
 	if !sp.None || sp.Why == "" {
 		t.Fatalf("before any document: %+v, want None with a reason", sp)
 	}
-	if _, err := d.AddSpecNote(ctx, 1, "hi", "sam"); !errors.Is(err, ErrNoCard) {
+	if _, err := d.AddSpecNote(ctx, 1, "hi", "sam", nil); !errors.Is(err, ErrNoCard) {
 		t.Fatalf("a note on a missing document: err = %v, want ErrNoCard", err)
 	}
 
@@ -243,16 +243,16 @@ func TestWebSpecNotes(t *testing.T) {
 		t.Fatalf("a clean document should carry empty, non-nil lists: %+v", sp)
 	}
 
-	if _, err := d.AddSpecNote(ctx, 5, "  ", "sam"); err == nil {
+	if _, err := d.AddSpecNote(ctx, 5, "  ", "sam", nil); err == nil {
 		t.Fatal("a blank note was accepted")
 	} else if ie := (*InvalidError)(nil); !errors.As(err, &ie) {
 		t.Fatalf("blank note: err = %T, want *InvalidError", err)
 	}
-	if _, err := d.AddSpecNote(ctx, 999, "hi", "sam"); err == nil {
+	if _, err := d.AddSpecNote(ctx, 999, "hi", "sam", nil); err == nil {
 		t.Fatal("a note past the end of the document was accepted")
 	}
 
-	sp, err = d.AddSpecNote(ctx, 5, "why dark?", "sam")
+	sp, err = d.AddSpecNote(ctx, 5, "why dark?", "sam", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

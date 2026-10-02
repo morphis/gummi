@@ -393,6 +393,25 @@ func TestAYouLineCarriesWhoTypedIt(t *testing.T) {
 	}
 }
 
+// TestItemsCarryAttachments asserts that a you line's attachments (a
+// steer's images, mirrored onto the card log) reach the folded item.
+func TestItemsCarryAttachments(t *testing.T) {
+	plan := domain.StagePlan
+	ref := state.AttachmentRef{ID: strings.Repeat("a", 64), Name: "shot.png", MediaType: "image/png", Size: 4096}
+	log := newLog().enter(plan, "architect", "stage").
+		add(plan, state.EventMessage, "", MessagePayload{Author: "user", Content: "look at this", Images: []state.AttachmentRef{ref}}, "")
+	var got []engine.AttachmentRef
+	for _, it := range Items(log.evs, Options{}) {
+		if it.T == ItemYou {
+			got = it.Attachments
+		}
+	}
+	want := []engine.AttachmentRef{{ID: ref.ID, Name: ref.Name, MediaType: ref.MediaType, Size: ref.Size}}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("you line attachments = %+v, want %+v", got, want)
+	}
+}
+
 // A verify that had no gummi-checks to run is a verify item with no
 // checks and the reason as its text. Before, it drew nothing — and a page
 // counting failures in a verify item reads zero checks as "all passed".

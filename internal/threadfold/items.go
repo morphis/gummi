@@ -94,6 +94,8 @@ type Item struct {
 	// By names the person who typed an ItemYou, when the line carried a
 	// name (a web viewer); empty for the terminal's own "you".
 	By string `json:"by,omitempty"`
+	// Attachments are the images an ItemYou turn carried, in order.
+	Attachments []engine.AttachmentRef `json:"attachments,omitempty"`
 
 	Tools    []ToolCall   `json:"tools,omitempty"`
 	Receipt  *Receipt     `json:"receipt,omitempty"`
@@ -300,6 +302,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 				Author: AuthorLabel(p.Author, seg.Role), Text: Sanitize(p.Content)}
 			if p.Author == string(engine.AuthorUser) {
 				it.T, it.Via, it.By = ItemYou, ViaSteered, state.PersonName(p.By)
+				it.Attachments = attachmentRefs(p.Images)
 				if echoes[k][p.Content] {
 					it.Via = ViaAnswer
 				}
@@ -397,6 +400,19 @@ func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
 	}
 }
 
+// attachmentRefs converts a message payload's stored attachment refs to
+// the fold's own shape.
+func attachmentRefs(refs []state.AttachmentRef) []engine.AttachmentRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]engine.AttachmentRef, len(refs))
+	for i, r := range refs {
+		out[i] = engine.AttachmentRef{ID: r.ID, Name: r.Name, MediaType: r.MediaType, Size: r.Size}
+	}
+	return out
+}
+
 // consultItem is one consult turn: the person's question, or the consult
 // agent's answer.
 func consultItem(ev state.CardEvent) Item {
@@ -406,6 +422,7 @@ func consultItem(ev state.CardEvent) Item {
 		Text: Sanitize(p.Content), Via: ViaConsult}
 	if p.Author == string(engine.AuthorUser) {
 		it.T, it.Author, it.By = ItemYou, AuthorLabel(p.Author, ""), state.PersonName(p.By)
+		it.Attachments = attachmentRefs(p.Images)
 		return it
 	}
 	it.T, it.Author = ItemMessage, string(agent.RoleConsult)

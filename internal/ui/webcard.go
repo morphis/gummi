@@ -608,7 +608,8 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	}
 	c := m.classifyThreadLine(r, line, func() *threadDecision { return m.openDecision(r) })
 	route, says := m.webLineRoute(r, line, c)
-	return webapi.Composer{Route: route, Says: says}
+	images := m.engine != nil && m.engine.SessionTakesImages(context.Background(), r.F.ID)
+	return webapi.Composer{Route: route, Says: says, Images: images}
 }
 
 // webLineRoute names a classified line's destination in the contract's

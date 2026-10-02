@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -183,6 +184,53 @@ func TestOpenFreeformIsIdempotentPerCard(t *testing.T) {
 	}
 	if got := e.Freeform(f.ID); got != a {
 		t.Errorf("Freeform(id) = %p, want %p", got, a)
+	}
+}
+
+// TestAFreeformSendTurnRefusedImagesNotRecorded asserts that a freeform
+// turn's images, refused only once the send actually reaches the backend
+// (a live per-model check checkImageCapable's structural gate cannot see
+// — simulated via Fake.RefuseImages), are never durably recorded: not in
+// the persisted session row a restart would restore from, and not as an
+// echo in the session's own live transcript.
+func TestAFreeformSendTurnRefusedImagesNotRecorded(t *testing.T) {
+	ctx := context.Background()
+	ws, store, wt := newRepo(t)
+	ag := agent.NewFake("ack")
+	ag.Caps.Images = true
+	ag.RefuseImages = true
+	unregister := agent.RegisterCapabilities("fake", ag.Caps)
+	defer unregister()
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	f := freeformCard(4, "image refusal")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := putTestImage(t, e)
+	before := len(ff.Snapshot().Transcript)
+	err = ff.SendTurn(ctx, "look at this", []AttachmentRef{ref})
+	if !errors.Is(err, agent.ErrImagesUnsupported) {
+		t.Fatalf("err = %v, want ErrImagesUnsupported", err)
+	}
+	if after := len(ff.Snapshot().Transcript); after != before {
+		t.Fatalf("refused turn changed the freeform transcript: %d -> %d entries", before, after)
+	}
+
+	snaps, err := store.LoadSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snap := range snaps {
+		for _, m := range snap.Transcript {
+			if m.Content == "look at this" {
+				t.Fatalf("refused turn was persisted: %+v", m)
+			}
+		}
 	}
 }
 

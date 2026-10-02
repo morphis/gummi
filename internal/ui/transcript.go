@@ -100,6 +100,9 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		for _, l := range block {
 			lines = append(lines, "  "+style.Render(l))
 		}
+		for _, img := range msg.Images {
+			lines = append(lines, "  "+s.Faint.Render("[image: "+img.Name+"]"))
+		}
 		lines = append(lines, "")
 	}
 	return lines

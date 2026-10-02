@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"cmp"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,7 +75,7 @@ func (p *Pi) Name() string { return "pi" }
 // native surface for. WriteCage is cwd-only until pi's edit/write tools
 // are proven to refuse paths outside the working directory.
 func (p *Pi) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCageCwd}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCageCwd, Images: true}
 }
 
 // CreditRate implements Agent. pi reports its own USD cost per assistant
@@ -380,9 +381,18 @@ func (s *piSession) nextID() string {
 
 // piCommand is one stdin line. Only the fields the adapter sends.
 type piCommand struct {
-	ID      string `json:"id,omitempty"`
-	Type    string `json:"type"`
-	Message string `json:"message,omitempty"`
+	ID      string    `json:"id,omitempty"`
+	Type    string    `json:"type"`
+	Message string    `json:"message,omitempty"`
+	Images  []piImage `json:"images,omitempty"`
+}
+
+// piImage is one image on a prompt command's Images field, carried inline
+// as base64 — pi's RPC mode has no separate reference form.
+type piImage struct {
+	Type     string `json:"type"`
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
 }
 
 func (s *piSession) write(v any) error {
@@ -404,7 +414,13 @@ func (s *piSession) write(v any) error {
 	return err
 }
 
-func (s *piSession) Send(_ context.Context, msg string) error {
+func (s *piSession) Send(ctx context.Context, msg string) error {
+	return s.SendTurn(ctx, Turn{Text: msg})
+}
+
+// SendTurn implements ImageSender: each image rides the prompt command's
+// Images field, inline as base64.
+func (s *piSession) SendTurn(_ context.Context, turn Turn) error {
 	s.mu.Lock()
 	// pi queues a prompt sent mid-stream only when the client asks
 	// (streamingBehavior); gummi serializes turns, so a second Send is
@@ -421,7 +437,22 @@ func (s *piSession) Send(_ context.Context, msg string) error {
 	hints := s.primeHints()
 	s.mu.Unlock()
 
-	if err := s.write(piCommand{ID: id, Type: "prompt", Message: hints + msg}); err != nil {
+	var images []piImage
+	for _, img := range turn.Images {
+		data, err := os.ReadFile(img.Path)
+		if err != nil {
+			s.mu.Lock()
+			s.inTurn = false
+			s.mu.Unlock()
+			return fmt.Errorf("pi: read image: %w", err)
+		}
+		images = append(images, piImage{
+			Type: "image", Data: base64.StdEncoding.EncodeToString(data), MimeType: img.MediaType,
+		})
+	}
+
+	cmd := piCommand{ID: id, Type: "prompt", Message: hints + turn.Text, Images: images}
+	if err := s.write(cmd); err != nil {
 		s.mu.Lock()
 		s.inTurn = false
 		s.mu.Unlock()

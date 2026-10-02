@@ -80,3 +80,39 @@ export const del = (path) => api('DELETE', path)
 export function cardPath (id, rest = '') {
   return `/api/cards/${encodeURIComponent(id)}${rest ? '/' + rest : ''}`
 }
+
+// uploadAttachment POSTs a File/Blob's raw bytes to /api/attachments,
+// carrying its name in X-Filename (display only — the server sniffs the
+// media type from the bytes, never trusting a header for it). Answers
+// the stored ref ({id, name, mediaType, size}); throws ApiError on the
+// server's 413/415 refusals.
+export async function uploadAttachment (file) {
+  const res = await fetch('/api/attachments', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': file.type || 'application/octet-stream',
+      // percent-encoded: header values must stay ASCII, and a pasted
+      // screenshot's name is whatever the OS or clipboard gave it.
+      'X-Filename': encodeURIComponent(file.name || 'image')
+    },
+    body: file
+  })
+  const text = await res.text()
+  let data = null
+  if (text) {
+    try { data = JSON.parse(text) } catch { data = null }
+  }
+  if (!res.ok) {
+    if (res.status === 401 && onUnauthorized) onUnauthorized()
+    throw new ApiError(res.status, data, res.statusText)
+  }
+  return data
+}
+
+// attachmentURL is where GET /api/attachments/{id} serves id's bytes —
+// what an <img> thumbnail's src points at.
+export function attachmentURL (id) {
+  return `/api/attachments/${encodeURIComponent(id)}`
+}

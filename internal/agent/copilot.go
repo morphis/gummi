@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -69,13 +70,31 @@ func (c *Copilot) Name() string { return "copilot" }
 
 // Capabilities implements Agent. The Copilot SDK provides all of these.
 func (c *Copilot) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd, SkillDirs: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, ClientTools: true, WriteCage: WriteCageCwd, SkillDirs: true, Images: true}
 }
 
 // CreditRate implements Agent: Copilot self-reports per-model AI-credit
 // spend via the SDK's usage events, so the engine must not re-price its
 // tokens. Zero here disables the token-priced fallback for hosted sessions.
 func (c *Copilot) CreditRate(string) float64 { return 0 }
+
+// SupportsImages reports whether model can take images with a turn, per
+// the CLI's own model list (cached by the SDK after its first call). An
+// error means the check itself failed — e.g. the CLI has no such model —
+// not that images are unsupported; callers should treat that as a refusal
+// too, since a model this session cannot even name cannot take a turn.
+func (c *Copilot) SupportsImages(ctx context.Context, model string) (bool, error) {
+	models, err := c.client.ListModels(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range models {
+		if m.ID == model {
+			return m.Capabilities.Supports.Vision, nil
+		}
+	}
+	return false, fmt.Errorf("copilot: model %q not in the CLI's model list", model)
+}
 
 // NewSession implements Agent.
 func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, error) {
@@ -136,6 +155,8 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 	}
 
 	cs := &copilotSession{
+		agent:   c,
+		model:   opts.Model,
 		workdir: opts.WorkDir,
 		// hosted sessions are credits-metered by the CLI; their usage
 		// samples are authoritative as-is.
@@ -161,6 +182,7 @@ func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, er
 		return nil, fmt.Errorf("creating copilot session: %w", err)
 	}
 	cs.sdk = sess
+	cs.send = sess.Send
 	cs.getMetrics = sess.RPC.Usage.GetMetrics
 	go cs.forward()
 	cs.unsub = sess.On(cs.onEvent)
@@ -244,8 +266,13 @@ func (c *Copilot) Close() error {
 
 type copilotSession struct {
 	sdk     *copilot.Session
-	workdir string // opts.WorkDir, for repo-relative tool-call details
-	metered bool   // hosted (credits-metered) session; stamped on usage events
+	agent   *Copilot // for the per-model vision check a Turn's images need
+	model   string   // opts.Model, named at session creation
+	workdir string   // opts.WorkDir, for repo-relative tool-call details
+	metered bool     // hosted (credits-metered) session; stamped on usage events
+	// send is sdk.Send in production; a stub in tests that build a
+	// copilotSession directly without a live SDK session.
+	send func(context.Context, copilot.MessageOptions) (string, error)
 	// raw carries events from the SDK's event goroutine to the
 	// forwarder; events is the consumer-facing stream, owned solely by
 	// the forwarder so it can close it exactly once.
@@ -692,8 +719,38 @@ func (s *copilotSession) emit(e Event) {
 }
 
 func (s *copilotSession) Send(ctx context.Context, msg string) error {
-	_, err := s.sdk.Send(ctx, copilot.MessageOptions{Prompt: msg})
-	if err != nil {
+	return s.SendTurn(ctx, Turn{Text: msg})
+}
+
+// SendTurn implements ImageSender: each image becomes an SDK file
+// attachment named by path — the CLI resolves and inlines the bytes
+// itself. A model the CLI's model list reports without vision support
+// refuses with ErrImagesUnsupported before anything is sent; this is the
+// one adapter that can know that per-model, since Capabilities().Images
+// only speaks for the backend as a whole.
+func (s *copilotSession) SendTurn(ctx context.Context, turn Turn) error {
+	opts := copilot.MessageOptions{Prompt: turn.Text}
+	if len(turn.Images) > 0 {
+		ok, err := s.agent.SupportsImages(ctx, s.model)
+		if err != nil {
+			// SupportsImages' own doc comment: a model this session cannot
+			// even name cannot take a turn, so its failure is a refusal
+			// too, not a different kind of error — classified the same as
+			// a plain "no vision" answer so every caller's refusal
+			// handling (kickoff's fallback, the live steer's undo) catches
+			// this case as well.
+			return fmt.Errorf("copilot: checking model vision support: %v: %w", err, ErrImagesUnsupported)
+		}
+		if !ok {
+			return fmt.Errorf("copilot: %w", ErrImagesUnsupported)
+		}
+		for _, img := range turn.Images {
+			opts.Attachments = append(opts.Attachments, &copilot.AttachmentFile{
+				Path: img.Path, DisplayName: filepath.Base(img.Path),
+			})
+		}
+	}
+	if _, err := s.send(ctx, opts); err != nil {
 		return fmt.Errorf("sending to copilot: %w", err)
 	}
 	return nil

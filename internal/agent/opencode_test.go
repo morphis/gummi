@@ -373,6 +373,55 @@ func TestOpencodeSendPassesAutoFlag(t *testing.T) {
 	}
 }
 
+// TestOpencodeSendTurnFileFlags asserts that a turn's images each become a
+// `--file <path>` flag on that invocation's argv.
+func TestOpencodeSendTurnFileFlags(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	argsFile := dir + "/args"
+	path := dir + "/opencode"
+	body := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
+		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ag, err := NewOpencode(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sender, ok := sess.(ImageSender)
+	if !ok {
+		t.Fatal("opencode session does not implement ImageSender")
+	}
+	turn := Turn{Text: "go", Images: []Image{
+		{Path: "/tmp/a.png", MediaType: "image/png"},
+		{Path: "/tmp/b.png", MediaType: "image/png"},
+	}}
+	if err := sender.SendTurn(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	waitOpencodeIdle(t, sess)
+	data, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	got := strings.Join(lines, " ")
+	if !strings.Contains(got, "--file /tmp/a.png --file /tmp/b.png") {
+		t.Errorf("opencode args %q missing one --file flag per image", got)
+	}
+}
+
 // Send exports OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX into opencode's
 // environment when (and only when) the role sets output_token_max — it is
 // opencode's sole lever above its hardcoded 32000 per-step output cap.

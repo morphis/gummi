@@ -84,6 +84,32 @@ func TestThreadShape(t *testing.T) {
 	}))
 }
 
+// TestAttachmentShapes pins the fields the page reads for images: an
+// AttachmentRef's own shape, and where it (or just its id) rides on every
+// other request/response that carries one.
+func TestAttachmentShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Ref        AttachmentRef
+		Send       SendRequest
+		CreateCard CreateCardRequest
+		SpecNote   SpecNoteRequest
+		Composer   Composer
+		ThreadItem Item
+	}{
+		Ref:  AttachmentRef{ID: "ab12ef34", Name: "shot.png", MediaType: "image/png", Size: 4096},
+		Send: SendRequest{Text: "look at this", Attachments: []string{"ab12ef34"}},
+		CreateCard: CreateCardRequest{
+			Kind: "feature", Title: "Dark mode", Attachments: []string{"ab12ef34"},
+		},
+		SpecNote: SpecNoteRequest{Line: 3, Text: "see the mock", Attachments: []string{"ab12ef34"}},
+		Composer: Composer{Says: "steers the implementer mid-turn", Route: RouteSteer, Images: true},
+		ThreadItem: Item{
+			Key: "you-7", Seq: 7, T: ItemYou, Time: at, Author: "you", Text: "look at this",
+			Attachments: []AttachmentRef{{ID: "ab12ef34", Name: "shot.png", MediaType: "image/png", Size: 4096}},
+		},
+	}))
+}
+
 func TestChangeShapes(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, []Change{
 		{Kind: ChangeBoard},

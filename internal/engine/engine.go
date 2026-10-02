@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/envprobe"
@@ -916,15 +917,18 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.pump(s) }()
 	var ko string
+	var koImages []AttachmentRef
 	if fresh {
 		ko = designKickoff(f)
+		specText, _ := os.ReadFile(specPath)
+		ko, koImages = e.kickoffTurn(s, ko, string(specText))
 		s.appendSystem(ko)
 		s.setBusy(true)
 	}
 	e.persist(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventStarted})
 	if fresh {
-		if err := sess.Send(ctx, ko); err != nil {
+		if err := e.sendKickoffTurn(ctx, sess, ko, koImages); err != nil {
 			s.setError(err)
 			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventError, Err: err})
 		}
@@ -1314,7 +1318,9 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 			}
 		}
 	}
-	if err := sess.Send(context.Background(), msg); err != nil {
+	specText, _ := os.ReadFile(s.SpecPath())
+	msg, images := e.kickoffTurn(s, msg, string(specText))
+	if err := e.sendKickoffTurn(context.Background(), sess, msg, images); err != nil {
 		e.failRun(s, err)
 	}
 }
@@ -2172,8 +2178,24 @@ func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift boo
 	return workDir, artifact, nil
 }
 
-// Send routes a user/orchestrator turn to a feature's session.
+// Attachments returns the workspace's image store (internal/attachment),
+// rooted under the gitignored .gummi an upload, a spec-anchored link, and
+// a kickoff turn all resolve ids and paths through.
+func (e *Engine) Attachments() *attachment.Store {
+	return &attachment.Store{Dir: e.cfg.Workspace.AttachmentsDir()}
+}
+
+// Send routes a user/orchestrator turn to a feature's session. It is
+// SendTurn's text-only case.
 func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) error {
+	return e.SendTurn(ctx, id, msg, nil)
+}
+
+// SendTurn routes a user/orchestrator turn, optionally carrying images, to
+// a feature's session. A turn with images is delivered natively via the
+// backend's ImageSender, or refused with agent.ErrImagesUnsupported before
+// anything is appended or persisted — never silently sent text-only.
+func (e *Engine) SendTurn(ctx context.Context, id domain.FeatureID, msg string, images []AttachmentRef) error {
 	s := e.Get(id)
 	if s == nil {
 		return fmt.Errorf("no session for %s", id)
@@ -2191,6 +2213,11 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	if s.Snapshot().PendingAsk != nil {
 		return fmt.Errorf("%s is waiting on your answer: %w", id, agent.ErrBusy)
 	}
+	if len(images) > 0 {
+		if err := e.checkImageCapable(s); err != nil {
+			return err
+		}
+	}
 	// deliver any queued budget nudge before the orchestrator's own text
 	// (DESIGN §5.1 layer 2: the mid-session threshold is folded into the
 	// next turn rather than injected mid-flight).
@@ -2198,11 +2225,11 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	if nudge != "" {
 		msg = nudge + "\n\n" + msg
 	}
-	s.appendUser(msg, actorOf(ctx))
+	s.appendUserImages(msg, actorOf(ctx), images)
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})
-	if err := e.deliverTurn(ctx, s, msg); err != nil {
+	if err := e.deliverTurn(ctx, s, msg, images); err != nil {
 		// The backend is the authority on whether it can take a turn, and
 		// it said no. Undo what this call consumed and recorded, so a
 		// refusal leaves the session exactly as it found it: the nudge
@@ -2213,7 +2240,12 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 		// tell otherwise. That is what a line typed while the spinner was
 		// up used to look like, right before failRun killed the stage
 		// under it.
-		if errors.Is(err, agent.ErrBusy) {
+		// ErrImagesUnsupported gets the identical undo: checkImageCapable
+		// catches every real backend's mismatch before the echo lands, but
+		// a model-level refusal (copilot's per-model vision check) can
+		// only surface once the turn actually reaches the adapter, so the
+		// echo must still come back out when that happens.
+		if errors.Is(err, agent.ErrBusy) || errors.Is(err, agent.ErrImagesUnsupported) {
 			s.dropUnsentUser(msg)
 			s.requeueNudge(nudge)
 			e.persist(s)
@@ -2224,32 +2256,191 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	return nil
 }
 
-// deliverTurn dispatches msg as the session's next turn to the backend.
-// It is Send's dispatch half with the transcript append already done —
-// Answer's convention path uses it so an answer the transcript already
-// recorded (and the durable decision log cites) is not appended a second
-// time by the delivery that carries it.
-func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string) error {
+// checkImageCapable reports agent.ErrImagesUnsupported when s's live
+// backend cannot take a Turn's images — it is not an agent.ImageSender or
+// its advertised capability says no — without sending anything. The
+// per-model check (copilot's vision flag) lives in that adapter's own
+// SendTurn and surfaces the same error once a turn actually reaches it.
+func (e *Engine) checkImageCapable(s *Session) error {
+	a := s.agent()
+	if _, ok := a.(agent.ImageSender); !ok {
+		return fmt.Errorf("%s: %w", s.Feature.ID, agent.ErrImagesUnsupported)
+	}
+	if caps, ok := agent.CapabilitiesFor(s.Snapshot().AgentName); ok && !caps.Images {
+		return fmt.Errorf("%s: %w", s.Feature.ID, agent.ErrImagesUnsupported)
+	}
+	return nil
+}
+
+// imagesSupporter is implemented by a backend whose per-model vision
+// support SessionTakesImages checks live (copilot, via the CLI's own
+// model list); every other capable backend answers for its whole adapter.
+type imagesSupporter interface {
+	SupportsImages(ctx context.Context, model string) (bool, error)
+}
+
+// SessionTakesImages reports whether a card's live session can take a
+// turn's images right now — the composer's attach control reads this,
+// unlike checkImageCapable (SendTurn's own gate), which stays backend-
+// level only so a model-level refusal still surfaces as an error at the
+// adapter rather than needing a live check on every send.
+func (e *Engine) SessionTakesImages(ctx context.Context, id domain.FeatureID) bool {
+	s := e.Get(id)
+	if s == nil {
+		return false
+	}
+	if e.checkImageCapable(s) != nil {
+		return false
+	}
+	snap := s.Snapshot()
+	if sup, ok := s.agent().(imagesSupporter); ok {
+		can, err := sup.SupportsImages(ctx, snap.Model)
+		return err == nil && can
+	}
+	return true
+}
+
+// deliverTurn dispatches msg (and any images) as the session's next turn
+// to the backend. It is SendTurn's dispatch half with the transcript
+// append already done — Answer's convention path uses the text-only form
+// so an answer the transcript already recorded (and the durable decision
+// log cites) is not appended a second time by the delivery that carries
+// it.
+func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string, images []AttachmentRef) error {
 	if s.agent() == nil {
 		return fmt.Errorf("%s is queued, not yet running", s.Feature.ID)
 	}
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
-	if err := s.agent().Send(ctx, msg); err != nil {
+	var err error
+	if len(images) > 0 {
+		turn := agent.Turn{Text: msg, Images: e.turnImages(images)}
+		err = s.agent().(agent.ImageSender).SendTurn(ctx, turn)
+	} else {
+		err = s.agent().Send(ctx, msg)
+	}
+	if err != nil {
 		// ErrBusy is the backend saying "not now", not "this session is
 		// broken". Failing the run over it is how a second thought typed
 		// while the spinner was up used to kill a stage — and the card
 		// then reported "plan failed" while the same session went on
 		// answering questions, because failRun leaves an interactive
 		// session running and nothing ever clears the error it set.
-		if errors.Is(err, agent.ErrBusy) {
+		if errors.Is(err, agent.ErrBusy) || errors.Is(err, agent.ErrImagesUnsupported) {
 			return err
 		}
 		e.failRun(s, err)
 		return err
 	}
 	return nil
+}
+
+// turnImages resolves a turn's attachment refs to the absolute host paths
+// an agent.ImageSender takes, via the workspace's attachment store. A ref
+// whose file has since gone missing is dropped rather than failing the
+// whole turn — the transcript still names it.
+func (e *Engine) turnImages(refs []AttachmentRef) []agent.Image {
+	store := e.Attachments()
+	images := make([]agent.Image, 0, len(refs))
+	for _, r := range refs {
+		path, err := store.Path(r.ID)
+		if err != nil {
+			continue
+		}
+		images = append(images, agent.Image{Path: path, MediaType: r.MediaType})
+	}
+	return images
+}
+
+// kickoffTurn resolves the spec-anchored attachments source names (a
+// stage's spec file content for a stage kickoff, the brief itself for a
+// freeform one — a description attachment lands as a link in either) into
+// what the kickoff carrying text should say and, when s's live backend can
+// take them, the images it should carry natively alongside it.
+//
+// It never errors: a spec-named attachment must never be the reason a
+// stage fails to start. A ref whose file has since gone missing is named
+// as missing in the text either way; every other ref rides natively when
+// the backend takes images, or is named by its absolute path in the text
+// when it cannot — so a read-tool can still open it.
+func (e *Engine) kickoffTurn(s *Session, text, source string) (string, []AttachmentRef) {
+	refs := attachment.Refs(source)
+	if len(refs) == 0 {
+		return text, nil
+	}
+	store := e.Attachments()
+	capable := e.checkImageCapable(s) == nil
+	var images, textOnly []AttachmentRef
+	for _, r := range refs {
+		ref, err := store.Get(r.ID)
+		if err != nil {
+			textOnly = append(textOnly, AttachmentRef{ID: r.ID})
+			continue
+		}
+		full := AttachmentRef{ID: ref.ID, Name: ref.Name, MediaType: ref.MediaType, Size: ref.Size}
+		if capable {
+			images = append(images, full)
+		} else {
+			textOnly = append(textOnly, full)
+		}
+	}
+	if lines := e.imagePathLines(textOnly); lines != "" {
+		text = text + "\n\n" + lines
+	}
+	return text, images
+}
+
+// imagePathLines renders one "Attached image: <path> (<media type>)" line
+// per ref, naming a ref whose file has since gone missing as missing
+// instead — the text a kickoff falls back to for an image it cannot (or,
+// after a late per-model refusal, turned out not to be able to) deliver
+// natively.
+func (e *Engine) imagePathLines(refs []AttachmentRef) string {
+	store := e.Attachments()
+	var lines []string
+	for _, r := range refs {
+		ref, err := store.Get(r.ID)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("Attached image missing: %s", r.ID))
+			continue
+		}
+		path, err := store.Path(r.ID)
+		if err != nil {
+			lines = append(lines, fmt.Sprintf("Attached image missing: %s", r.ID))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("Attached image: %s (%s)", path, ref.MediaType))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sendKickoffTurn dispatches a kickoff (system, not user — appendUser/
+// persist already happened on the caller's side): images, if any, ride
+// natively via the backend's ImageSender, exactly as kickoffTurn already
+// established it can take them. kickoffTurn's capability check is
+// structural only (ImageSender + Capabilities.Images) — it cannot see a
+// live per-model refusal (copilot's vision flag), which only surfaces once
+// SendTurn actually reaches the adapter. A spec-named attachment must
+// never be the reason a stage fails to start, so a late
+// agent.ErrImagesUnsupported here falls back to the same text-only shape
+// kickoffTurn already uses for a backend it knew up front couldn't take
+// images, rather than failing the run.
+func (e *Engine) sendKickoffTurn(ctx context.Context, sess agent.Session, text string, images []AttachmentRef) error {
+	if len(images) == 0 {
+		return sess.Send(ctx, text)
+	}
+	err := sess.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: text, Images: e.turnImages(images)})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, agent.ErrImagesUnsupported) {
+		return err
+	}
+	if lines := e.imagePathLines(images); lines != "" {
+		text = text + "\n\n" + lines
+	}
+	return sess.Send(ctx, text)
 }
 
 // Interrupt aborts a feature's in-flight turn.

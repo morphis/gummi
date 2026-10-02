@@ -11,6 +11,31 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
+// stateImages converts a message's attachment refs to their state-layer
+// mirror for storage.
+func stateImages(refs []AttachmentRef) []state.AttachmentRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]state.AttachmentRef, len(refs))
+	for i, r := range refs {
+		out[i] = state.AttachmentRef{ID: r.ID, Name: r.Name, MediaType: r.MediaType, Size: r.Size}
+	}
+	return out
+}
+
+// engineImages is stateImages's inverse, used on restore.
+func engineImages(refs []state.AttachmentRef) []AttachmentRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]AttachmentRef, len(refs))
+	for i, r := range refs {
+		out[i] = AttachmentRef{ID: r.ID, Name: r.Name, MediaType: r.MediaType, Size: r.Size}
+	}
+	return out
+}
+
 // usageFrom reconstructs a spend total from a persisted snapshot.
 func usageFrom(snap state.SessionSnapshot) agent.Usage {
 	return agent.Usage{
@@ -96,6 +121,7 @@ func (e *Engine) saveLocked(s *Session) {
 			// mirrored by the first post-restore save, reintroducing
 			// the user-message row this stamp exists to keep out.
 			AnsweredBy: m.AnsweredBy,
+			Images:     stateImages(m.Images),
 		})
 	}
 	_ = e.cfg.Store.SaveSession(context.Background(), rec)
@@ -169,11 +195,12 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 		if m.Author == AuthorUser && m.AnsweredBy == state.ActorAutopilot {
 			continue
 		}
-		fields := map[string]string{"author": string(m.Author), "content": m.Content}
-		if m.By != "" {
-			fields["by"] = m.By
-		}
-		payload, _ := json.Marshal(fields)
+		payload, _ := json.Marshal(struct {
+			Author  string                `json:"author"`
+			Content string                `json:"content"`
+			By      string                `json:"by,omitempty"`
+			Images  []state.AttachmentRef `json:"images,omitempty"`
+		}{Author: string(m.Author), Content: m.Content, By: m.By, Images: stateImages(m.Images)})
 		evs = append(evs, state.CardEvent{
 			Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
 			Kind: state.EventMessage, At: eventTime(m.At), Payload: string(payload),
@@ -371,6 +398,7 @@ func (e *Engine) Restore(ctx context.Context) error {
 				// the mirror's skip holds across the restart instead
 				// of failing open on the first post-restore save.
 				AnsweredBy: m.AnsweredBy,
+				Images:     engineImages(m.Images),
 			})
 		}
 		s.activity = append(s.activity, snap.Activity...)

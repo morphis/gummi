@@ -69,8 +69,11 @@
         <div class="composer" id="composer" data-testid="composer">
           <div class="draftrow" id="composer-draft" data-testid="composer-draft" hidden></div>
           <label class="sr-only" for="composer-input">Message</label>
+          <div class="chips" id="composer-chips" data-testid="composer-chips" hidden></div>
           <textarea id="composer-input" data-testid="composer-input" rows="1" placeholder="Message the agent, or type a command"></textarea>
+          <input type="file" id="composer-file" data-testid="composer-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
           <div class="bar">
+            <button class="attach" id="composer-attach" data-testid="composer-attach" type="button" title="Attach an image" hidden>📎</button>
             <span class="enter"><kbd>enter</kbd><b id="enter-says" data-testid="composer-says" aria-live="polite">sends your message</b></span>
             <span class="mslot" id="composer-model" data-testid="composer-model"></span>
             <button class="send" id="send" data-testid="composer-send">Send</button>

@@ -453,6 +453,13 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 // That is the whole of what replaces a stage's kickoff, its verdict
 // grammar and its bounce edges.
 func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
+	return ff.SendTurn(ctx, msg, nil)
+}
+
+// SendTurn is Send's image-carrying form: a turn with images is delivered
+// natively, or refused with agent.ErrImagesUnsupported before anything is
+// appended or recorded.
+func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []AttachmentRef) error {
 	sess, err := ff.ensureBackend(ctx)
 	if err != nil {
 		return err
@@ -461,15 +468,39 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 	if a == nil {
 		return fmt.Errorf("%s's freeform session has no live agent", ff.id)
 	}
-	sess.appendUser(msg, actorOf(ctx))
+	if len(images) > 0 {
+		if err := ff.engine.checkImageCapable(sess); err != nil {
+			return err
+		}
+	}
+	sess.appendUserImages(msg, actorOf(ctx), images)
 	ff.engine.persist(sess)
 	sess.setBusy(true)
 	ff.armIdleTimer()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
-	if err := a.Send(ctx, msg); err != nil {
-		sess.setError(err)
-		ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventError, Err: err})
-		return err
+	var sendErr error
+	if len(images) > 0 {
+		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: msg, Images: ff.engine.turnImages(images)})
+	} else {
+		sendErr = a.Send(ctx, msg)
+	}
+	if sendErr != nil {
+		if errors.Is(sendErr, agent.ErrBusy) || errors.Is(sendErr, agent.ErrImagesUnsupported) {
+			// Same undo Engine.SendTurn gives a live steer: a refusal that
+			// only surfaces this late (a busy backend, or copilot's
+			// per-model vision check, which checkImageCapable's structural
+			// gate can't see) must leave no echo and nothing durably
+			// recorded — persist rewrites the whole session row, so
+			// re-running it after the drop erases the turn from what a
+			// restart would restore.
+			sess.dropUnsentUser(msg)
+			ff.engine.persist(sess)
+			ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+			return sendErr
+		}
+		sess.setError(sendErr)
+		ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventError, Err: sendErr})
+		return sendErr
 	}
 	return nil
 }
@@ -516,7 +547,16 @@ func (ff *FreeformSession) KickoffWith(ctx context.Context, opening string) erro
 	if brief == "" {
 		return nil
 	}
-	return ff.Send(ctx, brief)
+	// The brief is both the turn and the document a description
+	// attachment's link landed in, so it is scanned for its own links —
+	// unlike a stage kickoff, which scans its spec separately from its
+	// (unrelated) boilerplate text.
+	live, err := ff.ensureBackend(ctx)
+	if err != nil {
+		return err
+	}
+	text, images := ff.engine.kickoffTurn(live, brief, brief)
+	return ff.SendTurn(ctx, text, images)
 }
 
 // InterruptFreeform stops a freeform card's turn in flight. It is
@@ -920,6 +960,7 @@ func restoredFreeformSession(f domain.Feature, snap state.SessionSnapshot) *Sess
 			Author: Author(m.Author), Content: m.Content,
 			ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
 			AnsweredBy: m.AnsweredBy,
+			Images:     engineImages(m.Images),
 		})
 	}
 	sess.activity = append(sess.activity, snap.Activity...)

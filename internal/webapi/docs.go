@@ -74,6 +74,10 @@ type CheckOutcome struct {
 type SpecNoteRequest struct {
 	Line int    `json:"line"`
 	Text string `json:"text"`
+	// Attachments are the ids of images (already uploaded via POST
+	// /api/attachments) to link into the note — stored by reference, so
+	// every later stage that reads the spec sees them too.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // SpecResolveRequest is POST /api/cards/{id}/spec/notes/resolve: close

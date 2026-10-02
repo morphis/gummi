@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,7 +80,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -951,16 +952,49 @@ type ccUserFrame struct {
 }
 
 type ccUserMessage struct {
-	Role    string        `json:"role"`
-	Content []ccTextBlock `json:"content"`
+	Role    string           `json:"role"`
+	Content []ccContentBlock `json:"content"`
 }
 
-type ccTextBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+// ccContentBlock is one block of a user turn's content: a text block, or
+// an image block carrying its bytes inline as base64 (Source set).
+type ccContentBlock struct {
+	Type   string         `json:"type"`
+	Text   string         `json:"text,omitempty"`
+	Source *ccImageSource `json:"source,omitempty"`
 }
 
-func (s *claudeSession) Send(_ context.Context, msg string) error {
+// ccImageSource is an image content block's inline payload, per Claude's
+// stream-json wire format.
+type ccImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+func (s *claudeSession) Send(ctx context.Context, msg string) error {
+	return s.SendTurn(ctx, Turn{Text: msg})
+}
+
+// SendTurn implements ImageSender: the text block is followed by one image
+// block per attachment, each carrying its bytes inline as base64 — claude's
+// stream-json wire format has no separate reference form.
+func (s *claudeSession) SendTurn(_ context.Context, turn Turn) error {
+	content := []ccContentBlock{{Type: "text", Text: turn.Text}}
+	for _, img := range turn.Images {
+		data, err := os.ReadFile(img.Path)
+		if err != nil {
+			return fmt.Errorf("claude: read image: %w", err)
+		}
+		content = append(content, ccContentBlock{
+			Type: "image",
+			Source: &ccImageSource{
+				Type:      "base64",
+				MediaType: img.MediaType,
+				Data:      base64.StdEncoding.EncodeToString(data),
+			},
+		})
+	}
 	s.mu.Lock()
 	// a stale interrupted flag from a race (Interrupt landing after its
 	// turn's result) must not mask the new turn's genuine errors.
@@ -968,7 +1002,7 @@ func (s *claudeSession) Send(_ context.Context, msg string) error {
 	s.inTurn = true
 	s.mu.Unlock()
 	err := s.write(ccUserFrame{Type: "user", Message: ccUserMessage{
-		Role: "user", Content: []ccTextBlock{{Type: "text", Text: msg}},
+		Role: "user", Content: content,
 	}})
 	if err != nil {
 		s.mu.Lock()

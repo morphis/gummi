@@ -165,7 +165,7 @@ func (s *Server) handleSpecNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	who, _ := WhoFrom(r.Context())
-	sp, err := d.AddSpecNote(r.Context(), req.Line, req.Text, who.Person)
+	sp, err := d.AddSpecNote(r.Context(), req.Line, req.Text, who.Person, req.Attachments)
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return

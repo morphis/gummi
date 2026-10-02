@@ -4098,11 +4098,60 @@ start-up code. The boundary that keeps an agent out of those is the one
 the operator's browser, the workspace's `.gummi/state` or the host's
 loopback.
 
-### 20.6 Deferred
+### 20.6 Attachments
+
+A person on the page can attach an image where the terminal cannot offer
+one: the new-card form, a spec comment, and the card's composer. The two
+kinds of place split on how long the image has to last and what "shows
+it to the agent" means there, and each gets a different mechanism rather
+than one stretched to cover both.
+
+A **thread turn**'s images are this turn's alone — a steer, a consult
+question, a freeform turn — so they ride with it, natively, exactly once:
+`agent.Turn` carries them alongside the text, `agent.Capabilities.Images`
+says which backends can take them at all (claude, copilot, codex,
+opencode, pi; never the line-protocol headless backend), and a turn that
+carries images to a session that cannot is refused with
+`agent.ErrImagesUnsupported` before anything is sent or recorded —
+refusal, not drop, the same rule the rest of this section already lives
+by for every other kind of write. copilot is the one backend that can
+also know a *model's* support (its SDK's model list), so it refuses a
+text-only model the same way. The web contract mirrors this exactly:
+`Composer.Images` is true only when the card's live session can take
+images right now, and the page's attach control shows only then — an
+attach button the backend would refuse is worse than none.
+
+A **card description or a spec note** has to outlive the request that
+uploaded it and be there for every later stage, so it is stored, not
+streamed: `internal/attachment` is a content-addressed store under the
+workspace's gitignored `.gummi/attachments` (sha256 id, sniffed media
+type, ≤ 5 MB, at most 8 per write), and the description or note names it
+by a markdown image link whose target is the store's own workspace-
+relative path — `![name](.gummi/attachments/<id>.<ext>)`. That link is
+the whole of the mechanism: the spec is the durable carrier this section
+already trusts stages, reviewers and verify to read, so a later stage's
+opening turn scans it for that link grammar and delivers the images it
+names the same way a thread turn's own images ride — natively when the
+backend can take them, and as a line naming the file's absolute path
+when it cannot, so a read-tool can still open it. Never an error at
+kickoff: the spec already committed to naming the file, and a missing
+one is named as missing rather than failing the stage. `markdown.js`
+renders exactly that link grammar as an `<img>` pointing at the serve
+endpoint, and no other image syntax — an agent's own words, or a spec
+line, naming an arbitrary third-party URL must never make the browser
+fetch it.
+
+Neither surface ever writes into a card's worktree: the store lives only
+under the workspace directory, never touched by a checkout, a commit or
+`clean`.
+
+### 20.7 Deferred
 
 A daily ceiling for the whole board, if unattended nights prove expensive.
 Holding a line typed mid-turn until the turn ends (open question 3): the
 web face does whatever the TUI does, and will change when it does.
+Garbage-collecting the attachment store (§20.6): nothing removes a
+stored image today, including `clean`.
 
 ## 21. The log — a card's own commits, and rewriting them
 

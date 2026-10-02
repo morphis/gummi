@@ -50,6 +50,8 @@ type (
 		// By is who typed a user line (state.PersonActor), when a
 		// person's name came with it.
 		By string `json:"by,omitempty"`
+		// Images are the attachments a user turn carried, in order.
+		Images []state.AttachmentRef `json:"images,omitempty"`
 	}
 )
 

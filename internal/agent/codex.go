@@ -44,7 +44,7 @@ func NewCodex(bin string) (*Codex, error) {
 
 func (c *Codex) Name() string { return "codex" }
 func (c *Codex) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCageCwd}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, WriteCage: WriteCageCwd, Images: true}
 }
 func (c *Codex) CreditRate(string) float64 { return 0 }
 
@@ -177,7 +177,14 @@ func (s *codexSession) forward() {
 	}
 }
 
-func (s *codexSession) Send(_ context.Context, msg string) error {
+func (s *codexSession) Send(ctx context.Context, msg string) error {
+	return s.SendTurn(ctx, Turn{Text: msg})
+}
+
+// SendTurn implements ImageSender: each image becomes a `-i <path>` flag
+// on that turn's `codex exec` invocation, then shares Send's process path.
+func (s *codexSession) SendTurn(_ context.Context, turn Turn) error {
+	msg := turn.Text
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -189,7 +196,7 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 		s.mu.Unlock()
 		return ErrBusy
 	}
-	args, err := s.buildArgs()
+	args, err := s.buildArgs(turn.Images)
 	if err != nil {
 		s.mu.Unlock()
 		return err
@@ -239,8 +246,10 @@ func (s *codexSession) Send(_ context.Context, msg string) error {
 // than the top-level `-a` flag, codex exec does not accept; keeping every
 // token on the exec subcommand mirrors the MCP override injected below,
 // and leaves the argument vector testable against a real codex binary
-// without a live session.
-func (s *codexSession) buildArgs() ([]string, error) {
+// without a live session. images is this turn's attachments only — codex
+// exec takes no session-lifetime image state, so each carries just the
+// images sent with it, one `-i` flag apiece.
+func (s *codexSession) buildArgs(images []Image) ([]string, error) {
 	args := []string{
 		"exec", "--json", "--color", "never", "-m", s.model,
 		"-s", "workspace-write", "-c", `approval_policy="never"`,
@@ -266,6 +275,9 @@ func (s *codexSession) buildArgs() ([]string, error) {
 	}
 	if s.threadID != "" {
 		args = append(args, "resume", s.threadID)
+	}
+	for _, img := range images {
+		args = append(args, "-i", img.Path)
 	}
 	args = append(args, "-")
 	return args, nil

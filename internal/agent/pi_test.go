@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -377,6 +378,58 @@ func TestPiSendBusyAndFlags(t *testing.T) {
 		case <-deadline:
 			t.Fatal("interrupted turn never went idle")
 		}
+	}
+}
+
+// TestPiSendTurnImages asserts that a turn's images ride the prompt
+// command's Images field, inline as base64 with their media type.
+func TestPiSendTurnImages(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.json")
+	path := writeFakePi(t, dir, `      printf '%s\n' "$line" > `+promptFile+`
+      echo '{"type":"response","command":"prompt","success":true}'
+      echo '{"type":"agent_settled"}'`)
+	ag, err := NewPi(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	sender, ok := sess.(ImageSender)
+	if !ok {
+		t.Fatal("pi session does not implement ImageSender")
+	}
+	png := []byte{0x89, 0x50, 0x4e, 0x47}
+	imgPath := filepath.Join(dir, "shot.png")
+	if err := os.WriteFile(imgPath, png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.SendTurn(ctx, Turn{Text: "look", Images: []Image{{Path: imgPath, MediaType: "image/png"}}}); err != nil {
+		t.Fatal(err)
+	}
+	waitPiIdle(t, sess)
+
+	raw, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmd piCommand
+	if err := json.Unmarshal(raw, &cmd); err != nil {
+		t.Fatalf("prompt command not valid JSON: %s", raw)
+	}
+	if len(cmd.Images) != 1 || cmd.Images[0].MimeType != "image/png" {
+		t.Fatalf("prompt command images = %+v, want one image/png", cmd.Images)
+	}
+	if want := base64.StdEncoding.EncodeToString(png); cmd.Images[0].Data != want {
+		t.Errorf("image data = %q, want %q", cmd.Images[0].Data, want)
 	}
 }
 

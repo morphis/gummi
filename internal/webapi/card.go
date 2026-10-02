@@ -215,6 +215,20 @@ type Composer struct {
 	// will do ("steers the implementer mid-turn").
 	Says  string `json:"says"`
 	Route Route  `json:"route"`
+	// Images is whether the card's current agent (its backend and,
+	// where knowable, its model) can take images with a turn. The page
+	// offers the composer's attach control only when this is true.
+	Images bool `json:"images,omitempty"`
+}
+
+// AttachmentRef is a stored image, as a request names it (an id the page
+// already uploaded) or a response describes it back: GET/POST
+// /api/attachments.
+type AttachmentRef struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	MediaType string `json:"mediaType"`
+	Size      int64  `json:"size"`
 }
 
 // AnswerRequest is POST /api/cards/{id}/answer.
@@ -293,6 +307,11 @@ type SendRequest struct {
 	// 409 "moved" rather than routed at a stop nobody saw. Required while
 	// the card pins a decision.
 	Against string `json:"against,omitempty"`
+	// Attachments are the ids of images (already uploaded via POST
+	// /api/attachments) to send with this line. Only the steer, consult
+	// and freeform-turn routes accept them; every other route refuses a
+	// line that carries any with a 4xx, and nothing is recorded.
+	Attachments []string `json:"attachments,omitempty"`
 }
 
 // SendResponse says where the line went and returns the card as it now

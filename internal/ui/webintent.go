@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/overlay"
 	"github.com/morphis/gummi/internal/webapi"
@@ -143,6 +144,11 @@ type webIntent struct {
 	// routes a line from there); it is cleared once the intent is done,
 	// so a headless board's composer never holds a page's leftovers.
 	resetComposer bool
+	// images are the attachments a POST /api/cards/{id}/send request
+	// resolved, for the turn its route ends up delivering (steer, consult
+	// or a freeform card's turn) to pick up via intentImages — nil for
+	// every TUI-driven intent, which never carries any.
+	images []engine.AttachmentRef
 
 	mu      sync.Mutex
 	pending int
@@ -488,4 +494,18 @@ func (m *Shell) finishIntent(t *webIntent) webOutcome {
 	default:
 	}
 	return t.out
+}
+
+// intentImages returns and clears the current web intent's pending
+// attachments (set by Bridge.Send before routing the line), so the turn
+// its route ends up delivering — steer, consult or a freeform card's
+// turn — picks them up exactly once. nil outside a web request, which is
+// what every TUI-driven send sees.
+func (m *Shell) intentImages() []engine.AttachmentRef {
+	if m.intent == nil {
+		return nil
+	}
+	images := m.intent.images
+	m.intent.images = nil
+	return images
 }

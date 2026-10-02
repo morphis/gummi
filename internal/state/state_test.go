@@ -912,3 +912,78 @@ func TestSessionStartedAtRoundTrip(t *testing.T) {
 		t.Errorf("StartedAt = %q, want %q", snaps[0].StartedAt, started)
 	}
 }
+
+// TestSessionMessageImagesRoundTrip: a user turn's attachment refs survive
+// a SaveSession/LoadSessions round trip alongside the message they were
+// sent with.
+func TestSessionMessageImagesRoundTrip(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Images round trip")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := []AttachmentRef{
+		{ID: "abc123", Name: "shot.png", MediaType: "image/png", Size: 42},
+		{ID: "def456", Name: "another.jpg", MediaType: "image/jpeg", Size: 7},
+	}
+	if err := s.SaveSession(ctx, SessionSnapshot{
+		Feature: f.ID, Stage: f.Stage, Role: "implementer", State: "running",
+		Transcript: []SessionMessage{
+			{Author: "user", Content: "look at these", Images: refs},
+			{Author: "assistant", Content: "ok"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snaps, err := s.LoadSessions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps) != 1 || len(snaps[0].Transcript) != 2 {
+		t.Fatalf("LoadSessions = %+v, want one session with two messages", snaps)
+	}
+	got := snaps[0].Transcript[0].Images
+	if len(got) != 2 || got[0] != refs[0] || got[1] != refs[1] {
+		t.Errorf("Images = %+v, want %+v", got, refs)
+	}
+	if len(snaps[0].Transcript[1].Images) != 0 {
+		t.Errorf("assistant message Images = %+v, want none", snaps[0].Transcript[1].Images)
+	}
+}
+
+// TestSessionMessageLegacyRowHasNoImages: a row written before the images
+// column existed (empty string, the migration's default) decodes to no
+// images rather than an error.
+func TestSessionMessageLegacyRowHasNoImages(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := feat(1, "Legacy row")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSession(ctx, SessionSnapshot{
+		Feature: f.ID, Stage: f.Stage, Role: "implementer", State: "running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output, answered_by)
+		VALUES (?,?,?,?,?,?,?)`,
+		string(f.ID), 0, "user", "an old turn", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := s.loadMessages(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("loadMessages = %+v, want one message", msgs)
+	}
+	if len(msgs[0].Images) != 0 {
+		t.Errorf("legacy row Images = %+v, want none", msgs[0].Images)
+	}
+}

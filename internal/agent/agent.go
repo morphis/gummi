@@ -274,6 +274,12 @@ type Capabilities struct {
 	// operator is told so rather than left to wonder why a forwarded
 	// skill never arrived.
 	SkillDirs bool
+	// Images reports that the backend can take images natively with a
+	// turn — the session implements ImageSender and SendTurn actually
+	// reaches the model as multimodal input, not just a path the agent
+	// might choose to open. True for claude, copilot, codex, opencode and
+	// pi; false for headless (its line protocol has no image input).
+	Images bool
 }
 
 // WriteCage is the confinement a backend applies to its file-writing
@@ -400,6 +406,38 @@ type Session interface {
 	// Close ends the session and releases its resources.
 	Close() error
 }
+
+// Image is one attachment carried natively with a Turn: an absolute host
+// path to a file already written to the attachment store (see
+// internal/attachment), plus its sniffed media type.
+type Image struct {
+	Path      string
+	MediaType string
+}
+
+// Turn is a user/orchestrator turn that may carry images alongside its
+// text. SendTurn is the only path that accepts one; Send remains the
+// text-only case (equivalent to Turn{Text: msg}).
+type Turn struct {
+	Text   string
+	Images []Image
+}
+
+// ImageSender is implemented by sessions whose backend can carry images
+// natively with a turn (Capabilities.Images true). A session without it,
+// or whose capability/model says no, returns an error wrapping
+// ErrImagesUnsupported from SendTurn rather than silently dropping the
+// images and sending the text alone.
+type ImageSender interface {
+	SendTurn(ctx context.Context, turn Turn) error
+}
+
+// ErrImagesUnsupported is the refusal a Turn carrying images gets when
+// the session cannot deliver them — not an ImageSender, a capability that
+// reports false, or (copilot) a model reported without vision support. A
+// caller must treat it as a refusal before anything is sent or recorded,
+// the same rule ErrBusy's undo follows.
+var ErrImagesUnsupported = errors.New("this session cannot take images")
 
 // EventKind classifies a streamed Event.
 type EventKind string

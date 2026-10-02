@@ -197,6 +197,39 @@ func (r *bridgeMsg) run(m *Shell) (cmd tea.Cmd) {
 	return cmd
 }
 
+// PutAttachment stores an uploaded image via the workspace's attachment
+// store (internal/attachment), independent of any card — the store is a
+// plain directory on disk, not board state, so this bypasses Do rather
+// than block the Update loop for the write. Errors are the store's own
+// (attachment.ErrNotImage, ErrTooLarge); internal/web maps them to their
+// HTTP statuses directly.
+func (b *Bridge) PutAttachment(r io.Reader, name string) (webapi.AttachmentRef, error) {
+	if b.shell.engine == nil {
+		return webapi.AttachmentRef{}, refuse(WebUnavailable, b.shell.noAgent(""))
+	}
+	ref, err := b.shell.engine.Attachments().Put(r, name)
+	if err != nil {
+		return webapi.AttachmentRef{}, err
+	}
+	return webapi.AttachmentRef{ID: ref.ID, Name: ref.Name, MediaType: ref.MediaType, Size: ref.Size}, nil
+}
+
+// AttachmentPath resolves id to the stored file's absolute path and media
+// type, for GET /api/attachments/{id}. The store's ErrUnknown is returned
+// unwrapped for internal/web to map to 404.
+func (b *Bridge) AttachmentPath(id string) (path, mediaType string, err error) {
+	if b.shell.engine == nil {
+		return "", "", refuse(WebUnavailable, b.shell.noAgent(""))
+	}
+	store := b.shell.engine.Attachments()
+	ref, err := store.Get(id)
+	if err != nil {
+		return "", "", err
+	}
+	path, err = store.Path(id)
+	return path, ref.MediaType, err
+}
+
 // SetChangeHook installs the function the Shell calls after it handled
 // anything that can change what a viewer sees. The hook is called on the
 // Update goroutine (and, for the needs-you queue, from whichever goroutine

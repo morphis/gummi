@@ -2,12 +2,24 @@ package state
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
+
+// AttachmentRef is one image a user turn carried, durable enough to
+// survive a restart alongside the transcript entry it was sent on: the
+// store id a later read serves from, the name it was uploaded under, its
+// media type, and its size.
+type AttachmentRef struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	MediaType string `json:"mediaType"`
+	Size      int64  `json:"size"`
+}
 
 // SessionMessage is one persisted transcript turn.
 type SessionMessage struct {
@@ -25,6 +37,34 @@ type SessionMessage struct {
 	// every turn a person typed and for all legacy rows, both of which
 	// read as "not stamped" and mirror as today.
 	AnsweredBy string
+	// Images are the attachments a user turn carried, in order. Empty for
+	// every turn without one and for all legacy rows.
+	Images []AttachmentRef
+}
+
+// encodeImages JSON-encodes a message's attachment refs for storage, "" for
+// none so a legacy or image-less row round-trips as an empty column.
+func encodeImages(refs []AttachmentRef) (string, error) {
+	if len(refs) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(refs)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// decodeImages is encodeImages's inverse; "" decodes to no images.
+func decodeImages(s string) ([]AttachmentRef, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var refs []AttachmentRef
+	if err := json.Unmarshal([]byte(s), &refs); err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
 // SessionSnapshot is the durable record of a feature's agent session,
@@ -120,10 +160,14 @@ func (s *Store) SaveSession(ctx context.Context, snap SessionSnapshot) error {
 		return err
 	}
 	for i, m := range snap.Transcript {
+		images, err := encodeImages(m.Images)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output, answered_by)
-			VALUES (?,?,?,?,?,?,?)`,
-			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput, m.AnsweredBy); err != nil {
+			`INSERT INTO session_messages (feature_id, ord, author, content, tool_status, tool_output, answered_by, images)
+			VALUES (?,?,?,?,?,?,?,?)`,
+			string(snap.Feature), i, m.Author, m.Content, m.ToolStatus, m.ToolOutput, m.AnsweredBy, images); err != nil {
 			return err
 		}
 	}
@@ -182,7 +226,7 @@ func (s *Store) LoadSessions(ctx context.Context) ([]SessionSnapshot, error) {
 
 func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]SessionMessage, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT author, content, tool_status, tool_output, answered_by
+		`SELECT author, content, tool_status, tool_output, answered_by, images
 		FROM session_messages WHERE feature_id = ? ORDER BY ord`, string(id))
 	if err != nil {
 		return nil, err
@@ -191,7 +235,11 @@ func (s *Store) loadMessages(ctx context.Context, id domain.FeatureID) ([]Sessio
 	var out []SessionMessage
 	for rows.Next() {
 		var m SessionMessage
-		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput, &m.AnsweredBy); err != nil {
+		var images string
+		if err := rows.Scan(&m.Author, &m.Content, &m.ToolStatus, &m.ToolOutput, &m.AnsweredBy, &images); err != nil {
+			return nil, err
+		}
+		if m.Images, err = decodeImages(images); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

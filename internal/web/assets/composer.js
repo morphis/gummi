@@ -14,8 +14,8 @@
 // With a session draft open (session.js) there is no card yet: the line is
 // the session's first message, and sending it creates the session.
 
-import { $, clear } from './dom.js?v=__ASSET_V__'
-import { post, cardPath } from './api.js?v=__ASSET_V__'
+import { h, $, clear } from './dom.js?v=__ASSET_V__'
+import { post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick } from './decision.js?v=__ASSET_V__'
@@ -29,6 +29,10 @@ let timer = 0
 let sending = false
 let ctxRef = {}
 let noteText = ''
+// attachments pending on the composer: {id, name, mediaType, size,
+// pending, error}. id is set once the upload answers; pending/error are
+// upload-in-flight state a send must wait out (or refuse to send with).
+let attachments = []
 
 export function initComposer (ctx) {
   ctxRef = ctx
@@ -64,14 +68,36 @@ export function initComposer (ctx) {
     }
   })
   $('#send').addEventListener('click', submit)
+  $('#composer-attach').addEventListener('click', () => $('#composer-file').click())
+  $('#composer-file').addEventListener('change', (e) => {
+    const files = [...e.target.files]
+    e.target.value = ''
+    addFiles(files)
+  })
+  input.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.items || [])]
+      .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+      .map((it) => it.getAsFile())
+      .filter(Boolean)
+    if (files.length) { e.preventDefault(); addFiles(files) }
+  })
+  input.addEventListener('dragover', (e) => {
+    if ([...(e.dataTransfer?.items || [])].some((it) => it.kind === 'file' && it.type.startsWith('image/'))) e.preventDefault()
+  })
+  input.addEventListener('drop', (e) => {
+    const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'))
+    if (files.length) { e.preventDefault(); addFiles(files) }
+  })
   on(['sel'], () => { clearComposer(); said = null; setNote('') })
   on(['card', 'hi', 'conn', 'picked', 'sessionDraft'], renderSays)
+  on(['card'], renderAttachButton)
   ctx.clearComposer = clearComposer
   ctx.restoreComposer = restore
   // a line enter would otherwise have given to an answer that takes no
   // words goes as a line (decision.js answer)
   ctx.submitLine = () => submit({ asLine: true })
   renderSays()
+  renderAttachButton()
 }
 
 export function clearComposer () {
@@ -79,7 +105,53 @@ export function clearComposer () {
   input.value = ''
   set({ draft: '' })
   autosize()
+  attachments = []
+  renderChips()
   renderSays()
+}
+
+// renderAttachButton shows the paperclip only when the card's current
+// agent can take images with a turn (Composer.Images) — a control the
+// backend would refuse is worse than none, since it invites a line that
+// comes straight back.
+function renderAttachButton () {
+  $('#composer-attach').hidden = !state.card?.composer?.images
+}
+
+// addFiles uploads each file (POST /api/attachments) and tracks it as a
+// chip from the moment it is picked/pasted/dropped, not once the upload
+// answers — so a slow upload still shows something landed.
+async function addFiles (files) {
+  for (const file of files) {
+    const chip = { id: null, name: file.name || 'image', mediaType: file.type, size: file.size, pending: true, error: null }
+    attachments.push(chip)
+    renderChips()
+    try {
+      const ref = await uploadAttachment(file)
+      Object.assign(chip, ref, { pending: false })
+    } catch (err) {
+      chip.pending = false
+      chip.error = (err.data && err.data.error) || err.message || 'upload failed'
+    }
+    renderChips()
+  }
+}
+
+function removeAttachment (chip) {
+  attachments = attachments.filter((a) => a !== chip)
+  renderChips()
+}
+
+function renderChips () {
+  const box = $('#composer-chips')
+  clear(box)
+  box.hidden = attachments.length === 0
+  for (const a of attachments) {
+    box.append(h('span', { class: ['chip', a.error && 'err', a.pending && 'pending'] },
+      a.pending ? 'Uploading…' : (a.error || a.name),
+      h('button', { type: 'button', title: 'Remove', onclick: () => removeAttachment(a) }, '×')
+    ))
+  }
 }
 
 function restore (text) {
@@ -201,6 +273,8 @@ async function submit ({ asLine = false } = {}) {
   if (d && !text) { answer(); return }
   if (!text || sending || !state.sel) return
   if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
+  if (attachments.some((a) => a.pending)) { setNote('Still uploading an image — wait a moment and send again.', 'info'); return }
+  if (attachments.some((a) => a.error)) { setNote('Remove the failed attachment before sending.', 'err'); return }
   const id = state.sel
   if (d && !asLine) {
     // enter was pressed before the line was classified: ask now
@@ -220,6 +294,7 @@ async function submit ({ asLine = false } = {}) {
     // routed at another the card has moved to since (409 "moved")
     const body = { text }
     if (d?.against?.token) body.against = d.against.token
+    if (attachments.length) body.attachments = attachments.map((a) => a.id)
     const r = await post(cardPath(id, 'send'), body)
     if (r?.route === 'menu') {
       // the line names something in the card's menu: open it there

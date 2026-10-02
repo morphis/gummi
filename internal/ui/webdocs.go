@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
@@ -72,6 +73,9 @@ type WebDocs struct {
 	// two things a history rewrite asks of the model.
 	locks *state.CardLocks
 	busy  bool
+	// attachments is the workspace's image store, for resolving a spec
+	// note's attachment ids into links; nil on a board with no engine.
+	attachments *attachment.Store
 }
 
 // WebDocs captures card id's documents for reading off the loop. It
@@ -85,11 +89,15 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 	if !m.attached() || m.store == nil || m.wt == nil {
 		return nil, ErrDetached
 	}
-	return &WebDocs{
+	d := &WebDocs{
 		f: r.F, base: m.baseBranch(r.F), store: m.store, pool: m.wt, ws: m.ws,
 		now: m.now, threads: m.fetchPRReviewThreads,
 		locks: m.locks, busy: m.webCardBusy(r.F.ID) || m.cardBusy(r),
-	}, nil
+	}
+	if m.engine != nil {
+		d.attachments = m.engine.Attachments()
+	}
+	return d, nil
 }
 
 // WebThreadDocs is WebDocs for reading the thread, which also needs the
@@ -210,6 +218,9 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 		Key: it.Key, Seq: it.Seq, T: webapi.ItemType(it.T), Time: it.At, Stage: string(it.Stage),
 		Role: it.Role, Model: it.Model, Flavor: it.Flavor, Author: it.Author, Text: it.Text, Via: it.Via,
 		Exited: it.Exited, Verdict: it.Verdict, Credits: it.Credits, Outcome: it.Outcome, By: it.By,
+	}
+	for _, a := range it.Attachments {
+		out.Attachments = append(out.Attachments, webapi.AttachmentRef{ID: a.ID, Name: a.Name, MediaType: a.MediaType, Size: a.Size})
 	}
 	for _, c := range it.Tools {
 		out.Tools = append(out.Tools, webapi.ToolCall{
@@ -341,13 +352,29 @@ func (d *WebDocs) lastChecks(ctx context.Context) map[string]webapi.CheckOutcome
 // AddSpecNote writes a person's note under line, the way the TUI's
 // comment dialog does (writeSpecNote), with the person's name in the
 // marker's stamp. It writes only to a document that exists.
-func (d *WebDocs) AddSpecNote(ctx context.Context, line int, text, person string) (webapi.Spec, error) {
+func (d *WebDocs) AddSpecNote(ctx context.Context, line int, text, person string, attachments []string) (webapi.Spec, error) {
 	path := d.artifact()
 	if path == "" {
 		return webapi.Spec{}, ErrNoCard
 	}
 	if strings.TrimSpace(text) == "" {
 		return webapi.Spec{}, invalid("a note needs some text")
+	}
+	if len(attachments) > 0 {
+		if d.attachments == nil {
+			return webapi.Spec{}, invalid("no agent configured — attachments need the workspace's store")
+		}
+		refs, err := d.attachments.Resolve(attachments)
+		if err != nil {
+			return webapi.Spec{}, invalid("%s", err.Error())
+		}
+		links := make([]string, len(refs))
+		for i, ref := range refs {
+			links[i] = attachment.Link(ref)
+		}
+		// A spec note stays one line, so its attachments ride the same
+		// line as the text rather than a paragraph of their own.
+		text = strings.TrimSpace(text) + " " + strings.Join(links, " ")
 	}
 	if err := writeSpecNote(path, line, spec.Stamp(d.now().Format("2006-01-02"), person), text); err != nil {
 		return webapi.Spec{}, invalid("%s", err.Error())

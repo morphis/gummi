@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"os/exec"
@@ -155,6 +157,70 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	}
 	if ctx2.Tokens != 75 || ctx2.Limit != 200000 {
 		t.Errorf("turn 2 context = %+v, want 75/200000 (20 input + 50 cache read + 5 cache write)", ctx2)
+	}
+}
+
+// imageEchoScript echoes each content block of the user turn it receives —
+// "text:<text>" or "image:<media type>:<base64 length>" — joined with "|",
+// as its assistant reply, so the test can assert exactly what SendTurn put
+// on the wire without parsing the frame itself.
+const imageEchoScript = `import sys, json
+def out(o):
+    sys.stdout.write(json.dumps(o)+"\n"); sys.stdout.flush()
+MODEL = "claude-test-1"
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    m = json.loads(line)
+    if m.get("type") != "user": continue
+    kinds = []
+    for b in m["message"]["content"]:
+        if b.get("type") == "image":
+            kinds.append("image:" + b["source"]["media_type"] + ":" + str(len(b["source"]["data"])))
+        else:
+            kinds.append("text:" + b.get("text", ""))
+    out({"type":"system","subtype":"init","session_id":"s","model":MODEL})
+    out({"type":"assistant","message":{"model":MODEL,"content":[{"type":"text","text":"|".join(kinds)}]}})
+    out({"type":"result","subtype":"success","is_error":False,
+         "modelUsage":{MODEL:{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"costUSD":0.0,"contextWindow":200000}}})
+`
+
+func TestClaudeSendTurnImageBlocks(t *testing.T) {
+	ag, err := NewClaudeCode(writeFakeClaude(t, imageEchoScript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Permission: PermissionAllowAll})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xde, 0xad, 0xbe, 0xef}
+	imgPath := filepath.Join(t.TempDir(), "shot.png")
+	if err := os.WriteFile(imgPath, png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sender, ok := sess.(ImageSender)
+	if !ok {
+		t.Fatal("claude session does not implement ImageSender")
+	}
+	if err := sender.SendTurn(ctx, Turn{Text: "look at this", Images: []Image{{Path: imgPath, MediaType: "image/png"}}}); err != nil {
+		t.Fatal(err)
+	}
+	evs := collect(t, sess)
+	var msg string
+	for _, e := range evs {
+		if e.Kind == EventMessage {
+			msg = e.Text
+		}
+	}
+	want := fmt.Sprintf("text:look at this|image:image/png:%d", base64.StdEncoding.EncodedLen(len(png)))
+	if msg != want {
+		t.Fatalf("assistant echoed content = %q, want %q", msg, want)
 	}
 }
 

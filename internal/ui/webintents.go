@@ -348,6 +348,23 @@ func (b *Bridge) Send(ctx context.Context, id string, req webapi.SendRequest, pe
 			}
 			decide := func() *threadDecision { return m.openDecision(r) }
 			route, _ = m.webLineRoute(r, text, m.classifyThreadLine(r, text, decide))
+			var images []engine.AttachmentRef
+			if len(req.Attachments) > 0 {
+				if route != webapi.RouteSteer && route != webapi.RouteConsult && route != webapi.RouteFreeform {
+					return nil, refuse(WebBadRequest, "images go with a turn to a running agent, not a "+string(route)+" line")
+				}
+				if m.engine == nil {
+					return nil, refuse(WebUnavailable, m.noAgent(""))
+				}
+				refs, rerr := m.engine.Attachments().Resolve(req.Attachments)
+				if rerr != nil {
+					return nil, refuse(WebBadRequest, rerr.Error())
+				}
+				images = make([]engine.AttachmentRef, len(refs))
+				for i, ref := range refs {
+					images[i] = engine.AttachmentRef{ID: ref.ID, Name: ref.Name, MediaType: ref.MediaType, Size: ref.Size}
+				}
+			}
 			if route == webapi.RouteMenu {
 				return nil, nil
 			}
@@ -356,6 +373,7 @@ func (b *Bridge) Send(ctx context.Context, id string, req webapi.SendRequest, pe
 			}
 			m.threadInput.SetValue(text)
 			m.intent.resetComposer = true
+			m.intent.images = images
 			return m.routeThreadLine(r, text, decide), nil
 		})
 	if werr != nil {

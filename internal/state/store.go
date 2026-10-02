@@ -760,6 +760,11 @@ var migrations = []string{
 	// which is what every row written before the columns existed ran on.
 	`ALTER TABLE features ADD COLUMN session_backend TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN session_model TEXT NOT NULL DEFAULT ''`,
+	// A user turn's attachment refs (JSON-encoded []SessionMessage.Images),
+	// so an uploaded image survives a restart with the transcript entry it
+	// was sent on. Empty decodes to no images — every row written before
+	// attachments existed, and every turn that never carried one.
+	`ALTER TABLE session_messages ADD COLUMN images TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

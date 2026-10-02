@@ -451,6 +451,16 @@ profile or read its cookies, pair before you do, or edit gummi's files
 and restart the server — for those, run agents in a container
 ([DESIGN §20.5](docs/DESIGN.md#205-scope-guards)).
 
+The page can attach images (PNG, JPEG, GIF, WebP, ≤5 MB, up to 8 at a
+time) in three places: the new-card form, a spec comment, and the card's
+composer. A description or a spec note stores the image and links it
+into the document, so every stage that reads the spec sees it — even a
+backend with no vision support gets the file's path. The composer's
+paperclip only shows when the card's current agent can actually take an
+image with a turn (claude, copilot, codex, opencode, pi; not the
+headless backend), since that one sends the bytes with the turn itself
+rather than just naming a file.
+
 ## Backends and configuration
 
 Stages run on one of six backends. `GUMMI_AGENT` picks the default, and a

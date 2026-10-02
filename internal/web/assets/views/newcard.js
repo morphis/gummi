@@ -60,7 +60,10 @@ registerView('newcard', {
       kind: ctx.params?.kind || 'feature',
       form: null,
       repo: '',
-      busy: false
+      busy: false,
+      // attachments are stored by reference, so the description always
+      // offers the control — every stage gets at least the file's path.
+      attachments: []
     }
     clear(body).append(h('div', { class: 'empty', testid: 'newcard-loading' }, h('span', { class: 'spinner' })))
 
@@ -93,10 +96,42 @@ registerView('newcard', {
       const [briefLabel, briefPh] = BRIEF[st.kind] || BRIEF.feature
       el.title = h('input', { testid: 'newcard-title', placeholder: 'A short title', autocomplete: 'off', value: st.title ?? seedTitle ?? '' })
       el.desc = h('textarea', { testid: 'newcard-desc', placeholder: briefPh, rows: 5, value: st.desc ?? seedRest.join('\n').trim() })
+      const chips = h('div', { class: 'chips', testid: 'newcard-chips', hidden: st.attachments.length === 0 })
+      const renderChips = () => {
+        clear(chips)
+        chips.hidden = st.attachments.length === 0
+        for (const a of st.attachments) {
+          chips.append(h('span', { class: ['chip', a.error && 'err', a.pending && 'pending'] },
+            a.pending ? 'Uploading…' : (a.error || a.name),
+            h('button', { type: 'button', title: 'Remove', onclick: () => { st.attachments = st.attachments.filter((x) => x !== a); renderChips() } }, '×')))
+        }
+      }
+      renderChips()
+      const file = h('input', {
+        type: 'file', testid: 'newcard-file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true,
+        onchange: async (e) => {
+          const files = [...e.target.files]
+          e.target.value = ''
+          for (const f of files) {
+            const chip = { id: null, name: f.name || 'image', pending: true, error: null }
+            st.attachments.push(chip)
+            renderChips()
+            try {
+              Object.assign(chip, await ctx.api.uploadAttachment(f), { pending: false })
+            } catch (err) {
+              chip.pending = false
+              chip.error = (err.data && err.data.error) || err.message || 'upload failed'
+            }
+            renderChips()
+          }
+        }
+      })
+      const attach = h('button', { class: 'attach', type: 'button', testid: 'newcard-attach', title: 'Attach an image', onclick: () => file.click() }, '📎')
       const main = [
         h('div', { class: 'nc-kindrow' }, kinds, h('p', { class: 'nc-about', testid: 'newcard-about' }, ABOUT[st.kind] || '')),
         field('title', 'Title', el.title),
-        field('desc', briefLabel, el.desc)
+        field('desc', briefLabel, el.desc),
+        h('div', { class: 'nc-attach' }, attach, file, chips)
       ]
       if (st.kind === 'bug') {
         el.severity = h('select', { testid: 'newcard-severity' }, f.severities.map(s => h('option', { value: s, selected: s === (st.severity || 'medium') }, s)))
@@ -196,6 +231,8 @@ registerView('newcard', {
 
     const submit = async (autopilot) => {
       if (st.busy) return
+      if (st.attachments.some((a) => a.pending)) { showErr('still uploading an image — wait a moment and try again'); return }
+      if (st.attachments.some((a) => a.error)) { showErr('remove the failed attachment before creating'); return }
       keep()
       const env = el.envelope.value.trim()
       const req = {
@@ -210,7 +247,8 @@ registerView('newcard', {
         adopt: el.adopt?.value || undefined,
         stackOn: el.stack?.value || undefined,
         dependsOn: el.after ? el.after.filter(x => x.cb.checked).map(x => x.c.id) : undefined,
-        autopilot: autopilot || undefined
+        autopilot: autopilot || undefined,
+        attachments: st.attachments.length ? st.attachments.map((a) => a.id) : undefined
       }
       if (st.kind === 'bug') {
         Object.assign(req, {

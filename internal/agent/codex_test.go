@@ -305,6 +305,44 @@ func TestCodexArgvShapes(t *testing.T) {
 	}
 }
 
+// TestCodexSendTurnImageFlags asserts that a turn's images each become a
+// `-i <path>` flag on that invocation's argv.
+func TestCodexSendTurnImageFlags(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "codex")
+	writeCodexEchoBin(t, bin, log)
+	c, err := NewCodex(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	sess, err := c.NewSession(context.Background(), SessionOpts{WorkDir: dir, Model: "gpt-x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, ok := sess.(ImageSender)
+	if !ok {
+		t.Fatal("codex session does not implement ImageSender")
+	}
+	turn := Turn{Text: "look at these", Images: []Image{
+		{Path: "/tmp/a.png", MediaType: "image/png"},
+		{Path: "/tmp/b.png", MediaType: "image/png"},
+	}}
+	if err := sender.SendTurn(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	waitCodexIdle(t, sess)
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "-i /tmp/a.png -i /tmp/b.png") {
+		t.Errorf("argv missing one -i flag per image:\n%s", got)
+	}
+}
+
 func TestCodexLiveRoundTrip(t *testing.T) {
 	if os.Getenv("GUMMI_CODEX_TEST") != "1" {
 		t.Skip("set GUMMI_CODEX_TEST=1 for authenticated real CLI test")
@@ -376,7 +414,7 @@ func TestCodexRealArgvParses(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &codexSession{model: "gpt-test", featureID: tc.feature, mcpSock: tc.sock}
-			args, err := s.buildArgs()
+			args, err := s.buildArgs(nil)
 			if err != nil {
 				t.Fatal(err)
 			}

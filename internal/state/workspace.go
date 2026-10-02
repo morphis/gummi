@@ -55,6 +55,12 @@ func (w Workspace) WorktreesDir() string { return filepath.Join(w.GummiDir(), "w
 // provenance pointer stays resolvable.
 func (w Workspace) IngestDir() string { return filepath.Join(w.GummiDir(), "ingest") }
 
+// AttachmentsDir holds uploaded images, content-addressed by sha256
+// (internal/attachment). Workspace content, never committed — the same
+// `.gummi/attachments/<id>.<ext>` path a spec-anchored link names, always
+// relative to Root.
+func (w Workspace) AttachmentsDir() string { return filepath.Join(w.GummiDir(), "attachments") }
+
 // SeqFile is the FD-NNN monotonic counter.
 func (w Workspace) SeqFile() string { return filepath.Join(w.GummiDir(), "seq") }
 

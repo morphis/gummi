@@ -341,7 +341,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 			// armed: every key already types unmolested (the branch just
 			// below), so enter delivers straight to consult — never the
 			// decision/verb machinery submitThreadLine would otherwise run.
-			return m.sendConsultMessage(r.F, text)
+			return m.sendConsultMessage(r.F, text, m.intentImages())
 		}
 		return m.submitThreadLine(r, text)
 	}
@@ -657,7 +657,7 @@ func (m *Shell) routeThreadLine(r featureRow, text string, decide func() *thread
 	}
 	switch c.route {
 	case lineConsult:
-		return m.sendConsultMessage(r.F, text)
+		return m.sendConsultMessage(r.F, text, m.intentImages())
 	case lineConducted:
 		// The line is kept, not discarded: it stays in the composer so it
 		// can be retyped where it lands, which is the goal's own thread.
@@ -908,7 +908,7 @@ func (m *Shell) routeVerb(f domain.Feature, verb, remainder string) tea.Cmd {
 			m.threadInput.Reset()
 			return nil
 		}
-		return m.sendConsultMessage(f, remainder)
+		return m.sendConsultMessage(f, remainder, m.intentImages())
 	}
 	m.threadInput.Reset()
 	return m.fireVerb(verb, remainder)
@@ -1032,15 +1032,16 @@ func (m *Shell) notWiredVerb(verb, remainder string) tea.Cmd {
 // and the refusal was routed through failRun, so typing a second thought
 // while the spinner was up both lost the thought and killed the stage.
 func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
+	images := m.intentImages()
 	// A freeform card has one session and every line is a turn to it: no
 	// stage to steer, and no read-only consult fallback either, since the
 	// session this card has is the one that can actually act on it.
 	if f.IsFreeform() {
-		return m.sendFreeformTurn(f, text)
+		return m.sendFreeformTurn(f, text, images)
 	}
 	sess := m.sessionFor(f.ID)
 	if !sess.Live() {
-		return m.sendConsultMessage(f, text)
+		return m.sendConsultMessage(f, text, images)
 	}
 	m.threadInput.Reset()
 	eng := m.engine
@@ -1050,7 +1051,7 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 		if eng.Get(id) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
-		if err := eng.Send(ctx, id, text); err != nil {
+		if err := eng.SendTurn(ctx, id, text, images); err != nil {
 			if errors.Is(err, agent.ErrBusy) {
 				return noticeMsg{
 					text:    string(id) + ": the agent is still mid-turn — your line is back in the composer, send it when the turn ends",
@@ -1070,7 +1071,7 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 // live-session precondition to fail against synchronously — a consult
 // session takes no lock and competes for no attention slot — so the
 // composer always clears here.
-func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
+func (m *Shell) sendConsultMessage(f domain.Feature, text string, images []engine.AttachmentRef) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)")}
 		return nil
@@ -1095,7 +1096,7 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 		if err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
-		if err := c.Send(who, text); err != nil {
+		if err := c.SendTurn(who, text, images); err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
 		return consultSentMsg{id: id}
@@ -1112,7 +1113,7 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 // can see for those seconds. What differs is what the session may do —
 // this one writes, holds the card's worktree and commits every turn — so
 // the two can never be the same call.
-func (m *Shell) sendFreeformTurn(f domain.Feature, text string) tea.Cmd {
+func (m *Shell) sendFreeformTurn(f domain.Feature, text string, images []engine.AttachmentRef) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)")}
 		return nil
@@ -1130,7 +1131,7 @@ func (m *Shell) sendFreeformTurn(f domain.Feature, text string) tea.Cmd {
 		if err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
-		if err := ff.Send(who, text); err != nil {
+		if err := ff.SendTurn(who, text, images); err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
 		return consultSentMsg{id: id}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -551,5 +552,109 @@ func TestCopilotResumeConfigCarriesTheCreateConfig(t *testing.T) {
 	}
 	if rc.SessionLimits == nil {
 		t.Error("session limits not carried: the credit backstop is gone")
+	}
+}
+
+// visionModelClient builds a *Copilot whose ListModels answers from a
+// fixed table, without a live CLI (the SDK's OnListModels handler is
+// consulted before any connection is needed).
+func visionModelClient(models map[string]bool) *Copilot {
+	client := copilot.NewClient(&copilot.ClientOptions{
+		OnListModels: func(context.Context) ([]copilot.ModelInfo, error) {
+			infos := make([]copilot.ModelInfo, 0, len(models))
+			for id, vision := range models {
+				infos = append(infos, copilot.ModelInfo{
+					ID:           id,
+					Capabilities: copilot.ModelCapabilities{Supports: copilot.ModelSupports{Vision: vision}},
+				})
+			}
+			return infos, nil
+		},
+	})
+	return &Copilot{client: client}
+}
+
+// TestCopilotSendTurnAttachments asserts that a turn's images become one
+// SDK file attachment per image, named by path, alongside the prompt.
+func TestCopilotSendTurnAttachments(t *testing.T) {
+	var got copilot.MessageOptions
+	s := &copilotSession{
+		agent: visionModelClient(map[string]bool{"vision-model": true}),
+		model: "vision-model",
+		send: func(_ context.Context, opts copilot.MessageOptions) (string, error) {
+			got = opts
+			return "msg-1", nil
+		},
+	}
+	err := s.SendTurn(context.Background(), Turn{
+		Text:   "look at this",
+		Images: []Image{{Path: "/tmp/shot.png", MediaType: "image/png"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Prompt != "look at this" {
+		t.Errorf("prompt = %q", got.Prompt)
+	}
+	if len(got.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want one", got.Attachments)
+	}
+	file, ok := got.Attachments[0].(*copilot.AttachmentFile)
+	if !ok || file.Path != "/tmp/shot.png" {
+		t.Errorf("attachment = %+v, want an AttachmentFile at /tmp/shot.png", got.Attachments[0])
+	}
+}
+
+// TestCopilotSendTurnRefusesTextOnlyModel asserts that a model the CLI's
+// model list reports without vision support refuses a turn's images
+// before anything is sent.
+func TestCopilotSendTurnRefusesTextOnlyModel(t *testing.T) {
+	sent := false
+	s := &copilotSession{
+		agent: visionModelClient(map[string]bool{"text-model": false}),
+		model: "text-model",
+		send: func(context.Context, copilot.MessageOptions) (string, error) {
+			sent = true
+			return "", nil
+		},
+	}
+	err := s.SendTurn(context.Background(), Turn{
+		Text:   "look at this",
+		Images: []Image{{Path: "/tmp/shot.png", MediaType: "image/png"}},
+	})
+	if !errors.Is(err, ErrImagesUnsupported) {
+		t.Fatalf("err = %v, want ErrImagesUnsupported", err)
+	}
+	if sent {
+		t.Error("SendTurn sent the turn despite the model's refusal")
+	}
+}
+
+// TestCopilotSendTurnRefusesWhenModelLookupFails asserts that a failure in
+// SupportsImages itself (the CLI's model list erroring, or the session's
+// own model missing from it) is classified as ErrImagesUnsupported too —
+// per SupportsImages' own doc comment, a model this session cannot even
+// name cannot take a turn — so every caller that special-cases that error
+// (kickoff's fallback, a live steer's undo) catches this case as well,
+// rather than it surfacing as an ordinary failure.
+func TestCopilotSendTurnRefusesWhenModelLookupFails(t *testing.T) {
+	sent := false
+	s := &copilotSession{
+		agent: visionModelClient(map[string]bool{"some-other-model": true}),
+		model: "unlisted-model",
+		send: func(context.Context, copilot.MessageOptions) (string, error) {
+			sent = true
+			return "", nil
+		},
+	}
+	err := s.SendTurn(context.Background(), Turn{
+		Text:   "look at this",
+		Images: []Image{{Path: "/tmp/shot.png", MediaType: "image/png"}},
+	})
+	if !errors.Is(err, ErrImagesUnsupported) {
+		t.Fatalf("err = %v, want ErrImagesUnsupported", err)
+	}
+	if sent {
+		t.Error("SendTurn sent the turn despite the failed model lookup")
 	}
 }

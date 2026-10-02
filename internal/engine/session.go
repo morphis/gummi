@@ -120,6 +120,16 @@ const (
 	ToolFail    ToolStatus = "fail"
 )
 
+// AttachmentRef is one image a user turn carried — the attachment store's
+// id (what a later read serves from GET /api/attachments/{id}), the name
+// it was uploaded under, its media type, and its size.
+type AttachmentRef struct {
+	ID        string
+	Name      string
+	MediaType string
+	Size      int64
+}
+
 // Message is one transcript turn.
 type Message struct {
 	Author Author
@@ -182,6 +192,9 @@ type Message struct {
 	// matter how many restarts the transcript survives. Empty on legacy
 	// rows and every message that is not an ask echo.
 	AnsweredBy string
+	// Images are the attachments a user turn carried, in the order they
+	// were sent. Empty for every turn without one.
+	Images []AttachmentRef
 }
 
 // generation is this session generation's key: the discriminator that
@@ -657,9 +670,16 @@ func (s *Session) releaseSlot() (held bool, pool lanePool) {
 }
 
 func (s *Session) appendUser(text, by string) {
+	s.appendUserImages(text, by, nil)
+}
+
+// appendUserImages is appendUser's image-carrying form: the refs a turn's
+// images were resolved to land on the transcript entry itself, so the
+// thread shows what was sent and a restart restores it (state.SessionMessage.Images).
+func (s *Session) appendUserImages(text, by string, images []AttachmentRef) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, By: by, At: time.Now()})
+	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, By: by, Images: images, At: time.Now()})
 	s.err = nil
 	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
 }

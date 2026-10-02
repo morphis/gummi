@@ -14,6 +14,7 @@
 .nc-row.two > .field{flex:1;min-width:0}
 .nc-row > .field{min-width:160px}
 .nc textarea{min-height:110px}
+.nc-attach{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:-4px}
 /* the buttons stay in reach while the form scrolls under them */
 .nc-foot{display:flex;align-items:center;gap:8px;padding:12px 0 4px;border-top:1px solid var(--line);flex-wrap:wrap;position:sticky;bottom:-14px;background:var(--panel);z-index:1}
 .nc-foot .aerr{flex:1 1 100%;order:-1}

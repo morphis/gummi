@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -119,5 +120,45 @@ func TestFakeInterrupt(t *testing.T) {
 	}
 	if count > 40 {
 		t.Errorf("interrupt did not short-circuit: %d events before idle", count)
+	}
+}
+
+func TestFakeSendTurnRecordsImages(t *testing.T) {
+	ag := NewFake("ok")
+	ag.Caps.Images = true
+	defer ag.Close()
+	s, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: "/tmp", Role: RoleScribe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, ok := s.(ImageSender)
+	if !ok {
+		t.Fatal("fake session does not implement ImageSender")
+	}
+	turn := Turn{Text: "look at this", Images: []Image{{Path: "/tmp/a.png", MediaType: "image/png"}}}
+	if err := sender.SendTurn(context.Background(), turn); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, s)
+
+	fs := s.(*fakeSession)
+	got := fs.Turns()
+	if len(got) != 1 || len(got[0].Images) != 1 || got[0].Images[0].Path != "/tmp/a.png" {
+		t.Fatalf("Turns() = %+v, want one turn carrying the image", got)
+	}
+}
+
+func TestFakeSendTurnRefusesWithoutImageCapability(t *testing.T) {
+	ag := NewFake("ok") // Caps.Images left false
+	defer ag.Close()
+	s, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: "/tmp", Role: RoleScribe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender := s.(ImageSender)
+	turn := Turn{Text: "look at this", Images: []Image{{Path: "/tmp/a.png", MediaType: "image/png"}}}
+	err = sender.SendTurn(context.Background(), turn)
+	if !errors.Is(err, ErrImagesUnsupported) {
+		t.Fatalf("err = %v, want ErrImagesUnsupported", err)
 	}
 }

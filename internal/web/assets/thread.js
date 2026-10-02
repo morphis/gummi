@@ -11,6 +11,7 @@ import { $, h, clear, clock, dur, cr, initials, ROLE, decisionWord, decisionColo
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { draftHero } from './session.js?v=__ASSET_V__'
+import { attachmentURL } from './api.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -238,7 +239,18 @@ function you (it) {
     h('div', { class: 'av you', 'aria-hidden': 'true' }, it.by ? initials(it.by) : 'you'),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, who), h('span', { class: 'mono' }, clock(it.time)), it.via ? h('span', { class: 'via' }, it.via) : null),
-      h('div', { class: 'body' }, md(it.text))))
+      h('div', { class: 'body' }, md(it.text)),
+      attachmentThumbs(it.attachments)))
+}
+
+// attachmentThumbs renders a you turn's images as thumbnails linking to
+// GET /api/attachments/{id}, the same URL their src loads from — nothing
+// here is trusted markup, only img tags built from server-named ids.
+function attachmentThumbs (refs) {
+  if (!refs || !refs.length) return null
+  return h('div', { class: 'thumbs' }, refs.map((r) =>
+    h('a', { class: 'thumb', href: attachmentURL(r.id), target: '_blank', rel: 'noopener' },
+      h('img', { src: attachmentURL(r.id), alt: r.name || 'attached image', loading: 'lazy' }))))
 }
 
 export function tools (list) {

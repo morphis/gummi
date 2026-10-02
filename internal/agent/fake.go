@@ -42,6 +42,11 @@ type Fake struct {
 	// is still streaming. Tests that lean on the Fake's permissiveness
 	// are pinning a state production cannot reach.
 	SendErr error
+	// RefuseImages, when set, makes SendTurn refuse a turn's images with
+	// ErrImagesUnsupported even though Caps.Images is true — modeling a
+	// live per-model refusal (copilot's vision check) that a structural
+	// capability gate (checkImageCapable) cannot see ahead of the send.
+	RefuseImages bool
 
 	mu       sync.Mutex
 	sessions []*fakeSession
@@ -120,6 +125,7 @@ type fakeSession struct {
 	closed    bool
 	sends     int
 	lastMsg   string
+	turns     []Turn
 	interrupt bool
 	resolved  map[string]string // client-tool callID → result (Resolve)
 }
@@ -166,7 +172,22 @@ func (s *fakeSession) forward() {
 	}
 }
 
-func (s *fakeSession) Send(_ context.Context, msg string) error {
+func (s *fakeSession) Send(ctx context.Context, msg string) error {
+	return s.send(ctx, Turn{Text: msg})
+}
+
+// SendTurn implements ImageSender: it refuses with ErrImagesUnsupported
+// when the turn carries images and the fake's advertised capabilities say
+// it can't take them, matching every real adapter's refusal rule.
+func (s *fakeSession) SendTurn(ctx context.Context, turn Turn) error {
+	if len(turn.Images) > 0 && (!s.agent.Caps.Images || s.agent.RefuseImages) {
+		return fmt.Errorf("fake: %w", ErrImagesUnsupported)
+	}
+	return s.send(ctx, turn)
+}
+
+func (s *fakeSession) send(_ context.Context, turn Turn) error {
+	msg := turn.Text
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -178,6 +199,7 @@ func (s *fakeSession) Send(_ context.Context, msg string) error {
 	}
 	s.sends++
 	s.lastMsg = msg
+	s.turns = append(s.turns, turn)
 	s.interrupt = false
 	s.mu.Unlock()
 
@@ -262,4 +284,12 @@ func (s *fakeSession) SendCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sends
+}
+
+// Turns returns every Turn this session received via Send or SendTurn, in
+// order (test aid for asserting what images reached the session).
+func (s *fakeSession) Turns() []Turn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Turn(nil), s.turns...)
 }
