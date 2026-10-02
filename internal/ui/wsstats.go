@@ -199,6 +199,7 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 			LandedAt: doneAt(r.History),
 			Run:      cardrun.Report(cardrun.Input{Feature: r.F, Events: log, Spend: spend}),
 			Events:   log,
+			Spend:    spend,
 		})
 	}
 	all := make([]fleetrun.AllTimeRow, 0, len(rows))
@@ -841,15 +842,33 @@ func wsTickLabel(span time.Duration, t time.Time) string {
 	}
 }
 
+// wsLegendStages is every stage a lane's blocks can carry: the graph's
+// own, plus domain.StageOpen — a freeform card's blocks (freeformBlocks)
+// are stamped with it, and domain.Stages leaves it out on purpose (it is
+// off the graph), so the legend names it itself rather than silently
+// drawing a stage no key explains.
+var wsLegendStages = append(append([]domain.Stage{}, domain.Stages...), domain.StageOpen)
+
+// wsStageLabel is a stage's legend word: every graph stage's own name,
+// and "freeform" for domain.StageOpen — its stored value, "open", reads
+// as a card waiting rather than one being worked, which is the one
+// stage this label can't afford to get backwards.
+func wsStageLabel(st domain.Stage) string {
+	if st == domain.StageOpen {
+		return "freeform"
+	}
+	return string(st)
+}
+
 // wsLegend is the timeline's key, rendered from what the lanes drew —
 // the flags the raster collected — so an empty legend never promises a
 // mark nobody can see.
 func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, width int) string {
 	s := m.styles
 	var parts []string
-	for _, st := range domain.Stages {
+	for _, st := range wsLegendStages {
 		if flags.stages[st] {
-			parts = append(parts, s.Stage(st).Render("█ "+string(st)))
+			parts = append(parts, s.Stage(st).Render("█ "+wsStageLabel(st)))
 		}
 	}
 	if flags.running {

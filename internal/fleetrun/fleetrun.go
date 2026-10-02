@@ -38,6 +38,15 @@ type Card struct {
 	LandedAt time.Time
 	Run      cardrun.Run
 	Events   []state.CardEvent
+	// Spend is the same session-grained rollup Run was built from. The
+	// fold reads it raw for one thing cardrun deliberately does not give
+	// back: a freeform card logs no stage_enter/stage_exit (DESIGN
+	// §19.3a), so it never gets a cardrun.Session — the spend lands as
+	// Money.Charges, which have a moment but no span. Its rows still
+	// each name a span, though: Session is the backend's own start (the
+	// same generation stamp a stage pass's key already is), so a block
+	// is read back out of it directly (see freeformBlocks).
+	Spend []state.StageSpend
 }
 
 // AllTimeRow is one board row's contribution to the all-time ledger:
@@ -386,6 +395,14 @@ func buildLane(c Card, w Window, now time.Time, busy map[domain.FeatureID]bool) 
 			}
 		}
 	}
+	// A freeform card has no passes above — c.Run.Sessions is always
+	// empty for one — so its blocks come straight off its own spend
+	// rows instead. Its credits are already counted below, in the
+	// Charges loop; this only draws the span.
+	for _, b := range freeformBlocks(c.Spend, w, now, busy != nil && busy[c.Feature.ID]) {
+		l.Blocks = append(l.Blocks, b)
+		l.Last = later(l.Last, b.To)
+	}
 	// ...and the spend no pass holds to the window its one moment fell in
 	// (cardrun.Charge), so the lane adds up to the card.
 	for _, ch := range c.Run.Money.Charges {
@@ -448,6 +465,69 @@ func buildLane(c Card, w Window, now time.Time, busy map[domain.FeatureID]bool) 
 		return Lane{}, false
 	}
 	return l, true
+}
+
+// freeformBlocks reads a freeform card's blocks straight out of its own
+// spend rows, clipped to the window — the one span a freeform card's
+// record still carries, since it has no stage_enter/stage_exit to carry
+// one more legibly (DESIGN §19.3a).
+//
+// Each row's Session is the generation stamp engine.Session.generation
+// writes for every rollup row, stage pass or not: the backend's own
+// start, as Unix nanoseconds. Grouped by it, a freeform card's rows come
+// back exactly as its backends did — one group per spawn, from the
+// stamp its session key already is to its last metered sample — without
+// guessing at a boundary the record never drew.
+//
+// running is the board's own word (fleetrun.Input.Busy, the same one
+// buildLane reads everywhere else): only the most recently spawned
+// backend can still be running, and only then does its block reach to
+// now rather than stopping at its last sample.
+func freeformBlocks(spend []state.StageSpend, w Window, now time.Time, running bool) []Block {
+	type span struct{ from, to time.Time }
+	groups := map[string]*span{}
+	var keys []string
+	for _, r := range spend {
+		if r.Stage != domain.StageOpen || r.Session == "" {
+			continue
+		}
+		ns, err := strconv.ParseInt(r.Session, 10, 64)
+		if err != nil {
+			continue
+		}
+		start := time.Unix(0, ns).UTC()
+		g, ok := groups[r.Session]
+		if !ok {
+			g = &span{from: start, to: start}
+			groups[r.Session] = g
+			keys = append(keys, r.Session)
+		}
+		if r.UpdatedAt.After(g.to) {
+			g.to = r.UpdatedAt
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return groups[keys[i]].from.Before(groups[keys[j]].from) })
+
+	var out []Block
+	for i, k := range keys {
+		g := groups[k]
+		from, to := g.from, g.to
+		isOpen := running && i == len(keys)-1
+		if isOpen {
+			to = now
+		}
+		if from.Before(w.From) {
+			from = w.From
+		}
+		if to.After(w.To) {
+			to = w.To
+		}
+		if to.Before(from) {
+			continue
+		}
+		out = append(out, Block{From: from, To: to, Stage: domain.StageOpen, Open: isOpen})
+	}
+	return out
 }
 
 // laneNote is the one-line diagnosis a costly lane carries, read off

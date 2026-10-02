@@ -177,6 +177,45 @@ func TestConcurrencyCountsHalfOpenIntervals(t *testing.T) {
 	}
 }
 
+// TestAFreeformCardDrawsItsOwnBlocks: a freeform card logs no
+// stage_enter/stage_exit, so cardrun.Report never gives it a Session to
+// draw a bar from (TestALaneAddsUpToItsCard's "which logs no passes"
+// case). Its timeline bar instead comes straight off its spend rows —
+// one block per backend spawn, clipped to the window, with the last one
+// left open if the board still reads the card as running.
+func TestAFreeformCardDrawsItsOwnBlocks(t *testing.T) {
+	c := wsCard(1, "freeform")
+	c.Feature.Kind = domain.KindFreeform
+	c.Feature.Stage = domain.StageOpen
+
+	first := base.Add(time.Hour)
+	second := base.Add(3 * time.Hour)
+	c.Spend = []state.StageSpend{
+		{Stage: domain.StageOpen, Session: keyOf(first), Role: "implementer", Model: "m", Credits: 5, UpdatedAt: first.Add(20 * time.Minute)},
+		{Stage: domain.StageOpen, Session: keyOf(second), Role: "implementer", Model: "m", Credits: 7, UpdatedAt: second.Add(40 * time.Minute)},
+	}
+	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Spend: c.Spend})
+
+	rep := Fold(Input{
+		Now: wsWindow.To, Window: wsWindow, Cards: []Card{c},
+		Rows: []AllTimeRow{{Feature: c.Feature, StageSpend: c.Spend}},
+		Busy: map[domain.FeatureID]bool{c.Feature.ID: true},
+	})
+	l := laneOf(t, rep, c.Feature.ID)
+	if len(l.Blocks) != 2 {
+		t.Fatalf("blocks = %+v, want 2 — one per backend spawn", l.Blocks)
+	}
+	if !l.Blocks[0].From.Equal(first) || l.Blocks[0].Open {
+		t.Errorf("first block = %+v, want closed starting at %v", l.Blocks[0], first)
+	}
+	if !l.Blocks[1].From.Equal(second) || !l.Blocks[1].Open || !l.Blocks[1].To.Equal(wsWindow.To) {
+		t.Errorf("second block = %+v, want open to the window's right edge", l.Blocks[1])
+	}
+	if l.Credits != 12 {
+		t.Errorf("lane credits = %.2f, want 12", l.Credits)
+	}
+}
+
 // TestTheBusiestStretchIsNamed: the hour with the most agent time wins,
 // by the bucket the window is read in. A lane running the whole window
 // keeps every hour above zero, so the winner is the hour something else
