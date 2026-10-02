@@ -15,7 +15,7 @@ async function openDoctor(page: Page) {
 test('the checklist renders with an overall verdict', async ({ pairedPage: page, api }, info) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await openDoctor(page);
   const want = (await api('GET', '/api/doctor')).json;
   await expect(page.getByTestId('doctor-checks')).toBeVisible();
@@ -34,7 +34,7 @@ test('the checklist renders with an overall verdict', async ({ pairedPage: page,
 });
 
 test('deep checks warn before contacting the backends, then probe', async ({ pairedPage: page }, info) => {
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await openDoctor(page);
   await expect(page.getByTestId('doctor-checks')).toBeVisible();
   await page.getByTestId('doctor-deep').click();

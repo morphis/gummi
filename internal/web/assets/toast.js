@@ -32,11 +32,11 @@ export function hush (text, ms = 15000) {
 }
 
 // place stands the notices just above whatever is docked at the bottom —
-// the decision and composer, the phone's decision bar and nav — so a
+// the decision and composer, the phone's decision bar — so a
 // notice never covers the composer or Send, nor the tabs at the top.
 function place (box) {
   const vh = window.visualViewport?.height || window.innerHeight
-  const tops = ['.dock', '#mdec', '#mnav']
+  const tops = ['.dock', '#mdec']
     .map(s => document.querySelector(s))
     .filter(el => el && el.getClientRects().length)
     .map(el => el.getBoundingClientRect().top)
@@ -52,7 +52,7 @@ let watched = null
 function follow (box) {
   if (watched || typeof ResizeObserver === 'undefined') return
   watched = new ResizeObserver(() => { if (box.children.length) place(box) })
-  for (const s of ['.dock', '#mdec', '#mnav']) {
+  for (const s of ['.dock', '#mdec']) {
     const el = document.querySelector(s)
     if (el) watched.observe(el)
   }

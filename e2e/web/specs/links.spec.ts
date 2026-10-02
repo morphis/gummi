@@ -11,7 +11,7 @@ async function open(page: Page, server: GummiServer, id: string, phone: boolean)
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('mnav-thread').click();
+  if (phone) await page.getByTestId('tab-thread').click();
 }
 
 const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
@@ -62,7 +62,6 @@ test.describe('a verified card', () => {
 
   test('links a pull request by its number', async ({ pairedPage: page, server, api, workspace }, info) => {
     await open(page, server, id, phone(info));
-    if (phone(info)) await page.getByTestId('mnav-panel').click();
     await page.getByTestId('tab-pr').click();
     await expect(page.getByTestId('pr-none')).toBeVisible();
     // the PR tab offers the link the card's menu has

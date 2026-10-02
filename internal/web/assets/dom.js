@@ -58,6 +58,7 @@ const ICONS = {
   fleet: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
   cards: '<rect x="4" y="4" width="16" height="4" rx="1.5"/><rect x="4" y="10" width="16" height="4" rx="1.5"/><rect x="4" y="16" width="16" height="4" rx="1.5"/>',
   thread: '<path d="M4 5h16v11H9l-5 4z"/>',
   doc: '<path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4"/>',

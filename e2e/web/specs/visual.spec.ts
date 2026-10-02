@@ -56,19 +56,23 @@ class Look {
   async open(id: string, tab?: string) {
     await this.page.evaluate(([i, t]) => { location.hash = t ? `${i}/${t}` : i; }, [id, tab ?? '']);
     await expect(this.page.getByTestId('card-id')).toHaveText(id);
-    if (this.phone) await this.page.getByTestId('mnav-thread').click();
+    // back on the cards with the hash unchanged, the card is opened as a
+    // person would: from its row
+    if (this.phone && !(await this.page.getByTestId('card-back').isVisible())) await this.page.getByTestId(`rail-row-${id}`).click();
+    if (this.phone) await this.page.getByTestId('tab-thread').click();
     await this.settle();
   }
 
   async tab(tab: string) {
-    if (this.phone) await this.page.getByTestId('mnav-panel').click();
     await this.page.getByTestId(`tab-${tab}`).click();
     await expect(this.page.getByTestId('panel-pane')).toHaveAttribute('data-tab', tab);
     await this.settle();
   }
 
   async rail() {
-    if (this.phone) await this.page.getByTestId('mnav-cards').click();
+    // back to the cards, unless they are already the screen
+    const back = this.page.getByTestId('card-back');
+    if (this.phone && (await back.isVisible())) await back.click();
   }
 
   async view(name: string, open: () => Promise<void>) {

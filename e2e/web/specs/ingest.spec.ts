@@ -25,7 +25,7 @@ const DOC = [
 ].join('\n');
 
 async function openIngest(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-ingest').click();
   await expect(page.getByTestId('view-ingest')).toBeVisible();
@@ -90,7 +90,7 @@ test('paste, review, rename and drop, approve: the cards land on the rail', asyn
   await expect(page.getByTestId('view-ingest')).toHaveCount(0);
   await expect(page.getByTestId('card-id')).toHaveText(first);
   await expect(page.getByTestId('card-title')).toHaveText('Add a wave helper');
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   for (const id of ids) await expect(page.getByTestId(`rail-row-${id}`)).toBeVisible();
   await expect(page.getByTestId('rail').getByText('Add a nod helper')).toBeAttached();
   expect(errors).toEqual([]);

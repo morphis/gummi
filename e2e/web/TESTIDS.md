@@ -167,8 +167,11 @@ Stats: `stats`, `stats-spent`, `stats-passes`, `stats-rework`, `stats-table`,
 
 ## Phone (≤ 760px)
 
-`mobile-nav`, `mnav-cards`, `mnav-thread`, `mnav-panel` (`aria-current="page"`
-on the shown view), `mobile-decision` (docked decision bar), `mdec-toggle`,
+`mobile-card` (a card's screen bar: hidden over the cards), `card-back` (back
+to the cards), `card-back-needs` (its count of cards that need you),
+`tab-thread` (the card's thread, first in its tab row; `aria-selected` on the
+shown one), `mdec-card` (the card the docked decision bar is for, over the
+cards), `mobile-decision` (docked decision bar), `mdec-toggle`,
 `mdec-option-<optionId>`, `mdec-note`, `mdec-confirm`, `mdec-confirm-question`,
 `mdec-confirm-yes`, `mdec-confirm-no` (the bar's own copy of the confirmation).
 

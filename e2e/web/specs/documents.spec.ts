@@ -8,10 +8,6 @@ import { shot } from '../fixtures/shots';
 let id: string;
 test.use({ seed: { run: async (ws) => { id = await ws.seedVerifyFailed('Add a regressing helper'); await ws.linkPR(id); } } });
 
-async function openPanel(page: import('@playwright/test').Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-panel').click();
-}
-
 test('the thread shows the stages the card walked and its verify', async ({ pairedPage: page }, info) => {
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('stage-group-verify').last()).toBeVisible();
@@ -21,8 +17,6 @@ test('the thread shows the stages the card walked and its verify', async ({ pair
 });
 
 test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage: page }, info) => {
-  const phone = info.project.name === 'phone';
-  await openPanel(page, phone);
   await page.getByTestId('tab-spec').click();
   await expect(page.getByTestId('spec-toc')).toContainText('Chosen approach');
   await expect(page.getByTestId('spec-checks')).toContainText('go build');

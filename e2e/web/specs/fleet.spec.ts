@@ -22,7 +22,7 @@ test.use({
 });
 
 async function openFleet(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-fleet').click();
   await expect(page.getByTestId('view-fleet')).toBeVisible();
 }

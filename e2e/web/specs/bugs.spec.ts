@@ -9,7 +9,7 @@ import { shot } from '../fixtures/shots';
 // as gh said it.
 
 async function openBugs(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-bugs').click();
   await expect(page.getByTestId('view-bugs')).toBeVisible();
@@ -47,7 +47,6 @@ test('list the issues, import two, and they land on the rail', async ({ pairedPa
   expect(created).toHaveLength(2);
   for (const id of created) expect(id).toMatch(/^BG-\d+$/);
   await page.getByTestId('modal-close').click();
-  if (phone) await page.getByTestId('mnav-cards').click();
   for (const id of created) await expect(page.getByTestId(`rail-row-${id}`)).toBeVisible();
   await expect(page.getByTestId('rail').getByText('The greeting ignores the locale')).toBeAttached();
   expect(errors).toEqual([]);

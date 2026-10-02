@@ -18,7 +18,7 @@ const pushFile = (repo: string) => path.join(repo, '.gummi', 'state', 'web', 'pu
 
 async function openPush(page: Page, phone: boolean) {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-push').click();
   await expect(page.getByTestId('push-dialog')).toBeVisible();

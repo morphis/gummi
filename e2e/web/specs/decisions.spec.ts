@@ -25,7 +25,7 @@ async function open(page: Page, server: GummiServer, id: string) {
 // a yes) is the server's to ask.
 async function answerOption(page: Page, phone: boolean, option: string) {
   if (phone) {
-    await page.getByTestId('mnav-panel').click();
+    await page.getByTestId('tab-diff').click();
     await page.getByTestId('mdec-toggle').click();
     await page.getByTestId(`mdec-option-${option}`).click();
     return;
@@ -34,7 +34,7 @@ async function answerOption(page: Page, phone: boolean, option: string) {
 }
 
 async function thread(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-thread').click();
+  if (phone) await page.getByTestId('tab-thread').click();
   return page.getByTestId('thread-items');
 }
 
@@ -86,7 +86,7 @@ test.describe('a design gate', () => {
 
   test('reworking the plan carries the note to the architect', async ({ pairedPage: page, server, workspace }, info) => {
     await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await page.getByTestId('composer-input').fill('Cover an empty name too');
     await expect(page.getByTestId('decision-option-run')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('composer-says')).toHaveText('start the architect with your words');
@@ -121,7 +121,7 @@ test.describe('a design gate', () => {
     fs.writeFileSync(file, body.replace(/(## Chosen approach\n)[\s\S]*?(\n## )/, '$1$2'));
     expect(fs.readFileSync(file, 'utf8')).not.toBe(body);
     await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await answerOption(page, false, 'advance');
     const note = page.getByTestId('decision-error');
     await expect(note).toContainText('gate stays shut');
@@ -140,7 +140,7 @@ test.describe('a design gate', () => {
 
   test('the enter line says what a line would do as it is typed', async ({ pairedPage: page, server }, info) => {
     await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     const says = page.getByTestId('composer-says');
     await expect(says).toHaveText('approve');
     await page.getByTestId('composer-input').fill('the plan misses the empty name');
@@ -166,7 +166,7 @@ test.describe('a design gate', () => {
       const phone = isPhone(info);
       const go = async (p: Page) => {
         if (phone) {
-          await p.getByTestId('mnav-panel').click();
+          await p.getByTestId('tab-diff').click();
           await p.getByTestId('mdec-toggle').click();
           return p.getByTestId('mdec-option-advance');
         }
@@ -196,7 +196,7 @@ test.describe('a failed verify', () => {
   test('a diff comment goes back with the failure', async ({ pairedPage: page, server, api }, info) => {
     const phone = isPhone(info);
     await open(page, server, id);
-    if (phone) await page.getByTestId('mnav-panel').click();
+    if (phone) await page.getByTestId('tab-diff').click();
     await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
     await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
     await page.getByTestId('annotation-input').fill('Return early on an empty name');
@@ -273,7 +273,7 @@ test.describe('an agent’s question', () => {
   test('a long question keeps its answers in reach', async ({ pairedPage: page, server, api }, info) => {
     const id = await ask(api, '[ask-long] Add a wordy helper');
     await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     const decision = page.getByTestId('decision');
     await expect(decision).toHaveAttribute('data-kind', 'ask');
     const q = page.getByTestId('decision-question');
@@ -339,7 +339,7 @@ test.describe('an agent’s question', () => {
   test('chat about this answers in your words', async ({ pairedPage: page, server, api }, info) => {
     const id = await ask(api);
     await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     // the chat row with nothing typed asks for the words
     await page.getByTestId('decision-option-chat').click();
     await expect(page.getByTestId('decision-needs')).toContainText('Type your answer');
@@ -422,7 +422,7 @@ test.describe('a question the agent stopped waiting on', () => {
     // is still looking at the question
     // (a running stage's turns are drawn under the settled items, so
     // this reads the whole thread)
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await expect(page.getByTestId('thread')).toContainText('The ask timed out');
     // long enough for a critique to have started, had the stage been
     // taken for finished
@@ -476,7 +476,7 @@ test.describe('a question whose backend went away', () => {
     await answerOption(page, isPhone(info), '1');
     // the answer opens the new backend's session, a running one: its turns
     // are drawn under the settled items, so this reads the whole thread
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await expect(page.getByTestId('thread')).toContainText('Extend the existing file');
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
     const spec = JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json);
@@ -492,7 +492,7 @@ test.describe('a question whose backend went away', () => {
     await expect(page.getByTestId('decision-question')).toContainText('Where should');
     await expect(page.getByTestId('decision-option-chat')).toBeVisible();
     await shot(page, info, 'ask-restored');
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await page.getByTestId('decision-option-chat').click();
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
     await page.keyboard.press('Enter');
@@ -548,7 +548,7 @@ test('the board agent cannot run a card over a person’s question', async ({ pa
   const asked = (await api('GET', `/api/cards/${c.id}`)).json.decision;
   expect((await api('POST', `/api/cards/${c.id}/actions/pause`, { against: asked.against.token })).status).toBe(200);
 
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-agent').click();
   await page.getByTestId('agent-open').click();
   const input = page.getByTestId('agent-input');
@@ -576,7 +576,7 @@ test.describe('a verified card', () => {
   // on a phone, and nobody could hand a card off by touch.
   test('handing it off asks first, and the question can be answered by touch', async ({ pairedPage: page, server, api }, info) => {
     await open(page, server, id);
-    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    if (isPhone(info)) await page.getByTestId('tab-thread').click();
     const opt = page.getByTestId('decision-option-handoff');
     await expect(opt).toBeVisible();
     await opt.click();
@@ -615,7 +615,7 @@ test('a phone sends a multi-pick answer from the docked bar', async ({ pairedPag
   card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
   await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.multi).toBe(true);
   await open(page, server, c.id);
-  await page.getByTestId('mnav-panel').click();
+  await page.getByTestId('tab-diff').click();
   await page.getByTestId('mdec-toggle').click();
   await expect(page.getByTestId('mdec-send')).toBeDisabled();
   await page.getByTestId('mdec-option-0').click();

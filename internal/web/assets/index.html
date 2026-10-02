@@ -43,6 +43,10 @@
     <button class="iconbtn theme-btn" id="btn-theme" data-testid="btn-theme" title="Toggle theme" aria-label="Toggle theme"></button>
   </header>
 
+  <!-- a phone's card screen: the way back to the cards, and the card's head
+       and tabs, moved in here by mobile.js so every view of a card names it -->
+  <div class="mcard" id="mcard" data-testid="mobile-card"></div>
+
   <div class="resume" id="resume" data-testid="resume-slot"></div>
 
   <div class="main">
@@ -94,7 +98,6 @@
   </div>
 
   <div class="mdec" id="mdec" data-testid="mobile-decision" hidden></div>
-  <nav class="mnav" id="mnav" aria-label="Views" data-testid="mobile-nav"></nav>
 </div>
 
 <!-- devices asking to join: over the board, on every page at it, until answered -->

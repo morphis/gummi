@@ -17,20 +17,20 @@ test.describe('back', () => {
     const page = await pairedPage.context().newPage();
     await page.goto(`${server.url}/#${a}`);
     await expect(page.getByTestId('card-id')).toHaveText(a);
-    await expect(page.getByTestId('mnav-thread')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
 
     // the documents are not a step of their own: back from them is the cards
-    await page.getByTestId('mnav-panel').click();
+    await page.getByTestId('tab-diff').click();
     await page.goBack();
-    await expect(page.getByTestId('mnav-cards')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('rail')).toBeVisible();
     expect(page.url()).toContain(server.url);
 
     // a card opened from the cards: back returns to them
     await page.getByTestId(`rail-row-${b}`).click();
-    await expect(page.getByTestId('mnav-thread')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('card-id')).toHaveText(b);
     await page.goBack();
-    await expect(page.getByTestId('mnav-cards')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('rail')).toBeVisible();
     // the card stays the one that was open, whatever the address bar held before
     await page.waitForTimeout(600);
     expect(page.url()).toContain(`#${b}`);
@@ -46,7 +46,7 @@ test.describe('back', () => {
     await expect(page.getByTestId('view-doctor')).toBeVisible();
     await page.goBack();
     await expect(page.getByTestId('view-doctor')).toHaveCount(0);
-    await expect(page.getByTestId('mnav-cards')).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('rail')).toBeVisible();
 
     // from the cards there is nothing of the board's left to step back
     // through: back would leave the site

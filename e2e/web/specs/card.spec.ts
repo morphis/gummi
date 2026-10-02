@@ -45,7 +45,7 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
   const m = await mockCard(page, id);
   await page.goto(page.url().replace(/#.*$/, '') + `#${id}/spec`);
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-spec').click();
   const doc = page.getByTestId('spec-doc');
   await expect(doc.getByTestId('spec-section-1')).toContainText('Chosen approach');
   await expect(doc.getByTestId('spec-note')).toContainText('Does clean share');
@@ -67,7 +67,7 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
 test('the diff draws files, comments inline, keeps viewed ticks and adds a comment', async ({ pairedPage: page }, info) => {
   const m = await mockCard(page, id);
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-diff').click();
   // a verify-failed decision is about the diff: the panel follows it
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('diff-line-8')).toContainText('func Wave');
@@ -82,7 +82,7 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   await page.getByTestId('diff-viewed-1').check();
   await expect(page.getByTestId('diff-filebox-1')).toHaveClass(/viewed/);
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('diff-viewed-1')).toBeChecked();
   expect(m.annotations).toHaveLength(2);
   // at verify the diff's comments send the card back to implement, and
@@ -102,7 +102,7 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
   // the document, whatever tab the decision is about
   await mockCard(page, id, { kind: 'research' });
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('decision-jump')).toHaveText('read the document');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 
@@ -110,7 +110,6 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
   const { options } = decision;
   await mockCard(page, id, { decision: { ...decision, options: options.map((o) => ({ ...o, carriesComments: false })) } });
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
   await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('diff-pending')).toHaveText('1 comment on this diff is still open.');
   await expect(page.getByTestId('decision-carry')).toHaveCount(0);
@@ -119,7 +118,6 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
 test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info) => {
   await mockCard(page, id);
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
   await page.getByTestId('tab-pr').click();
   await expect(page.getByTestId('pr-state')).toContainText('open');
   await expect(page.getByTestId('pr-thread-0')).toContainText('Should Wave trim');

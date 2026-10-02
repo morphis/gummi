@@ -24,7 +24,7 @@ test.describe('typing on a phone', () => {
     const kb = { width: full.width, height: Math.round(full.height * 0.5) };
     await page.setViewportSize(kb);
     await expect(page.locator('html')).toHaveClass(/\bkb\b/);
-    await expect(page.getByTestId('mobile-nav')).toBeHidden();
+    await expect(page.getByTestId('panel-tabs')).toBeHidden();
     await expect(page.getByTestId('topbar')).toBeHidden();
 
     // everything the person needs is inside what the keyboard leaves
@@ -41,11 +41,11 @@ test.describe('typing on a phone', () => {
     expect(await page.evaluate(() => [document.scrollingElement!.scrollTop, document.scrollingElement!.scrollLeft])).toEqual([0, 0]);
     await shot(page, info, 'typing-keyboard');
 
-    // the keyboard goes away: the nav and the top bar are back
+    // the keyboard goes away: the tabs and the top bar are back
     await page.getByTestId('composer-input').blur();
     await page.setViewportSize(full);
     await expect(page.locator('html')).not.toHaveClass(/\bkb\b/);
-    await expect(page.getByTestId('mobile-nav')).toBeVisible();
+    await expect(page.getByTestId('panel-tabs')).toBeVisible();
     await expect(page.getByTestId('topbar')).toBeVisible();
   });
 });

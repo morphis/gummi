@@ -13,7 +13,7 @@ test('the live turn is spaced and aligned as the thread is', async ({ pairedPage
   const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
   await page.goto(`${server.url}/#${c.id}`);
   await expect(page.getByTestId('card-id')).toHaveText(c.id);
-  if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token });
   await expect(page.getByTestId('live-streaming')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('live')).toBeVisible();

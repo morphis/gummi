@@ -9,7 +9,7 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   // the card's opening turn runs and ends
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 
@@ -50,6 +50,6 @@ test('a landed freeform card claims no stages', async ({ pairedPage: page, serve
   await expect(page.getByTestId('card-stages')).toContainText('session');
   await expect(page.getByTestId('card-stages')).not.toContainText('verify');
   await expect(page.getByTestId('stage-verify')).toHaveCount(0);
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await expect(page.getByTestId(`rail-row-${id}`)).toContainText('session');
 });

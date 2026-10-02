@@ -32,7 +32,7 @@ function watchErrors(page: Page): string[] {
 test('the rail shows the seeded cards and a card opens with its head', async ({ pairedPage: page }, info) => {
   const errors = watchErrors(page);
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   for (const id of [ids.gate, ...ids.backlog, ids.bug]) {
     await expect(page.getByTestId(`rail-row-${id}`)).toBeVisible();
   }
@@ -44,7 +44,7 @@ test('the rail shows the seeded cards and a card opens with its head', async ({ 
   await expect(page).toHaveURL(new RegExp(`#${ids.bug}`));
   await expect(page.getByTestId('thread')).toBeVisible();
   await shot(page, info, 'board');
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await page.getByTestId(`rail-row-${ids.gate}`).click();
   await expect(page.getByTestId('card-title')).toHaveText('Add a wave helper');
   await expect(page.getByTestId('card-stages')).toContainText('plan');
@@ -59,7 +59,6 @@ test('a deep link opens the card and the tab it names', async ({ pairedPage: pag
 });
 
 test('the panel tabs switch, and 501 routes read as not available yet', async ({ pairedPage: page }, info) => {
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
   for (const tab of ['diff', 'pr', 'stats', 'spec']) {
     await page.getByTestId(`tab-${tab}`).click();
     await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
@@ -95,21 +94,31 @@ test('three panes sit side by side and never overlap', async ({ pairedPage: page
   await expect.poll(async () => (await page.getByTestId('rail').boundingBox())!.width).not.toBe(before);
 });
 
-test('the phone switches between cards, thread and documents', async ({ pairedPage: page }, info) => {
+test('the phone opens a card from the cards, and its screen names it above its tabs', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name !== 'phone', 'phone only');
   await expect(page.getByTestId('conversation')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
-  await page.getByTestId('mnav-cards').click();
+  const id = (await page.getByTestId('card-id').textContent())!;
+  await page.getByTestId('card-back').click();
   await expect(page.getByTestId('rail')).toBeVisible();
   await expect(page.getByTestId('conversation')).toBeHidden();
+  // the cards are the root: nothing of one card is on screen over them
+  await expect(page.getByTestId('mobile-card')).toBeHidden();
   await shot(page, info, 'cards');
-  await page.getByTestId('mnav-panel').click();
+  await page.getByTestId(`rail-row-${id}`).click();
+  await expect(page.getByTestId('conversation')).toBeVisible();
+  await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('panel')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
+  // the documents say whose they are
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'false');
   await shot(page, info, 'panel');
-  await page.getByTestId('mnav-thread').click();
+  await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('conversation')).toBeVisible();
-  await expect(page.getByTestId('mnav-thread')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
 });
 
 test('the theme toggles and is kept', async ({ pairedPage: page }, info) => {
@@ -144,7 +153,7 @@ test('j and k walk the rail, ? lists the keys, ⌘K jumps', async ({ pairedPage:
 });
 
 test('a surface that is not built yet says so', async ({ pairedPage: page }, info) => {
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await page.getByTestId('rail-fleet').click();
   await expect(page.getByTestId('view-fleet')).toBeVisible();
   await page.keyboard.press('Escape');

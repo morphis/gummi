@@ -12,7 +12,6 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedResearch('How are gree
 test('a research card offers no branch to diff or push', async ({ pairedPage: page, server }, info) => {
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
   await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('panel-pane')).toContainText('carries no branch');
   await expect(page.getByTestId('panel-pane')).not.toContainText('when you approve');

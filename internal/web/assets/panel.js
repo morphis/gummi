@@ -1,6 +1,6 @@
 // panel.js — the right panel: the Spec, Diff, Log, PR and Stats tabs beside the
 // conversation (never over it), the resizer between them, and hiding it
-// with `]`. It fetches the open tab for the open card, refetches it when
+// with `]`. On a phone the tabs lead the card's screen, with its Thread first. It fetches the open tab for the open card, refetches it when
 // the card changes, and hands each tab module an entry { data, fresh, err }
 // to draw. A route the server does not answer yet shows a quiet "not
 // available yet" instead of an error.
@@ -49,6 +49,9 @@ export function initPanel (c) {
     renderTabs()
   })
   on(['rightHidden'], applyHidden)
+  // on a phone the row holds the card's Thread too, and says which is shown
+  on(['view'], renderTabs)
+  matchMedia('(max-width:760px)').addEventListener('change', renderTabs)
   initResizer()
   applyHidden()
   renderTabs()
@@ -123,9 +126,25 @@ function renderTabs () {
   const list = h('div', { class: 'tablist', role: 'tablist', 'aria-label': 'Documents' })
   list.addEventListener('keydown', tabKeys)
   box.append(list)
+  // a phone's card screen has one row of tabs: its thread, then its documents
+  const phone = isMobile()
+  if (phone) {
+    const on = state.view === 'thread'
+    list.append(h('button', {
+      class: ['tab', on && 'on'],
+      role: 'tab',
+      type: 'button',
+      id: 'tab-thread',
+      tabindex: on ? '0' : '-1',
+      data: { tab: 'thread' },
+      'aria-selected': String(on),
+      testid: 'tab-thread',
+      onclick: () => set({ view: 'thread' })
+    }, 'Thread'))
+  }
   for (const t of shown()) {
     const e = cache[t.name]
-    const on = state.tab === t.name
+    const on = state.tab === t.name && (!phone || state.view === 'panel')
     const empty = e && !e.err && e.data && t.empty?.(e.data)
     const n = e?.data && t.count ? t.count(e.data) : 0
     list.append(h('button', {
@@ -142,7 +161,7 @@ function renderTabs () {
       onclick: () => setTab(t.name)
     }, t.label, n ? h('span', { class: ['n', e.fresh && 'hot'] }, e.fresh ? `${n}+` : String(n)) : null))
   }
-  box.append(h('span', { class: 'sp' }, h('button', {
+  if (!phone) box.append(h('span', { class: 'sp' }, h('button', {
     class: 'iconbtn', type: 'button', testid: 'panel-close', title: 'Hide panel (])', 'aria-label': 'Hide panel', onclick: togglePanel
   }, icon('close'))))
   $('#pane').setAttribute('aria-labelledby', `tab-${state.tab}`)

@@ -20,7 +20,7 @@ async function open(page: Page, server: GummiServer, id: string) {
 
 async function option(page: Page, phone: boolean, id: string) {
   if (phone) {
-    await page.getByTestId('mnav-panel').click();
+    await page.getByTestId('tab-diff').click();
     const toggle = page.getByTestId('mdec-toggle');
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
     return page.getByTestId(`mdec-option-${id}`);

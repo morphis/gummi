@@ -13,7 +13,7 @@ test.use({ seed: { run: async (ws) => { gate = await ws.seedDesignGate('Add a wa
 
 async function openForm(page: Page, phone: boolean) {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-new').click();
   await expect(page.getByTestId('view-newcard')).toBeVisible();
   await expect(page.getByTestId('newcard-title')).toBeVisible();
@@ -42,7 +42,7 @@ test('a feature that waits on one card and stacks on another', async ({ pairedPa
   expect(card).toMatchObject({ kind: 'feature', stage: 'todo', envelope: 300, profile: 'e2e-alt' });
   expect(card.stack).toMatchObject({ pos: 1, of: 2 });
   expect(await api('GET', '/api/form').then((r) => r.json.dependable.map((c: any) => c.id))).toContain(id);
-  if (phone(info)) await page.getByTestId('mnav-cards').click();
+  if (phone(info)) await page.getByTestId('card-back').click();
   await expect(page.getByTestId(`rail-row-${id}`)).toContainText('stack 2 of 2');
   const deps = await server_deps(api, id);
   expect(deps).toEqual(backlog[0]);
@@ -83,7 +83,7 @@ test('a freeform card opens at once', async ({ pairedPage: page }, info) => {
   await expect(page.getByTestId('card-title')).toHaveText('Tidy the readme');
   await expect(page.getByTestId('card-id')).toHaveText(/^FF-/);
   await expect(page.getByTestId('card-stages')).toContainText('session');
-  if (phone(info)) await page.getByTestId('mnav-thread').click();
+  if (phone(info)) await page.getByTestId('tab-thread').click();
   await page.getByTestId('composer-input').fill('Add a line about the command');
   await expect(page.getByTestId('composer-says')).toContainText('a turn for this card');
   await shot(page, info, 'newcard-freeform');

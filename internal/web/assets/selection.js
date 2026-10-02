@@ -46,7 +46,8 @@ export async function select (id, { tab = null, view = true } = {}) {
   }
   if (tab && tab !== state.tab) set({ tab })
   writeHash(id, tab)
-  if (view && isMobile()) set({ view: 'thread' })
+  // on a phone a link that names a tab opens that document, not the thread
+  if (view && isMobile()) set({ view: tab ? 'panel' : 'thread' })
   const tabBefore = state.tab
   const card = await loadCard(id)
   // the panel follows the decision only when nothing chose a tab while the

@@ -10,7 +10,7 @@ import { shot } from '../fixtures/shots';
 // conduct; its cards are [slow] so it stays there while the test works.
 
 async function openGoals(page: Page, mobile: boolean) {
-  if (mobile) await page.getByTestId('mnav-cards').click();
+  if (mobile) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-goals').click();
   await expect(page.getByTestId('view-goals')).toBeVisible();
@@ -169,7 +169,7 @@ test.describe('a running goal', () => {
   test('deleting the goal shows the server’s question, cards and all', async ({ pairedPage: page, server, api }, info) => {
     await page.goto(`${server.url}/#${goal}`);
     await expect(page.getByTestId('card-id')).toHaveText(goal);
-    if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+    if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
     const sent: any[] = [];
     page.on('request', (r) => { if (r.url().includes('/actions/delete') && r.method() === 'POST') sent.push(r.postDataJSON() || {}); });
     await page.getByTestId('card-actions').click();

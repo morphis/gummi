@@ -7,7 +7,7 @@ import { shot } from '../fixtures/shots';
 // flight, switch profile through the page's own confirm, and /clear.
 
 async function openAgent(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-agent').click();
   await expect(page.getByTestId('view-agent')).toBeVisible();
 }

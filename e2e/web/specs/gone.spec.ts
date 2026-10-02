@@ -16,7 +16,7 @@ test.use({ seed: { run: async (ws) => {
 test('a card deleted elsewhere stays gone where it was open', async ({ pairedPage: page, server, api }, info) => {
   await page.goto(`${server.url}/#${doomed}`);
   await expect(page.getByTestId('card-id')).toHaveText(doomed);
-  if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await page.getByTestId('composer-input').fill('half a thought about the helper');
 
   // another device deletes it

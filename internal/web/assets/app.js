@@ -169,7 +169,8 @@ async function startBoard () {
   const first = (route.id && rows().some(r => r.id === route.id) && route.id) ||
     rows().find(r => r.status === 'needs')?.id || rows()[0]?.id
   if (route.id && first !== route.id) toast(`${route.id} is not on this board`)
-  if (first) await select(first, { tab: route.id === first ? route.tab : null, view: false })
+  const tab = route.id === first ? route.tab : null
+  if (first) await select(first, { tab, view: !!tab })
 
   connectEvents()
 }

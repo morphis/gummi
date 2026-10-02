@@ -326,6 +326,8 @@ function drawMdec (box) {
   box.style.setProperty('--dc', decisionColor(d, state.card.stage))
   box.classList.toggle('open', state.mdecOpen)
   box.append(h('button', { class: 'sum', type: 'button', testid: 'mdec-toggle', 'aria-expanded': String(state.mdecOpen), onclick: () => set({ mdecOpen: !state.mdecOpen }) },
+    // over the cards it would read as any card's: it says whose it is
+    state.view === 'cards' ? h('span', { class: 'cid', testid: 'mdec-card' }, state.card.id) : null,
     h('span', { class: 'k' }, decisionWord(d, state.card.stage)),
     h('span', { class: 'q' }, d.question),
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▴')))

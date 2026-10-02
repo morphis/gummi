@@ -10,7 +10,7 @@ async function open(page: Page, server: GummiServer, id: string, phone: boolean)
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('mnav-thread').click();
+  if (phone) await page.getByTestId('tab-thread').click();
 }
 
 async function menu(page: Page, action: string) {
@@ -88,13 +88,12 @@ test.describe('a backlog', () => {
     expect(typeof sent[2].confirm).toBe('string');
     expect(sent[2].confirm.length).toBeGreaterThan(8);
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).status).toBe(404);
-    if (phone(info)) await page.getByTestId('mnav-cards').click();
-    await expect(page.getByTestId(`rail-row-${id}`)).toHaveCount(0);
     // where it was open, it is said to be gone; the page does not move
     // itself onto another card
-    if (phone(info)) await page.getByTestId('mnav-thread').click();
     await expect(page.getByTestId('card-title')).toHaveText(`${id} · deleted`);
     await expect(page.getByTestId('card-id')).toHaveCount(0);
+    if (phone(info)) await page.getByTestId('card-back').click();
+    await expect(page.getByTestId(`rail-row-${id}`)).toHaveCount(0);
   });
 });
 
@@ -166,7 +165,7 @@ test.describe('a verified card', () => {
     await menu(page, 'merge');
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-dialog')).toHaveCount(0, { timeout: 30_000 });
-    if (phone(info)) await page.getByTestId('mnav-cards').click();
+    if (phone(info)) await page.getByTestId('card-back').click();
     await expect(page.getByTestId('rail-group-done').getByTestId(`rail-row-${id}`)).toBeVisible();
     // the group holds every closed card, landed or handed off: it is not
     // headed as if each one landed
@@ -191,7 +190,7 @@ test.describe('a running card', () => {
     await shot(page, info, 'running');
     await pause.click();
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.status).toBe('paused');
-    if (phone(info)) await page.getByTestId('mnav-cards').click();
+    if (phone(info)) await page.getByTestId('card-back').click();
     await expect(page.getByTestId(`rail-row-${c.id}`)).toHaveAttribute('data-status', 'paused');
   });
 });

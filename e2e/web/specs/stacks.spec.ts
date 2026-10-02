@@ -22,7 +22,7 @@ test.use({
 });
 
 async function openStacks(page: Page, mobile: boolean) {
-  if (mobile) await page.getByTestId('mnav-cards').click();
+  if (mobile) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-stacks').click();
   await expect(page.getByTestId('view-stacks')).toBeVisible();
@@ -110,7 +110,7 @@ test('the card head’s stack badge opens its stack', async ({ pairedPage: page,
   expect(made.status).toBe(200);
   const stack = made.json.id as string;
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await page.getByTestId(`rail-row-${ids.shrug}`).click();
   const badge = page.getByTestId('card-stack');
   await expect(badge).toHaveText('stack 2 of 2');

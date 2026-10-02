@@ -676,14 +676,14 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .boot{height:100%;display:flex;align-items:center;justify-content:center;color:var(--fg3);gap:10px}
 
 /* mobile-only pieces */
-.mnav,.mdec{display:none}
+.mcard,.mdec{display:none}
 
 @media (max-width:1100px){
   .pills .pill.hide-m{display:none}
   .ws .branch{display:none}
 }
 @media (max-width:760px){
-  .app{grid-template-rows:44px auto minmax(0,1fr) auto auto}
+  .app{grid-template-rows:44px auto auto minmax(0,1fr) auto;padding-bottom:env(safe-area-inset-bottom,0px)}
   .resume-banner{padding:8px 12px}
   .rb-actions{width:100%}
   .rb-actions .btn{flex:1;justify-content:center}
@@ -697,15 +697,24 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
   .pills,.ws,.top .hide-s{display:none}
   .top{padding:0 12px}
   .top .theme-btn{margin-left:auto}
-  .mnav{display:grid;grid-template-columns:repeat(3,1fr);height:calc(52px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--rail);padding-bottom:env(safe-area-inset-bottom,0px)}
-  .mnav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:var(--fg3);position:relative}
-  .mnav button.on{color:var(--accent)}
-  .mnav svg.i{width:18px;height:18px;stroke-width:1.7}
-  .mnav .dotn{position:absolute;top:6px;left:calc(50% + 6px);min-width:16px;height:16px;border-radius:8px;background:var(--accent);color:var(--accent-fg);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 4px}
+  /* a card's screen: back to the cards, the card's head, then one row of
+     tabs — its thread and its documents (mobile.js moves the head and tabs in) */
+  .mcard{display:grid;grid-template-columns:auto minmax(0,1fr);background:var(--bg);border-bottom:1px solid var(--line)}
+  .app[data-view="cards"] .mcard{display:none}
+  .mback{grid-column:1;align-self:start;width:40px;height:44px;margin-left:4px;display:flex;align-items:center;justify-content:center;color:var(--fg2);position:relative}
+  .mback svg.i{width:20px;height:20px;stroke-width:2}
+  .mback .dotn{position:absolute;top:4px;right:0;min-width:16px;height:16px;border-radius:8px;background:var(--accent);color:var(--accent-fg);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 4px}
+  .mback .dotn[hidden]{display:none}
+  .mcard .head{grid-column:2;padding:10px 12px 8px 0;border-bottom:0;min-width:0}
+  .mcard .tabs{grid-column:1 / -1}
+  .mcard [data-testid="toggle-panel"]{display:none}
+  /* the documents want the height: their card is named, its stages wait in the thread */
+  .app[data-view="panel"] .mcard .subline{display:none}
   /* the decision follows you into the cards and document views */
   .mdec{display:block;border-top:1px solid color-mix(in srgb,var(--dc) 45%,var(--line));background:color-mix(in srgb,var(--dc) 6%,var(--panel))}
   .mdec[hidden]{display:none}
   .mdec .sum{width:100%;display:flex;align-items:center;gap:8px;padding:10px 16px;text-align:left;font-size:13px}
+  .mdec .sum .cid{font-family:var(--mono);font-size:12px;color:var(--fg2);white-space:nowrap}
   .mdec .sum .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc) var(--t-keep),#000);white-space:nowrap}
   .mdec .sum .q{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg2)}
   .mdec .sum .chev{color:var(--fg3);transition:transform .15s}
@@ -724,8 +733,8 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
   .head-actions .hide-s{display:none}
   .annot{margin-left:10px}
   .tabs{overflow-x:auto}
-  /* the foot is one row of four on a phone, so the cards keep the height */
-  .rail-foot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:6px 8px}
+  /* the foot is one row of five on a phone, so the cards keep the height */
+  .rail-foot{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;padding:6px 8px}
   .rail-foot button,.rail-foot .newcard{flex-direction:column;justify-content:center;gap:2px;padding:6px 2px;height:auto;font-size:11px;white-space:normal;text-align:center}
   .rail-foot .newcard .plus{font-size:16px;line-height:16px}
   .rail-foot .sub{display:none}
@@ -737,10 +746,10 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
    the conversation and the line being written steps aside or shrinks */
 @media (max-width:760px){
   /* each piece keeps its own row, so one stepping aside moves nothing else */
-  .app > .top{grid-row:1} .app > .resume{grid-row:2} .app > .main{grid-row:3}
-  .app > .mdec{grid-row:4} .app > .mnav{grid-row:5}
-  html.kb .app{grid-template-rows:0 auto minmax(0,1fr) 0 0}
-  html.kb .top,html.kb .mnav,html.kb .mdec{display:none}
+  .app > .top{grid-row:1} .app > .resume{grid-row:2}
+  .app > .mcard{grid-row:3} .app > .main{grid-row:4} .app > .mdec{grid-row:5}
+  html.kb .app{grid-template-rows:0 auto auto minmax(0,1fr) 0;padding-bottom:0}
+  html.kb .top,html.kb .mdec,html.kb .mcard .tabs{display:none}
   html.kb .toasts{bottom:auto;top:8px}
   html.kb .scrim{padding-top:6px;padding-bottom:6px}
   html.kb .head{padding:6px 12px;gap:0}
