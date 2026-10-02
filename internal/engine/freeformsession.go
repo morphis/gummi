@@ -176,6 +176,15 @@ func (e *Engine) FreeformHistory(id domain.FeatureID) (Snapshot, bool) {
 	return sess.Snapshot(), true
 }
 
+// Session returns ff's current backend session, or nil if none has ever
+// spawned — AnswerAs's and the UI's hook into a freeform card's own
+// session, which e.live never holds (OpenFreeform's doc comment).
+func (ff *FreeformSession) Session() *Session {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	return ff.sess
+}
+
 // Freeform looks up a card's freeform session without ever spawning one —
 // the read path a render or a delivery uses (the diff surface's request
 // changes) to reach whatever exists without opening a backend as a side
@@ -262,24 +271,30 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		hints = append(hints, replay)
 	}
 
-	// gummi's one client tool here is resolve_annotation, so the agent can
-	// mark each of the reader's diff comments addressed and the open count
-	// burns down live (DESIGN §6.1). It reaches the model by whichever of
-	// the two routes the backend supports, exactly as a stage's tools do:
-	// natively, or over this card's own inbound MCP endpoint. A freeform
-	// card needs no ask_user — the person is in the thread, and a reply is
-	// the answer.
+	// gummi's tools here are ask_user and resolve_annotation — the same
+	// pair any other coding-agent session would have for a card with no
+	// artifact and no gate, and the diff comments that steer this one
+	// (DESIGN §6.1: resolve_annotation's open count burns down live). They
+	// reach the model by whichever of the two routes the backend supports,
+	// exactly as a stage's tools do: natively, or over this card's own
+	// inbound MCP endpoint. A backend with neither falls back to the
+	// fenced-block convention for ask_user, same as a stage session's.
 	var tools []agent.ToolDef
 	var mcpPath string
 	var mcpTeardown func()
 	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
 		tools = stageTools(domain.StageOpen, flavorStage, nil)
+		if h := toolHint(domain.StageOpen, flavorStage); h != "" {
+			hints = append(hints, h)
+		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage)
 		if merr != nil {
 			cancel()
 			return merr
 		}
 		mcpPath, mcpTeardown = path, teardown
+	} else {
+		hints = append(hints, askConventionHint)
 	}
 
 	agentSess, err := ag.NewSession(ctx, agent.SessionOpts{
@@ -854,6 +869,20 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		// No commit here: a turn ending is not a reason to commit. The agent
 		// commits what it means to keep; the rest stays in the worktree.
 		sess.setBusy(false)
+		// convention-path ask (a backend without client tools): a
+		// gummi-ask block in the final message becomes a pending question
+		// instead of a finished turn — maybeConventionAsk's own doc
+		// (asktool.go), unchanged by which kind of session it is reading.
+		if e.maybeConventionAsk(sess) {
+			e.persist(sess)
+			ff.armIdleTimer()
+			e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventQuestion})
+			return
+		}
+		// a turn that ended with its question still open has not finished:
+		// the card stays parked on the question, not on a reply that never
+		// came (askOutlivedItsCall's own doc).
+		e.askOutlivedItsCall(sess)
 		e.persist(sess)
 		ff.armIdleTimer() // a reply landing resets the idle clock
 	case agent.EventError:

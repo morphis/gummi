@@ -180,15 +180,17 @@ func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent
 	case domain.StageImplement:
 		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageOpen:
-		// A freeform card (DESIGN §19): resolve_annotation and nothing
-		// else. It gets that one because the reader's diff comments are
+		// A freeform card (DESIGN §19): ask_user and resolve_annotation. It
+		// gets resolve_annotation because the reader's diff comments are
 		// exactly how work is steered on such a card, and the count has to
-		// burn down as they are addressed. It gets no spec tools because it
-		// has no artifact, and no ask_user because the person is in the
-		// thread — a reply is the answer, so a blocking question tool would
-		// be a second, worse channel for the one thing this card already
-		// does well.
-		return []agent.ToolDef{resolveAnnotationTool()}
+		// burn down as they are addressed. It gets ask_user (the no-
+		// artifact form, below) because a freeform card is otherwise an
+		// ordinary coding-agent session, and an ordinary coding-agent
+		// session that needs a decision asks for one instead of guessing —
+		// the person being in the thread already is not a reason to take
+		// its one way of stopping and waiting away. It gets no spec tools:
+		// it has no artifact to read or write.
+		return []agent.ToolDef{askUserToolFreeform(), resolveAnnotationTool()}
 	default:
 		return nil
 	}
@@ -276,6 +278,46 @@ func askUserTool(deciding []string) agent.ToolDef {
 						"gummi records the answer as a resolved %% marker under it.",
 				},
 				"changes_section": changesSectionSchema(deciding),
+			},
+			"required": []any{"question", "options"},
+		},
+	}
+}
+
+// askUserToolFreeform is ask_user stripped to what a card with no
+// artifact and no stage can use: no changes_section (there is no
+// section for an answer to change the content of), no gate (a freeform
+// card has no stage to cross) and no spec_anchor (nothing to anchor
+// into). What is left is the whole of what a plain coding-agent
+// session's "ask the user" tool needs — question, options, multi-select.
+func askUserToolFreeform() agent.ToolDef {
+	return agent.ToolDef{
+		Name: askToolName,
+		Description: "Ask the user a question with a small set of options and wait for their " +
+			"answer. Use this whenever you need a decision from the user: it is cheaper and " +
+			"clearer than asking in prose. Returns the chosen option(s) — or, since every " +
+			"question also offers to talk it over, whatever the user wrote instead. Read the " +
+			"result as an answer in their own words when it matches none of your options.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"question": map[string]any{
+					"type":        "string",
+					"description": "The question to put to the user.",
+				},
+				"options": map[string]any{
+					"type":        "array",
+					"description": "2–6 distinct options.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"label":  map[string]any{"type": "string", "description": "Short choice text."},
+							"detail": map[string]any{"type": "string", "description": "Optional one-line explanation."},
+						},
+						"required": []any{"label"},
+					},
+				},
+				"multi_select": map[string]any{"type": "boolean", "description": "Allow choosing more than one option."},
 			},
 			"required": []any{"question", "options"},
 		},
@@ -526,6 +568,15 @@ heading and the next; re-emit any %% @user: marker lines yourself), then
 call the submit_verdict tool exactly once at the end (verdict "pass",
 "fail", or "blocked") instead of writing a VERDICT: line — gummi gates
 on it.`
+	case domain.StageOpen:
+		return `You have two gummi tools. ask_user: put a decision to the user as a
+few options and get their choice back — prefer it over asking in prose
+(faster for the user, cheaper); lead with your recommended option, marked
+as such in its label; ask one question at a time (parallel ask_user calls
+are bounced). This card has no gate and no artifact, so leave gate and
+changes_section unset. resolve_annotation: mark a diff review comment
+addressed — call it once per comment, right after you make the edit it
+asks for.`
 	default:
 		return ""
 	}
@@ -707,6 +758,15 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	ask, err := parseAsk(tc.ID, tc.Args)
 	if err != nil {
 		e.bounceAsk(s, tc.ID, err.Error()+" — ask again with valid arguments, or proceed")
+		return
+	}
+	if ask.Gate && s.Feature.Stage == domain.StageOpen {
+		// A freeform card has no stage to cross, so "gate" has nothing to
+		// mean here — the tool schema omits it, but a bare JSON call could
+		// still set it, and parseAsk has already swapped in the gate's own
+		// options by this point. Bounce rather than let an advance/hold
+		// picker stand in for a plain question nothing will act on.
+		e.bounceAsk(s, tc.ID, "a freeform card has no gate to cross — ask again without gate")
 		return
 	}
 	if reason, ok := askChangesSomething(s, ask); !ok {
@@ -1168,6 +1228,17 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	mu.(*sync.Mutex).Lock()
 	defer mu.(*sync.Mutex).Unlock()
 	s := e.Get(id)
+	// e.live never holds a freeform card's session (DESIGN §19: no
+	// attention-pool slot, nothing scheduled) — its own session lives in
+	// e.freeform instead, and this is the one place that difference would
+	// otherwise matter: an ask_user call blocks on a person exactly the
+	// same way there, and the answer has to reach it the same way.
+	var ff *FreeformSession
+	if s == nil {
+		if ff = e.Freeform(id); ff != nil {
+			s = ff.Session()
+		}
+	}
 	if s == nil {
 		return fmt.Errorf("no session for %s", id)
 	}
@@ -1197,13 +1268,26 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// conversation is attached to again, and the answer is its next turn
 	rerun := false
 	if !byCall && !s.takesTurns() {
-		if s.Interactive {
+		switch {
+		case ff != nil:
+			// A freeform card's own reconnection: a fresh backend carrying
+			// this session's own transcript (or resuming it natively),
+			// exactly as its next ordinary turn would spawn one.
+			// Engine.Attach is the stage session's reconnection path (the
+			// headless driver's `resume --answer`, the TUI's enter) and
+			// does not apply to a card with no stage to resume into.
+			ns, err := ff.ensureBackend(ctx)
+			if err != nil {
+				return err
+			}
+			s = ns
+		case s.Interactive:
 			ns, err := e.reattachForAnswer(ctx, s)
 			if err != nil {
 				return err
 			}
 			s = ns
-		} else {
+		default:
 			rerun = true
 		}
 	}

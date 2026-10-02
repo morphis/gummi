@@ -43,6 +43,28 @@ type threadDecision struct {
 	ask      *engine.Ask
 }
 
+// liveSessionFor is sessionFor's counterpart for a freeform card: its own
+// session lives in the engine's freeform map, which Engine.Get (and so
+// m.sessionFor) never looks at (DESIGN §19 — no attention-pool slot,
+// nothing scheduled). Every place that answers an ask_user question
+// reaches whichever session the card actually has — a workflow stage's
+// or a freeform card's own — through this rather than sessionFor, and
+// takes eng rather than m so it can run unchanged inside a tea.Cmd
+// closure created before the answer, the same reason those closures
+// already capture eng instead of m.
+func liveSessionFor(eng *engine.Engine, r featureRow) *engine.Session {
+	if eng == nil {
+		return nil
+	}
+	if r.F.IsFreeform() {
+		if ff := eng.Freeform(r.F.ID); ff != nil {
+			return ff.Session()
+		}
+		return nil
+	}
+	return eng.Get(r.F.ID)
+}
+
 func (m *Shell) openDecision(r featureRow) *threadDecision {
 	if r.DrivenAbroad {
 		// Nothing here could answer: the pending ask's resolver lives in
@@ -69,7 +91,7 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		// reader acts.
 		return nil
 	}
-	if sess := m.sessionFor(r.F.ID); sess != nil {
+	if sess := liveSessionFor(m.engine, r); sess != nil {
 		snap := sess.Snapshot()
 		if ask := snap.PendingAsk; ask != nil {
 			key := "ask|" + string(r.F.ID) + "|" + ask.CallID + "|" + ask.Question
@@ -915,7 +937,7 @@ func (m *Shell) proseAnswersAsk() bool {
 // is confirmed live — a line typed with nothing to answer stays put
 // rather than vanishing under the notice explaining why it wasn't sent.
 func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
-	sess := m.sessionFor(r.F.ID)
+	sess := liveSessionFor(m.engine, r)
 	if sess == nil {
 		m.notice = noticeMsg{text: string(r.F.ID) + ": no live session to answer — attach first (enter)"}
 		return nil
@@ -924,7 +946,7 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 	m.threadFreeForm = false
 	eng, actor := m.engine, m.humanActor()
 	return func() tea.Msg {
-		if eng.Get(r.F.ID) != sess {
+		if liveSessionFor(eng, r) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
 		if err := eng.AnswerAs(context.Background(), r.F.ID, text, actor); err != nil {
@@ -974,10 +996,10 @@ func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, pi
 				return noticeMsg{text: "that option carries no answer text — the question cannot be answered as asked", isErr: true}
 			}
 		}
-		sess := m.sessionFor(r.F.ID)
+		sess := liveSessionFor(m.engine, r)
 		eng, actor := m.engine, m.humanActor()
 		answerCmd := func() tea.Msg {
-			if sess == nil || eng.Get(r.F.ID) != sess {
+			if sess == nil || liveSessionFor(eng, r) != sess {
 				return noticeMsg{text: "session is no longer active", isErr: true}
 			}
 			if err := eng.AnswerAs(context.Background(), r.F.ID, answer, actor); err != nil {

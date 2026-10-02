@@ -289,18 +289,18 @@ func TestAFreeformCardHoldsItsCardLock(t *testing.T) {
 	release()
 }
 
-// TestAFreeformCardsToolSurfaceIsResolveAnnotationOnly pins what a
-// freeform session may reach for: the review loop's resolve tool, and
-// nothing else. No spec tools (there is no artifact) and no ask_user (the
-// person is in the thread, so a reply is the answer).
-func TestAFreeformCardsToolSurfaceIsResolveAnnotationOnly(t *testing.T) {
+// TestAFreeformCardsToolSurfaceIsAskAndResolveOnly pins what a freeform
+// session may reach for: ask_user (a plain coding-agent session's way of
+// stopping for a decision) and the review loop's resolve tool. No spec
+// tools, since there is no artifact for either to read or write.
+func TestAFreeformCardsToolSurfaceIsAskAndResolveOnly(t *testing.T) {
 	tools := stageTools(domain.StageOpen, flavorStage, nil)
-	if len(tools) != 1 || tools[0].Name != resolveToolName {
+	if len(tools) != 2 || tools[0].Name != askToolName || tools[1].Name != resolveToolName {
 		var names []string
 		for _, td := range tools {
 			names = append(names, td.Name)
 		}
-		t.Fatalf("freeform tools = %v, want just %s", names, resolveToolName)
+		t.Fatalf("freeform tools = %v, want [%s %s]", names, askToolName, resolveToolName)
 	}
 }
 
