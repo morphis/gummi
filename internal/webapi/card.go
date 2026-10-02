@@ -29,6 +29,20 @@ type Card struct {
 	// resolved the way its next turn will resolve them; nil on a card in
 	// the workflow, whose stages take theirs from its profile.
 	Session *SessionModel `json:"session,omitempty"`
+	// Files is where the page may open the card's worktree files from;
+	// nil while the card has no worktree on this machine.
+	Files *Files `json:"files,omitempty"`
+}
+
+// Files maps a card's worktree onto the server: a file at Dir/<path> is
+// served at URL<path>. An agent names the files it writes by their
+// absolute path, and the page links a path under Dir to the copy at URL.
+// URL carries its own key rather than relying on the device cookie: the
+// file is served sandboxed, as a page of no origin, and the cookie does
+// not reach the stylesheets and scripts it loads beside it.
+type Files struct {
+	Dir string `json:"dir"`
+	URL string `json:"url"`
 }
 
 // DecisionKind classifies an open decision.

@@ -405,6 +405,27 @@ func sortMarkers(ms []spec.Marker) {
 	}
 }
 
+// ----------------------------------------------------------------- files
+
+// FilesDir is the card's worktree, the one directory the page may open
+// files from (webapi.Files); ok is false while it has none.
+func (d *WebDocs) FilesDir(ctx context.Context) (string, bool) {
+	return filesDir(ctx, d.pool, d.f)
+}
+
+// filesDir is a card's branch worktree when it exists. A research card's
+// scratch tree is left out: it is a throwaway checkout, not the card's.
+func filesDir(ctx context.Context, pool *worktree.Pool, f domain.Feature) (string, bool) {
+	if pool == nil || f.Kind == domain.KindResearch {
+		return "", false
+	}
+	if ok, err := pool.Exists(ctx, &f); err != nil || !ok {
+		return "", false
+	}
+	dir, err := pool.Path(&f)
+	return dir, err == nil
+}
+
 // ------------------------------------------------------------------ diff
 
 // diffLines is the card's diff as the diff surface reads it, split in

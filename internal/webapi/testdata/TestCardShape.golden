@@ -54,5 +54,9 @@
   "composer": {
     "says": "asks the architect, without interrupting",
     "route": "consult"
+  },
+  "files": {
+    "dir": "/repo/.gummi/worktrees/FD-012",
+    "url": "/files/FD-012/k3y/"
   }
 }

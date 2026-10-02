@@ -28,6 +28,9 @@ func (s *Server) handleCard(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if c.Files != nil {
+		c.Files.URL = s.filesURL(c.ID)
+	}
 	writeJSON(w, http.StatusOK, c)
 }
 

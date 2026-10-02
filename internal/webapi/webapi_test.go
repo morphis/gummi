@@ -65,6 +65,7 @@ func TestCardShape(t *testing.T) {
 			{ID: "delete", Label: "Delete the card", Danger: true, Needs: ActionNeedsConfirm},
 		},
 		Composer: Composer{Says: "asks the architect, without interrupting", Route: RouteConsult},
+		Files:    &Files{Dir: "/repo/.gummi/worktrees/FD-012", URL: "/files/FD-012/k3y/"},
 	}))
 }
 

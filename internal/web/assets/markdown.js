@@ -4,6 +4,8 @@
 // fenced code (with a hook for custom fences such as gummi-checks),
 // indented code, code spans (both keep their spaces as written), bold, italic, lists (nested by indent), block quotes, rules, pipe
 // tables and links (http and https only, opened with rel=noopener).
+// With opts.files (a card's webapi.Files) a path under the card's worktree,
+// as an agent names a file it wrote, links to the server's copy of it.
 // Lines starting with `%%` are review notes and prompts; the spec view shows
 // notes on their own, so they are dropped here.
 
@@ -17,6 +19,10 @@ const QUOTE = /^\s{0,3}>\s?/
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
 const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
 
+// files is the worktree a markdown() call links paths under, for as long
+// as the call runs (the renderer is synchronous).
+let files = null
+
 // Headings are levelled against the page they land in, not the source:
 // an agent's "#### Detail" under a card's h1 would skip two levels, which
 // is how a screen reader's heading list loses its way. A fragment's first
@@ -26,7 +32,12 @@ const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
 export function markdown (src, opts = {}) {
   const frag = h('div', { class: ['md', opts.class] })
   const lines = String(src || '').replace(/\r\n?/g, '\n').split('\n').filter(l => !/^\s*%%/.test(l))
-  frag.append(...blocks(lines, { ...opts, levels: { last: (opts.headingBase || 2) - 1 } }))
+  files = opts.files?.dir && opts.files?.url ? opts.files : null
+  try {
+    frag.append(...blocks(lines, { ...opts, levels: { last: (opts.headingBase || 2) - 1 } }))
+  } finally {
+    files = null
+  }
   return frag
 }
 
@@ -171,10 +182,10 @@ export function inline (text) {
   while ((m = re.exec(text))) {
     let start = m.index
     if (m[7] !== undefined) start += m[6].length // keep the char before _em_
-    if (start > last) out.push(...breaks(text.slice(last, start)))
+    if (start > last) out.push(...paths(text.slice(last, start)))
     // a code span keeps its spaces (app.css) but not its line breaks,
     // which CommonMark reads as spaces
-    if (m[1]) out.push(h('code', null, m[2].replace(/\n/g, ' ')))
+    if (m[1]) out.push(fileLink(m[2].trim(), h('code', null, m[2].replace(/\n/g, ' '))))
     else if (m[3] !== undefined) out.push(h('strong', null, inline(m[3])))
     else if (m[4] !== undefined) out.push(h('strong', null, inline(m[4])))
     else if (m[5] !== undefined) out.push(h('em', null, inline(m[5])))
@@ -183,8 +194,34 @@ export function inline (text) {
     else if (m[10] !== undefined) out.push(link(m[10], [m[10]]))
     last = re.lastIndex
   }
-  if (last < text.length) out.push(...breaks(text.slice(last)))
+  if (last < text.length) out.push(...paths(text.slice(last)))
   return out
+}
+
+// paths links each worktree path in plain text, keeping the rest as breaks.
+function paths (s) {
+  if (!files) return breaks(s)
+  const re = new RegExp(files.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/[^\\s<>()\\[\\]`\'"]*[^\\s<>()\\[\\]`\'".,;:!?]', 'g')
+  const out = []
+  let last = 0
+  let m
+  while ((m = re.exec(s))) {
+    if (m.index > last) out.push(...breaks(s.slice(last, m.index)))
+    out.push(fileLink(m[0], m[0]))
+    last = re.lastIndex
+  }
+  if (last < s.length) out.push(...breaks(s.slice(last)))
+  return out
+}
+
+// fileLink is kids linked to the served copy of p when p is a file under
+// the worktree (a trailing :line or :line:col is dropped), else kids.
+function fileLink (p, kids) {
+  if (!files || !p.startsWith(files.dir + '/')) return kids
+  const rel = p.slice(files.dir.length + 1).replace(/(?::\d+){1,2}$/, '')
+  if (!rel || /\n/.test(rel)) return kids
+  const href = files.url + rel.split('/').map(encodeURIComponent).join('/')
+  return h('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'file' }, kids)
 }
 
 // breaks keeps a hard line break (two trailing spaces or a backslash).
@@ -196,6 +233,14 @@ function breaks (s) {
 }
 
 function link (href, kids) {
+  if (files && href.startsWith(files.dir + '/')) {
+    // a link's destination is URL-encoded (%20 for a space); fileLink
+    // takes the path as written on disk
+    let p = href
+    try { p = decodeURI(href) } catch { p = href }
+    const a = fileLink(p, kids)
+    if (a !== kids) return a
+  }
   let url = null
   try { url = new URL(href, location.href) } catch { url = null }
   if (!url || !/^https?:$/.test(url.protocol) || !/^https?:\/\//i.test(href)) {

@@ -166,7 +166,7 @@ function groupNode (grp, last) {
 }
 
 function itemNode (it) {
-  const sig = `${it.seq}|${it.t}|${it.decision?.answer || ''}`
+  const sig = `${it.seq}|${it.t}|${it.decision?.answer || ''}|${state.card?.files?.url || ''}`
   const have = nodes.get(it.key)
   if (have && have.sig === sig) return have.el
   const el = itemEl(it)
@@ -199,6 +199,10 @@ function firstLine (text) {
   return l.length > 110 ? l.slice(0, 108) + '…' : l
 }
 
+// md renders a message, linking the paths it names under the card's
+// worktree to the server's copy (webapi.Files).
+function md (text) { return markdown(text, { files: state.card?.files }) }
+
 function avatarFor (role) { return (role || 'ag').slice(0, 2).toUpperCase() }
 
 function message (it) {
@@ -207,7 +211,7 @@ function message (it) {
       h('div', { class: 'av you', 'aria-hidden': 'true' }, 'g'),
       h('div', null,
         h('div', { class: 'who' }, h('b', null, 'gummi'), h('span', { class: 'mono' }, clock(it.time))),
-        h('details', { class: 'body prompt' }, h('summary', null, firstLine(it.text)), markdown(it.text))))
+        h('details', { class: 'body prompt' }, h('summary', null, firstLine(it.text)), md(it.text))))
   }
   if (it.author === 'you') return you(it)
   const role = it.author || it.role || ROLE[it.stage] || 'agent'
@@ -221,7 +225,7 @@ function message (it) {
         it.flavor && it.flavor !== 'work' ? h('span', { class: 'via' }, it.flavor) : null,
         it.model ? h('span', { class: 'mono' }, it.model) : null,
         h('span', { class: 'mono' }, clock(it.time))),
-      h('div', { class: 'body' }, markdown(it.text))))
+      h('div', { class: 'body' }, md(it.text))))
 }
 
 // you is a line a person typed. It is headed with the name it was sent
@@ -234,7 +238,7 @@ function you (it) {
     h('div', { class: 'av you', 'aria-hidden': 'true' }, it.by ? initials(it.by) : 'you'),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, who), h('span', { class: 'mono' }, clock(it.time)), it.via ? h('span', { class: 'via' }, it.via) : null),
-      h('div', { class: 'body' }, markdown(it.text))))
+      h('div', { class: 'body' }, md(it.text))))
 }
 
 export function tools (list) {
@@ -292,7 +296,7 @@ function verify (it) {
         checks.length
           ? h('span', { class: fails ? 'badc' : 'okc' }, fails ? `${fails} failed` : 'all passed')
           : h('span', { class: 'badc', testid: 'verify-no-checks' }, 'no checks')),
-      it.text ? h('div', { class: 'body' }, markdown(it.text)) : null,
+      it.text ? h('div', { class: 'body' }, md(it.text)) : null,
       checks.length ? checksList(checks) : null))
 }
 
@@ -379,7 +383,7 @@ function conversation (kind, c, role, stage) {
   turns.forEach((t, i) => {
     if (t.tool) { run.push(t); return }
     flush(i)
-    const sig = `${t.author}|${(t.text || '').length}`
+    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}`
     out.push(cached(`${kind}:${i}`, sig, () => t.author === 'you'
       ? you({ text: t.text, by: t.by })
       : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text })))
@@ -388,7 +392,7 @@ function conversation (kind, c, role, stage) {
   if (c.streaming) {
     out.push(h('div', { class: ['msg live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),
-      h('div', null, h('div', { class: 'who' }, h('b', null, role), h('span', { class: 'mono' }, 'writing')), h('div', { class: 'body' }, markdown(c.streaming)))))
+      h('div', null, h('div', { class: 'who' }, h('b', null, role), h('span', { class: 'mono' }, 'writing')), h('div', { class: 'body' }, md(c.streaming)))))
   }
   return out
 }

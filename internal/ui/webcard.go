@@ -350,6 +350,10 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	c.DecisionsMore = m.webDecisionsMore(ctx, st.f.ID, c.Decision)
 	m.webActionDefaults(ctx, st.f, c.Actions)
 	c.Actions = m.webDropCleanCommit(ctx, st.f, c.Actions)
+	if dir, ok := filesDir(ctx, m.wt, st.f); ok {
+		// the server, which holds the key, fills in the URL
+		c.Files = &webapi.Files{Dir: dir}
+	}
 	return c, nil
 }
 

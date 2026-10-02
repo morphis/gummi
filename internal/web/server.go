@@ -21,6 +21,7 @@
 package web
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -101,6 +102,9 @@ type Server struct {
 	mints   *limiter
 	assets  map[string]asset
 	hub     *hub
+	// filesSecret keys the URLs a card's files are served at
+	// (routes_files.go); drawn per start, so they lapse with the server.
+	filesSecret []byte
 
 	hostsMu sync.RWMutex
 	hosts   map[string]struct{}
@@ -133,6 +137,10 @@ func New(o Options) (*Server, error) {
 		assets:  assets,
 		hub:     newHub(o.Now, o.Coalesce),
 		hosts:   map[string]struct{}{},
+	}
+	s.filesSecret = make([]byte, 32)
+	if _, err := rand.Read(s.filesSecret); err != nil {
+		return nil, err
 	}
 	s.AllowHosts(o.Hosts...)
 	if !o.OpenAccess {

@@ -8,6 +8,7 @@ package web
 //	routes_board.go    the rail
 //	routes_card.go     a card: head, thread, live, answer, send, actions
 //	routes_docs.go     a card's spec, diff, pull request and stats
+//	routes_files.go    a card's worktree files, opened in the browser
 //	routes_create.go   the new-card form
 //	routes_goals.go    goals and stacks
 //	routes_ingest.go   spec ingest and bug import
@@ -24,6 +25,7 @@ func (s *Server) routes() {
 	s.boardRoutes()
 	s.cardRoutes()
 	s.docsRoutes()
+	s.fileRoutes()
 	s.createRoutes()
 	s.goalRoutes()
 	s.ingestRoutes()
