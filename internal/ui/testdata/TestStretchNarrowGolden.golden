@@ -12,15 +12,15 @@ plan · architect · 1 turn · 180 credits ────── ✓ 00:04
 
 ── implement · implementer · claude-sonnet · fresh co…
 
-  implementer
+  implementer  00:10
     wired the theme layer through the pane.
 ── autopilot parked it ────────────────────── 00:11 ──
   implement finished, review it
   2 gates · 1 answer
 
-  you
+  you  00:20
     hold on, I want to look at the diff first
-  implementer
+  implementer  00:21
     sure — nothing else is running.
 
 

@@ -1933,7 +1933,11 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// budget.
 		rows := strings.Split(wrapText(sanitize(p.Content), max(w-6, 8)), "\n")
 		out := make([]string, 0, len(rows)+1)
-		out = append(out, s.Faint.Render(threadfold.AuthorLabel(p.Author, role)))
+		label := threadfold.AuthorLabel(p.Author, role)
+		if !ev.At.IsZero() {
+			label += "  " + ev.At.Format("15:04")
+		}
+		out = append(out, s.Faint.Render(label))
 		for _, l := range rows {
 			out = append(out, "  "+body.Render(l))
 		}
