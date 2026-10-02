@@ -2284,8 +2284,17 @@ type imagesSupporter interface {
 // unlike checkImageCapable (SendTurn's own gate), which stays backend-
 // level only so a model-level refusal still surfaces as an error at the
 // adapter rather than needing a live check on every send.
+//
+// A freeform card's session is never in e.live (OpenFreeform's doc
+// comment on FreeformSession.Session) — it is checked there too, or the
+// control would stay hidden on every freeform card regardless of backend.
 func (e *Engine) SessionTakesImages(ctx context.Context, id domain.FeatureID) bool {
 	s := e.Get(id)
+	if s == nil {
+		if ff := e.Freeform(id); ff != nil {
+			s = ff.Session()
+		}
+	}
 	if s == nil {
 		return false
 	}

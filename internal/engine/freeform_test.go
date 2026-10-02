@@ -93,6 +93,35 @@ func TestAFreeformTurnDoesNotCommit(t *testing.T) {
 	}
 }
 
+// TestSessionTakesImagesChecksFreeformToo: a freeform card's session is
+// never in e.live (OpenFreeform's doc comment), so SessionTakesImages —
+// what the web composer's attach control reads — must still find it
+// through the freeform registry, or the control would stay hidden on
+// every freeform card regardless of backend.
+func TestSessionTakesImagesChecksFreeformToo(t *testing.T) {
+	ag := agent.NewFake("ack")
+	ag.Caps.Images = true
+	unregister := agent.RegisterCapabilities("fake", ag.Caps)
+	defer unregister()
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	f := freeformCard(1, "poke at the attachments")
+	createFeature(t, store, f)
+
+	if e.SessionTakesImages(ctx, f.ID) {
+		t.Fatalf("SessionTakesImages = true before any session opened")
+	}
+	if _, err := e.OpenFreeform(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if !e.SessionTakesImages(ctx, f.ID) {
+		t.Errorf("SessionTakesImages = false for a freeform card on a capable backend")
+	}
+}
+
 // TestAFreeformSessionGetsNoArtifact: a freeform card has no document, so
 // the session must not be handed one — a backend told where its artifact
 // is would go and look for a file that does not exist.
