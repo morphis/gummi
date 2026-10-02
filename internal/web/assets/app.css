@@ -301,6 +301,14 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .spinner{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:spin .8s linear infinite;flex-shrink:0}
 .spinner.still{animation:none}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* a running tool call, inside a group a busy session's own spinner already
+   heads — its own mark so the two in-flight things on screen don't read
+   as the one glyph said twice */
+.dots{display:inline-flex;align-items:center;gap:3px;flex-shrink:0}
+.dots i{width:4px;height:4px;border-radius:50%;background:var(--accent);animation:dotpulse 1s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}
+.dots i:nth-child(3){animation-delay:.3s}
+@keyframes dotpulse{0%,80%,100%{opacity:.25;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
 .empty{padding:40px 24px;text-align:center;color:var(--fg3);font-size:13px;display:flex;flex-direction:column;gap:8px;align-items:center}
 .empty b{color:var(--fg2);font-weight:500;font-size:14px}
 .empty .mono{margin-top:6px}
@@ -780,6 +788,7 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 @media (prefers-reduced-motion:reduce){
   .shimmer{animation:none;color:var(--fg2);background:none}
   .spinner{animation:none}
+  .dots i{animation:none;opacity:.6}
   .ev-stage .fold,.tools summary::before,.mdec .sum .chev,.doc h2 .sc{transition:none}
 }
 

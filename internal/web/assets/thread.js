@@ -262,11 +262,14 @@ export function tools (list) {
   // doesn't spin: there, but not "busy", so a reply stays obviously safe
   // to send.
   const watching = list.some(t => t.status === 'watching')
+  // a call in flight gets dots rather than the live row's own spinner:
+  // the two can be on screen together (the session thinking, a tool
+  // under it running), and a shared glyph read as one thing twice.
   return h('details', { class: 'tools', testid: 'tool-group' },
     h('summary', null, plural(list.length, 'tool call'),
       fails ? h('span', { class: 'fails' }, `· ${fails} failed`) : null,
       watching ? h('span', { class: 'watching' }, '· watching') : null,
-      (running || watching) ? h('span', { class: ['spinner', !running && 'still'] }) : null),
+      running ? h('span', { class: 'dots' }, h('i'), h('i'), h('i')) : watching ? h('span', { class: 'spinner still' }) : null),
     h('ol', null, list.map(t => {
       const label = String(t.label || '').replace(/\s+/g, ' ').trim()
       const named = label.startsWith(t.tool + ' ') || label === t.tool

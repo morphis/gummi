@@ -23,8 +23,12 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 	}
 	var live webapi.Live
 	f := r.F
+	// A freeform card's own busy-ness is live.Freeform's to carry — its
+	// Conversation already holds the verb and the turns — so the generic
+	// field is left alone here; setting both drew two busy rows in the
+	// thread for the one session the card has.
 	switch {
-	case m.cardBusy(r):
+	case m.cardBusy(r) && !f.IsFreeform():
 		live.Busy = true
 		live.Verb = m.cardBusyWord(r)
 	}
