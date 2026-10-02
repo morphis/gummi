@@ -107,7 +107,6 @@ export function draftHead () {
       h('div', { class: 'head-actions' },
         h('button', { class: 'btn', type: 'button', testid: 'draft-cancel', onclick: cancelDraft }, 'Cancel'))),
     h('div', { class: 'subline' },
-      h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ session · no stages')),
       h('span', null, d.repo || state.board?.repo || 'this repository', d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree'),
       h('span', null, `budget ${d.envelope || '∞'} cr`))
   ]

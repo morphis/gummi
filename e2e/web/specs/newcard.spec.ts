@@ -82,7 +82,8 @@ test('a freeform card opens at once', async ({ pairedPage: page }, info) => {
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('card-title')).toHaveText('Tidy the readme');
   await expect(page.getByTestId('card-id')).toHaveText(/^FF-/);
-  await expect(page.getByTestId('card-stages')).toContainText('session');
+  // an open session has no stages at all, so it shows no badge for them
+  await expect(page.getByTestId('card-stages')).toHaveCount(0);
   if (phone(info)) await page.getByTestId('tab-thread').click();
   await page.getByTestId('composer-input').fill('Add a line about the command');
   await expect(page.getByTestId('composer-says')).toContainText('a turn for this card');

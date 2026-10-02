@@ -40,7 +40,8 @@ test('a session starts from its first message, on the model picked beside Send',
   await expect(page.getByTestId('card-id')).toHaveText(/^FF-/, { timeout: 20_000 });
   const id = (await page.getByTestId('card-id').textContent())!;
   await expect(page.getByTestId('card-title')).toHaveText('Tidy the readme.');
-  await expect(page.getByTestId('card-stages')).toContainText('session');
+  // an open session has no stages at all, so it shows no badge for them
+  await expect(page.getByTestId('card-stages')).toHaveCount(0);
   const card = (await api('GET', `/api/cards/${id}`)).json;
   expect(card.session).toEqual({ backend: 'headless', model: 'e2e-alt-implementer' });
   expect(card.envelope).toBe(500);

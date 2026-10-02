@@ -102,10 +102,13 @@ export function openActions (line = '') {
 }
 
 function stages (c) {
-  // a session has no stages at all, closed or not: ticking the workflow's
-  // would claim a plan, an implement and a verify it never had
-  if (c.stage === 'open' || c.kind === 'freeform') {
-    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, c.stage === 'open' ? '◆ session · no stages' : '◆ session · closed'))
+  // an open session has no stages at all: ticking the workflow's would
+  // claim a plan, an implement and a verify it never had, so it shows no
+  // badge while open. Once closed it still isn't done in the workflow's
+  // sense, but the card needs some word for what happened to it.
+  if (c.stage === 'open') return null
+  if (c.kind === 'freeform') {
+    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ session · closed'))
   }
   const idx = STAGES.indexOf(c.stage)
   return h('span', { class: 'stages', testid: 'card-stages' }, STAGES.map((s, i) => [
