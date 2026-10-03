@@ -258,7 +258,15 @@ func specBrief(f domain.Feature, title, head string, asked []string) string {
 	}
 	var b strings.Builder
 	b.WriteString(title)
-	b.WriteString("\n\nContinued from the session " + string(f.ID) + " (" + f.Title + "). Its work so far is already on this card's branch, cut from " + f.BranchName() + " at " + short + ": read the diff before designing, and plan what remains rather than what is done.")
+	if f.MainCheckout {
+		// The session ran in the main checkout and left its work uncommitted
+		// there; the branch this spec walks starts from the checkout's HEAD
+		// and carries none of the loose work — the architect has to know
+		// which half of the checkout it is standing on.
+		b.WriteString("\n\nContinued from the session " + string(f.ID) + " (" + f.Title + "). That session ran in the main checkout and left its work uncommitted there; this card's branch is cut from the checkout's HEAD at " + short + " and carries none of the loose work: read the checkout before designing, and plan what remains rather than what is done.")
+	} else {
+		b.WriteString("\n\nContinued from the session " + string(f.ID) + " (" + f.Title + "). Its work so far is already on this card's branch, cut from " + f.BranchName() + " at " + short + ": read the diff before designing, and plan what remains rather than what is done.")
+	}
 	if len(asked) == 0 {
 		return b.String()
 	}

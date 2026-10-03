@@ -924,8 +924,13 @@ func (m *Manager) DeleteLandedBranch(ctx context.Context, f *domain.Feature) err
 }
 
 // Head returns the feature branch's current tip commit sha, resolved inside
-// the feature's own worktree.
+// the feature's own worktree. A main-checkout freeform card holds no branch:
+// its tip is the managed checkout's HEAD, which is what a successor branch
+// (a spec written from the session) forks from.
 func (m *Manager) Head(ctx context.Context, f *domain.Feature) (string, error) {
+	if f.IsFreeform() && f.MainCheckout {
+		return runGit(ctx, m.repo, "rev-parse", "HEAD")
+	}
 	wtPath, err := m.requireWorktree(f)
 	if err != nil {
 		return "", err
@@ -2045,7 +2050,22 @@ func (m *Manager) DiffBase(ctx context.Context, f *domain.Feature) (string, erro
 // diffBase resolves the worktree path and the base SHA the diff family
 // shares, refusing on fork drift first: main rewound past the recorded
 // fork makes every range below name work the feature never did.
+//
+// A main-checkout freeform card has neither a worktree nor a branch (its
+// mint refused both), so its diff family reads the managed checkout
+// itself and its base is that checkout's HEAD: the loose tracked work is
+// what "this card's diff" means there. Anchoring at HEAD rather than a
+// recorded fork keeps a commit the person makes in the checkout — and any
+// squash-merge another card lands while the session runs — out of this
+// card's diff, which is about what the session has left loose.
 func (m *Manager) diffBase(ctx context.Context, f *domain.Feature) (wtPath, base string, err error) {
+	if f.IsFreeform() && f.MainCheckout {
+		head, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
+		if err != nil {
+			return "", "", err
+		}
+		return m.repo, head, nil
+	}
 	p, err := m.requireWorktree(f)
 	if err != nil {
 		return "", "", err

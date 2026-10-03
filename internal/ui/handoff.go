@@ -57,15 +57,20 @@ func (m *Shell) prepareHandOff(f domain.Feature) tea.Cmd {
 		// drifted branch is not. The drift rides along to the confirm
 		// instead, because the remedy the error would print — rebase, or
 		// delete — is the pair of things this verb exists to avoid.
-		landed, err := m.wt.Landed(ctx, &f)
+		// A main-checkout session holds no branch, so nothing of it can be
+		// "already landed": the Landed walk would refuse on a ref that does
+		// not exist, for a question that cannot arise.
 		var drift *worktree.ForkDriftError
-		if errors.As(err, &drift) {
-			landed, err = false, nil
-		}
-		if err != nil {
-			return handOffReadyMsg{err: err}
-		} else if landed {
-			return handOffReadyMsg{err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
+		if !f.MainCheckout {
+			landed, err := m.wt.Landed(ctx, &f)
+			if errors.As(err, &drift) {
+				landed, err = false, nil
+			}
+			if err != nil {
+				return handOffReadyMsg{err: err}
+			} else if landed {
+				return handOffReadyMsg{err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
+			}
 		}
 		deps, err := m.store.ListDependents(ctx, f.ID)
 		if err != nil {
@@ -88,9 +93,17 @@ func handOffDetail(f domain.Feature, base string, dependents []domain.FeatureID,
 	// caller passes and runs a three-row table straight into the title.
 	var b strings.Builder
 	b.WriteString("\nthe card moves to done and nothing lands.\n\n")
-	b.WriteString("  " + pad("branch") + f.BranchName() + " — kept\n")
-	b.WriteString("  " + pad("worktree") + f.WorktreePath() + " — kept\n")
-	b.WriteString("  " + pad(base) + "unchanged")
+	if f.MainCheckout {
+		// No branch and no worktree to keep: what the card leaves behind
+		// is the loose work in the checkout the person works in, and that
+		// is what the confirm says is kept.
+		b.WriteString("  " + pad("checkout") + "the session's loose work in the main checkout — kept\n")
+		b.WriteString("  " + pad(base) + "unchanged")
+	} else {
+		b.WriteString("  " + pad("branch") + f.BranchName() + " — kept\n")
+		b.WriteString("  " + pad("worktree") + f.WorktreePath() + " — kept\n")
+		b.WriteString("  " + pad(base) + "unchanged")
+	}
 	if len(dependents) > 0 {
 		names := make([]string, 0, len(dependents))
 		for _, d := range dependents {
@@ -150,8 +163,12 @@ func (m *Shell) handOffFeature(f domain.Feature) tea.Cmd {
 				return m.advanceOutcome(f.ID, actor, res, err)
 			}
 			m.dropSession(f.ID)
+			done := string(f.ID) + " → done · " + f.BranchName() + " is yours — nothing landed on " + m.baseBranch(f)
+			if f.MainCheckout {
+				done = string(f.ID) + " → done — its work stays loose in the main checkout, yours to commit"
+			}
 			return noticeMsg{
-				text:       string(f.ID) + " → done · " + f.BranchName() + " is yours — nothing landed on " + m.baseBranch(f),
+				text:       done,
 				reload:     true,
 				clearInbox: f.ID,
 			}

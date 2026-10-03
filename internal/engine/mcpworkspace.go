@@ -620,6 +620,9 @@ type cardNewArgs struct {
 	Envelope     int    `json:"envelope"`
 	Repo         string `json:"repo"`
 	GateApproval string `json:"gate_approval"`
+	// MainCheckout mints a freeform card into the main checkout: no
+	// branch, no worktree (DESIGN §19). Refused on every other kind.
+	MainCheckout bool `json:"main_checkout"`
 }
 
 // cardNew answers card_new: mint a fresh card via internal/cardmint, the
@@ -669,9 +672,13 @@ func (e *Engine) cardNew(ctx context.Context, args json.RawMessage) (string, err
 		// Until then its branch has to be cut somewhere (goalrepos.go).
 		repo = e.ProvisionalRepo()
 	}
+	if a.MainCheckout && ct.Kind != domain.KindFreeform {
+		return "", fmt.Errorf("card_new: main_checkout is a freeform card's: a %s runs in its own branch worktree", ct.Kind)
+	}
 	f, err := cardmint.Mint(ctx, e.cfg.Store, e.cfg.Workspace, cardmint.Input{
 		Kind: ct.Kind, Mode: ct.Mode, Description: a.Description, Profile: a.Profile, Envelope: a.Envelope,
 		Repo: repo, RequireRepo: e.RequireRepo, GateApproval: gate,
+		MainCheckout: a.MainCheckout,
 	})
 	if err != nil {
 		return "", err
@@ -886,6 +893,10 @@ func cardNewTool() agent.ToolDef {
 				"gate_approval": map[string]any{
 					"type":        "string",
 					"description": "Optional: \"auto\" or \"caller\" (default \"caller\" — see description).",
+				},
+				"main_checkout": map[string]any{
+					"type":        "boolean",
+					"description": "Optional, freeform only: run the session in the repository's main checkout instead of a worktree of its own — no branch is cut and its work stays loose in the checkout. Refused on every other kind.",
 				},
 			},
 			"required": []any{"kind", "description"},

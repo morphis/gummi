@@ -80,6 +80,13 @@ type Input struct {
 	// profile.
 	SessionBackend string
 	SessionModel   string
+	// MainCheckout mints a freeform card whose session runs in the
+	// repository's main checkout instead of a worktree of its own
+	// (DESIGN §19): no branch is cut, no worktree is created. Refused on
+	// every other kind, and incompatible with Adopt (an adopted card
+	// walks the whole workflow; a main-checkout card has no branch to
+	// walk any of it on). False is every card minted before it existed.
+	MainCheckout bool
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
 	Repo string
@@ -310,6 +317,14 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if in.Kind == domain.KindFreeform && in.Goal != "" {
 		return domain.Feature{}, fmt.Errorf("goal %s cannot hold a freeform card: a goal conducts cards through the workflow, and a freeform card is not in it", in.Goal)
 	}
+	// MainCheckout is the freeform kind's own opt-out, and nothing else
+	// has a use for it: every other kind exists to end as a branch.
+	if in.MainCheckout && in.Kind != domain.KindFreeform {
+		return domain.Feature{}, fmt.Errorf("main_checkout is a freeform card's: a %s runs in its own branch worktree", in.Kind)
+	}
+	if in.MainCheckout && in.Adopt != "" {
+		return domain.Feature{}, fmt.Errorf("a card running in the main checkout cannot adopt %s: it has no branch of its own to leave behind", in.Adopt)
+	}
 	// The branch name a card gets no longer carries its id, so two cards
 	// whose titles slugify the same would want the same ref. Refuse here,
 	// before a sequence number is spent and before a card exists that
@@ -320,7 +335,9 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	// cards, for the opposite reason — their branch name does not come
 	// from the slug at all, so two of them may slugify alike without ever
 	// wanting the same ref. What they need instead is the same uniqueness
-	// question asked about the ref itself, which adoptedWork does.
+	// question asked about the ref itself, which adoptedWork does. A
+	// main-checkout freeform card cuts no branch either, so no slug can
+	// collide on one.
 	var inherited domain.AdoptedWork
 	switch {
 	case in.Adopt != "":
@@ -329,6 +346,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 			return domain.Feature{}, aerr
 		}
 		inherited = w
+	case in.MainCheckout:
 	case in.Kind != domain.KindResearch:
 		free, terr := freeSlug(ctx, store, in, slug)
 		if terr != nil {
@@ -364,6 +382,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		Slug: slug, Stage: workflow.InitialFor(in.Kind),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		SessionBackend: in.SessionBackend, SessionModel: in.SessionModel,
+		MainCheckout: in.MainCheckout,
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
 		Base: in.Base,

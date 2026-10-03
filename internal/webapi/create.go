@@ -44,6 +44,12 @@ type CreateCardRequest struct {
 	// kind: a stage takes its agent from the card's profile.
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
+	// MainCheckout is a freeform kind's "runs in" choice: a session that
+	// works in the repository's main checkout instead of a worktree of
+	// its own (DESIGN §19) — no branch cut, no worktree created. Refused
+	// on every other kind, and with Base or StackOn set: a main-checkout
+	// session has no branch to fork from or stack onto.
+	MainCheckout bool `json:"mainCheckout,omitempty"`
 	// Attachments are the ids of images (already uploaded via POST
 	// /api/attachments) to link into the card's seeded description —
 	// stored by reference, so every later stage that reads the spec sees

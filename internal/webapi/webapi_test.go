@@ -99,7 +99,10 @@ func TestAttachmentShapes(t *testing.T) {
 		Ref:  AttachmentRef{ID: "ab12ef34", Name: "shot.png", MediaType: "image/png", Size: 4096},
 		Send: SendRequest{Text: "look at this", Attachments: []string{"ab12ef34"}},
 		CreateCard: CreateCardRequest{
-			Kind: "feature", Title: "Dark mode", Attachments: []string{"ab12ef34"},
+			Kind: "freeform", Title: "Dark mode", Attachments: []string{"ab12ef34"},
+			// the session's "runs in" choice: the main checkout, without a
+			// branch or worktree (DESIGN §19)
+			MainCheckout: true,
 		},
 		SpecNote: SpecNoteRequest{Line: 3, Text: "see the mock", Attachments: []string{"ab12ef34"}},
 		Composer: Composer{Says: "steers the implementer mid-turn", Route: RouteSteer, Images: true},

@@ -163,6 +163,14 @@ func (m *Manager) RemoveScratch(ctx context.Context, f *domain.Feature) error {
 // worktree — engine, driver, TUI alike — gets that for free without
 // knowing adoption exists.
 func (m *Manager) Ensure(ctx context.Context, f *domain.Feature) (string, error) {
+	// A main-checkout card was minted to do without the tree this would
+	// cut: no branch, no worktree, its turns loose in the checkout (DESIGN
+	// §19). Refusing here is the floor under the engine's own routing of
+	// such a card away from this seam — any caller that reaches Ensure for
+	// one has lost track of what the card is.
+	if f.MainCheckout {
+		return "", fmt.Errorf("%s runs in the main checkout: it has no worktree to ensure", f.ID)
+	}
 	p, _, err := m.featurePaths(f)
 	if err != nil {
 		return "", err

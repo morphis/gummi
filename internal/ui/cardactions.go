@@ -418,7 +418,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts go to an agent)", false,
-			needsWT,
+			needsWT && !r.F.MainCheckout,
 		},
 		// The third ending, offered only at verify like merge: hand-off
 		// CLOSES the card. There is nothing to close before the work is finished —
@@ -429,8 +429,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// finished", and on a freeform card only the person can say
 			// when that is — there is no verify to have passed.
 			"handoff", "h", "hand off", handOffHelp, false,
-			// never while a freeform turn is writing the branch it keeps
-			needsWT && r.HasWorktree && !r.Landed && (in.stage == domain.StageVerify || freeform) && !in.freeformBusy,
+			// never while a freeform turn is writing the branch it keeps.
+			// A main-checkout session has no worktree row to require: the
+			// work it keeps is loose in the checkout, and that is what the
+			// confirm names.
+			((needsWT && r.HasWorktree) || (freeform && in.mainCheckout)) &&
+				!r.Landed && (in.stage == domain.StageVerify || freeform) && !in.freeformBusy,
 		},
 		{
 			// offered where a landing may happen (merge.go's

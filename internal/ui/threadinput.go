@@ -114,6 +114,11 @@ func composerPlaceholder(k domain.Kind) string {
 // a landing, so those are what it names.
 const freeformPlaceholderText = "say what to do next — it works in this card's branch; alt+d to review, m to land"
 
+// freeformMainPlaceholderText is the same promise for a session minted
+// into the main checkout: there is no branch to land, so the line names
+// what the work actually is there — loose, until the person commits it.
+const freeformMainPlaceholderText = "say what to do next — it works in the main checkout, uncommitted; alt+d to review the loose changes"
+
 // drivenAbroadPlaceholderText is the composer's placeholder on a card
 // another gummi process is driving: no verb vocabulary reaches it (this
 // is the one row where every line is consult prose, implicitly and
@@ -1285,6 +1290,8 @@ func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
 	} else if r.conducted() {
 		m.threadInput.Placeholder = fmt.Sprintf(conductedPlaceholderText, goalDriver(r.F.GoalID), r.F.GoalID)
+	} else if r.F.IsFreeform() && r.F.MainCheckout {
+		m.threadInput.Placeholder = freeformMainPlaceholderText
 	} else {
 		// up reaches the inventory whether or not a decision is pinned
 		// above the line (F11), so the placeholder no longer has to pick

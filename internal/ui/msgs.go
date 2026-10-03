@@ -498,6 +498,11 @@ type formResult struct {
 	// draft sets them today.
 	SessionBackend string
 	SessionModel   string
+	// MainCheckout is the freeform kind's "runs in" choice: a session that
+	// works in the repository's main checkout instead of a worktree of its
+	// own — no branch cut, no worktree created (DESIGN §19). Refused at
+	// the mint on every other kind.
+	MainCheckout bool
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
@@ -560,6 +565,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
+			MainCheckout: res.MainCheckout,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}

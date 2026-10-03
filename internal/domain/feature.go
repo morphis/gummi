@@ -337,6 +337,16 @@ type Feature struct {
 	// fact of the data and not a convention of the readers.
 	SessionBackend string
 	SessionModel   string
+	// MainCheckout marks a freeform card whose session runs in the
+	// repository's main checkout instead of a worktree of its own (DESIGN
+	// §19): no branch is cut, no worktree is created, and its turns write
+	// straight into the checkout the person works in. It is mint-time-only
+	// and freeform-only — Validate refuses it on every other kind, and on
+	// a freeform card that carries a base, a branch or a stack position,
+	// all of which name a branch such a card does not have. Landing is
+	// not a thing it does: there is no branch to squash, its work stays
+	// loose in the checkout, and the person commits what they keep.
+	MainCheckout bool
 	// GateApproval is who crosses this card's gates on an unattended
 	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
@@ -939,6 +949,24 @@ func (f *Feature) Validate() error {
 	}
 	if (f.SessionBackend != "" || f.SessionModel != "") && f.kind() != KindFreeform {
 		return fmt.Errorf("feature %s: a %s takes its agents from its profile, not a session model", f.ID, f.kind())
+	}
+	// MainCheckout is a freeform-only property, and a main-checkout card
+	// has no branch to name: a base, a carried branch or a stack position
+	// on one is a mint that lost track of what it was making, and a reader
+	// of the row should not have to know to ignore any of the three.
+	if f.MainCheckout {
+		if f.kind() != KindFreeform {
+			return fmt.Errorf("feature %s: main checkout is a freeform card's, not a %s's", f.ID, f.kind())
+		}
+		if f.Base != "" {
+			return fmt.Errorf("feature %s: a main-checkout card forks from no branch, but names base %q", f.ID, f.Base)
+		}
+		if f.Branch != "" {
+			return fmt.Errorf("feature %s: a main-checkout card holds no branch, but carries %q", f.ID, f.Branch)
+		}
+		if f.StackID != "" {
+			return fmt.Errorf("feature %s: a main-checkout card has no branch to stack", f.ID)
+		}
 	}
 	if f.Budget.Envelope < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)

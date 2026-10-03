@@ -2115,6 +2115,16 @@ func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift boo
 		}
 		return scratch, artifact, nil
 	}
+	// A freeform card minted into the main checkout has no worktree to
+	// ensure and no branch to cut: its working directory is the managed
+	// checkout itself, shared with everything the person has there. That
+	// is the choice its mint recorded — no branch, no worktree, no
+	// protection (DESIGN §19) — so none of what follows applies to it:
+	// there is no fork point to drift, and nothing here may create the
+	// tree the card was minted to do without.
+	if f.IsFreeform() && f.MainCheckout {
+		return wt.RepoRoot(), "", nil
+	}
 	// Every feature and bug stage — design and work alike — runs in the
 	// card's own branch worktree, allocated here on its first stage run
 	// and kept for the card's whole life. There is no scratch tree and no

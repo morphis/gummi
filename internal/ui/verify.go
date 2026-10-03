@@ -130,6 +130,21 @@ func branchVerbRefusal(r featureRow, verb string) *noticeMsg {
 	if r.F.Kind == domain.KindResearch {
 		return &noticeMsg{text: string(r.F.ID) + ": no " + verb + " — research cards carry no branch"}
 	}
+	// A main-checkout session holds no branch and no worktree by mint
+	// (DESIGN §19) — but the work it keeps is loose in the checkout, so
+	// reading the diff and ending the card still mean something there,
+	// while every branch verb gets the reason that is actually true
+	// rather than "created when you approve the spec", which never will
+	// be for one of these.
+	if r.F.MainCheckout {
+		switch verb {
+		case "diff", "hand-off":
+			return nil
+		case "attach":
+			return &noticeMsg{text: string(r.F.ID) + ": no attach — it runs in the main checkout, with no worktree to attach into", isErr: true}
+		}
+		return &noticeMsg{text: string(r.F.ID) + ": no " + verb + " — it runs in the main checkout and holds no branch", isErr: true}
+	}
 	if !r.HasWorktree {
 		return &noticeMsg{text: noWorktreeYet(r.F), isErr: true}
 	}

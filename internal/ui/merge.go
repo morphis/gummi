@@ -79,6 +79,9 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 		if !ok {
 			return ""
 		}
+		if f.MainCheckout {
+			return string(f.ID) + " runs in the main checkout — there is no branch to land; commit your work there yourself, then hand the card off"
+		}
 		if m.freeformTurnBusy(r) {
 			return string(f.ID) + ": a turn is in flight — stop it, or let it finish, before landing"
 		}

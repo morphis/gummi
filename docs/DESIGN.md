@@ -3632,6 +3632,33 @@ made on purpose, a step this card's other floor (every commit is
 intentional) leaves to the person and git. Not mid-turn, and not over an
 open question.
 
+### 19.3b Where a session works: the main checkout
+
+The worktree is the default, not the requirement. A freeform card may be
+minted **into the main checkout** (`Feature.MainCheckout`) — the `n`
+dialog's "runs in" row, the web draft's toggle, `card_new`'s
+`main_checkout` — for a session that runs directly in the repository's
+managed checkout: no branch is cut, no worktree is created, and its turns
+write beside everything else the person has there. It is the person
+opting out of the isolation, deliberately and at mint, not a card that
+lost its tree.
+
+What such a card does not have, it does not pretend to have. There is no
+branch to land, so the landing floor refuses (`landingRefusalIn`) and the
+headless `merge` verb refuses with it; the person commits what they keep,
+in their own checkout, on their own branch. `CommitFreeform` refuses too —
+sweeping the checkout's loose work into a commit is not this card's to
+do. Hand-off is the ending that works: it closes the card and keeps the
+loose work exactly where it is, committing nothing. What replaces the
+diff is the same surface read against the checkout itself: the diff
+family anchors at the checkout's `HEAD` (`Manager.diffBase`), so the
+loose tracked work is what it describes, and a commit the person makes
+mid-session — or a squash-merge another card lands while the session
+runs — never rides into it. `Validate` holds the invariants (freeform
+only, and no base, no branch, no stack position), and `Manager.Ensure`
+refuses to cut the tree the card was minted to do without, whatever
+caller reaches it.
+
 ### 19.4 The review loop
 
 A freeform card is the **simplest consumer** of the diff-review machinery
@@ -3659,6 +3686,10 @@ stop an *unattended* loop from spinning, and here the person is the loop.
 - **Be driven.** `run`/`resume` drive stages. The refusal is explicit
   rather than inherited from `Terminal`, which would otherwise report a
   card that is very much open as done.
+- **Stack, when it runs in the main checkout.** A stack position says a
+  branch forks from a branch (§18.1), and a main-checkout session holds
+  no branch of its own — `Validate` refuses the combination, and the
+  creation surfaces never offer the rows together.
 
 ### 19.6 The board
 

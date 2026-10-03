@@ -512,6 +512,13 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	if f.IsGoal() {
 		return d.mergeGoal(ctx, f, message)
 	}
+	// A main-checkout freeform card holds no branch: there is nothing to
+	// squash and nothing this command could do to its work, which lives
+	// loose in the checkout the person works in.
+	if f.IsFreeform() && f.MainCheckout {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s runs in the main checkout and holds no branch — there is nothing to land; commit your work there and hand the card off", id))
+	}
 	wt, err := d.eng.WorktreesFor(ctx, &f)
 	if err != nil {
 		return d.fail(ctx, string(id), err)

@@ -429,9 +429,13 @@ on anything but loopback. See
 rather than a form. You pick the repository, base and budget in the
 composer, and the model beside Send. The first message you send starts it.
 A session is a freeform card: one agent in its own worktree, with no
-stages and no gates, and it lands on your read of its diff. It runs on
-any model an installed agent offers (claude, codex, copilot, opencode, pi,
-or a headless command). The picker suggests the models your profiles
+stages and no gates, and it lands on your read of its diff. Flip the
+draft's **runs in** toggle to work in the main checkout instead — no
+branch, no worktree, its changes left uncommitted for you to commit; such
+a session never lands through gummi, it just hands off when you are done
+([DESIGN §19.3b](docs/DESIGN.md#193b-where-a-session-works-the-main-checkout)).
+It runs on any model an installed agent offers (claude, codex, copilot,
+opencode, pi, or a headless command). The picker suggests the models your profiles
 already use and takes any id you type. Switching models mid-session keeps
 the conversation. When the work turns out to need a design, **Write a
 spec** in the session's head continues it as a feature: its branch is cut

@@ -111,6 +111,11 @@ type nextInput struct {
 	// goal is a goal card's report, nil for every other card: a goal's
 	// verify pass is a hand-over whose sentence names what was met
 	goal *engine.GoalReport
+	// mainCheckout is a freeform card minted into the main checkout: no
+	// branch, no worktree, its turns loose in the checkout the person
+	// works in (DESIGN §19). It is what the answer set reads instead of
+	// hasWorktree — which is false for such a card by definition.
+	mainCheckout bool
 	// hasWorktree is whether the card's worktree exists on disk right
 	// now — the same question cardactions' own attach row asks, and the
 	// only thing that makes attaching a raw agent CLI possible.
@@ -468,6 +473,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		kind:             r.F.Kind,
 		goal:             r.Goal,
 		landed:           r.Landed,
+		mainCheckout:     r.F.MainCheckout,
 		hasWorktree:      r.HasWorktree,
 		reviewRound:      m.round(r.F.ID, domain.RoundKindReview),
 		verifyBounces:    verifyBounces(r.History),
@@ -1024,6 +1030,18 @@ func stageAnswers(in nextInput) []nextAction {
 		// land — the composer's placeholder is what says how to start, and
 		// a row offering to land an empty branch would be a row that
 		// refuses.
+		// A session minted into the main checkout: there is a diff to read
+		// (the loose work in the checkout) and an ending (hand-off keeps
+		// it, loose, for the person to commit) — but no landing, because
+		// there is no branch to squash. Offering one would be offering the
+		// refusal the floor answers with.
+		if in.mainCheckout {
+			return []nextAction{
+				nextStep("diff", "d", "read the diff", "what the session has left loose in the main checkout"),
+				nextStep("handoff", "h", "hand off",
+					"close the card — its work stays loose in the main checkout, yours to commit"),
+			}
+		}
 		if !in.hasWorktree {
 			return nil
 		}

@@ -70,27 +70,36 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 	// the base did since the fork is theirs to reconcile before they push,
 	// and the confirm says so. Refusing would offer exactly two exits, a
 	// rebase and a delete, neither of which is the verb they chose.
-	wt, err := e.mgr(ctx, &f)
-	if err != nil {
-		return AdvanceResult{}, err
-	}
-	if landed, err := landedOrDrifted(ctx, wt, &f); err != nil {
-		return AdvanceResult{}, err
-	} else if landed {
-		// the branch it landed on, not the literal "main": a card of a goal
-		// lands on the goal branch, and a `master` repo has never been
-		// called main.
-		return AdvanceResult{}, fmt.Errorf("%s already landed on %s — there is nothing to hand off", id, wt.BaseBranch(ctx))
-	}
-
-	if exists, err := wt.Exists(ctx, &f); err != nil {
-		return AdvanceResult{}, err
-	} else if exists {
-		// AsIs: the ordinary checkpoint refuses on fork drift, to keep a
-		// landing coherent. Nothing lands here, and the loose work would
-		// otherwise be lost with the branch the person is about to take.
-		if _, err := wt.CommitAllAsIs(ctx, &f, string(id)+": final checkpoint"); err != nil {
+	//
+	// A main-checkout freeform card has no branch and no worktree, so
+	// neither the landed check nor the checkpoint applies: its loose work
+	// is in the person's checkout and stays there whatever happens here,
+	// and committing it would sweep in whatever else the checkout holds —
+	// not gummi's call, on a card minted to have no protection at all.
+	mainCheckout := f.IsFreeform() && f.MainCheckout
+	if !mainCheckout {
+		wt, err := e.mgr(ctx, &f)
+		if err != nil {
 			return AdvanceResult{}, err
+		}
+		if landed, err := landedOrDrifted(ctx, wt, &f); err != nil {
+			return AdvanceResult{}, err
+		} else if landed {
+			// the branch it landed on, not the literal "main": a card of a goal
+			// lands on the goal branch, and a `master` repo has never been
+			// called main.
+			return AdvanceResult{}, fmt.Errorf("%s already landed on %s — there is nothing to hand off", id, wt.BaseBranch(ctx))
+		}
+
+		if exists, err := wt.Exists(ctx, &f); err != nil {
+			return AdvanceResult{}, err
+		} else if exists {
+			// AsIs: the ordinary checkpoint refuses on fork drift, to keep a
+			// landing coherent. Nothing lands here, and the loose work would
+			// otherwise be lost with the branch the person is about to take.
+			if _, err := wt.CommitAllAsIs(ctx, &f, string(id)+": final checkpoint"); err != nil {
+				return AdvanceResult{}, err
+			}
 		}
 	}
 

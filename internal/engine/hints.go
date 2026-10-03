@@ -1369,6 +1369,48 @@ func freeformContractHint(f domain.Feature, workDir string) string {
 	if f.OneLiner != "" {
 		brief += "\n\n" + f.OneLiner
 	}
+	// Where the session stands is the one thing the two shapes disagree
+	// about: a worktree card has a boundary to keep, a main-checkout card
+	// IS the boundary everyone shares. Everything after the directory
+	// paragraph is shared, because the conversation — the record, the
+	// steering, the person — is the same in both.
+	steering := `The person is in this conversation with you. They will steer you two
+ways: prose, and comments anchored to specific lines of your diff. The
+second arrives as a list of file/line comments to address — make the
+edits, keep the change minimal, and mark each one resolved as you go.
+Their unresolved comments are what holds this card from landing, so
+resolving them is finishing the work, not bookkeeping.
+
+When the work is done, say so plainly rather than looking for something
+else to improve: they decide when this lands.`
+	if f.MainCheckout {
+		return fmt.Sprintf(`You are working on %s, a freeform card: a coding task with no workflow
+around it. There is no design document, no plan to write, no review gate
+and no verdict to emit — the conversation you are in is the whole of the
+record, so say what you did and what you did not in it.
+
+What this card was opened for, in the words it was asked in. The
+conversation may well have moved on from it; this is what it started as,
+and it is here so you still have it after a restart:
+
+%s
+
+Your working directory is the repository's main checkout:
+
+  %s
+
+This card has no branch and no worktree of its own: it writes directly
+in the checkout the person works in, with none of the isolation a card's
+own worktree gives — that is what this card was opened for, so do not
+work around it. Nothing is committed for you: leave what a turn wrote
+uncommitted unless the person asks for a commit. What becomes a commit,
+and on which branch, is theirs to decide — gummi neither commits nor
+lands for this card, and what you leave loose stays in the checkout for
+the next turn.
+
+%s`,
+			f.ID, indentBlock(brief, "  "), workDir, steering)
+	}
 	return fmt.Sprintf(`You are working on %s, a freeform card: a coding task with no workflow
 around it. There is no design document, no plan to write, no review gate
 and no verdict to emit — the conversation you are in is the whole of the
@@ -1392,16 +1434,8 @@ the work reaches a point worth keeping, with a message that describes
 the change — never just because a turn is ending. What you leave
 uncommitted stays in the worktree for the next turn.
 
-The person is in this conversation with you. They will steer you two
-ways: prose, and comments anchored to specific lines of your diff. The
-second arrives as a list of file/line comments to address — make the
-edits, keep the change minimal, and mark each one resolved as you go.
-Their unresolved comments are what holds this card from landing, so
-resolving them is finishing the work, not bookkeeping.
-
-When the work is done, say so plainly rather than looking for something
-else to improve: they decide when this lands.`,
-		f.ID, indentBlock(brief, "  "), f.BranchName(), workDir)
+%s`,
+		f.ID, indentBlock(brief, "  "), f.BranchName(), workDir, steering)
 }
 
 // indentBlock prefixes every line of text with pad. It exists so a card's

@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS features (
 	stack_id        TEXT NOT NULL DEFAULT '',
 	stack_pos       INTEGER NOT NULL DEFAULT 0,
 	session_backend TEXT NOT NULL DEFAULT '',
-	session_model   TEXT NOT NULL DEFAULT ''
+	session_model   TEXT NOT NULL DEFAULT '',
+	main_checkout   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 -- features_stack is created by the column migrations, not here: this
@@ -760,6 +761,10 @@ var migrations = []string{
 	// which is what every row written before the columns existed ran on.
 	`ALTER TABLE features ADD COLUMN session_backend TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN session_model TEXT NOT NULL DEFAULT ''`,
+	// A freeform card whose session runs in the main checkout instead of
+	// its own worktree (DESIGN §19). Empty (0) is every row written
+	// before the column existed, and every card that works in a worktree.
+	`ALTER TABLE features ADD COLUMN main_checkout INTEGER NOT NULL DEFAULT 0`,
 	// A user turn's attachment refs (JSON-encoded []SessionMessage.Images),
 	// so an uploaded image survives a restart with the transcript entry it
 	// was sent on. Empty decodes to no images — every row written before
@@ -802,8 +807,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
-			session_backend, session_model)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			session_backend, session_model, main_checkout)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -817,7 +822,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
-		f.SessionBackend, f.SessionModel)
+		f.SessionBackend, f.SessionModel, f.MainCheckout)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -843,7 +848,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
-	session_backend, session_model`
+	session_backend, session_model, main_checkout`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -884,7 +889,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
-		&f.SessionBackend, &f.SessionModel)
+		&f.SessionBackend, &f.SessionModel, &f.MainCheckout)
 	if err != nil {
 		return f, err
 	}

@@ -51,7 +51,7 @@ export async function newSession () {
   const known = form
   const draftOf = (f) => {
     const d = f?.sessions?.default || {}
-    return { repo: f?.repos?.[0] || '', base: '', envelope: f?.envelope || 0, backend: d.backend || '', model: d.model || '' }
+    return { repo: f?.repos?.[0] || '', base: '', envelope: f?.envelope || 0, backend: d.backend || '', model: d.model || '', mainCheckout: false }
   }
   set({
     sel: null,
@@ -74,6 +74,7 @@ function pickedOnly (d) {
   const out = {}
   for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
   if (d.envelope) out.envelope = d.envelope
+  if (d.mainCheckout) out.mainCheckout = true
   return out
 }
 
@@ -84,7 +85,8 @@ export async function startSession (text) {
   const d = state.sessionDraft
   const req = { kind: 'freeform', description: text, backend: d.backend, model: d.model, envelope: d.envelope }
   if (d.repo) req.repo = d.repo
-  if (d.base) req.base = d.base
+  if (d.mainCheckout) req.mainCheckout = true
+  else if (d.base) req.base = d.base
   const c = await post('/api/cards', req)
   set({ sessionDraft: null })
   await ctx.refreshBoard?.()
@@ -107,7 +109,7 @@ export function draftHead () {
       h('div', { class: 'head-actions' },
         h('button', { class: 'btn', type: 'button', testid: 'draft-cancel', onclick: cancelDraft }, 'Cancel'))),
     h('div', { class: 'subline' },
-      h('span', null, d.repo || state.board?.repo || 'this repository', d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree'),
+      h('span', null, d.repo || state.board?.repo || 'this repository', d.mainCheckout ? ' · the main checkout' : (d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree')),
       h('span', null, `budget ${d.envelope || '∞'} cr`))
   ]
 }
@@ -173,12 +175,19 @@ function render () {
       }, repos.map(r => h('option', { value: r, selected: r === d.repo }, r)))))
   }
   const branches = form?.branches || []
-  row.append(h('label', { class: 'dsel' }, h('span', { class: 'lbl' }, 'from'),
-    h('select', {
-      testid: 'draft-base', 'aria-label': 'Branch the session forks from',
-      onchange: (e) => set({ sessionDraft: { ...state.sessionDraft, base: e.target.value } })
-    }, h('option', { value: '', selected: !d.base }, 'the default branch'), branches.map(b => h('option', { value: b, selected: b === d.base }, b)))))
-  row.append(h('span', { class: 'dnote-s' }, 'new worktree'))
+  row.append(h('button', {
+    class: 'dsel dbtn', type: 'button', testid: 'draft-main',
+    title: d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
+    onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout, base: '' } })
+  }, d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
+  if (!d.mainCheckout) {
+    row.append(h('label', { class: 'dsel' }, h('span', { class: 'lbl' }, 'from'),
+      h('select', {
+        testid: 'draft-base', 'aria-label': 'Branch the session forks from',
+        onchange: (e) => set({ sessionDraft: { ...state.sessionDraft, base: e.target.value } })
+      }, h('option', { value: '', selected: !d.base }, 'the default branch'), branches.map(b => h('option', { value: b, selected: b === d.base }, b)))))
+    row.append(h('span', { class: 'dnote-s' }, 'new worktree'))
+  }
   const bud = h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-budget', 'aria-haspopup': 'dialog',
     onclick: () => (pop?.kind === 'budget' ? closePop() : openBudget(bud))

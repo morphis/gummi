@@ -12,8 +12,9 @@
     ]
   },
   "CreateCard": {
-    "kind": "feature",
+    "kind": "freeform",
     "title": "Dark mode",
+    "mainCheckout": true,
     "attachments": [
       "ab12ef34"
     ]

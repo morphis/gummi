@@ -104,6 +104,14 @@ type cardForm struct {
 	// when the candidate list would not otherwise carry it.
 	stackOffer domain.FeatureID
 
+	// mainCheckout is the freeform kind's "runs in" choice: the session
+	// works in the repository's main checkout instead of its own worktree
+	// — no branch cut, no worktree created, nothing isolated. Selecting
+	// it clears the fork-from and stack rows, which name a branch such a
+	// session does not have; moving the kind row off freeform clears it,
+	// because the row that sets it goes with the kind.
+	mainCheckout bool
+
 	// expanded shows the run options as rows instead of one readout line.
 	expanded bool
 
@@ -197,6 +205,7 @@ const (
 	cardStopProfile
 	cardStopSeverity
 	cardStopAfter
+	cardStopWhere
 	cardStopBase
 	cardStopAdopt
 	cardStopStack
@@ -287,7 +296,8 @@ func cardPlaceholderFor(c domain.CardType) string {
 	case domain.KindFreeform:
 		return "Say what you want done. The first line is the title.\n\n" +
 			"  it starts working in this card's own branch straight away —\n" +
-			"  no plan, no gates: you read the diff and land it when it's right"
+			"  no plan, no gates: you read the diff and land it when it's right\n" +
+			"  alt+o: runs in the main checkout, without a branch or worktree"
 	default: // domain.KindFeature
 		return head + "  ## Acceptance seeds the verification plan"
 	}
@@ -340,7 +350,13 @@ func (d *cardForm) stops() []int {
 			s = append(s, cardStopSeverity)
 		}
 		s = append(s, cardStopAfter)
-		if len(d.baseCands) > 1 {
+		if d.ct.Kind == domain.KindFreeform {
+			// the one choice only a session makes: where it works. A card
+			// in the workflow exists to end as a branch, so it is never
+			// asked.
+			s = append(s, cardStopWhere)
+		}
+		if len(d.baseCands) > 1 && !d.mainCheckout {
 			s = append(s, cardStopBase)
 		}
 		if d.asksAdopt() {
@@ -414,6 +430,10 @@ func (d *cardForm) setFocus(f int) {
 func (d *cardForm) setKind(c domain.CardType) {
 	d.ct = c
 	d.text.Placeholder = cardPlaceholderFor(c)
+	if c.Kind != domain.KindFreeform {
+		// the where row goes with the kind; so does the choice it holds
+		d.mainCheckout = false
+	}
 	if d.focus == cardStopSeverity && c.Kind != domain.KindBug {
 		d.setFocus(cardStopAfter)
 	}
@@ -573,6 +593,12 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case cardStopAfter:
 		if !d.handleAfterKey(key) {
 			// enter with nothing to add is enter: create
+			return d.submit(false)
+		}
+	case cardStopWhere:
+		if delta, ok := selectCycleDelta(k); ok {
+			d.cycleWhere(delta)
+		} else if k == "enter" {
 			return d.submit(false)
 		}
 	case cardStopBase:
@@ -850,12 +876,22 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		}
 		env = &n
 	}
+	if d.mainCheckout && d.stackOnto != "" {
+		// unreachable through the row itself — cycleWhere cleared it — but
+		// a preset (the T gesture) or a web fill could have set both: the
+		// refusal names the row rather than minting a card the store would
+		// reject at Validate.
+		d.errText = "a session in the main checkout has no branch to stack on — clear the stack row"
+		d.setFocus(cardStopStack)
+		return false, nil
+	}
 	res := formResult{
 		Kind: d.ct.Kind, Mode: d.ct.Mode, Desc: desc, Profile: d.profiles[d.profile], Envelope: env,
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start: start, FromPicker: d.fromPicker,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
+		MainCheckout: d.mainCheckout,
 	}
 	if d.ct.Kind == domain.KindBug {
 		res.Severity = bugSeverityChoices[d.sev]
@@ -1212,6 +1248,9 @@ func (d *cardForm) becomesLine(s *theme.Styles) string {
 	if from := d.forkFrom(); from != "" {
 		out += s.Faint.Render(" · from ") + from
 	}
+	if d.mainCheckout {
+		out += " · in the main checkout"
+	}
 	if d.ct.Kind == domain.KindBug && bugSeverityChoices[d.sev] != "" {
 		out += " · severity " + string(bugSeverityChoices[d.sev])
 		if d.imported != nil && d.imported.prop.Severity == bugSeverityChoices[d.sev] {
@@ -1238,6 +1277,9 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 	}
 	if st := d.stackSummary(); st != "" {
 		out += " · " + st
+	}
+	if d.mainCheckout {
+		out += " · in the main checkout"
 	}
 	if d.base != "" {
 		out += " · on " + d.base
@@ -1303,10 +1345,17 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 	if d.focus == cardStopAfter {
 		rows = append(rows, d.afterListRows(s, width)...)
 	}
+	if d.ct.Kind == domain.KindFreeform {
+		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopWhere, "runs in"), optionLabelW,
+			choiceCells(s, d.focus == cardStopWhere, d.whereChoices(), d.whereIdx(), "", false),
+			d.whereIdx(), width, maxLines)...)
+	}
 	// The base row appears only when there is a choice to make: a repo
 	// with one branch has nothing to offer, and an unanswerable row is
-	// a tab stop that teaches nothing.
-	if len(d.baseCands) > 1 {
+	// a tab stop that teaches nothing. A session in the main checkout
+	// forks from no branch, so the row has nothing to ask even when the
+	// repository could offer one.
+	if len(d.baseCands) > 1 && !d.mainCheckout {
 		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopBase, "forks from"), optionLabelW,
 			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
 			d.baseIdx(), width, maxLines)...)
@@ -1526,6 +1575,8 @@ func (d *cardForm) hint() string {
 		return "←/→ choose the severity · alt+o collapse · tab next · esc cancel"
 	case cardStopAfter:
 		return "type to filter · ↑/↓ move · enter add · backspace remove last · alt+o collapse · tab next · esc cancel"
+	case cardStopWhere:
+		return "←/→ choose where the session works · alt+o collapse · tab next · esc cancel"
 	case cardStopBase:
 		return "←/→ choose the branch it forks from · alt+o collapse · tab next · esc cancel"
 	case cardStopAdopt:
@@ -1606,10 +1657,11 @@ func (d *cardForm) asksAdopt() bool {
 }
 
 // asksStack is whether the stack row is worth a tab stop: a research
-// card has no branch of its own to fork, and a goal's cards share the
-// goal's branch rather than stacking (DESIGN §18.5).
+// card has no branch of its own to fork, a goal's cards share the goal's
+// branch rather than stacking (DESIGN §18.5), and a session running in
+// the main checkout holds no branch to be stacked onto.
 func (d *cardForm) asksStack() bool {
-	return d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindGoal
+	return d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindGoal && !d.mainCheckout
 }
 
 // stackVisible is the row's cycle: the chosen repository's cards, since
@@ -1707,6 +1759,9 @@ func sortStackCands(c []stackCand) {
 // card's branch comes from, empty when it is the plain default (the
 // checkout's HEAD, unstacked) and there is nothing to say.
 func (d *cardForm) forkFrom() string {
+	if d.mainCheckout {
+		return ""
+	}
 	if d.stackOnto != "" {
 		return string(d.stackOnto) + "'s branch"
 	}
@@ -1784,6 +1839,38 @@ func (d *cardForm) cycleAdopt(dir int) {
 		return
 	}
 	d.adopt = choices[i]
+}
+
+// whereChoices is the "runs in" row's cells: the card's own worktree,
+// which is what nearly every session wants and what every card minted
+// before the choice existed got, then the main checkout.
+func (d *cardForm) whereChoices() []string {
+	return []string{"its own worktree", "the main checkout"}
+}
+
+// whereIdx is the selected cell of whereChoices.
+func (d *cardForm) whereIdx() int {
+	if d.mainCheckout {
+		return 1
+	}
+	return 0
+}
+
+// cycleWhere moves the "runs in" row. The main checkout has no branch,
+// so moving onto it clears the fork-from and stack rows — a base or a
+// card to stack on names a branch this session will never have, and the
+// readouts above stop showing them the same frame. Moving back restores
+// nothing: the rows open on their defaults, as a fresh form would.
+func (d *cardForm) cycleWhere(dir int) {
+	i := (d.whereIdx() + dir) % 2
+	if i < 0 {
+		i += 2
+	}
+	d.mainCheckout = i == 1
+	if d.mainCheckout {
+		d.base = ""
+		d.stackOnto, d.stackLabel, d.stackInto = "", "", ""
+	}
 }
 
 // cycleBase moves the base row by dir over baseChoices.

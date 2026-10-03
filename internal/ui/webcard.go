@@ -501,11 +501,21 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 		// role, so its menu switches the model instead (DESIGN §19.8)
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
 			list = append(list,
-				cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"},
+				cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"})
+			if !r.F.MainCheckout {
 				// listed only while the worktree holds something to commit:
-				// Bridge.Card drops it off the loop when it does not
-				cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — gummi never commits a session's work on its own"},
-				cardAction{id: "writespec", label: "write a spec", why: "continue this work as a feature: the profile's architect plans it from this conversation and the branch so far, and it lands on a verified branch"})
+				// Bridge.Card drops it off the loop when it does not. A
+				// main-checkout session has no branch to commit to, and
+				// sweeping the checkout's loose work into one is not this
+				// card's to do.
+				list = append(list,
+					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — gummi never commits a session's work on its own"})
+			}
+			specWhy := "continue this work as a feature: the profile's architect plans it from this conversation and the branch so far, and it lands on a verified branch"
+			if r.F.MainCheckout {
+				specWhy = "continue this work as a feature: the profile's architect plans it from this conversation, on a branch cut from the checkout as it stands, and it lands on a verified branch"
+			}
+			list = append(list, cardAction{id: "writespec", label: "write a spec", why: specWhy})
 		}
 	} else {
 		list = append(list, m.cardProfileActions()...)
@@ -688,7 +698,7 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 			}
 			return webapi.RouteFreeform, "runs the project's /" + cmd.Name + " (" + cmd.Source + ")"
 		}
-		return webapi.RouteFreeform, "a turn for this card's agent — it works on the branch"
+		return webapi.RouteFreeform, freeformTurnRoute(r)
 	case lineAskAnswer:
 		return webapi.RouteAnswer, "answers the question above, in your words"
 	case lineChat:
@@ -767,12 +777,23 @@ func (m *Shell) projectCommandsPrefixed(r featureRow, word string, limit int) []
 // own session when one is live, its consult session otherwise.
 func (m *Shell) webMessageRoute(r featureRow) (webapi.Route, string) {
 	if r.F.IsFreeform() {
-		return webapi.RouteFreeform, "a turn for this card's agent — it works on the branch"
+		return webapi.RouteFreeform, freeformTurnRoute(r)
 	}
 	if sess := m.sessionFor(r.F.ID); sess.Live() {
 		return webapi.RouteSteer, "goes to the " + string(r.F.Stage) + " agent as its next turn"
 	}
 	return webapi.RouteConsult, "asks the card's consult agent — read-only, never steers"
+}
+
+// freeformTurnRoute says where a freeform turn goes, in the words of the
+// place it works: its own branch, or the main checkout it was minted
+// into (DESIGN §19) — where nothing is committed for it and the work
+// stays loose.
+func freeformTurnRoute(r featureRow) string {
+	if r.F.MainCheckout {
+		return "a turn for this card's agent — it works in the main checkout, uncommitted"
+	}
+	return "a turn for this card's agent — it works on the branch"
 }
 
 // answerTo finds the answer the log holds to the decision ref names — an

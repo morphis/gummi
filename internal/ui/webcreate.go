@@ -119,6 +119,21 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 		}
 		d.sessionBackend, d.sessionModel = req.Backend, strings.TrimSpace(req.Model)
 	}
+	if req.MainCheckout {
+		// the freeform kind's "runs in" choice, refused everywhere else
+		// for the same reason the model pick is: every other kind exists
+		// to end as a branch.
+		if d.ct.Kind != domain.KindFreeform {
+			return "only a session can run in the main checkout — a " + d.ct.Name() + " works in a branch worktree of its own"
+		}
+		if req.Base != "" {
+			return "a session in the main checkout forks from no branch — drop base"
+		}
+		if req.StackOn != "" {
+			return "a session in the main checkout has no branch to stack on — drop stackOn"
+		}
+		d.mainCheckout = true
+	}
 	text := strings.TrimSpace(req.Title)
 	var body []string
 	if s := strings.TrimSpace(req.Description); s != "" {
