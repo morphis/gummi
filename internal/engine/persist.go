@@ -175,7 +175,7 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 			evs = append(evs, toolEvents(snap, m, prefix, i)...)
 			continue
 		}
-		if m.Streaming {
+		if m.Streaming || m.Author == AuthorThinking || m.Author == AuthorTasks {
 			continue
 		}
 		// The echo of an answer the unattended loop took by itself:

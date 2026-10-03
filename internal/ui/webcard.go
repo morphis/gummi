@@ -15,6 +15,7 @@ import (
 
 	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/threadfold"
@@ -609,7 +610,15 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	c := m.classifyThreadLine(r, line, func() *threadDecision { return m.openDecision(r) })
 	route, says := m.webLineRoute(r, line, c)
 	images := m.engine != nil && m.engine.SessionTakesImages(context.Background(), r.F.ID)
-	return webapi.Composer{Route: route, Says: says, Images: images}
+	out := webapi.Composer{Route: route, Says: says, Images: images}
+	// the line as typed: "/review " is a command awaiting its arguments,
+	// not a word still being completed
+	if word, ok := strings.CutPrefix(strings.TrimLeft(text, " \t\n"), "/"); ok {
+		for _, c := range m.projectCommandsPrefixed(r, word, 8) {
+			out.Completions = append(out.Completions, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description})
+		}
+	}
+	return out
 }
 
 // webLineRoute names a classified line's destination in the contract's
@@ -623,6 +632,12 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 	case lineGoalNote:
 		return webapi.RouteGoalNote, "a note for the goal's lead — it reads it next turn"
 	case lineFreeformTurn:
+		if cmd, ok := m.projectCommandFor(r, text); ok {
+			if cmd.Source == "" { // gummi's own /compact, not a file's
+				return webapi.RouteFreeform, "/" + cmd.Name + " — " + cmd.Description
+			}
+			return webapi.RouteFreeform, "runs the project's /" + cmd.Name + " (" + cmd.Source + ")"
+		}
 		return webapi.RouteFreeform, "a turn for this card's agent — it works on the branch"
 	case lineAskAnswer:
 		return webapi.RouteAnswer, "answers the question above, in your words"
@@ -642,6 +657,13 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 	parsed := parseInput(text)
 	switch parsed.Kind {
 	case verbMenu:
+		if cmds := m.projectCommandsPrefixed(r, parsed.Remainder, 5); len(cmds) > 0 {
+			names := make([]string, len(cmds))
+			for i, c := range cmds {
+				names[i] = "/" + c.Name
+			}
+			return webapi.RouteMenu, "opens the card's menu — or finish a project command: " + strings.Join(names, " ")
+		}
 		return webapi.RouteMenu, "opens the card's menu"
 	case verbCommand:
 		if parsed.Verb == "ask" {
@@ -656,6 +678,39 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 		return webapi.RouteVerb, "runs " + parsed.Verb
 	}
 	return m.webMessageRoute(r)
+}
+
+// projectCommandFor is the repository command a freeform card's line
+// invokes, if it invokes one.
+func (m *Shell) projectCommandFor(r featureRow, text string) (engine.ProjectCommand, bool) {
+	if !r.F.IsFreeform() || m.engine == nil {
+		return engine.ProjectCommand{}, false
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	if ff == nil {
+		return engine.ProjectCommand{}, false
+	}
+	c, _, ok := engine.FindProjectCommand(ff.Commands(), text)
+	return c, ok
+}
+
+// projectCommandsPrefixed is each repository command a partly typed word
+// could still become, at most limit of them.
+func (m *Shell) projectCommandsPrefixed(r featureRow, word string, limit int) []engine.ProjectCommand {
+	if !r.F.IsFreeform() || m.engine == nil || strings.ContainsAny(word, " \t\n") {
+		return nil
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	if ff == nil {
+		return nil
+	}
+	var out []engine.ProjectCommand
+	for _, c := range ff.Commands() {
+		if strings.HasPrefix(strings.ToLower(c.Name), strings.ToLower(word)) && len(out) < limit {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // webMessageRoute is where sendThreadMessage delivers prose: the card's

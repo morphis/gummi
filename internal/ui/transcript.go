@@ -8,11 +8,13 @@ package ui
 // requirement of the card, not of the pane that happened to hold it.
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -50,6 +52,13 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 				lines = append(lines, "")
 			}
 			continue
+		}
+		if msg.Author == engine.AuthorThinking {
+			lines = append(lines, thinkingLines(s, msg.Content, w, showOutput)...)
+			continue
+		}
+		if msg.Author == engine.AuthorTasks {
+			continue // pinned below the conversation, not in its flow
 		}
 		var label string
 		style := s.Base
@@ -105,7 +114,88 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		}
 		lines = append(lines, "")
 	}
-	return lines
+	lines = append(lines, taskLines(s, snap.Tasks, w)...)
+	lines = append(lines, watchLines(s, snap.Watches, w)...)
+	return append(lines, queuedLines(s, snap.Queued, w)...)
+}
+
+// queuedLines renders what was said while the agent was mid-turn, waiting
+// to go to it as its next turn; alt+u takes the newest back.
+func queuedLines(s *theme.Styles, queued []string, w int) []string {
+	if len(queued) == 0 {
+		return nil
+	}
+	lines := []string{s.Faint.Render("queued · alt+u takes the last back")}
+	for _, q := range queued {
+		lines = append(lines, "  "+s.Subtle.Render(ansi.Truncate(sanitize(strings.Join(strings.Fields(q), " ")), max(w-4, 8), "…")))
+	}
+	return append(lines, "")
+}
+
+// watchLines lists the gummi watches a freeform session has running:
+// each will speak up as a turn of its own, so the reader should know they
+// are there.
+func watchLines(s *theme.Styles, watches []string, w int) []string {
+	if len(watches) == 0 {
+		return nil
+	}
+	lines := []string{s.Faint.Render("watching")}
+	for _, x := range watches {
+		lines = append(lines, "  "+s.Subtle.Render(ansi.Truncate(sanitize(x), max(w-4, 8), "…")))
+	}
+	return append(lines, "")
+}
+
+// taskLines renders the agent's checklist after the conversation, where
+// the thread's window opens: what it is doing and what is left stays in
+// view however long the turn runs, the way a coding agent pins its todo
+// list. A finished list folds to its count.
+func taskLines(s *theme.Styles, ts []agent.Task, w int) []string {
+	if len(ts) == 0 {
+		return nil
+	}
+	done := 0
+	for _, t := range ts {
+		if t.Status == agent.TaskDone {
+			done++
+		}
+	}
+	lines := []string{s.Faint.Render(fmt.Sprintf("tasks %d/%d", done, len(ts)))}
+	if done == len(ts) {
+		return append(lines, "")
+	}
+	for _, t := range ts {
+		text := ansi.Truncate(sanitize(t.Text), max(w-6, 8), "…")
+		switch t.Status {
+		case agent.TaskDone:
+			lines = append(lines, "  "+s.Faint.Render("✓ "+text))
+		case agent.TaskInProgress:
+			lines = append(lines, "  "+s.Title.Render("▸ "+text))
+		default:
+			lines = append(lines, "  "+s.Subtle.Render("○ "+text))
+		}
+	}
+	return append(lines, "")
+}
+
+// thinkingTailLines is how much of the agent's reasoning shows without
+// expanding: the newest of it, which is what it is thinking now.
+const thinkingTailLines = 3
+
+// thinkingLines renders a thinking entry faint, behind the reply it led
+// to: its tail only, and the whole of it while alt+o expands output.
+func thinkingLines(s *theme.Styles, content string, w int, showOutput bool) []string {
+	block := strings.Split(wrapText(sanitize(strings.TrimSpace(content)), max(w-4, 8)), "\n")
+	label := "thinking"
+	if !showOutput && len(block) > thinkingTailLines {
+		label = fmt.Sprintf("thinking · %d more lines (alt+o)", len(block)-thinkingTailLines)
+		block = block[len(block)-thinkingTailLines:]
+	}
+	lines := []string{s.Faint.Render(label)}
+	for _, l := range block {
+		lines = append(lines, "  "+s.Faint.Render(l))
+	}
+	return append(lines, "")
 }
 
 // failTailLines is how much of a failed tool's output shows inline

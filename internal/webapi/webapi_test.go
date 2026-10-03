@@ -110,6 +110,16 @@ func TestAttachmentShapes(t *testing.T) {
 	}))
 }
 
+func TestComposerCompletionShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Composer{
+		Says: "opens the card's menu — or finish a project command: /review /release", Route: RouteMenu,
+		Completions: []Completion{
+			{Text: "/review ", Detail: "review the diff"},
+			{Text: "/release "},
+		},
+	}))
+}
+
 func TestChangeShapes(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, []Change{
 		{Kind: ChangeBoard},

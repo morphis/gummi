@@ -95,6 +95,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
 | `live`, `live-streaming`, `live-elsewhere`, `live-error`, `live-consult`, `live-consult-head`, `live-freeform`, `live-freeform-head` | live block parts |
+| `thinking`, `tasks` | the agent's reasoning, folded; its pinned checklist |
 
 ## Decision and composer
 

@@ -280,6 +280,16 @@ type Capabilities struct {
 	// might choose to open. True for claude, copilot, codex, opencode and
 	// pi; false for headless (its line protocol has no image input).
 	Images bool
+	// NativeWatch reports that the backend has a tool of its own for
+	// watching a command run on outside its turns — Claude Code's Monitor.
+	// A freeform session offers gummi's watch tool to every backend that
+	// does not.
+	NativeWatch bool
+	// Compact reports that a "/compact" line compacts the conversation:
+	// Claude Code reads it off the user line itself, and opencode's
+	// session is a Compactor. A freeform session offers /compact where
+	// this is true.
+	Compact bool
 }
 
 // WriteCage is the confinement a backend applies to its file-writing
@@ -432,6 +442,16 @@ type ImageSender interface {
 	SendTurn(ctx context.Context, turn Turn) error
 }
 
+// Compactor is implemented by sessions whose backend can compact its own
+// conversation — replace the history with a summary of it — through
+// something other than a user line. Compact runs like a turn: it returns
+// once started, ends with EventIdle (or EventError), refuses with ErrBusy
+// while a turn is in flight, and Interrupt stops it. A backend that reads
+// "/compact" off an ordinary user line (Claude Code) needs no Compactor.
+type Compactor interface {
+	Compact(ctx context.Context) error
+}
+
 // ErrImagesUnsupported is the refusal a Turn carrying images gets when
 // the session cannot deliver them — not an ImageSender, a capability that
 // reports false, or (copilot) a model reported without vision support. A
@@ -465,11 +485,19 @@ const (
 	// EventPermission reports a pending tool-call approval (guarded
 	// mode); the orchestrator answers via the queue.
 	EventPermission EventKind = "permission"
+	// EventTasks carries the agent's whole working checklist (Tasks
+	// populated), replacing any earlier one: what the backend's own
+	// task tool last said, mapped by TaskList.
+	EventTasks EventKind = "tasks"
 	// EventUsage carries per-turn spend (Usage populated).
 	EventUsage EventKind = "usage"
 	// EventContext reports the conversation's context-window usage
 	// (Context populated): current tokens vs the model's limit.
 	EventContext EventKind = "context"
+	// EventTurnStarted reports the backend beginning a turn nobody sent it
+	// — Claude Code waking on a Monitor event. It ends with EventIdle like
+	// any other turn; a consumer that tracks busy-ness sets it here.
+	EventTurnStarted EventKind = "turn-started"
 	// EventIdle marks the agent finished its turn and awaits input.
 	EventIdle EventKind = "idle"
 	// EventBudgetExhausted reports the session hit its credit cap; the
@@ -549,5 +577,6 @@ type Event struct {
 	Result   *ToolResult // populated for EventToolResult
 	Usage    Usage       // populated for EventUsage
 	Context  Context     // populated for EventContext
+	Tasks    []Task      // populated for EventTasks
 	Err      error       // populated for EventError
 }

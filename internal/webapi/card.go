@@ -219,6 +219,17 @@ type Composer struct {
 	// where knowable, its model) can take images with a turn. The page
 	// offers the composer's attach control only when this is true.
 	Images bool `json:"images,omitempty"`
+	// Completions are the repository commands a partly typed "/word" on a
+	// freeform card could become, best first; the page offers them above
+	// the composer, and picking one puts "/name " in the field.
+	Completions []Completion `json:"completions,omitempty"`
+}
+
+// Completion is one command a composer line could be completed to.
+type Completion struct {
+	// Text is what picking it puts in the field: "/name ".
+	Text   string `json:"text"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // AttachmentRef is a stored image, as a request names it (an id the page

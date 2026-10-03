@@ -41,7 +41,39 @@
       {
         "author": "you",
         "text": "why two funcs?"
+      },
+      {
+        "author": "thinking",
+        "text": "one per backend"
       }
+    ],
+    "tool": {
+      "tool": "Read",
+      "label": "Read  main.go",
+      "detail": "main.go",
+      "status": "running"
+    },
+    "spent": 0.5,
+    "model": "claude-opus",
+    "context": {
+      "tokens": 41000,
+      "limit": 200000
+    },
+    "tasks": [
+      {
+        "text": "read the adapter",
+        "status": "completed"
+      },
+      {
+        "text": "Fixing the leak",
+        "status": "in_progress"
+      }
+    ],
+    "queued": [
+      "also fix the docs"
+    ],
+    "watches": [
+      "w1 · go test ./... | grep FAIL"
     ]
   },
   "elsewhere": {

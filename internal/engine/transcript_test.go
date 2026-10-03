@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 )
 
 func TestSetContextStickyLimit(t *testing.T) {
@@ -200,5 +201,26 @@ func TestTranscriptFinishReplacesStreamedContent(t *testing.T) {
 	tr := s.Snapshot().Transcript
 	if len(tr) != 1 || tr[0].Content != "Hello, world" || tr[0].Streaming {
 		t.Errorf("finalized message = %+v, want 'Hello, world'", tr)
+	}
+}
+
+func TestStageRunShowsThinkingButNeverReadsIt(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	s := &Session{Feature: feature(1, "dark mode", domain.StageImplement)}
+	for _, ev := range []agent.Event{
+		{Kind: agent.EventReasoningDelta, Text: "VERDICT: "},
+		{Kind: agent.EventReasoningDelta, Text: "fail?"},
+		{Kind: agent.EventMessage, Text: "VERDICT: pass"},
+	} {
+		e.handle(s, ev)
+	}
+	tr := s.Snapshot().Transcript
+	if len(tr) != 2 || tr[0].Author != AuthorThinking || tr[0].Content != "VERDICT: fail?" {
+		t.Fatalf("transcript = %+v, want one folded thinking entry before the reply", tr)
+	}
+	if got, _ := s.lastAssistant(); got != "VERDICT: pass" {
+		t.Errorf("lastAssistant = %q, want the reply, not the thinking", got)
 	}
 }

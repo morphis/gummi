@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/mcp"
 	"github.com/morphis/gummi/internal/state"
@@ -56,7 +57,10 @@ type mcpEndpoint struct {
 	engine  *Engine
 	feature domain.Feature
 	flavor  runFlavor
-	ln      net.Listener
+	// extra is tools offered beyond the stage's own (a freeform session's
+	// watch, for a backend without one)
+	extra []agent.ToolDef
+	ln    net.Listener
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -76,7 +80,7 @@ type mcpEndpoint struct {
 // for the accept and per-connection goroutines, and removes the socket
 // file. It must be stashed on the Session (setMCPTeardown) so Session.stop
 // invokes it exactly once; an error here leaves nothing behind to release.
-func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor runFlavor) (string, func(), error) {
+func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor runFlavor, extra ...agent.ToolDef) (string, func(), error) {
 	path := mcpSockPath(e.cfg.Workspace, f.ID)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -101,6 +105,7 @@ func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor 
 		engine:  e,
 		feature: f,
 		flavor:  flavor,
+		extra:   extra,
 		ln:      ln,
 		ctx:     epCtx,
 		cancel:  epCancel,
@@ -256,7 +261,7 @@ func (ep *mcpEndpoint) dispatch(conn net.Conn, wmu *sync.Mutex, req *mcp.Request
 // what that pass's prompt told the model existed.
 func (ep *mcpEndpoint) listTools() (json.RawMessage, error) {
 	defs := stageTools(ep.feature.Stage, ep.flavor, ep.engine.decidingHeadings(&ep.feature))
-	return mcp.MarshalTools(defs)
+	return mcp.MarshalTools(append(defs, ep.extra...))
 }
 
 type callToolParams struct {
@@ -274,6 +279,14 @@ func (ep *mcpEndpoint) callTool(req *mcp.Request) (json.RawMessage, error) {
 		return nil, fmt.Errorf("call_tool: %w", err)
 	}
 	s := ep.engine.Get(ep.feature.ID)
+	// e.live never holds a freeform card's session (Answer has the same
+	// fallback): without it every ask_user a freeform card's MCP backend
+	// made was refused as "no live session"
+	if s == nil {
+		if ff := ep.engine.Freeform(ep.feature.ID); ff != nil {
+			s = ff.Session()
+		}
+	}
 	if s == nil {
 		return nil, fmt.Errorf("feature %s has no live session", ep.feature.ID)
 	}

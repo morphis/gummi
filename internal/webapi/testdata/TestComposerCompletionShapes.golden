@@ -1,0 +1,13 @@
+{
+  "says": "opens the card's menu — or finish a project command: /review /release",
+  "route": "menu",
+  "completions": [
+    {
+      "text": "/review ",
+      "detail": "review the diff"
+    },
+    {
+      "text": "/release "
+    }
+  ]
+}

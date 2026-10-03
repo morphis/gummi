@@ -267,6 +267,21 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .tools li.fail{color:var(--err)}
 .tools li.running,.tools li.watching{color:var(--accent)}
 .tools li .ms{color:var(--fg3);margin-left:6px}
+.tools.thinking .body{padding:4px 12px 8px;border-top:1px solid var(--line);color:var(--fg3);font-size:12.5px}
+.tools.tasks ul{list-style:none;margin:0;padding:4px 12px 8px;border-top:1px solid var(--line);font-size:12.5px}
+.tools.tasks .task.completed{color:var(--fg3);text-decoration:line-through}
+.tools.tasks .task.in_progress{color:var(--fg);font-weight:600}
+.tools.tasks .task.pending{color:var(--fg2)}
+.queued{display:flex;flex-direction:column;gap:4px;margin:4px 0 4px 40px}
+.queued-line{display:flex;align-items:center;gap:8px;padding:4px 6px 4px 10px;border:1px dashed var(--line);border-radius:8px;font-size:12.5px;color:var(--fg2)}
+.queued-line .text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.queued-line .via{color:var(--fg3);font-size:11px}
+.queued-line button{padding:0 6px;border-radius:6px;color:var(--fg3)}
+.queued-line button:hover{background:var(--line);color:var(--fg)}
+.msg .who .rewind{margin-left:auto;padding:0 6px;border-radius:6px;font-size:11px;color:var(--fg3);opacity:0}
+.msg:hover .who .rewind,.msg .who .rewind:focus-visible{opacity:1}
+@media (hover:none){.msg .who .rewind{opacity:1}}
+.msg .who .rewind:hover{background:var(--line);color:var(--fg)}
 .receipt{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--fg3);padding:6px 10px;border-radius:8px;background:var(--sunk)}
 .receipt .ok{color:var(--ok)} .receipt .bad{color:var(--err)}
 .receipt .when{margin-left:auto;font-family:var(--mono);font-size:11px;white-space:nowrap}
@@ -367,6 +382,11 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .composer{border:1px solid var(--line2);border-radius:12px;background:var(--panel)}
 .composer:focus-within{border-color:var(--accent)}
 .composer textarea{display:block;width:100%;border:0;outline:0;background:transparent;resize:none;padding:10px 14px 4px;min-height:44px;max-height:min(160px,22vh);font-size:14px;line-height:1.5}
+.composer .complete{display:flex;flex-direction:column;padding:6px 6px 0;border-bottom:1px solid var(--line);max-height:min(220px,30vh);overflow-y:auto}
+.composer .complete button{display:flex;gap:10px;align-items:baseline;text-align:left;padding:4px 8px;border-radius:6px;font-size:12.5px;min-width:0}
+.composer .complete button[aria-selected=true]{background:var(--line)}
+.composer .complete b{font-family:var(--mono);font-weight:500;color:var(--fg);white-space:nowrap}
+.composer .complete span{color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .composer .bar{display:flex;align-items:center;gap:10px;padding:4px 8px 6px 14px;font-size:12px;color:var(--fg3)}
 .composer .enter{display:flex;align-items:center;gap:6px;min-width:0}
 .composer .enter b{color:var(--fg2);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

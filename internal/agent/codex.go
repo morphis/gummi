@@ -389,7 +389,7 @@ func (s *codexSession) mapLine(line []byte) ([]Event, bool, error) {
 			s.threadID = id
 		}
 		s.mu.Unlock()
-	case "item.completed", "item.started":
+	case "item.completed", "item.started", "item.updated":
 		var i struct {
 			ID               string          `json:"id"`
 			Type             string          `json:"type"`
@@ -406,9 +406,30 @@ func (s *codexSession) mapLine(line []byte) ([]Event, bool, error) {
 				Path string `json:"path"`
 				Kind string `json:"kind"`
 			} `json:"changes"`
+			Items []struct {
+				Text      string `json:"text"`
+				Completed bool   `json:"completed"`
+			} `json:"items"`
 		}
 		if err := json.Unmarshal(raw["item"], &i); err != nil {
 			return nil, false, fmt.Errorf("malformed codex item: %w", err)
+		}
+		// Codex's plan is its own item, restated whole on every change
+		// (item.updated is the only event it comes on besides start and
+		// end), with done/not-done and nothing between.
+		if i.Type == "todo_list" {
+			ts := make([]Task, 0, len(i.Items))
+			for _, it := range i.Items {
+				st := TaskPending
+				if it.Completed {
+					st = TaskDone
+				}
+				ts = append(ts, Task{Text: it.Text, Status: st})
+			}
+			return []Event{{Kind: EventTasks, Tool: "plan", Tasks: ts}}, false, nil
+		}
+		if typ == "item.updated" {
+			return nil, false, nil
 		}
 		if typ == "item.started" {
 			s.mu.Lock()
@@ -470,6 +491,14 @@ func itemCompleted(started bool, id, typ, text, command, output, status string, 
 	if typ == "agent_message" {
 		if text != "" {
 			return []Event{{Kind: EventMessage, Text: text}}
+		}
+		return nil
+	}
+	if typ == "reasoning" {
+		// exec reports thinking whole, once the item completes; it is one
+		// delta here so it reads like every streaming backend's.
+		if strings.TrimSpace(text) != "" {
+			return []Event{{Kind: EventReasoningDelta, Text: text}}
 		}
 		return nil
 	}

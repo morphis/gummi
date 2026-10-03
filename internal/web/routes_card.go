@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -11,6 +12,8 @@ func (s *Server) cardRoutes() {
 	s.api("POST /api/cards/{id}/composer", s.handleComposer)
 	s.api("POST /api/cards/{id}/answer", s.handleAnswer)
 	s.api("POST /api/cards/{id}/send", s.handleSend)
+	s.api("POST /api/cards/{id}/queue/{n}/take", s.handleUnqueue)
+	s.api("POST /api/cards/{id}/rewind", s.handleRewind)
 	s.api("POST /api/cards/{id}/actions/{action}", s.handleAction)
 }
 
@@ -64,6 +67,36 @@ func (s *Server) handleAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// handleUnqueue is POST /api/cards/{id}/queue/{n}/take.
+func (s *Server) handleUnqueue(w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "expected a queue index")
+		return
+	}
+	res, err := s.opt.Board.Unqueue(r.Context(), r.PathValue("id"), n)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleRewind is POST /api/cards/{id}/rewind.
+func (s *Server) handleRewind(w http.ResponseWriter, r *http.Request) {
+	var body webapi.RewindRequest
+	if err := readJSON(w, r, &body); err != nil || body.Back < 1 {
+		writeError(w, http.StatusBadRequest, "expected {\"back\": n}, n ≥ 1")
+		return
+	}
+	res, err := s.opt.Board.Rewind(r.Context(), r.PathValue("id"), body.Back)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // handleSend is POST /api/cards/{id}/send: one composer line.

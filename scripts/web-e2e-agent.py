@@ -227,9 +227,15 @@ class Turn:
         self.beat()
         emit({"type": "reasoning", "text": text})
 
-    def tool(self, name, detail):
+    def tool(self, name, detail, call_id=None):
         self.beat()
-        emit({"type": "tool", "name": name, "detail": detail})
+        emit({"type": "tool", "name": name, "detail": detail, "id": call_id or ""})
+
+    def tool_result(self, call_id, name, ok=True, result=""):
+        emit({"type": "tool_result", "id": call_id, "name": name, "ok": ok, "result": result})
+
+    def tasks(self, *items):
+        emit({"type": "tasks", "tasks": [{"text": t, "status": st} for t, st in items]})
 
     def say(self, text):
         """A finished assistant message. A [slow] card streams it first."""
@@ -585,8 +591,11 @@ def freeform_turn(turn, text):
     notes = os.path.join(wd, "NOTES.md")
     with open(notes, "a", encoding="utf-8") as fh:
         fh.write("- %s\n" % text.strip().splitlines()[0] if text.strip() else "- (empty)\n")
-    turn.tool("edit", "NOTES.md")
+    turn.think("The ask belongs in NOTES.md, beside the others.")
+    turn.tool("edit", "NOTES.md", "ff-edit")
     git(wd, "add", "--", "NOTES.md")
+    turn.tool_result("ff-edit", "edit")
+    turn.tasks(("Note the fix", "completed"), ("Say what was done", "in_progress"))
     turn.say("Done: noted it in NOTES.md.")
 
 

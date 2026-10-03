@@ -37,7 +37,11 @@ import (
 //	{"type":"reasoning","text":"…"} → EventReasoningDelta
 //	{"type":"message","text":"…"}   → EventMessage
 //	{"type":"tool","name":"…","detail":"…"} → EventToolCall (detail optional:
-//	                                  the salient argument, e.g. command or path)
+//	                                  the salient argument, e.g. command or path;
+//	                                  id optional, pairs it with its result)
+//	{"type":"tool_result","id":"…","name":"…","ok":B,"result":"…"} → EventToolResult
+//	                                  (ok defaults to true)
+//	{"type":"context","tokens":T,"limit":L} → EventContext (limit 0 = unknown)
 //	{"type":"usage","credits":N,"input":I,"output":O,"model":"…"} → EventUsage
 //	{"type":"ask","id":"…","ask":{…}} → EventClientToolCall (ask_user)
 //	{"type":"idle"}                 → EventIdle
@@ -377,8 +381,13 @@ type headlessEvent struct {
 	Input   int64           `json:"input"`
 	Output  int64           `json:"output"`
 	Model   string          `json:"model"`
-	ID      string          `json:"id"`  // client-tool call id (ask)
-	Ask     json.RawMessage `json:"ask"` // ask_user payload
+	ID      string          `json:"id"`     // client-tool call id (ask); tool/tool_result pairing id
+	Ask     json.RawMessage `json:"ask"`    // ask_user payload
+	OK      *bool           `json:"ok"`     // tool_result: outcome (absent means ok)
+	Result  string          `json:"result"` // tool_result: captured output
+	Tokens  int64           `json:"tokens"` // context: tokens in the window
+	Limit   int64           `json:"limit"`  // context: window size (0 = unknown)
+	Tasks   []Task          `json:"tasks"`  // tasks: the whole checklist, replacing the last
 }
 
 func decodeHeadless(line []byte) (Event, bool) {
@@ -396,7 +405,18 @@ func decodeHeadless(line []byte) (Event, bool) {
 	case "tool":
 		// the child knows its own workdir and is expected to emit short,
 		// relative details; gummi only normalizes to one bounded line.
-		return Event{Kind: EventToolCall, Tool: m.Name, Detail: collapseDetail("", m.Detail)}, true
+		return Event{Kind: EventToolCall, Tool: m.Name, Detail: collapseDetail("", m.Detail), CallID: m.ID}, true
+	case "tool_result":
+		ok := m.OK == nil || *m.OK
+		return Event{Kind: EventToolResult, Tool: m.Name, CallID: m.ID, Result: &ToolResult{OK: ok, Output: boundTail(m.Result, ok)}}, true
+	case "context":
+		return Event{Kind: EventContext, Context: Context{Tokens: m.Tokens, Limit: m.Limit}}, true
+	case "tasks":
+		ts := make([]Task, 0, len(m.Tasks))
+		for _, t := range m.Tasks {
+			ts = append(ts, Task{Text: t.Text, Status: taskStatus(string(t.Status))})
+		}
+		return Event{Kind: EventTasks, Tasks: ts}, true
 	case "ask":
 		// the ask payload is passed through verbatim; the orchestrator
 		// parses it into a question (name defaults to ask_user).

@@ -33,6 +33,10 @@ let noteText = ''
 // pending, error}. id is set once the upload answers; pending/error are
 // upload-in-flight state a send must wait out (or refuse to send with).
 let attachments = []
+// the project commands a half-typed "/word" could become (Composer
+// .Completions), as last offered, and which one tab would take
+let offered = []
+let pick = 0
 
 export function initComposer (ctx) {
   ctxRef = ctx
@@ -51,6 +55,16 @@ export function initComposer (ctx) {
   })
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); return }
+    if (offered.length && !$('#composer-complete').hidden) {
+      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); complete(offered[pick]); return }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        pick = (pick + (e.key === 'ArrowDown' ? 1 : -1) + offered.length) % offered.length
+        renderCompletions()
+        return
+      }
+      if (e.key === 'Escape') { offered = []; renderCompletions(); return }
+    }
     if (e.key === 'Escape') { input.blur(); return }
     const d = openDecision()
     if (d && !input.value) {
@@ -154,6 +168,9 @@ function renderChips () {
   }
 }
 
+// restoreComposer puts text back in the composer to be edited and sent.
+export function restoreComposer (text) { restore(text) }
+
 function restore (text) {
   const input = $('#composer-input')
   input.value = text
@@ -208,6 +225,45 @@ function current () {
   return said && said.id === state.sel && said.text === state.draft ? said : null
 }
 
+// completing puts the command's "/name " in the field, ready for its
+// arguments, and asks the server about the line it now is.
+function complete (c) {
+  if (!c) return
+  const input = $('#composer-input')
+  input.value = c.text
+  set({ draft: c.text })
+  offered = []
+  autosize()
+  input.focus()
+  ask()
+  renderSays()
+}
+
+// renderCompletions lists the commands a "/word" could become. While the
+// server has not yet answered for the line in the field, the last list
+// narrows to what the word still matches, so it does not flicker away
+// between keystrokes.
+function renderCompletions (c) {
+  const box = $('#composer-complete')
+  const draft = state.draft || ''
+  if (c) offered = c.completions || []
+  else if (!/^\/\S*$/.test(draft)) offered = []
+  else offered = offered.filter((o) => o.text.toLowerCase().startsWith(draft.toLowerCase()))
+  if (pick >= offered.length) pick = 0
+  clear(box)
+  box.hidden = offered.length === 0
+  offered.forEach((o, i) => {
+    box.append(h('button', {
+      type: 'button',
+      role: 'option',
+      'aria-selected': String(i === pick),
+      tabindex: '-1',
+      onmousedown: (e) => e.preventDefault(),
+      onclick: () => complete(o)
+    }, h('b', null, o.text.trim()), o.detail ? h('span', null, o.detail) : null))
+  })
+}
+
 function renderSays () {
   const says = $('#enter-says')
   const btn = $('#send')
@@ -215,6 +271,7 @@ function renderSays () {
   const offline = state.conn !== 'live'
   const d = openDecision()
   const c = current()
+  renderCompletions(state.draft.trim() ? c : { completions: [] })
   box.classList.remove('blocked')
   box.dataset.route = c?.route || ''
   btn.disabled = offline || sending || (!state.card && !state.sessionDraft)

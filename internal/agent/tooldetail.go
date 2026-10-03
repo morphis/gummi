@@ -68,3 +68,10 @@ func collapseDetail(workdir, s string) string {
 	}
 	return s
 }
+
+// WatchTool reports whether tool is a backend's own persistent
+// background watch rather than an ordinary, synchronous call: Claude
+// Code's Monitor tool (docs: tools-reference#monitor-tool), which
+// returns before the thing it is watching resolves and runs on, outside
+// any turn, until it fires or hits its deadline.
+func WatchTool(tool string) bool { return tool == "Monitor" }

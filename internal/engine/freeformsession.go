@@ -72,6 +72,27 @@ type FreeformSession struct {
 
 	mu   sync.Mutex
 	sess *Session
+	// workDir is the card's worktree, known once a backend has spawned;
+	// Commands reads the project's command files from it.
+	workDir string
+	// compacts is the spawned backend's Capabilities.Compact: whether
+	// Commands offers /compact.
+	compacts bool
+	// gummi's own watches (freeformwatch.go): running, and ended with an
+	// exit still to report. They outlive any one backend.
+	watches      []*freeformWatch
+	watchEnded   []*freeformWatch
+	watchSeq     int
+	watchWG      sync.WaitGroup
+	watchStop    chan struct{}
+	watchStopped bool
+	watchSent    time.Time
+	// queue holds the lines sent while a turn was in flight, oldest
+	// first, guarded by mu. They go to the agent together as the next
+	// turn once this one ends (drainQueue) — including a turn that ended
+	// because it was interrupted, which is how "stop, and do this
+	// instead" is said — and until then each can be taken back.
+	queue []queuedTurn
 
 	// lockMu guards release, this engine's hold on the card's per-card
 	// lock. The hold spans a BACKEND's life, not the conversation's: a
@@ -229,6 +250,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		ff.dropLock()
 		return err
 	}
+	ff.mu.Lock()
+	ff.workDir = workDir
+	ff.compacts = ag.Capabilities().Compact
+	ff.mu.Unlock()
 
 	sctx, cancel := context.WithCancel(context.Background())
 	sess := &Session{
@@ -287,7 +312,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		if h := toolHint(domain.StageOpen, flavorStage); h != "" {
 			hints = append(hints, h)
 		}
-		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage)
+		// gummi's own watch, for a backend with no Monitor of its own
+		var extra []agent.ToolDef
+		if !caps.NativeWatch {
+			extra = []agent.ToolDef{watchTool(), unwatchTool()}
+			tools = append(tools, extra...)
+			hints = append(hints, freeformWatchHint)
+		}
+		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage, extra...)
 		if merr != nil {
 			cancel()
 			return merr
@@ -474,6 +506,9 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 // SendTurn is Send's image-carrying form: a turn with images is delivered
 // natively, or refused with agent.ErrImagesUnsupported before anything is
 // appended or recorded.
+//
+// A turn sent while the agent is still on the last one is queued rather
+// than refused: the person said it, and the agent should hear it next.
 func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []AttachmentRef) error {
 	sess, err := ff.ensureBackend(ctx)
 	if err != nil {
@@ -488,16 +523,26 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 			return err
 		}
 	}
+	if sess.Busy() {
+		ff.enqueue(ctx, msg, images)
+		return nil
+	}
 	sess.appendUserImages(msg, actorOf(ctx), images)
 	ff.engine.persist(sess)
 	sess.setBusy(true)
 	ff.armIdleTimer()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+	// the transcript keeps the line as typed; the agent hears what a
+	// "/name" in it stands for
+	cmds := ff.Commands()
+	wire := expandProjectCommands(cmds, ff.WorkDir(), msg)
 	var sendErr error
-	if len(images) > 0 {
-		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: msg, Images: ff.engine.turnImages(images)})
+	if c, ok := a.(agent.Compactor); ok && len(images) == 0 && isCompactLine(cmds, msg) {
+		sendErr = c.Compact(ctx)
+	} else if len(images) > 0 {
+		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
 	} else {
-		sendErr = a.Send(ctx, msg)
+		sendErr = a.Send(ctx, wire)
 	}
 	if sendErr != nil {
 		if errors.Is(sendErr, agent.ErrBusy) || errors.Is(sendErr, agent.ErrImagesUnsupported) {
@@ -510,6 +555,12 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 			// restart would restore.
 			sess.dropUnsentUser(msg)
 			ff.engine.persist(sess)
+			if errors.Is(sendErr, agent.ErrBusy) {
+				// busy by the backend's own reckoning rather than ours: the
+				// same "not now" the check above answers by queueing
+				ff.enqueue(ctx, msg, images)
+				return nil
+			}
 			ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 			return sendErr
 		}
@@ -518,6 +569,101 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 		return sendErr
 	}
 	return nil
+}
+
+// queuedTurn is one line waiting for the turn in flight to end. ctx keeps
+// who said it (WithActor) but not the request it arrived on, which is
+// long finished by the time the line is sent.
+type queuedTurn struct {
+	ctx    context.Context
+	text   string
+	images []AttachmentRef
+}
+
+func (ff *FreeformSession) enqueue(ctx context.Context, msg string, images []AttachmentRef) {
+	ff.mu.Lock()
+	ff.queue = append(ff.queue, queuedTurn{ctx: context.WithoutCancel(ctx), text: msg, images: images})
+	ff.mu.Unlock()
+	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+}
+
+// Commands is the project's command files as the card's branch has them
+// now, read afresh each time so an edit to one is picked up by the next
+// turn, then /compact when the backend can compact. Empty until the
+// session's first backend has found its worktree.
+func (ff *FreeformSession) Commands() []ProjectCommand {
+	ff.mu.Lock()
+	workDir, compacts := ff.workDir, ff.compacts
+	ff.mu.Unlock()
+	cmds := LoadProjectCommands(workDir)
+	if compacts {
+		if _, _, clash := FindProjectCommand(cmds, "/"+compactCommand.Name); !clash {
+			cmds = append(cmds, compactCommand)
+		}
+	}
+	return cmds
+}
+
+// WorkDir is the card's worktree, "" until a backend has spawned.
+func (ff *FreeformSession) WorkDir() string {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	return ff.workDir
+}
+
+// Queued is the lines waiting for the turn in flight, oldest first.
+func (ff *FreeformSession) Queued() []string {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	out := make([]string, len(ff.queue))
+	for i, q := range ff.queue {
+		out[i] = q.text
+	}
+	return out
+}
+
+// Unqueue takes back the i'th waiting line before it is sent, returning
+// its text so a caller can hand it back to the composer to be edited. ok
+// is false when it is no longer waiting — sent already, or never there.
+func (ff *FreeformSession) Unqueue(i int) (text string, ok bool) {
+	ff.mu.Lock()
+	if i < 0 || i >= len(ff.queue) {
+		ff.mu.Unlock()
+		return "", false
+	}
+	text = ff.queue[i].text
+	ff.queue = append(ff.queue[:i], ff.queue[i+1:]...)
+	ff.mu.Unlock()
+	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+	return text, true
+}
+
+// drainQueue sends everything waiting as one turn, the way it reads to a
+// person: several things said while the agent was busy, each its own
+// paragraph. It runs off the pump, since a send can block on the backend
+// the pump is draining. Not while a question is open: that is waiting on
+// an answer, and a queued line is not one.
+func (ff *FreeformSession) drainQueue(sess *Session) {
+	if sess.Snapshot().PendingAsk != nil {
+		return
+	}
+	ff.mu.Lock()
+	q := ff.queue
+	ff.queue = nil
+	ff.mu.Unlock()
+	if len(q) == 0 {
+		return
+	}
+	texts := make([]string, len(q))
+	var images []AttachmentRef
+	for i, t := range q {
+		texts[i] = t.text
+		images = append(images, t.images...)
+	}
+	go func() {
+		// an error is the session's own and already on it (SendTurn)
+		_ = ff.SendTurn(q[0].ctx, strings.Join(texts, "\n\n"), images)
+	}()
 }
 
 // Kickoff sends the card's brief as the session's first turn, and does
@@ -677,7 +823,12 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 	if sess == nil {
 		return Snapshot{}
 	}
-	return sess.Snapshot()
+	snap := sess.Snapshot()
+	snap.Queued = ff.Queued()
+	for _, w := range ff.Watches() {
+		snap.Watches = append(snap.Watches, w.ID+" · "+w.Command)
+	}
+	return snap
 }
 
 // Close ends the card's freeform session: it stops the current backend,
@@ -688,6 +839,7 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 // left in the worktree stays there, uncommitted, for somebody to commit on
 // purpose.
 func (ff *FreeformSession) Close() error {
+	ff.stopWatches()
 	ff.settle()
 	ff.stopBackend()
 	ff.mu.Lock()
@@ -790,6 +942,11 @@ func (ff *FreeformSession) armIdleTimer() {
 	ff.idleTimer = time.AfterFunc(d, ff.onIdleTimeout)
 }
 
+// freeformWatchMax bounds how long an open watch keeps an idle backend
+// alive: the backstop for an end the backend never reports (Claude Code
+// reports one, as a task_notification; nothing guarantees every end does).
+const freeformWatchMax = 6 * time.Hour
+
 // onIdleTimeout closes only the current backend, marking it StateDone
 // first so Session.Live() reads false and the next Send respawns. The
 // transcript is untouched, and the card lock is kept: the worktree and
@@ -807,7 +964,12 @@ func (ff *FreeformSession) onIdleTimeout() {
 	if sess == nil {
 		return
 	}
-	if sess.Busy() {
+	// A watch the agent left running (agent.WatchTool) lives in this
+	// backend: stopping it would end the watch silently while the page
+	// still says "watching". So the backend stays up while one is open,
+	// bounded so a watch whose end was never reported cannot hold it
+	// forever.
+	if sess.Busy() || sess.openWatch(time.Now().Add(-freeformWatchMax)) {
 		ff.armIdleTimer()
 		return
 	}
@@ -851,6 +1013,8 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 	switch ev.Kind {
 	case agent.EventTextDelta:
 		sess.appendDelta(ev.Text)
+	case agent.EventReasoningDelta:
+		sess.appendThinking(ev.Text)
 	case agent.EventMessage:
 		sess.finishAssistant(ev.Text)
 		// Saved as it is said, not only at the end: a board that dies
@@ -868,6 +1032,14 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		return
 	case agent.EventContext:
 		sess.setContext(ev.Context)
+	case agent.EventTasks:
+		sess.setTasks(ev.Tasks)
+	case agent.EventTurnStarted:
+		// the backend woke by itself (a watch fired): the session is
+		// working until that turn's idle, so a line sent meanwhile queues
+		// and the faces say so
+		sess.setBusy(true)
+		ff.armIdleTimer()
 	case agent.EventUsage:
 		sess.addSpend(ev.Usage)
 		e.recordUsage(sess, ff.id, domain.StageOpen, agent.RoleImplementer, ev.Usage)
@@ -894,6 +1066,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.askOutlivedItsCall(sess)
 		e.persist(sess)
 		ff.armIdleTimer() // a reply landing resets the idle clock
+		ff.drainQueue(sess)
 	case agent.EventError:
 		sess.setError(ev.Err)
 	case agent.EventBudgetExhausted:
@@ -1088,6 +1261,10 @@ func replayLine(m Message) string {
 		return "  them: " + body
 	case AuthorAssistant:
 		return "  you: " + body
+	case AuthorSystem:
+		// gummi's own notes on the conversation — a rewind, a switch of
+		// model — are part of what the next backend has to know
+		return "  gummi: " + body
 	}
 	return ""
 }

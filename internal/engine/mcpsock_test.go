@@ -368,3 +368,47 @@ func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
 func jsonRaw(s string) json.RawMessage { return json.RawMessage(s) }
 
 func i2s(n int) string { return strconv.Itoa(n) }
+
+// TestMCPSockCallToolReachesAFreeformSession: a freeform card's session
+// lives in e.freeform, never e.live, and an MCP backend's ask_user must
+// still reach it — it used to be refused as "no live session".
+func TestMCPSockCallToolReachesAFreeformSession(t *testing.T) {
+	ag := agent.NewFake("")
+	ag.Caps = agent.Capabilities{MCPTools: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	f := freeformCard(1, "poke at the pty leak")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := dialSock(t, mcpSockPath(ws, f.ID))
+	if r := c.hello(string(f.ID)); r["error"] != nil {
+		t.Fatalf("hello error: %v", r["error"])
+	}
+	id := c.nextID()
+	c.send(mcp.Request{
+		JSONRPC: mcp.JSONRPC, ID: jsonRaw(id), Method: "call_tool",
+		Params: jsonRaw(`{"name":"ask_user","args":{"question":"which fd?","options":[{"label":"the pty"},{"label":"the log"}]}}`),
+	})
+	deadline := time.After(testWaitTimeout)
+	for ff.Session().Snapshot().PendingAsk == nil {
+		select {
+		case <-deadline:
+			t.Fatal("the freeform session never received the ask")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if err := e.Answer(context.Background(), f.ID, "the pty"); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	resp := c.read(id)
+	if resp["error"] != nil {
+		t.Fatalf("call_tool error: %v", resp["error"])
+	}
+	if got := resp["result"].(map[string]any)["result"].(string); !strings.Contains(got, "the pty") {
+		t.Errorf("ask_user result = %q, want the answer", got)
+	}
+}

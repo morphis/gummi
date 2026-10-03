@@ -38,6 +38,22 @@ func TestOpencodeMapEventText(t *testing.T) {
 	}
 }
 
+func TestOpencodeMapEventReasoning(t *testing.T) {
+	s := newOCSession()
+	var msg strings.Builder
+	evs := s.mapEvent([]byte(`{"type":"reasoning","part":{"id":"r1","type":"reasoning","text":"Look at"}}`), &msg)
+	if len(evs) != 1 || evs[0].Kind != EventReasoningDelta || evs[0].Text != "Look at" {
+		t.Fatalf("reasoning = %+v, want one EventReasoningDelta 'Look at'", evs)
+	}
+	evs = s.mapEvent([]byte(`{"type":"reasoning","part":{"id":"r1","type":"reasoning","text":"Look at main.go"}}`), &msg)
+	if len(evs) != 1 || evs[0].Text != " main.go" {
+		t.Fatalf("reasoning suffix = %+v, want ' main.go'", evs)
+	}
+	if msg.Len() != 0 {
+		t.Errorf("reasoning leaked into the message: %q", msg.String())
+	}
+}
+
 func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	s := newOCSession()
 	var msg strings.Builder

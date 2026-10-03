@@ -53,8 +53,8 @@ for line in sys.stdin:
         out({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"he"}}})
         out({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"llo"}}})
         out({"type":"assistant","message":{"model":MODEL,"content":[{"type":"text","text":"hello"}]}})
-        out({"type":"assistant","message":{"model":MODEL,"content":[{"type":"tool_use","name":"Bash","input":{"command":"true"}}]}})
-        out({"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}})
+        out({"type":"assistant","message":{"model":MODEL,"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"true"}}]}})
+        out({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":True,"content":[{"type":"text","text":"exit 1"}]}]}})
         out({"type":"stream_event","event":{"type":"message_delta","delta":{},"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":70,"cache_creation_input_tokens":0}}})
         out({"type":"result","subtype":"success","is_error":False,"session_id":"sess-1",
              "modelUsage":{MODEL:{"inputTokens":10,"outputTokens":20,"cacheReadInputTokens":70,"cacheCreationInputTokens":0,"costUSD":0.01,"contextWindow":200000}}})
@@ -96,7 +96,7 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	}
 	want := []EventKind{
 		EventReasoningDelta, EventTextDelta, EventTextDelta,
-		EventMessage, EventToolCall,
+		EventMessage, EventToolCall, EventToolResult,
 		EventUsage,   // mid-turn (message_delta), Credits 0 on turn one
 		EventContext, // at result
 		EventUsage,   // settlement
@@ -108,7 +108,10 @@ func TestClaudeCodeRoundTripAndSettlement(t *testing.T) {
 	if evs[3].Text != "hello" || evs[4].Tool != "Bash" || evs[4].Detail != "true" {
 		t.Errorf("message/tool = %q/%q(%q)", evs[3].Text, evs[4].Tool, evs[4].Detail)
 	}
-	mid, ctxEv, settle := evs[5].Usage, evs[6].Context, evs[7].Usage
+	if res := evs[5]; res.CallID != "toolu_1" || evs[4].CallID != "toolu_1" || res.Tool != "Bash" || res.Result == nil || res.Result.OK || res.Result.Output != "exit 1" {
+		t.Errorf("tool result = %+v (call id %q), want a failed Bash paired by toolu_1", res, evs[4].CallID)
+	}
+	mid, ctxEv, settle := evs[6].Usage, evs[7].Context, evs[8].Usage
 	if mid.Credits != 0 || mid.InputTokens != 10 || mid.OutputTokens != 20 || mid.Model != "claude-test-1" {
 		t.Errorf("turn 1 mid-turn usage = %+v (want token-only, no rate yet)", mid)
 	}
@@ -1129,5 +1132,57 @@ func TestClaudeRosterAddsSkillForRepoSkills(t *testing.T) {
 func TestClaudeRosterAddsSkillForForwardedDirs(t *testing.T) {
 	if !slices.Contains(claudeStageTools(t.TempDir(), []string{"/ws/.agents/skills/container-env"}), "Skill") {
 		t.Error("forwarded skill dirs did not put Skill on the roster")
+	}
+}
+
+// TestClaudeMonitorAckKeepsTheWatchOpen: Monitor's tool_result is only the
+// "started" ack, so a successful one must not settle the call (it would
+// read "ok" instead of "watching"); a failed start still reports.
+func TestClaudeMonitorAckKeepsTheWatchOpen(t *testing.T) {
+	s := &claudeSession{}
+	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"m1","name":"Monitor","input":{}},{"type":"tool_use","id":"m2","name":"Monitor","input":{}}]}`))
+	if evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"m1","content":"monitor started"}]}`)); len(evs) != 0 {
+		t.Errorf("a started watch settled: %+v", evs)
+	}
+	evs := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"m2","is_error":true,"content":"bad command"}]}`))
+	if len(evs) != 1 || evs[0].Result == nil || evs[0].Result.OK {
+		t.Errorf("a failed watch = %+v, want one failed result", evs)
+	}
+}
+
+// TestClaudeWatchEndAndUnpromptedTurn follows the line sequence the CLI
+// (2.1.x) was seen to write when a Monitor outlives its turn: the result,
+// then a task_notification naming the Monitor's tool_use, then a fresh
+// system init and a turn nobody sent. The notification settles the watch;
+// the init is a turn starting, and Interrupt must reach it.
+func TestClaudeWatchEndAndUnpromptedTurn(t *testing.T) {
+	s := &claudeSession{}
+	s.mu.Lock()
+	s.inTurn = true // the Send that asked for the watch
+	s.mu.Unlock()
+	if evs := s.mapLine([]byte(`{"type":"system","subtype":"init","session_id":"x","model":"claude-haiku"}`)); len(evs) != 0 {
+		t.Errorf("a prompted turn's init = %+v, want nothing", evs)
+	}
+	s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"toolu_m","name":"Monitor","input":{}}]}`))
+	s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"toolu_m","content":"Monitor started (task b1)"}]}`))
+	s.mapLine([]byte(`{"type":"result","subtype":"success","result":"started"}`))
+
+	evs := s.mapLine([]byte(`{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_m","status":"completed"}`))
+	if len(evs) != 1 || evs[0].Kind != EventToolResult || evs[0].CallID != "toolu_m" || evs[0].Result == nil || !evs[0].Result.OK {
+		t.Fatalf("task_notification = %+v, want the watch settled ok", evs)
+	}
+	if evs := s.mapLine([]byte(`{"type":"system","subtype":"task_notification","tool_use_id":"toolu_m","status":"completed"}`)); len(evs) != 0 {
+		t.Errorf("a second notification for a settled watch = %+v", evs)
+	}
+
+	evs = s.mapLine([]byte(`{"type":"system","subtype":"init","session_id":"x","model":"claude-haiku"}`))
+	if len(evs) != 1 || evs[0].Kind != EventTurnStarted {
+		t.Fatalf("an unprompted init = %+v, want EventTurnStarted", evs)
+	}
+	s.mu.Lock()
+	in := s.inTurn
+	s.mu.Unlock()
+	if !in {
+		t.Error("the unprompted turn is not one Interrupt would stop")
 	}
 }

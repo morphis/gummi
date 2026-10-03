@@ -3610,10 +3610,27 @@ excluded from. Between turns there is no backend and the tree is committed,
 so there is nothing left to exclude, and a board left open overnight stops
 blocking every CLI landing of every freeform card on it.
 
-Its tool surface is `resolve_annotation` and nothing else — the review
-loop needs it, there is no document for the spec tools to reach, and
-`ask_user` would be a worse channel than the reply the person is already
-about to type.
+Its tool surface is `resolve_annotation`, `ask_user` and, on a backend with
+no watch tool of its own, `watch`/`unwatch` — and no spec tools, since
+there is no document for them to reach. The review loop needs
+`resolve_annotation`; `ask_user` is how any coding-agent session stops for a
+decision instead of guessing. `watch` is gummi's stand-in for Claude Code's
+Monitor (`agent.Capabilities.NativeWatch`): gummi runs the command in the
+worktree and hands its output and exit back to the agent as turns of their
+own, batched and spaced because each one is billed. A watch belongs to the
+session, not the backend, so it outlives an idle close and its next output
+respawns one; it does not survive the board closing.
+
+**A rewind takes back the conversation, never the branch.** Rewinding to
+before one of the person's messages drops it and everything after from
+the transcript, hands the message back to the composer, and forgets the
+backend's own conversation id so the next turn replays what is left
+rather than resuming what was cut. The commits and the worktree stay as
+they are, and a note in the conversation — replayed to the agent — says
+so. Taking the branch back too would be gummi rewriting history the agent
+made on purpose, a step this card's other floor (every commit is
+intentional) leaves to the person and git. Not mid-turn, and not over an
+open question.
 
 ### 19.4 The review loop
 

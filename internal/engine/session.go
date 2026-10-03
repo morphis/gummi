@@ -107,6 +107,16 @@ const (
 	// nudges) recorded as transcript entries so history keeps them in
 	// order with the surrounding messages.
 	AuthorTool Author = "tool"
+	// AuthorThinking labels the agent's reasoning as its backend streamed
+	// it. Shown, never replayed: it is how the agent got to a reply, not
+	// part of the conversation (replayLine), nor of the card's record
+	// (persist skips it).
+	AuthorThinking Author = "thinking"
+	// AuthorTasks is the agent's working checklist: one entry, rewritten
+	// in place each time its task tool restates the list, its Content the
+	// list as agent.FormatTasks writes it. Pinned rather than shown in the
+	// flow, and like thinking never replayed nor mirrored to the record.
+	AuthorTasks Author = "tasks"
 )
 
 // ToolStatus is an AuthorTool entry's known outcome. It stays
@@ -224,6 +234,9 @@ type Snapshot struct {
 	Spend              agent.Usage
 	SpentCredits       float64       // Spend as a credit-equivalent at the provider's rate
 	Context            agent.Context // latest context-window occupancy
+	Tasks              []agent.Task  // the agent's checklist, as it last stated it
+	Queued             []string      // a freeform card's lines waiting for the turn in flight
+	Watches            []string      // a freeform card's running gummi watches, "w1 · command"
 	Busy               bool          // agent is mid-turn
 	PendingAsk         *Ask          // the agent's open ask_user question, if any
 	Verdict            string        // review verdict via submit_verdict, if submitted
@@ -449,6 +462,7 @@ func (s *Session) Snapshot() Snapshot {
 		Spend:              s.spend,
 		SpentCredits:       s.spentForBudgetLocked(),
 		Context:            s.context,
+		Tasks:              s.tasksLocked(),
 		Busy:               s.busy,
 		PendingAsk:         s.pendingAsk,
 		Verdict:            s.verdict,
@@ -727,6 +741,50 @@ func (s *Session) appendDelta(text string) {
 	s.streamIdx = len(s.transcript) - 1
 }
 
+// appendThinking adds streamed reasoning. Consecutive chunks extend one
+// entry; anything said or done in between starts the next. Like a tool
+// call it closes a streaming reply: what follows thinking is a new one.
+func (s *Session) appendThinking(text string) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n := len(s.transcript); n > 0 && s.transcript[n-1].Author == AuthorThinking {
+		s.transcript[n-1].Content += text
+		return
+	}
+	if s.streamOpen {
+		s.transcript[s.streamIdx].Streaming = false
+		s.streamOpen = false
+	}
+	s.transcript = append(s.transcript, Message{Author: AuthorThinking, Content: text, At: time.Now()})
+}
+
+// setTasks records the agent's checklist, replacing the one it had.
+func (s *Session) setTasks(ts []agent.Task) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	body := agent.FormatTasks(ts)
+	for i := range s.transcript {
+		if s.transcript[i].Author == AuthorTasks {
+			s.transcript[i].Content, s.transcript[i].At = body, time.Now()
+			return
+		}
+	}
+	s.transcript = append(s.transcript, Message{Author: AuthorTasks, Content: body, At: time.Now()})
+}
+
+// tasksLocked is the checklist setTasks last recorded, or nil.
+func (s *Session) tasksLocked() []agent.Task {
+	for i := range s.transcript {
+		if s.transcript[i].Author == AuthorTasks {
+			return agent.ParseTasks(s.transcript[i].Content)
+		}
+	}
+	return nil
+}
+
 // finishAssistant finalizes the streaming assistant message with the
 // authoritative full text, or appends a completed one if no deltas
 // arrived (the common case for adapters that only emit whole messages).
@@ -837,6 +895,19 @@ func (s *Session) appendTool(m Message) {
 		Kind: livelog.KindTool, Text: m.Content, Call: m.CallID,
 		OK: m.ToolStatus == ToolOK, Output: m.ToolOutput,
 	})
+}
+
+// openWatch reports whether the transcript holds a background watch
+// (agent.WatchTool) still pending that started after since.
+func (s *Session) openWatch(since time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.transcript {
+		if m.Author == AuthorTool && m.pending && agent.WatchTool(m.Tool) && m.At.After(since) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveToolResult attaches a backend-reported outcome to the pending

@@ -206,6 +206,19 @@ func (m *Shell) cardCommands(existing []command) []command {
 		}
 		out = append(out, command{id: id, alias: cardCommandNames[a.id], label: a.label, key: a.key, available: true})
 	}
+	// a freeform card also offers the repository's own command files;
+	// choosing one starts the line, since most of them take arguments
+	if r.F.IsFreeform() && m.engine != nil {
+		if ff := m.engine.Freeform(r.F.ID); ff != nil {
+			for _, c := range ff.Commands() {
+				label := "/" + c.Name
+				if c.Description != "" {
+					label += " — " + c.Description
+				}
+				out = append(out, command{id: "project-command:" + c.Name, alias: c.Name, label: label, available: true})
+			}
+		}
+	}
 	return out
 }
 
@@ -242,6 +255,11 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 			return nil
 		}
 		return m.confirmCardProfileChange(r.F.ID, name)
+	}
+	if name, ok := strings.CutPrefix(id, "project-command:"); ok {
+		m.threadInput.SetValue("/" + name + " ")
+		m.threadInput.CursorEnd()
+		return nil
 	}
 	switch id {
 	case "q":

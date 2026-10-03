@@ -56,7 +56,7 @@ func TestOpencodeIntegration(t *testing.T) {
 		WorkDir:     wt,
 		MCPSockPath: stubSock,
 		FeatureID:   "FD-011",
-		Model:       "opencode/deepseek-v4-flash-free",
+		Model:       ocIntegrationModel(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +137,30 @@ func TestOpencodeIntegration(t *testing.T) {
 				t.Fatal("no call_tool ping reached the stub")
 			case <-time.After(500 * time.Millisecond):
 			}
+		}
+	})
+
+	t.Run("compact summarizes the session and the next turn continues", func(t *testing.T) {
+		if err := sess.(Compactor).Compact(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.After(180 * time.Second)
+	wait:
+		for {
+			select {
+			case e := <-sess.Events():
+				switch e.Kind {
+				case EventError:
+					t.Fatalf("compact: %v", e.Err)
+				case EventIdle:
+					break wait
+				}
+			case <-deadline:
+				t.Skip("opencode did not compact in time (network?)")
+			}
+		}
+		if text := reply(t, "Reply with the single word: ok"); strings.TrimSpace(text) == "" {
+			t.Error("the turn after compaction produced no reply")
 		}
 	})
 }
@@ -298,4 +322,13 @@ func findChildArgv(t *testing.T) string {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// ocIntegrationModel is the model the live test runs on: a free one,
+// overridable with GUMMI_OPENCODE_TEST_MODEL since the free list changes.
+func ocIntegrationModel() string {
+	if m := os.Getenv("GUMMI_OPENCODE_TEST_MODEL"); m != "" {
+		return m
+	}
+	return "opencode/deepseek-v4-flash-free"
 }

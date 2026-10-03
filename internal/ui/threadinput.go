@@ -274,6 +274,12 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.stepCard(-1)
 	case "alt+j":
 		return m.stepCard(1)
+	case "alt+u":
+		m.unqueueFreeform(r)
+		return nil
+	case "alt+z":
+		m.rewindFreeform(r)
+		return nil
 	case "pgup", "pgdown":
 		// scrolling the conversation is never text, so it works mid-draft
 		m.scrollThread(msg.String() == "pgup")
@@ -582,7 +588,7 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 	//
 	// A verb still keeps the parser: "/land" on a freeform card means what
 	// it says, and the branches below own it.
-	if r.F.IsFreeform() && prose {
+	if r.F.IsFreeform() && (prose || m.isProjectCommand(r, text)) {
 		return lineClass{route: lineFreeformTurn, consumer: -1}
 	}
 	d := decide()
@@ -1138,6 +1144,75 @@ func (m *Shell) sendFreeformTurn(f domain.Feature, text string, images []engine.
 	}
 }
 
+// isProjectCommand reports whether a line on a freeform card invokes one
+// of the repository's own command files (engine.ProjectCommand): a turn,
+// which the session expands, rather than a word for the "/" menu. gummi's
+// own verbs are parsed first and so win a clash.
+func (m *Shell) isProjectCommand(r featureRow, text string) bool {
+	if m.engine == nil || parseInput(text).Kind != verbMenu {
+		return false
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	if ff == nil {
+		return false
+	}
+	_, _, ok := engine.FindProjectCommand(ff.Commands(), text)
+	return ok
+}
+
+// rewindFreeform takes a freeform conversation back to before the last
+// thing the reader said and puts it in the composer to edit and resend
+// (engine.FreeformSession.Rewind — the conversation, never the branch).
+// Pressed again with that line still untouched in the composer, it goes
+// one message further back; any other draft is never overwritten.
+func (m *Shell) rewindFreeform(r featureRow) {
+	if !r.F.IsFreeform() || m.engine == nil {
+		return
+	}
+	draft := strings.TrimSpace(m.threadInput.Value())
+	if draft != "" && draft != strings.TrimSpace(m.rewound[r.F.ID]) {
+		m.notice = noticeMsg{text: "clear the composer first — rewind puts your earlier message there", id: r.F.ID}
+		return
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	if ff == nil {
+		return
+	}
+	text, err := ff.Rewind(1)
+	if err != nil {
+		m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: r.F.ID}
+		return
+	}
+	if m.rewound == nil {
+		m.rewound = map[domain.FeatureID]string{}
+	}
+	m.rewound[r.F.ID] = text
+	m.threadInput.SetValue(text)
+	m.threadInput.CursorEnd()
+	m.notice = noticeMsg{text: string(r.F.ID) + ": rewound to before your last message — edit and send it, or alt+z to go further back. The branch keeps its commits.", id: r.F.ID}
+}
+
+// unqueueFreeform takes the newest line still waiting for a freeform
+// card's turn in flight back into the composer, to be edited or dropped
+// before the agent hears it (engine.FreeformSession.Unqueue). Only into
+// an empty composer: a draft is never overwritten.
+func (m *Shell) unqueueFreeform(r featureRow) {
+	if !r.F.IsFreeform() || m.engine == nil || strings.TrimSpace(m.threadInput.Value()) != "" {
+		return
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	if ff == nil {
+		return
+	}
+	q := ff.Queued()
+	if len(q) == 0 {
+		return
+	}
+	if text, ok := ff.Unqueue(len(q) - 1); ok {
+		m.threadInput.SetValue(text)
+	}
+}
+
 // interruptFreeform stops a freeform card's turn in flight, reporting
 // whether it took the keystroke at all. It is what p means on such a card
 // while it is working: the session is interactive, so nothing else on this
@@ -1347,7 +1422,15 @@ func (m *Shell) threadInputBindings() []binding {
 			return m.withCardTabs(append(bs, binding{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true}))
 		}
 	}
-	return m.withCardTabs([]binding{
+	var unqueue []binding
+	if r, ok := m.selected(); ok && r.F.IsFreeform() && m.engine != nil {
+		if ff := m.engine.Freeform(r.F.ID); ff != nil && len(ff.Queued()) > 0 {
+			unqueue = []binding{{key: "alt+u", label: "unqueue", help: "take the newest queued line back into the empty composer, before the agent hears it", bar: true}}
+		} else if ff != nil && !ff.Busy() && len(ff.Snapshot().Transcript) > 0 {
+			unqueue = []binding{{key: "alt+z", label: "rewind", help: "take the conversation back to before your last message and put it in the composer to edit; again to go further back. The branch keeps its commits"}}
+		}
+	}
+	return m.withCardTabs(append(unqueue, []binding{
 		{key: "enter", label: "send", help: "send the line — a message, or route a verb command; does nothing when the line is empty", bar: true},
 		{key: "↑", label: "actions", help: "open the action inventory while the line is empty (the placeholder says so too)", bar: true},
 		{key: "pgup/pgdn", label: "scroll", help: "scroll the thread without leaving the line", bar: true},
@@ -1357,7 +1440,7 @@ func (m *Shell) threadInputBindings() []binding {
 		// bar sheds the second-to-last hint first, so the way out is the
 		// last thing to go.
 		{key: "esc", label: "board", help: "back to the board (the draft is kept)", bar: true},
-	})
+	}...))
 }
 
 // threadEnterLabel names what enter will actually do with a verb-leading

@@ -20,6 +20,10 @@ func TestCodexMapLifecycleAndUsage(t *testing.T) {
 	if got := s.SessionID(); got != "thr_42" {
 		t.Fatalf("SessionID = %q", got)
 	}
+	evs, _, err := s.mapLine([]byte(`{"type":"item.completed","item":{"id":"r1","type":"reasoning","text":"**Planning** the fix"}}`))
+	if err != nil || len(evs) != 1 || evs[0].Kind != EventReasoningDelta || evs[0].Text != "**Planning** the fix" {
+		t.Fatalf("reasoning = %#v, %v", evs, err)
+	}
 	evs, terminal, err := s.mapLine([]byte(`{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"done"}}`))
 	if err != nil || terminal || len(evs) != 1 || evs[0].Kind != EventMessage || evs[0].Text != "done" {
 		t.Fatalf("message = %#v, %v, %v", evs, terminal, err)

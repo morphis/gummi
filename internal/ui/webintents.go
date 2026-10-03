@@ -389,6 +389,54 @@ func (b *Bridge) Send(ctx context.Context, id string, req webapi.SendRequest, pe
 	return webapi.SendResponse{Route: route, Card: card}, nil
 }
 
+// Rewind is POST /api/cards/{id}/rewind: a freeform conversation taken
+// back to before the person's back-th latest message
+// (engine.FreeformSession.Rewind — the conversation, never the branch).
+// Mid-turn, over an open question, or past the start, it is a 409.
+func (b *Bridge) Rewind(ctx context.Context, id string, back int) (webapi.Rewound, error) {
+	fid := webID(id)
+	var text string
+	rerr := engine.ErrNothingToRewind
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if m.engine != nil {
+			if ff := m.engine.Freeform(fid); ff != nil {
+				text, rerr = ff.Rewind(back)
+			}
+		}
+		return nil
+	}); err != nil {
+		return webapi.Rewound{}, err
+	}
+	if rerr != nil {
+		return webapi.Rewound{}, refuse(WebConflict, rerr.Error())
+	}
+	return webapi.Rewound{Text: text}, nil
+}
+
+// Unqueue is POST /api/cards/{id}/queue/{n}/take: a line said to a
+// freeform card mid-turn, taken back before the agent hears it
+// (engine.FreeformSession.Unqueue). One that has gone already is a 409,
+// since the page was showing a queue that has since moved on.
+func (b *Bridge) Unqueue(ctx context.Context, id string, n int) (webapi.Unqueued, error) {
+	fid := webID(id)
+	var text string
+	var ok bool
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if m.engine != nil {
+			if ff := m.engine.Freeform(fid); ff != nil {
+				text, ok = ff.Unqueue(n)
+			}
+		}
+		return nil
+	}); err != nil {
+		return webapi.Unqueued{}, err
+	}
+	if !ok {
+		return webapi.Unqueued{}, refuse(WebConflict, "that line is no longer waiting: it has gone to the agent")
+	}
+	return webapi.Unqueued{Text: text}, nil
+}
+
 // Action is POST /api/cards/{id}/actions/{action}: one entry of the
 // card's menu, run as the menu runs it, with the request's values
 // answering the dialogs it opens. A nil card with no error means the

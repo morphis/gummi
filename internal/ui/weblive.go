@@ -149,8 +149,20 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 }
 
 func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Conversation {
-	c := &webapi.Conversation{Busy: snap.Busy, Role: string(snap.Role)}
-	c.Turns, c.Streaming, _ = webTranscript(snap)
+	c := &webapi.Conversation{Busy: snap.Busy, Role: string(snap.Role), Spent: snap.SpentCredits, Model: runModel(snap)}
+	c.Turns, c.Streaming, c.Tool = webTranscript(snap)
+	if ctx := snap.Context; ctx.Tokens > 0 {
+		c.Context = &webapi.AgentContext{Tokens: ctx.Tokens, Limit: ctx.Limit}
+	}
+	for _, t := range snap.Tasks {
+		c.Tasks = append(c.Tasks, webapi.Task{Text: threadfold.Sanitize(t.Text), Status: string(t.Status)})
+	}
+	for _, x := range snap.Watches {
+		c.Watches = append(c.Watches, boundTail(threadfold.Sanitize(x), webapi.LiveText))
+	}
+	for _, q := range snap.Queued {
+		c.Queued = append(c.Queued, boundTail(threadfold.Sanitize(q), webapi.LiveText))
+	}
 	if snap.Busy {
 		c.Verb = verb
 	}
@@ -201,6 +213,9 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 			c := webToolCall(msg, i == inflight)
 			turns = append(turns, webapi.Turn{Author: "tool", Tool: &c})
 			continue
+		}
+		if msg.Author == engine.AuthorTasks {
+			continue // Conversation.Tasks, pinned
 		}
 		turns = append(turns, webapi.Turn{
 			Author: threadfold.AuthorLabel(string(msg.Author), string(snap.Role)),

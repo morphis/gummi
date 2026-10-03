@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -34,12 +35,9 @@ import (
 // still interject on its own.
 const StatusWatching = "watching"
 
-// WatchTool reports whether tool is a backend's own persistent
-// background watch rather than an ordinary, synchronous call: Claude
-// Code's Monitor tool (docs: tools-reference#monitor-tool), which
-// returns before the thing it is watching resolves and runs on, outside
-// any turn, until it fires or hits its deadline.
-func WatchTool(tool string) bool { return tool == "Monitor" }
+// WatchTool is agent.WatchTool, re-exported for the faces that read it
+// from the fold.
+func WatchTool(tool string) bool { return agent.WatchTool(tool) }
 
 func Sanitize(s string) string {
 	s = ansi.Strip(s) // remove recognized escape sequences (CSI/OSC/…)
@@ -63,6 +61,8 @@ func AuthorLabel(author, role string) string {
 		return "you"
 	case string(engine.AuthorSystem):
 		return "gummi"
+	case string(engine.AuthorThinking):
+		return "thinking"
 	default:
 		if role != "" {
 			return role

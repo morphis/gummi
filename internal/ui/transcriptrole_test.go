@@ -93,3 +93,81 @@ func labelPrecedes(rendered, label, body string) bool {
 	}
 	return false
 }
+
+// TestTranscriptShowsThinkingCollapsed: the agent's reasoning renders under
+// its own faint label, showing only its newest lines until alt+o expands
+// it, and is never labelled as the role's reply.
+func TestTranscriptShowsThinkingCollapsed(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	snap := engine.Snapshot{
+		Role: agent.RoleImplementer,
+		Transcript: []engine.Message{
+			{Author: engine.AuthorThinking, Content: "alpha\nbeta\ngamma\ndelta\nepsilon"},
+			{Author: engine.AuthorAssistant, Content: "done"},
+		},
+	}
+	collapsed := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
+	if !strings.Contains(collapsed, "thinking · 2 more lines") || strings.Contains(collapsed, "alpha") || !strings.Contains(collapsed, "epsilon") {
+		t.Errorf("collapsed thinking:\n%s", collapsed)
+	}
+	if !labelPrecedes(collapsed, "implementer", "done") {
+		t.Errorf("the reply lost its role label:\n%s", collapsed)
+	}
+	expanded := stripANSI(strings.Join(transcriptLines(s, snap, 80, true), "\n"))
+	if !strings.Contains(expanded, "alpha") || strings.Contains(expanded, "more lines") {
+		t.Errorf("expanded thinking:\n%s", expanded)
+	}
+}
+
+// TestTranscriptPinsTheChecklist: the agent's task list renders after the
+// conversation rather than where it was first stated, marking each item's
+// state, and folds to its count once all of it is done.
+func TestTranscriptPinsTheChecklist(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	snap := engine.Snapshot{
+		Role: agent.RoleImplementer,
+		Transcript: []engine.Message{
+			{Author: engine.AuthorTasks, Content: "- [x] read\n- [~] fixing\n"},
+			{Author: engine.AuthorAssistant, Content: "on it"},
+		},
+		Tasks: []agent.Task{{Text: "read", Status: agent.TaskDone}, {Text: "fixing", Status: agent.TaskInProgress}, {Text: "test", Status: agent.TaskPending}},
+	}
+	got := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
+	for _, want := range []string{"tasks 1/3", "✓ read", "▸ fixing", "○ test"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "on it") > strings.Index(got, "tasks 1/3") || strings.Contains(got, "[~]") {
+		t.Errorf("checklist not pinned below the conversation:\n%s", got)
+	}
+	for i := range snap.Tasks {
+		snap.Tasks[i].Status = agent.TaskDone
+	}
+	got = stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
+	if !strings.Contains(got, "tasks 3/3") || strings.Contains(got, "✓ read") {
+		t.Errorf("a finished list should fold to its count:\n%s", got)
+	}
+}
+
+// TestTranscriptShowsQueuedLines: lines waiting for the turn in flight
+// show after the conversation, with the key that takes one back.
+func TestTranscriptShowsQueuedLines(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	snap := engine.Snapshot{Role: agent.RoleImplementer, Queued: []string{"also fix\nthe docs"}}
+	got := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
+	if !strings.Contains(got, "queued · alt+u") || !strings.Contains(got, "also fix the docs") {
+		t.Errorf("queued lines:\n%s", got)
+	}
+}
+
+// TestTranscriptShowsRunningWatches: a gummi watch will speak up as a turn
+// of its own, so the reader is shown it is there.
+func TestTranscriptShowsRunningWatches(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	snap := engine.Snapshot{Role: agent.RoleImplementer, Watches: []string{"w1 · tail -f build.log | grep FAIL"}}
+	got := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
+	if !strings.Contains(got, "watching") || !strings.Contains(got, "w1 · tail -f build.log | grep FAIL") {
+		t.Errorf("watches:\n%s", got)
+	}
+}

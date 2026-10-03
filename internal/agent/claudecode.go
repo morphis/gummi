@@ -80,7 +80,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true, NativeWatch: true, Compact: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -454,6 +454,8 @@ type claudeSession struct {
 	prevCostUSD map[string]float64 // per-model cumulative costUSD at the last result
 	estimated   map[string]float64 // per-model credits estimated mid-turn, un-settled
 	ctxTokens   int64              // main model's last request: input+cache tokens
+	toolNames   map[string]string  // tool_use id → tool name, until its tool_result arrives
+	watching    map[string]string  // a started watch's tool_use id → its tool name, until its task_notification
 	// hadIdle marks that some prior turn on this session reached a clean
 	// idle — RunFailure.FirstTurn on a later failure reads the negation
 	// of this.
@@ -657,9 +659,11 @@ type ccLine struct {
 	Type      string          `json:"type"`
 	Subtype   string          `json:"subtype"`
 	SessionID string          `json:"session_id"`
-	Model     string          `json:"model"`   // system/init
-	Event     json.RawMessage `json:"event"`   // stream_event: the API SSE event
-	Message   json.RawMessage `json:"message"` // assistant: the full API message
+	Model     string          `json:"model"`       // system/init
+	ToolUseID string          `json:"tool_use_id"` // system/task_notification
+	Status    string          `json:"status"`      // system/task_notification
+	Event     json.RawMessage `json:"event"`       // stream_event: the API SSE event
+	Message   json.RawMessage `json:"message"`     // assistant: the full API message
 	// result fields
 	IsError    bool                    `json:"is_error"`
 	Result     string                  `json:"result"`
@@ -705,8 +709,20 @@ type ccAssistantMessage struct {
 	Content []struct {
 		Type  string         `json:"type"`
 		Text  string         `json:"text"`
+		ID    string         `json:"id"`    // tool_use: pairs with its tool_result
 		Name  string         `json:"name"`  // tool_use
 		Input map[string]any `json:"input"` // tool_use arguments
+	} `json:"content"`
+}
+
+// ccToolResultMessage is the API message inside a user line: the CLI
+// echoes each tool's outcome back as a tool_result block.
+type ccToolResultMessage struct {
+	Content []struct {
+		Type      string          `json:"type"`
+		ToolUseID string          `json:"tool_use_id"`
+		IsError   bool            `json:"is_error"`
+		Content   json.RawMessage `json:"content"` // a string, or text/image blocks
 	} `json:"content"`
 }
 
@@ -725,7 +741,8 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 		// init opens every turn (not just the first — P0). Capture the
 		// resolved model id: it is the modelUsage key for settlement and
 		// context, and opts.Model may be an alias ("haiku") or empty.
-		if l.Subtype == "init" {
+		switch l.Subtype {
+		case "init":
 			if s.SessionID() == "" {
 				s.mu.Lock()
 				s.sessionID = l.SessionID
@@ -733,6 +750,30 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 			}
 			if s.mainModel == "" {
 				s.mainModel = l.Model
+			}
+			// an init with no Send unanswered is a turn the CLI started by
+			// itself: a Monitor event woke the agent after its last result.
+			// It is a turn like any other — it ends in a result, it spends,
+			// and Interrupt must be able to stop it.
+			s.mu.Lock()
+			unprompted := !s.inTurn
+			s.inTurn = true
+			s.mu.Unlock()
+			if unprompted {
+				return []Event{{Kind: EventTurnStarted}}
+			}
+		case "task_notification":
+			// a watch ending: the one point the CLI says so, which settles
+			// the Monitor call its tool_result left open (mapToolResults)
+			if name, ok := s.watching[l.ToolUseID]; ok {
+				delete(s.watching, l.ToolUseID)
+				status := l.Status
+				if status == "" {
+					status = "ended"
+				}
+				return []Event{{Kind: EventToolResult, Tool: name, CallID: l.ToolUseID, Result: &ToolResult{
+					OK: status == "completed", Output: "watch " + status,
+				}}}
 			}
 		}
 		return nil // thinking_tokens and other advisory subtypes: dropped
@@ -742,8 +783,10 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 		return s.mapAssistant(l.Message)
 	case "result":
 		return s.mapResult(&l)
+	case "user":
+		return s.mapToolResults(l.Message)
 	default:
-		// user (tool-result echoes), rate_limit_event, control_response
+		// rate_limit_event, control_response
 		// (our interrupt's ack), and anything the CLI grows later.
 		return nil
 	}
@@ -842,11 +885,76 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage) []Event {
 			}
 		case "tool_use":
 			if b.Name != "" {
-				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input)})
+				if b.ID != "" {
+					if s.toolNames == nil {
+						s.toolNames = map[string]string{}
+					}
+					s.toolNames[b.ID] = b.Name
+				}
+				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input), CallID: b.ID})
+				out = append(out, tasksEvent(b.Name, b.Input)...)
 			}
 		}
 	}
 	return out
+}
+
+// mapToolResults turns a user line's tool_result blocks into tool-result
+// events paired by CallID with the tool_use they answer. A result for a
+// call this session never saw is dropped: it would be a result line with
+// no call above it.
+func (s *claudeSession) mapToolResults(raw json.RawMessage) []Event {
+	var m ccToolResultMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil
+	}
+	var out []Event
+	for _, b := range m.Content {
+		if b.Type != "tool_result" {
+			continue
+		}
+		name, ok := s.toolNames[b.ToolUseID]
+		if !ok {
+			continue
+		}
+		delete(s.toolNames, b.ToolUseID)
+		// Monitor's result only says the watch started; the watch itself
+		// runs on past the turn. Settling the call on that ack would turn
+		// "watching" into "ok", so only a watch that failed to start
+		// reports here — one that started is settled by the CLI's
+		// task_notification when it ends (mapLine).
+		if WatchTool(name) && !b.IsError {
+			if s.watching == nil {
+				s.watching = map[string]string{}
+			}
+			s.watching[b.ToolUseID] = name
+			continue
+		}
+		body := toolResultText(b.Content)
+		out = append(out, Event{Kind: EventToolResult, Tool: name, CallID: b.ToolUseID, Result: &ToolResult{OK: !b.IsError, Output: boundTail(body, !b.IsError)}})
+	}
+	return out
+}
+
+// toolResultText flattens a tool_result's content, which the API allows
+// to be a plain string or a list of blocks; only text blocks carry output.
+func toolResultText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	_ = json.Unmarshal(raw, &blocks)
+	parts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		if b.Type == "text" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // mapResult settles the turn's spend and terminates it. modelUsage is

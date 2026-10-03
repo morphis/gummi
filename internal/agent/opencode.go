@@ -60,7 +60,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage, and can be interrupted by killing
 // the turn's process.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true, Compact: true}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step
@@ -236,6 +236,8 @@ func (s *opencodeSession) SendTurn(_ context.Context, turn Turn) error {
 	// (outside the worktree cwd), so without this the reviewer's first
 	// `read` is silently rejected and the turn dies before any VERDICT.
 	args = append(args, "--auto")
+	// --thinking: without it run --format json leaves reasoning parts out.
+	args = append(args, "--thinking")
 	if s.sessionID != "" {
 		args = append(args, "--session", s.sessionID)
 	}
@@ -255,38 +257,8 @@ func (s *opencodeSession) SendTurn(_ context.Context, turn Turn) error {
 	procCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, s.o.bin, args...) //nolint:gosec // bin is operator config, args are gummi-built
 	cmd.Dir = s.workdir
-	cmd.Env = os.Environ()
-	// opencode caps each step's output at min(limit.output, 32000) and only
-	// this env var lifts the 32000 ceiling (opencode.jsonc can't). Set per
-	// the role's output_token_max so reasoning-heavy stages aren't truncated
-	// (reason=length, output=0). gummi forwards os.Environ() to opencode, so
-	// appending here reaches the child.
-	if s.outputTokenMax > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=%d", s.outputTokenMax))
-	}
-	if s.mcpSock != "" {
-		cmd.Env = append(cmd.Env, "GUMMI_MCP_SOCK="+s.mcpSock)
-	}
-	// The per-session config carries the worktree cage and the mcp.gummi
-	// endpoint. Exporting OPENCODE_CONFIG alongside GUMMI_MCP_SOCK (which
-	// opencode's mcp.local.environment only applies to the spawned MCP
-	// subprocess, not the main run) makes the child inherit the socket too.
-	if s.configPath != "" {
-		cmd.Env = append(cmd.Env, "OPENCODE_CONFIG="+s.configPath)
-	}
-	// Run opencode in its own process group and, on cancel/interrupt, kill
-	// the whole group — opencode spawns tool subprocesses (bash, editors)
-	// that would otherwise be orphaned and keep the stdout pipe open,
-	// stalling the turn's teardown. WaitDelay force-closes the pipes if a
-	// child lingers, so Wait can't hang.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
+	cmd.Env = s.childEnv()
+	setOpencodeGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -308,6 +280,47 @@ func (s *opencodeSession) SendTurn(_ context.Context, turn Turn) error {
 
 	go s.readTurn(cmd, stdout, stderr, cancel, msg)
 	return nil
+}
+
+// childEnv is the environment every opencode process this session starts
+// runs with: its own, plus the session's config and gummi's socket.
+func (s *opencodeSession) childEnv() []string {
+	env := os.Environ()
+	// opencode caps each step's output at min(limit.output, 32000) and only
+	// this env var lifts the 32000 ceiling (opencode.jsonc can't). Set per
+	// the role's output_token_max so reasoning-heavy stages aren't truncated
+	// (reason=length, output=0). gummi forwards os.Environ() to opencode, so
+	// appending here reaches the child.
+	if s.outputTokenMax > 0 {
+		env = append(env, fmt.Sprintf("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=%d", s.outputTokenMax))
+	}
+	if s.mcpSock != "" {
+		env = append(env, "GUMMI_MCP_SOCK="+s.mcpSock)
+	}
+	// The per-session config carries the worktree cage and the mcp.gummi
+	// endpoint. Exporting OPENCODE_CONFIG alongside GUMMI_MCP_SOCK (which
+	// opencode's mcp.local.environment only applies to the spawned MCP
+	// subprocess, not the main run) makes the child inherit the socket too.
+	if s.configPath != "" {
+		env = append(env, "OPENCODE_CONFIG="+s.configPath)
+	}
+	return env
+}
+
+// setOpencodeGroup runs cmd in its own process group and, on
+// cancel/interrupt, kills the whole group — opencode spawns tool
+// subprocesses (bash, editors) that would otherwise be orphaned and keep
+// the stdout pipe open, stalling the turn's teardown. WaitDelay
+// force-closes the pipes if a child lingers, so Wait can't hang.
+func setOpencodeGroup(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 2 * time.Second
 }
 
 // readTurn maps one `opencode run` process's stdout to events and ends the
@@ -506,24 +519,17 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 	}
 	switch e.Type {
 	case "text":
-		// emit only the new suffix of this part (robust whether opencode
-		// streams a part incrementally or sends it whole).
-		s.mu.Lock()
-		prev := s.partLen[e.Part.ID]
-		full := e.Part.Text
-		var delta string
-		if len(full) >= prev {
-			delta = full[prev:]
-		} else {
-			delta = full // part reset unexpectedly
-		}
-		s.partLen[e.Part.ID] = len(full)
-		s.mu.Unlock()
+		delta := s.partDelta(e.Part.ID, e.Part.Text)
 		if delta == "" {
 			return nil
 		}
 		msg.WriteString(delta)
 		return []Event{{Kind: EventTextDelta, Text: delta}}
+	case "reasoning":
+		if delta := s.partDelta(e.Part.ID, e.Part.Text); delta != "" {
+			return []Event{{Kind: EventReasoningDelta, Text: delta}}
+		}
+		return nil
 	case "tool", "tool_use":
 		if e.Part.Tool == "" {
 			return nil
@@ -545,6 +551,7 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 			detail = collapseDetail(s.workdir, e.Part.State.Title)
 		}
 		out = append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail, CallID: e.Part.CallID})
+		out = append(out, tasksEvent(e.Part.Tool, e.Part.State.Input)...)
 		// opencode writes a tool_use line only once the call has finished,
 		// completed or errored, so its outcome is already on it. It is
 		// reported because a refused call is otherwise invisible: a
@@ -595,6 +602,19 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 	default:
 		return nil // step_start and other lifecycle events aren't surfaced
 	}
+}
+
+// partDelta returns only the new suffix of a streamed part, robust
+// whether opencode streams a part incrementally or sends it whole.
+func (s *opencodeSession) partDelta(id, full string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev := s.partLen[id]
+	s.partLen[id] = len(full)
+	if len(full) >= prev {
+		return full[prev:]
+	}
+	return full // part reset unexpectedly
 }
 
 func (s *opencodeSession) Interrupt(_ context.Context) error {

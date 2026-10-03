@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -836,6 +838,7 @@ func transcriptText(snap Snapshot) string {
 func TestTheReplayCarriesWhatWasSaidAndNotWhatGummiDid(t *testing.T) {
 	seed := []Message{
 		{Author: AuthorUser, Content: "drop the leaked pty fd"},
+		{Author: AuthorThinking, Content: "the fd is opened in spawn"},
 		{Author: AuthorTool, Content: "write  pty.go"},
 		{Author: AuthorAssistant, Content: "Added pty.go."},
 		{Author: AuthorTool, Content: "worktree committed: FF-001: turn checkpoint"},
@@ -846,9 +849,276 @@ func TestTheReplayCarriesWhatWasSaidAndNotWhatGummiDid(t *testing.T) {
 			t.Errorf("the replay drops what was said (%q):\n%s", want, got)
 		}
 	}
-	for _, unwanted := range []string{"worktree committed", "write  pty.go"} {
+	for _, unwanted := range []string{"worktree committed", "write  pty.go", "opened in spawn"} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("the replay carries %q, which is not conversation:\n%s", unwanted, got)
+		}
+	}
+}
+
+// TestAFreeformTurnShowsItsThinking: reasoning a backend streams is kept
+// as one thinking entry ahead of the reply, not dropped — and it does not
+// leak into the reply it came before.
+func TestAFreeformTurnShowsItsThinking(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventReasoningDelta, Text: "the fd is "},
+			{Kind: agent.EventReasoningDelta, Text: "opened in spawn"},
+			{Kind: agent.EventTextDelta, Text: "Closed it."},
+			{Kind: agent.EventMessage, Text: "Closed it."},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := freeformCard(1, "poke at the pty leak")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "drop the leaked fd"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	var got []string
+	for _, m := range ff.Session().Snapshot().Transcript {
+		got = append(got, string(m.Author)+":"+m.Content)
+	}
+	want := []string{"user:drop the leaked fd", "thinking:the fd is opened in spawn", "assistant:Closed it."}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("transcript = %q, want %q", got, want)
+	}
+}
+
+// TestAnOpenWatchKeepsTheBackendUp: a backend idling out with a watch still
+// running would end the watch silently while the page says "watching", so
+// the idle close waits while one is open — and closes once it has settled.
+func TestAnOpenWatchKeepsTheBackendUp(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventToolCall, Tool: "Monitor", Detail: "tail build.log", CallID: "w1"},
+			{Kind: agent.EventMessage, Text: "watching the build"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	e.freeformIdleTimeout = 20 * time.Millisecond
+	ctx := context.Background()
+	f := freeformCard(1, "watch the build")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "tell me when it breaks"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	sess := ff.Session()
+	time.Sleep(100 * time.Millisecond)
+	if !sess.Live() {
+		t.Fatal("the backend idled out with a watch still open")
+	}
+	sess.resolveToolResult("w1", true, "build failed")
+	deadline := time.Now().Add(2 * time.Second)
+	for sess.Live() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sess.Live() {
+		t.Error("the backend stayed up after its watch settled")
+	}
+}
+
+// TestAFreeformSessionKeepsOneChecklist: each restatement of the agent's
+// task list replaces the last in one transcript entry, which a restart
+// restores and a replay never hands back to the agent as conversation.
+func TestAFreeformSessionKeepsOneChecklist(t *testing.T) {
+	first := []agent.Task{{Text: "read", Status: agent.TaskInProgress}, {Text: "fix", Status: agent.TaskPending}}
+	second := []agent.Task{{Text: "read", Status: agent.TaskDone}, {Text: "fix", Status: agent.TaskInProgress}}
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventTasks, Tasks: first},
+			{Kind: agent.EventMessage, Text: "reading"},
+			{Kind: agent.EventTasks, Tasks: second},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := freeformCard(1, "fix the leak")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "go"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	snap := ff.Session().Snapshot()
+	if !reflect.DeepEqual(snap.Tasks, second) {
+		t.Errorf("Tasks = %#v, want %#v", snap.Tasks, second)
+	}
+	var lists []Message
+	for _, m := range snap.Transcript {
+		if m.Author == AuthorTasks {
+			lists = append(lists, m)
+		}
+	}
+	if len(lists) != 1 {
+		t.Fatalf("%d checklist entries, want one", len(lists))
+	}
+	if got := replayLine(lists[0]); got != "" {
+		t.Errorf("the checklist was replayed as %q", got)
+	}
+	restored := restoredFreeformSession(f, state.SessionSnapshot{
+		Transcript: []state.SessionMessage{{Author: string(AuthorTasks), Content: lists[0].Content}},
+	})
+	if got := restored.Snapshot().Tasks; !reflect.DeepEqual(got, second) {
+		t.Errorf("restored Tasks = %#v, want %#v", got, second)
+	}
+}
+
+// TestAFreeformTurnSentMidTurnIsQueued: a line sent while the agent is on
+// a turn waits instead of being refused, can be taken back, and what is
+// left goes to the agent as one turn once the turn in flight ends.
+func TestAFreeformTurnSentMidTurnIsQueued(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var prompts []string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, prompt string) []agent.Event {
+		mu.Lock()
+		prompts = append(prompts, prompt)
+		first := len(prompts) == 1
+		mu.Unlock()
+		if first {
+			<-release
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := freeformCard(1, "fix the leak")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = ff.Send(ctx, "first") }()
+	deadline := time.Now().Add(testWaitTimeout)
+	for !ff.Busy() {
+		if time.Now().After(deadline) {
+			t.Fatal("the first turn never started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for _, line := range []string{"second", "never mind", "third"} {
+		if err := ff.Send(ctx, line); err != nil {
+			t.Fatalf("send %q mid-turn: %v", line, err)
+		}
+	}
+	if got := ff.Snapshot().Queued; strings.Join(got, "|") != "second|never mind|third" {
+		t.Fatalf("Queued = %q", got)
+	}
+	if text, ok := ff.Unqueue(1); !ok || text != "never mind" {
+		t.Fatalf("Unqueue = %q, %v", text, ok)
+	}
+	if _, ok := ff.Unqueue(5); ok {
+		t.Error("unqueued a line that was never there")
+	}
+	close(release)
+	for {
+		mu.Lock()
+		n := len(prompts)
+		mu.Unlock()
+		if n == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the queue was never sent")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	waitFreeformIdle(t, ff)
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(prompts[1], "second\n\nthird") || strings.Contains(prompts[1], "never mind") {
+		t.Errorf("queued turn = %q", prompts[1])
+	}
+	if q := ff.Queued(); len(q) != 0 {
+		t.Errorf("queue left after sending = %q", q)
+	}
+}
+
+// TestATurnTheBackendStartsItselfIsBusy: a backend that wakes by itself
+// (a Monitor firing) is working until that turn's idle — a line sent
+// meanwhile queues behind it instead of being written into the middle of
+// it, and goes once it ends.
+func TestATurnTheBackendStartsItselfIsBusy(t *testing.T) {
+	ag := &agent.Fake{}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := freeformCard(1, "watch the build")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "start watching"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	pusher, ok := ff.Session().agent().(interface{ Push(...agent.Event) })
+	if !ok {
+		t.Fatal("the fake session cannot push")
+	}
+	pusher.Push(agent.Event{Kind: agent.EventTurnStarted}, agent.Event{Kind: agent.EventTextDelta, Text: "the build failed"})
+	deadline := time.After(testWaitTimeout)
+	for !ff.Busy() {
+		select {
+		case <-deadline:
+			t.Fatal("the self-started turn never made the session busy")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if err := ff.Send(ctx, "what failed?"); err != nil {
+		t.Fatal(err)
+	}
+	if q := ff.Queued(); len(q) != 1 {
+		t.Fatalf("queued = %q, want the line held behind the turn", q)
+	}
+	pusher.Push(agent.Event{Kind: agent.EventMessage, Text: "the build failed"}, agent.Event{Kind: agent.EventIdle})
+	for {
+		var said []string
+		for _, m := range ff.Snapshot().Transcript {
+			if m.Author == AuthorUser {
+				said = append(said, m.Content)
+			}
+		}
+		if len(said) == 2 && said[1] == "what failed?" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("the queued line never went: %q", said)
+		case <-time.After(5 * time.Millisecond):
 		}
 	}
 }

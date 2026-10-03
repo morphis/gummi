@@ -195,7 +195,8 @@ const (
 
 // Turn is one entry of a live transcript.
 type Turn struct {
-	// Author is "you", "gummi", "tool" or the role that spoke.
+	// Author is "you", "gummi", "tool", "thinking" (the agent's reasoning,
+	// in Text) or the role that spoke.
 	Author string `json:"author"`
 	// By names the person behind a "you" turn, when it carried a name.
 	By   string `json:"by,omitempty"`
@@ -220,6 +221,49 @@ type Conversation struct {
 	// Sending is a line on its way that the session does not hold yet.
 	Sending string `json:"sending,omitempty"`
 	Err     string `json:"err,omitempty"`
+	// Tool is the call in flight, as on a stage run's live block.
+	Tool *ToolCall `json:"tool,omitempty"`
+	// Spent is the session's credits so far; Model what it runs on;
+	// Context how full its window is, when the backend reports it.
+	Spent   float64       `json:"spent,omitempty"`
+	Model   string        `json:"model,omitempty"`
+	Context *AgentContext `json:"context,omitempty"`
+	// Tasks is the agent's own checklist as it last stated it, pinned
+	// above the composer rather than in the flow of turns.
+	Tasks []Task `json:"tasks,omitempty"`
+	// Queued is what the person said while the agent was mid-turn, oldest
+	// first, waiting to go to it together as the next turn. Each can be
+	// taken back by its index (POST /api/cards/{id}/queue/{n}/take).
+	Queued []string `json:"queued,omitempty"`
+	// Watches is the session's running gummi watches ("w1 · command"),
+	// each of which reports back to the agent as a turn of its own.
+	Watches []string `json:"watches,omitempty"`
+}
+
+// RewindRequest is POST /api/cards/{id}/rewind's body: how many of the
+// person's own messages back to go, 1 being the last.
+type RewindRequest struct {
+	Back int `json:"back"`
+}
+
+// Rewound is POST /api/cards/{id}/rewind's answer: the message the
+// conversation was taken back to before, for the composer to offer for
+// editing. The branch is never rewound.
+type Rewound struct {
+	Text string `json:"text"`
+}
+
+// Unqueued is POST /api/cards/{id}/queue/{n}/take's answer: the line
+// taken back before it was sent, for the composer to offer for editing.
+type Unqueued struct {
+	Text string `json:"text"`
+}
+
+// Task is one item of an agent's checklist. Status is "pending",
+// "in_progress" or "completed".
+type Task struct {
+	Text   string `json:"text"`
+	Status string `json:"status"`
 }
 
 // Elsewhere is a run of the card another gummi process owns: read-only

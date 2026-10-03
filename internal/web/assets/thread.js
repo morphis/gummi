@@ -11,7 +11,9 @@ import { $, h, clear, clock, dur, cr, initials, ROLE, decisionWord, decisionColo
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { draftHero } from './session.js?v=__ASSET_V__'
-import { attachmentURL } from './api.js?v=__ASSET_V__'
+import { attachmentURL, post, cardPath } from './api.js?v=__ASSET_V__'
+import { restoreComposer } from './composer.js?v=__ASSET_V__'
+import { toast } from './toast.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -238,7 +240,8 @@ function you (it) {
   return h('div', { class: 'msg', testid: it.via === 'consult' ? 'thread-consult' : null },
     h('div', { class: 'av you', 'aria-hidden': 'true' }, it.by ? initials(it.by) : 'you'),
     h('div', null,
-      h('div', { class: 'who' }, h('b', null, who), h('span', { class: 'mono' }, clock(it.time)), it.via ? h('span', { class: 'via' }, it.via) : null),
+      h('div', { class: 'who' }, h('b', null, who), h('span', { class: 'mono' }, clock(it.time)), it.via ? h('span', { class: 'via' }, it.via) : null,
+        it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null),
       h('div', { class: 'body' }, md(it.text)),
       attachmentThumbs(it.attachments)))
 }
@@ -370,7 +373,17 @@ function renderLive () {
           k === 'freeform' ? h('span', { class: 'sum' }, c.role || 'implementer') : null))
         parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
         if (c.sending) parts.push(you({ text: c.sending, via: 'sending' }))
-        if (c.busy) parts.push(h('div', { class: 'live', testid: `live-${k}` }, h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }, c.verb || 'thinking')))
+        if (c.tasks?.length) parts.push(tasks(c.tasks))
+        if (k === 'freeform' && c.watches?.length) parts.push(watches(c.watches))
+        if (k === 'freeform' && c.queued?.length) parts.push(queued(state.sel, c.queued))
+        if (c.busy) {
+          // the same line a stage run shows: what it is doing, the call in
+          // flight, and what the session has cost and how full it is
+          const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
+          const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
+          parts.push(h('div', { class: 'live', testid: `live-${k}` }, h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }, words),
+            c.spent || ctx ? h('span', { class: 'spent' }, [c.spent ? `${cr(c.spent)} cr` : null, ctx].filter(Boolean).join(' · ')) : null))
+        }
         if (c.err) parts.push(h('div', { class: 'live badc' }, c.err))
       }
     } else if (r.status === 'running') {
@@ -381,6 +394,62 @@ function renderLive () {
   const stick = atBottom(sc)
   box.replaceChildren(...parts)
   if (stick) requestAnimationFrame(() => { sc.scrollTop = sc.scrollHeight })
+}
+
+// rewind takes a freeform conversation back to before one of the person's
+// messages and puts it in the composer. Only the conversation: the branch
+// keeps what was committed since, and the session says so.
+async function rewind (id, back) {
+  try {
+    const r = await post(cardPath(id, 'rewind'), { back })
+    restoreComposer(r.text)
+    toast('Rewound — edit and send. The branch keeps its commits.')
+  } catch (e) { toast(e.message) }
+}
+
+// queued is what was said while the agent was mid-turn, waiting to go as
+// its next turn: each line can be taken back to edit, or dropped.
+function queued (id, lines) {
+  const take = async (i, edit) => {
+    try {
+      const r = await post(cardPath(id, `queue/${i}/take`))
+      if (edit) restoreComposer(r.text)
+    } catch (e) { toast(e.message) }
+  }
+  return h('div', { class: 'queued', testid: 'queued' },
+    ...lines.map((text, i) => h('div', { class: 'queued-line' },
+      h('span', { class: 'via' }, 'queued'), h('span', { class: 'text' }, text),
+      h('button', { type: 'button', title: 'Edit', testid: 'queued-edit', onclick: () => take(i, true) }, 'edit'),
+      h('button', { type: 'button', title: 'Cancel', testid: 'queued-cancel', onclick: () => take(i, false) }, '×'))))
+}
+
+// watches are the gummi watches the session has running; each reports
+// back to the agent as a turn of its own.
+function watches (lines) {
+  return h('div', { class: 'queued', testid: 'watches' },
+    ...lines.map(text => h('div', { class: 'queued-line watch' },
+      h('span', { class: 'via' }, 'watching'), h('span', { class: 'text' }, text))))
+}
+
+// tasks is the agent's own checklist, pinned under the conversation: open
+// while anything is left, folded to its count once all of it is done.
+const TASK_MARK = { completed: '✓', in_progress: '▸', pending: '○' }
+function tasks (list) {
+  const done = list.filter(t => t.status === 'completed').length
+  return h('div', { class: 'indent' },
+    h('details', { class: 'tools tasks', open: done < list.length, testid: 'tasks' },
+      h('summary', null, `tasks ${done}/${list.length}`),
+      h('ul', { class: 'body' }, ...list.map(t =>
+        h('li', { class: ['task', t.status] }, `${TASK_MARK[t.status] || '○'} ${t.text}`)))))
+}
+
+// thinking is the agent's reasoning, folded behind its summary line so a
+// reply is never buried under how the agent got to it.
+function thinking (text, live) {
+  return h('div', { class: 'indent' },
+    h('details', { class: 'tools thinking', open: live, testid: 'thinking' },
+      h('summary', null, live ? h('span', { class: 'watching' }, 'thinking…') : 'thought'),
+      h('div', { class: 'body' }, md(text))))
 }
 
 // conversation draws a session's settled turns (tool turns folded into one
@@ -398,9 +467,21 @@ function conversation (kind, c, role, stage) {
   turns.forEach((t, i) => {
     if (t.tool) { run.push(t); return }
     flush(i)
-    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}`
+    if (t.author === 'thinking') {
+      // the newest thought of a busy session is what it is thinking now:
+      // open, and labelled live; every other one folds away
+      const live = c.busy && i === turns.length - 1 && !c.streaming
+      out.push(cached(`${kind}:${i}`, `thinking|${live}|${(t.text || '').length}`, () => thinking(t.text, live)))
+      return
+    }
+    // a freeform session's own messages can be rewound to, between turns:
+    // back counts them from the newest, which is how the server names one
+    const back = kind === 'freeform' && t.author === 'you' && !c.busy
+      ? turns.slice(i).filter(x => x.author === 'you').length
+      : 0
+    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${back}`
     out.push(cached(`${kind}:${i}`, sig, () => t.author === 'you'
-      ? you({ text: t.text, by: t.by })
+      ? you({ text: t.text, by: t.by, rewind: back ? () => rewind(state.sel, back) : null })
       : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text })))
   })
   flush(turns.length)

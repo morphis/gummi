@@ -2841,6 +2841,7 @@ func (e *Engine) Close() error {
 	// worktree holds stays there, for the agent or the person to commit on
 	// purpose.
 	for _, ff := range freeforms {
+		ff.stopWatches()
 		ff.settle()
 		ff.stopBackend()
 	}
@@ -2932,9 +2933,10 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	case agent.EventTextDelta:
 		s.appendDelta(ev.Text)
 	case agent.EventReasoningDelta:
-		// thinking is not transcript text and carries no state change;
-		// relaying it would only emit an EventUpdated per chunk.
-		return
+		// shown as it streams, as a freeform session shows it; persist
+		// never mirrors it and lastAssistant never reads it, so the
+		// verdict and the handoff see only what the agent said.
+		s.appendThinking(ev.Text)
 	case agent.EventMessage:
 		s.finishAssistant(ev.Text)
 		kind = EventMessage

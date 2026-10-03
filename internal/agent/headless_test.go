@@ -292,3 +292,21 @@ func TestHeadlessIgnoresResumePath(t *testing.T) {
 		t.Fatalf("headless adapter touched ResumePath %s: stat err = %v", resumePath, err)
 	}
 }
+
+func TestHeadlessDecodesToolResultAndContext(t *testing.T) {
+	call, _ := decodeHeadless([]byte(`{"type":"tool","id":"c1","name":"bash","detail":"go test"}`))
+	if call.Kind != EventToolCall || call.CallID != "c1" {
+		t.Fatalf("tool = %+v", call)
+	}
+	res, _ := decodeHeadless([]byte(`{"type":"tool_result","id":"c1","name":"bash","ok":false,"result":"FAIL"}`))
+	if res.Kind != EventToolResult || res.CallID != "c1" || res.Result == nil || res.Result.OK || res.Result.Output != "FAIL" {
+		t.Fatalf("tool_result = %+v", res)
+	}
+	if ok, _ := decodeHeadless([]byte(`{"type":"tool_result","id":"c2"}`)); ok.Result == nil || !ok.Result.OK {
+		t.Errorf("tool_result without ok = %+v, want ok", ok)
+	}
+	ctx, _ := decodeHeadless([]byte(`{"type":"context","tokens":1200,"limit":8000}`))
+	if ctx.Kind != EventContext || ctx.Context.Tokens != 1200 || ctx.Context.Limit != 8000 {
+		t.Fatalf("context = %+v", ctx)
+	}
+}

@@ -128,6 +128,7 @@ type fakeSession struct {
 	turns     []Turn
 	interrupt bool
 	resolved  map[string]string // client-tool callID → result (Resolve)
+	compacts  int
 }
 
 // Resolve implements ToolResolver: records the result so a test can
@@ -170,6 +171,35 @@ func (s *fakeSession) forward() {
 			}
 		}
 	}
+}
+
+// Push delivers events outside any turn, the way a backend that starts a
+// turn by itself does (EventTurnStarted). Test aid.
+func (s *fakeSession) Push(events ...Event) {
+	for _, e := range events {
+		select {
+		case s.raw <- e:
+		case <-s.stop:
+			return
+		}
+	}
+}
+
+// Compact implements Compactor: it counts the call and ends like a turn.
+// The engine only routes to it when Caps.Compact is set. Test aid.
+func (s *fakeSession) Compact(context.Context) error {
+	s.mu.Lock()
+	s.compacts++
+	s.mu.Unlock()
+	go s.Push(Event{Kind: EventMessage, Text: "compacted"}, Event{Kind: EventIdle})
+	return nil
+}
+
+// CompactCount reports how many times Compact was called (test aid).
+func (s *fakeSession) CompactCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.compacts
 }
 
 func (s *fakeSession) Send(ctx context.Context, msg string) error {

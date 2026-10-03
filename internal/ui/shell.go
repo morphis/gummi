@@ -479,6 +479,9 @@ type Shell struct {
 	// thread says so for as long as it runs (consultBlock). Cleared by
 	// consultSentMsg on both outcomes.
 	consultSending map[domain.FeatureID]string
+	// rewound is the line alt+z last put back in a freeform card's composer:
+	// pressed again over it, rewind goes one message further back.
+	rewound map[domain.FeatureID]string
 	// chatting marks a card whose thread's newest exchange is a consult
 	// answer: a line typed next continues that conversation and is not
 	// read again (chat.go). Ended by a row picked, a verb, the card
