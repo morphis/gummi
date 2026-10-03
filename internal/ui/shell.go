@@ -1480,6 +1480,24 @@ func (m *Shell) threadShowsFailure(id domain.FeatureID) bool {
 	return !r.DrivenAbroad && m.sessionFor(id) != nil
 }
 
+// crossCardOpen reports whether a card page is open on a card other than
+// id — the case where an engine-raised failure or budget stop about id
+// must not write the transient notice. The surface the reader is on
+// belongs to the card they opened, and a notice about a different card
+// buries the feedback for what they are doing; the event still reaches
+// the channels that own it (the inbox item, the bell/desktop hook, the
+// board row's glyph, the card's own thread), so nothing is lost — only
+// not echoed over a page it does not belong to. False when no card page
+// is open (the board tab keeps the notice) and for the empty id: a notice
+// not bound to a card (an ingest or other one-shot pass) has no card it
+// could be cross to, so it always writes.
+func (m *Shell) crossCardOpen(id domain.FeatureID) bool {
+	if id == "" {
+		return false
+	}
+	return m.cardOpen && m.selectedID() != id
+}
+
 // handleEngineEvent folds an engine event into the notice line, the
 // needs-attention queue, and the automatic review loop. It returns a
 // command for any automatic follow-up (review→fix→review), or nil.
@@ -1505,11 +1523,15 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// error inline when its card page is open (thread.go's
 			// snap.Err branch) — the notice band would be the same
 			// message twice, once under the status bar and once inside
-			// the conversation it is about (F9). raiseAttention still
-			// runs unconditionally: the inbox item is what turns
+			// the conversation it is about (F9). The notice is dropped
+			// outright too when a card page is open on a different card:
+			// the channels that own the failure (the inbox item below,
+			// the hook it rings) still carry it, and the page being read
+			// is not this card's. raiseAttention still runs
+			// unconditionally: the inbox item is what turns
 			// openDecision's pinned question into the failure kind, and
 			// nothing else feeds that.
-			if !m.threadShowsFailure(ev.Feature) {
+			if !m.threadShowsFailure(ev.Feature) && !m.crossCardOpen(ev.Feature) {
 				m.notice = noticeMsg{text: text, isErr: true, id: ev.Feature}
 			}
 			// a one-shot pass not bound to a feature (ingest) has no card
@@ -1538,8 +1560,19 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// in-memory counter once the write succeeds — a failed write must
 		// not re-grant budget on resume (the next entry rehydrates the
 		// persisted, nonzero value).
+		//
+		// With a card page open on another card, none of the four notice
+		// writes below land: each names this event's card, and the page
+		// being read is not its. The round-store failure arms are gated
+		// too — a failing store is systemic, so a run of exhausted cards
+		// would otherwise bark the same error onto every other card's
+		// page in a row — while every raiseAttention, both counter
+		// writes and the row reload stay unconditional.
+		crossCard := m.crossCardOpen(ev.Feature)
 		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindPlan); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
+			if !crossCard {
+				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
+			}
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
 			m.setRound(ev.Feature, domain.RoundKindPlan, 0)
@@ -1547,7 +1580,9 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// same write-through for the review-loop counter: a failed write
 		// must not lose the burned rounds recorded in the store.
 		if err := rounds.Reset(context.Background(), m.roundStore, ev.Feature, domain.RoundKindReview); err != nil {
-			m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
+			if !crossCard {
+				m.notice = noticeMsg{text: sanitize(err.Error()), isErr: true, id: ev.Feature}
+			}
 			m.raiseAttention(ev.Feature, attnFailure, sanitize(err.Error()))
 		} else {
 			m.setRound(ev.Feature, domain.RoundKindReview, 0)
@@ -1557,10 +1592,14 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// reads as ready-to-advance with top-up as the alternative —
 			// not lost work.
 			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, true))
-			m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
+			if !crossCard {
+				m.notice = noticeMsg{text: string(ev.Feature) + ": " + string(ev.Stage) + " reached its budget (work committed)"}
+			}
 		} else {
 			m.raiseAttention(ev.Feature, attnBudget, budgetAttentionText(ev.Stage, false))
-			m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
+			if !crossCard {
+				m.notice = noticeMsg{text: string(ev.Feature) + " budget exhausted at " + string(ev.Stage), isErr: true, id: ev.Feature}
+			}
 		}
 		// The park's own numbers: the engine suppresses the trailing idle
 		// of an exhausted turn (engine.handle), so the EventIdle branch
