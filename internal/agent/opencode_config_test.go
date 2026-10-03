@@ -231,3 +231,23 @@ func TestOpencodeConfigForwardsSkillPaths(t *testing.T) {
 		t.Errorf("skills.paths = %v, want %v", got, want)
 	}
 }
+
+func TestWorktreeCageAllowsRelativeInWorktreePaths(t *testing.T) {
+	// opencode checks an in-worktree file by its path relative to the
+	// project root, so the cage must allow that form, while still refusing
+	// relative escapes and every absolute path outside the worktree.
+	m := buildConfig(t, []string{"/ws/.gummi/specs/FD-011-artifact.md"})
+	perm := m["permission"].(map[string]any)
+	for _, key := range []string{"edit", "write", "read"} {
+		b := perm[key].(map[string]any)
+		if b["**"] != "allow" {
+			t.Errorf("%s[**] = %v, want allow", key, b["**"])
+		}
+		if b["../**"] != "deny" {
+			t.Errorf("%s[../**] = %v, want deny", key, b["../**"])
+		}
+		if b["/**"] != "deny" {
+			t.Errorf("%s[/**] = %v, want deny", key, b["/**"])
+		}
+	}
+}

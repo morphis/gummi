@@ -13,7 +13,8 @@ import "encoding/json"
 // The permission block cages opencode's file tools to the worktree: edit
 // (which gates both opencode's edit and write tools) is pinned to a
 // pattern→action map allowing only `<worktree>/**` and denying everything
-// else, and external_directory is denied. When the caller names specific
+// else, and external_directory is denied. The map is worktreeCage's, which
+// allows the worktree by its relative form too (see worktreeCage). When the caller names specific
 // extra reads (ExtraReadAllows), external_directory must be opened
 // (opencode's deny gates the fs tools generally, so a per-file read
 // allowance cannot slip through otherwise) and the named paths are then
@@ -41,7 +42,7 @@ import "encoding/json"
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
 func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, skillDirs []string, scratchDir string) ([]byte, error) {
-	worktreeOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
+	worktreeOnly := worktreeCage(workdir)
 	var external any = "deny"
 	if scratchDir != "" {
 		scratch := scratchDir + "/**"
@@ -64,7 +65,7 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	}
 	if len(extraReadAllows) > 0 {
 		permission["external_directory"] = "allow"
-		readOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
+		readOnly := worktreeCage(workdir)
 		for _, p := range extraReadAllows {
 			readOnly[p] = "allow"
 		}
@@ -93,4 +94,25 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 		}
 	}
 	return json.Marshal(out)
+}
+
+// worktreeCage is the pattern map that keeps a file tool inside workdir. It
+// has to allow the relative form as well as the absolute one: opencode checks
+// an in-worktree file against its path relative to the project root, whatever
+// form the call used (an absolute edit of <worktree>/b.txt is checked as
+// "b.txt"), so an allow for <workdir>/** alone never matches and every edit is
+// refused. Relative inputs that escape the worktree are rejected by opencode
+// before the rule check, and files outside it are checked by absolute path, so
+// "**" allows the in-worktree relative paths and "/**" then denies every
+// absolute path, with the worktree's own absolute allow after it. Keys are
+// sorted by encoding/json, so "*" < "**" < "../**" < "/**" < "<workdir>/**"
+// and the later rules win.
+func worktreeCage(workdir string) map[string]string {
+	return map[string]string{
+		"*":             "deny",
+		"**":            "allow",
+		"../**":         "deny",
+		"/**":           "deny",
+		workdir + "/**": "allow",
+	}
 }
