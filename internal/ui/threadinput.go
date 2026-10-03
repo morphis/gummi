@@ -793,7 +793,16 @@ func (m *Shell) openCommandMenu(filter string) tea.Cmd {
 // "is this verb on screen" is asked of the same table the screen is
 // rendered from rather than of a second list free to drift.
 var verbActionIDs = map[string]string{
+	// model is the freeform card's own switch (DESIGN §19.8): a setting
+	// the person changes, not a workflow answer, so it is never in the
+	// answer set — the word degrades to the menu, whose row opens the
+	// model picker on both faces.
 	"approve": "advance",
+	// model is the freeform card's own switch (DESIGN §19.8): a setting
+	// the person changes, not a workflow answer, so it is never in the
+	// answer set — the word degrades to the menu, whose row opens the
+	// model picker on both faces.
+	"model": "model",
 	// land maps to merge, not to advance. Landing IS what advance does
 	// from the verify gate, but advance is also "advance to verify" at
 	// implement and "approve" at the design stage — so treating /land as

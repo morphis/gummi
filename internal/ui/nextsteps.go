@@ -147,6 +147,12 @@ type nextInput struct {
 	// already under the cursor.
 	cardOpen bool
 
+	// agentWired is whether this board can run an agent at all (a nil
+	// engine cannot). It gates the freeform card's model row: a session
+	// switch to another agent or model needs a backend to start, and
+	// without one the row would only ever refuse what it offered.
+	agentWired bool
+
 	// verdict is the finished session's outcome (verify: pass/fail),
 	// verdictUnclear when none or when the session is gone — then the
 	// escalated flag on the gate still carries pass vs not-pass.
@@ -502,6 +508,9 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		in.attn, in.escalated, in.attnText = it.Kind, it.Escalated, it.Text
 	}
 	in.profiles = m.engine != nil && len(m.engine.CardProfiles(r.F.Stage)) > 0
+	// a session's model switch needs an agent to start, and a board with
+	// no engine has none to start (cardactions.go's model row).
+	in.agentWired = m.engine != nil
 	in.cutByQuit = m.quitCut[r.F.ID]
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom = true, r.Drift.ForkedFrom

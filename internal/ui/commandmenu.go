@@ -45,6 +45,17 @@ type commandMenu struct {
 	filter textinput.Model
 	onRun  func(id string) tea.Cmd
 	hint   string // set instead of running when the selection is unavailable
+
+	// base is the fixed command set and cmds what is shown; they are the
+	// same while dynamic is nil. When dynamic is set, cmds is rebuilt
+	// after every filter change as base plus whatever dynamic derives
+	// from the filter — the one way a filter-only menu can accept a value
+	// nobody offers (the model picker's typed id, sessionmodel.go): the
+	// derived rows carry the filter's value in their id, so onRun needs
+	// nothing else. They bypass commandMatches — they ARE the filter's
+	// own reading, not entries it narrows — and land last.
+	base    []command
+	dynamic func(q string) []command
 }
 
 // newCommandMenu opens with the filter input focused: typing narrows the
@@ -56,7 +67,22 @@ func newCommandMenu(cmds []command, onRun func(id string) tea.Cmd) *commandMenu 
 	filter.CharLimit = 60
 	filter.SetWidth(40)
 	filter.Focus()
-	return &commandMenu{cmds: cmds, filter: filter, onRun: onRun}
+	return &commandMenu{cmds: cmds, base: cmds, filter: filter, onRun: onRun}
+}
+
+// syncDynamic rebuilds cmds from base plus dynamic's reading of the
+// filter, when a dynamic hook is set. Nil dynamic (every menu but the
+// model picker's) rebuilds nothing, and every existing surface behaves
+// exactly as it did.
+func (m *commandMenu) syncDynamic() {
+	if m.dynamic == nil {
+		return
+	}
+	q := strings.TrimSpace(m.filter.Value())
+	m.cmds = append([]command{}, m.base...)
+	if q != "" {
+		m.cmds = append(m.cmds, m.dynamic(q)...)
+	}
 }
 
 // ID implements overlay.Dialog.
@@ -152,6 +178,7 @@ func (m *commandMenu) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	}
 	m.hint = ""
 	m.filter, _ = m.filter.Update(key)
+	m.syncDynamic()
 	m.setCursor(m.cursor) // reclamp: the visible set may have shrunk
 	return false, nil
 }
@@ -161,6 +188,7 @@ func (m *commandMenu) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 func (m *commandMenu) HandlePaste(msg tea.PasteMsg) tea.Cmd {
 	m.hint = ""
 	m.filter, _ = m.filter.Update(msg)
+	m.syncDynamic()
 	m.setCursor(m.cursor)
 	return nil
 }

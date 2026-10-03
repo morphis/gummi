@@ -26,6 +26,34 @@ type namedFake struct {
 
 func (n namedFake) Name() string { return n.name }
 
+// TestTheFormOffersTheModelsTheAgentSaysItProvides: the picker's model
+// list is the agent's own answer about itself (asked live, merged with
+// the workspace's profile ids), not only what profiles.yaml happens to
+// run — and it is filled off the loop, so the board did not block on the
+// ask.
+func TestTheFormOffersTheModelsTheAgentSaysItProvides(t *testing.T) {
+	fake := agent.NewFake("on it")
+	fake.Models = []string{"z-codex-model", "a-codex-model"}
+	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
+
+	var form webapi.Form
+	if st := h.call(http.MethodGet, "/api/form", nil, &form); st != http.StatusOK {
+		t.Fatalf("form = %d", st)
+	}
+	i := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "codex" })
+	if i < 0 {
+		t.Fatal("the picker has no codex row")
+	}
+	if got := form.Sessions.Agents[i].Models; !slices.Equal(got, []string{"a-codex-model", "z-codex-model"}) {
+		t.Errorf("codex's models = %v, want the agent's own catalog", got)
+	}
+	// an agent this host cannot start is not probed: its row keeps
+	// whatever the workspace's profiles run there, and nothing more
+	if j := slices.IndexFunc(form.Sessions.Agents, func(a webapi.SessionAgent) bool { return a.Name == "opencode" }); j < 0 || form.Sessions.Agents[j].Installed || len(form.Sessions.Agents[j].Models) != 0 {
+		t.Errorf("opencode = %+v, want not installed and no catalog", form.Sessions.Agents)
+	}
+}
+
 // waitTranscript waits for a session's conversation to hold want.
 func waitTranscript(t *testing.T, h *cardBoard, id, want string) {
 	t.Helper()

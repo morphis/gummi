@@ -3693,14 +3693,25 @@ the first time a session asks for it, and the engine closes the ones it
 started. `sessionAgent` never falls back to the default for a name it
 does not know, which is the one way it differs from `agentFor`.
 
-**There is still no model registry** (see `KnownModels`). The picker
-suggests the ids the workspace's profiles already run on each agent, plus
-the pairs sessions on the board use, and accepts any other id typed in.
-`CheckSessionModel` refuses a pair before it is stored: an unknown agent,
-an agent that needs a model and got none, and the ids the claude CLI would
-refuse at session start. Refusing it then, rather than at the next spawn,
-means a person does not type a message into a session that cannot answer
-it.
+**The list is the agent's own, asked live.** Where a backend can
+enumerate what it provides — copilot through its SDK's model list,
+opencode through its own CLI — the picker offers that catalog, merged
+with the ids the workspace's profiles run on it and the pairs sessions on
+the board use, and accepts any other id typed in. There is still no
+registry gummi keeps: a baked-in list would go stale
+the week a provider ships something, and the agent's answer about itself
+never does. A backend that cannot enumerate is not faked — its picker
+keeps the profile ids and the typed entry — and no backend is ever
+*started* just to be asked: the catalog comes from an adapter the board
+already runs, or, for opencode, from a CLI probe that needs nothing
+started. The ask is cached briefly, since a picker repeats it, and both
+faces read the one merged view (`SessionModelChoices`), so the terminal
+and the page cannot disagree about what a session can run on.
+`CheckSessionModel` still refuses a pair before it is stored: an unknown
+agent, an agent that needs a model and got none, and the ids the claude
+CLI would refuse at session start. Refusing it then, rather than at the
+next spawn, means a person does not type a message into a session that
+cannot answer it.
 
 **Switching mid-session keeps the conversation, not the backend's.**
 `SwitchSessionModel` refuses a turn in flight, stores the new pair on the
@@ -3758,9 +3769,20 @@ prefixes and dotted versions, and opencode and pi need `provider/model`.
 The page offers a typed id only on agents it fits. The pattern is a
 courtesy; `CheckSessionModel` is still the check.
 
-Deferred: the model picker in the TUI (`SwitchSessionModel` is the
-engine half; the Shell's `switchSessionModel` is shared, so it is a
-binding away); a permission dock for guarded mode, which needs an adapter
+**The terminal picks through the card's menu.** The TUI's freeform card
+carries the same "model" row its web menu does: one picker for the agent,
+then one for the model — the catalog rows and the workspace's ids, the
+running pair marked, and a last row that runs the id nobody offered,
+typed straight into the filter. Both tiers are the shared command menu,
+and the pick checks and switches through the shared Shell half
+(`checkSessionPick`, `switchSessionModel`), so a refusal surfaces as a
+notice in the same words the page's toast uses. The catalog ask runs off
+the loop, like every read that opens a dialog.
+
+Deferred: the model pick at CREATION for a terminal mint (the form has
+no session rows; the web's draft does — a card made in the terminal starts
+on its profile's implementer and switches from its page); a permission
+dock for guarded mode, which needs an adapter
 that emits `EventPermission` first (none does); and a terminal and a files
 tab, since a shell in the browser is a new surface under §20.5, not a
 restyle.

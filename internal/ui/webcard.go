@@ -497,11 +497,11 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 	in := m.nextInputFor(r)
 	list := cardActionsFor(in, r)
 	if r.F.IsFreeform() {
-		// a session runs on the model its person picked, not on a profile
-		// role, so its menu switches the model instead (DESIGN §19.8)
+		// a session's "model" row is cardActionsFor's own (one inventory
+		// for both faces); the two web-only endings are listed here, the
+		// commit only while the worktree holds something to commit, which
+		// Bridge.Card drops off the loop when it does not
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
-			list = append(list,
-				cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"})
 			if !r.F.MainCheckout {
 				// listed only while the worktree holds something to commit:
 				// Bridge.Card drops it off the loop when it does not. A

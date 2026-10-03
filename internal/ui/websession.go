@@ -39,9 +39,11 @@ var agentInstalled = func(name string) bool {
 }
 
 // webSessionModels is what a session's model picker offers: every agent a
-// session can run on with the models the profiles already run there, the
-// pairs sessions on this board run on now, and what a new session gets
-// when nothing is picked.
+// session can run on with the models the workspace's profiles already run
+// there, the pairs sessions on this board run on now, and what a new
+// session gets when nothing is picked. The agent's own catalog — the
+// models it says it provides, asked live — is merged into those rows by
+// Bridge.Form off the loop; a probe must not run on it.
 func (m *Shell) webSessionModels() webapi.SessionModels {
 	out := webapi.SessionModels{Agents: []webapi.SessionAgent{}, Recent: []webapi.SessionModel{}}
 	var suggest map[string][]string

@@ -378,6 +378,14 @@ type Engine struct {
 	// not start (sessionAgent), keyed by name, closed by Close.
 	startedMu sync.Mutex
 	started   map[string]agent.Agent
+	// modelCatalog caches each backend's own answer about the models it
+	// offers (SessionModelCatalog): the probes are subprocess and RPC
+	// reads a picker may repeat, so a fresh answer is trusted for
+	// modelCatalogTTL. Negative answers (a backend that cannot say, or a
+	// probe that failed) are cached for the same span, so a picker does
+	// not re-pay a slow failure on every open.
+	catalogMu    sync.Mutex
+	modelCatalog map[string]modelCatalogEntry
 	// freeformMu serializes OpenFreeform end to end — consultMu's job, for
 	// the identical check-then-act reason. Held by OpenFreeform and SwitchSessionModel, and
 	// never while e.mu is also held.

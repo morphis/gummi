@@ -67,6 +67,14 @@ func (o *Opencode) Capabilities() Capabilities {
 // (see mapEvent), so the engine must not re-price its tokens.
 func (o *Opencode) CreditRate(string) float64 { return 0 }
 
+// ModelCatalog implements ModelCataloger: the provider/model pairs
+// opencode itself offers, from its own CLI (`opencode models`), asked
+// live — never a list gummi keeps. Each call spawns the CLI; the engine
+// caches the answer (SessionModelCatalog).
+func (o *Opencode) ModelCatalog(ctx context.Context) ([]string, error) {
+	return OpencodeModelCatalog(ctx, o.bin)
+}
+
 // NewSession implements Agent. No process starts until the first Send; the
 // opencode session id is captured from that turn's events and threaded
 // into later turns via --session.

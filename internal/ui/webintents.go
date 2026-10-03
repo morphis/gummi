@@ -623,6 +623,9 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		}
 		return m.specFromSession(r.F, msg, profile, envelope), nil
 	case "model":
+		if m.engine == nil {
+			return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
+		}
 		if problem := m.checkSessionPick(req.Backend, req.Model); problem != "" || req.Backend == "" {
 			if problem == "" {
 				problem = "say which agent the session should run on"

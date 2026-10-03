@@ -96,6 +96,24 @@ func (c *Copilot) SupportsImages(ctx context.Context, model string) (bool, error
 	return false, fmt.Errorf("copilot: model %q not in the CLI's model list", model)
 }
 
+// ModelCatalog implements ModelCataloger: the ids of every model the CLI
+// itself offers, from the SDK's own ListModels (cached after its first
+// call, so a picker asking twice pays once). This is the backend's answer
+// about itself, live — never a registry gummi keeps — and the one place a
+// picker's open list comes from when this backend runs a session.
+func (c *Copilot) ModelCatalog(ctx context.Context) ([]string, error) {
+	models, err := c.client.ListModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(models))
+	for _, m := range models {
+		ids = append(ids, m.ID)
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
 // NewSession implements Agent.
 func (c *Copilot) NewSession(ctx context.Context, opts SessionOpts) (Session, error) {
 	c.mu.Lock()

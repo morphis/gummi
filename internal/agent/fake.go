@@ -47,6 +47,12 @@ type Fake struct {
 	// live per-model refusal (copilot's vision check) that a structural
 	// capability gate (checkImageCapable) cannot see ahead of the send.
 	RefuseImages bool
+	// Models, when non-empty, is what the fake answers when asked for its
+	// backend's own model catalog (ModelCataloger), so picker tests can
+	// stage "the models this agent provides" without a live CLI. Empty
+	// models a backend that cannot enumerate — the picker then offers
+	// only what the workspace's profiles run and what is typed.
+	Models []string
 
 	mu       sync.Mutex
 	sessions []*fakeSession
@@ -73,6 +79,13 @@ func (f *Fake) Capabilities() Capabilities { return f.Caps }
 // engine's Config.StageBudget / TurnReserve knobs; fake sessions carry no
 // realized rate of their own.
 func (f *Fake) CreditRate(string) float64 { return f.Rate }
+
+// ModelCatalog implements ModelCataloger, answering Models verbatim.
+// A fake with nothing staged answers with no error and no ids, which
+// callers read as "cannot say" (engine.SessionModelCatalog).
+func (f *Fake) ModelCatalog(context.Context) ([]string, error) {
+	return f.Models, nil
+}
 
 // NewSession implements Agent.
 func (f *Fake) NewSession(_ context.Context, opts SessionOpts) (Session, error) {

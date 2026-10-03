@@ -43,6 +43,13 @@ type cardBoard struct {
 // program starts and may hand back a change to the server's options.
 func newCardBoard(t *testing.T, ag agent.Agent, setup ...func(*ui.Shell) func(*Options)) *cardBoard {
 	t.Helper()
+	// no test reaches a real opencode: a form read asks every installed
+	// backend for its model catalog, and the opencode probe runs a CLI
+	// when the board holds no adapter for it. The override names a
+	// binary that is not there, so the probe fails fast and the picker
+	// falls back to the profile ids — exactly what the assertions below
+	// pin.
+	t.Setenv("GUMMI_OPENCODE_BIN", "opencode-not-in-this-test")
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)

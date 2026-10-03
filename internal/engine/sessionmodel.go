@@ -7,8 +7,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -232,11 +234,15 @@ func modelLabel(model string) string {
 }
 
 // SessionSuggestions is the model ids the workspace's profiles run on each
-// backend, sorted, for a session's picker to offer. There is deliberately
-// no registry of every model an agent can run: the
-// ids a workspace already uses are the ones worth offering, and any other
-// may be typed. A role that names no backend runs on the default agent and
-// is filed under its name.
+// backend, sorted. It is the picker's suggestion half, merged with the
+// backend's own answer about itself (SessionModelCatalog) into what a
+// session's picker offers (SessionModelChoices). There is still no
+// registry of every model an agent can run baked into gummi: model ids
+// are opaque strings the adapters forward verbatim, and a baked-in list
+// would go stale the week a provider ships something — so the list is
+// what the backend itself reports, plus what the workspace already runs,
+// plus anything else typed in. A role that names no backend runs on the
+// default agent and is filed under its name.
 func (e *Engine) SessionSuggestions() map[string][]string {
 	def := ""
 	if a := e.agentFor(""); a != nil {
@@ -295,4 +301,121 @@ func SessionModelRule(backend string) (needsModel bool, hint, pattern string) {
 		return false, "versions with dashes, e.g. claude-haiku-4-5; empty is the CLI's default", `^(?!(` + strings.Join(alts, "|") + `))(?!\S*\d\.\d)`
 	}
 	return false, "", ""
+}
+
+// modelCatalogTTL is how long one backend's own answer about its models
+// is trusted (SessionModelCatalog): the probe is a subprocess or RPC read
+// a picker may repeat, and asking an agent what it offers on every open
+// of that picker would pay for the same answer over and over.
+const modelCatalogTTL = 5 * time.Minute
+
+// modelCatalogTimeout bounds one probe. A backend that takes this long
+// to answer "what models do you have" is not worth waiting for: the
+// picker keeps its suggestions and its typed entry.
+const modelCatalogTimeout = 15 * time.Second
+
+// catalogNow is the catalog cache's clock, a var so a test can move it.
+var catalogNow = func() time.Time { return time.Now() }
+
+// modelCatalogEntry is one cached probe result: the ids (nil when the
+// probe failed or the backend cannot say), whether it said anything, and
+// when it was asked.
+type modelCatalogEntry struct {
+	ids []string
+	ok  bool
+	at  time.Time
+}
+
+// SessionModelCatalog reports the model ids backend offers by itself —
+// the agent's own answer, asked live: from an adapter this board already
+// runs when it can enumerate (agent.ModelCataloger), or, for opencode,
+// from its CLI, which answers without an adapter to start. It never
+// starts a backend just to be asked, so a board that runs no copilot
+// reports no copilot catalog and the picker falls back to the profile
+// ids and typed entry. ok is false when this backend cannot say, or its
+// probe failed or timed out. Answers are cached for modelCatalogTTL,
+// negative ones included; a caller whose context was already gone does
+// not write the cache, so its cancelled ask cannot suppress the next
+// caller's good one.
+func (e *Engine) SessionModelCatalog(ctx context.Context, backend string) ([]string, bool) {
+	if backend == "" {
+		a := e.agentFor("")
+		if a == nil {
+			return nil, false
+		}
+		backend = a.Name()
+	}
+	e.catalogMu.Lock()
+	if e.modelCatalog == nil {
+		e.modelCatalog = map[string]modelCatalogEntry{}
+	}
+	if c, ok := e.modelCatalog[backend]; ok && catalogNow().Sub(c.at) < modelCatalogTTL {
+		e.catalogMu.Unlock()
+		return c.ids, c.ok
+	}
+	e.catalogMu.Unlock()
+
+	pctx, cancel := context.WithTimeout(ctx, modelCatalogTimeout)
+	defer cancel()
+	ids, ok := e.probeModelCatalog(pctx, backend)
+
+	e.catalogMu.Lock()
+	if ctx.Err() == nil {
+		e.modelCatalog[backend] = modelCatalogEntry{ids: ids, ok: ok, at: catalogNow()}
+	}
+	e.catalogMu.Unlock()
+	return ids, ok
+}
+
+// probeModelCatalog asks backend itself, un-cached: the adapter it holds
+// when the adapter can enumerate, else the one probe that needs no
+// adapter (opencode's CLI answers without a started backend — no
+// authentication involved, just its own catalog).
+func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]string, bool) {
+	if a := e.knownAgent(backend); a != nil {
+		cl, ok := a.(agent.ModelCataloger)
+		if !ok {
+			return nil, false
+		}
+		ids, err := cl.ModelCatalog(ctx)
+		if err != nil || len(ids) == 0 {
+			return nil, false
+		}
+		return ids, true
+	}
+	if backend == "opencode" {
+		bin, _ := agentcli.Binary("opencode")
+		ids, err := agent.OpencodeModelCatalog(ctx, bin)
+		if err != nil || len(ids) == 0 {
+			return nil, false
+		}
+		return ids, true
+	}
+	return nil, false
+}
+
+// SessionModelChoices is what a session's model picker offers for
+// backend: the ids the backend itself provides (SessionModelCatalog)
+// merged with the ids the workspace's profiles already run there
+// (SessionSuggestions), deduplicated and sorted. It is the one merged
+// view both faces show, so the terminal and the page cannot disagree
+// about what a picker offers. It does IO (the catalog probe), so it runs
+// off a UI's render loop; the picker data a loop builds inline uses
+// SessionSuggestions alone and takes the merged view off it.
+func (e *Engine) SessionModelChoices(ctx context.Context, backend string) []string {
+	catalog, _ := e.SessionModelCatalog(ctx, backend)
+	suggest := e.SessionSuggestions()[backend]
+	seen := make(map[string]bool, len(catalog)+len(suggest))
+	var out []string
+	for _, src := range [2][]string{catalog, suggest} {
+		for _, id := range src {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -424,6 +424,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .mlist{overflow-y:auto;overscroll-behavior:contain;padding:4px 4px 6px}
 .mgh{display:flex;align-items:baseline;gap:8px;padding:8px 8px 3px;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--fg3)}
 .mgh .hint{text-transform:none;letter-spacing:0;font-weight:400;font-size:11px;color:var(--fg4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mgh.more{text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg4)}
 .mrow{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:7px;text-align:left;font-size:13px;color:var(--fg2)}
 .mrow:hover,.mrow:focus-visible{background:var(--sunk);color:var(--fg)}
 .mrow.on{background:var(--band);color:var(--fg)}

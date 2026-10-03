@@ -3,9 +3,14 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
@@ -256,5 +261,146 @@ func TestAClosedSessionKeepsItsConversation(t *testing.T) {
 	snap, ok = e2.FreeformHistory(f.ID)
 	if !ok || !strings.Contains(transcriptText(snap), "Added pty.go.") || !strings.Contains(transcriptText(snap), "Continued as the spec FD-031.") {
 		t.Errorf("the closed session's conversation did not survive a restart (ok=%v):\n%s", ok, transcriptText(snap))
+	}
+}
+
+// catalogAgent wraps a fake with its own model answer and counts the
+// asks, so a test can watch the catalog cache work.
+type catalogAgent struct {
+	*agent.Fake
+	calls int
+}
+
+func (c *catalogAgent) ModelCatalog(context.Context) ([]string, error) {
+	c.calls++
+	return c.Models, nil
+}
+
+// TestSessionModelChoicesMergesTheCatalogWithTheProfiles: a picker offers
+// the agent's own answer about itself plus the ids the workspace's
+// profiles run, deduplicated and sorted — the one merged view both faces
+// show. A backend the agent cannot enumerate keeps the profile ids only.
+func TestSessionModelChoicesMergesTheCatalogWithTheProfiles(t *testing.T) {
+	e, claude, _, _ := sessionModelEngine(t)
+	claude.Models = []string{"claude-opus-5-5", "claude-sonnet-5-5"}
+	e.cfg.Profiles.Profiles["beta"] = config.Profile{
+		"reviewer": {Backend: "codex", Model: "gpt-5"},
+	}
+	ctx := context.Background()
+
+	got := e.SessionModelChoices(ctx, "claude")
+	want := []string{"claude-opus-5-5", "claude-sonnet-5-5"}
+	if !slices.Equal(got, want) {
+		t.Errorf("claude choices = %v, want %v (deduped, sorted)", got, want)
+	}
+	if got := e.SessionModelChoices(ctx, "codex"); !slices.Equal(got, []string{"gpt-5"}) {
+		t.Errorf("codex choices = %v, want the profile id only (it cannot enumerate)", got)
+	}
+	if got := e.SessionModelChoices(ctx, "pi"); got != nil {
+		t.Errorf("pi choices = %v, want none (no agent, no probe, no profile)", got)
+	}
+}
+
+// TestSessionModelChoicesWithoutAnAgent: nil-safe on every axis — no
+// profiles, no agent, no probe.
+func TestSessionModelChoicesWithoutAnAgent(t *testing.T) {
+	e := &Engine{cfg: Config{Model: "fallback"}}
+	if got := e.SessionModelChoices(context.Background(), "claude"); got != nil {
+		t.Errorf("choices = %v, want nil", got)
+	}
+}
+
+// TestSessionModelCatalogCachesTheAsk: the probe is a subprocess or RPC
+// read a picker repeats, so the answer — including a backend's refusal to
+// answer — is trusted for its TTL, and a caller whose context was already
+// gone writes nothing (its cancelled ask must not suppress the next
+// caller's good one).
+func TestSessionModelCatalogCachesTheAsk(t *testing.T) {
+	e, _, _, _ := sessionModelEngine(t)
+	ag := &catalogAgent{Fake: agent.NewFake("ok")}
+	ag.Caps = agent.Capabilities{ReadOnlyEnforce: true}
+	ag.Models = []string{"fake-large"}
+	e.cfg.Agents["fake"] = ag
+	e.cfg.Agents[""] = ag
+	ctx := context.Background()
+
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok {
+		t.Fatal("the staged agent's catalog was not offered")
+	}
+	if ag.calls != 1 {
+		t.Fatalf("the agent was asked %d times for the first read", ag.calls)
+	}
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok || ag.calls != 1 {
+		t.Errorf("a repeat ask re-probed (ok=%v, calls=%d): the cache is not doing its job", ok, ag.calls)
+	}
+
+	// past the TTL the agent is asked again — and a backend that cannot
+	// enumerate stays cached negative for the same span
+	ag.Models = nil
+	oldNow := catalogNow
+	catalogNow = func() time.Time { return oldNow().Add(6 * time.Minute) }
+	t.Cleanup(func() { catalogNow = oldNow })
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); ok || ag.calls != 2 {
+		t.Errorf("past the TTL the ask was not re-paid (ok=%v, calls=%d)", ok, ag.calls)
+	}
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); ok || ag.calls != 2 {
+		t.Errorf("a refusal was not cached (ok=%v, calls=%d)", ok, ag.calls)
+	}
+
+	// a cancelled caller gets its answer and writes nothing: the clock
+	// moves past the cached refusal, the probe runs against a context
+	// that is already gone, and the cache still holds the old refusal —
+	// so the next good ask probes again rather than finding the
+	// cancelled call's non-answer.
+	ag.Models = []string{"fake-large"}
+	catalogNow = func() time.Time { return oldNow().Add(12 * time.Minute) }
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	// the fake answers regardless of the gone context, so the ask reads
+	// as ok — what the test pins is that it did not write the cache
+	if _, ok := e.SessionModelCatalog(cancelled, "fake"); !ok || ag.calls != 3 {
+		t.Errorf("a cancelled ask (ok=%v, calls=%d) did not reach the probe", ok, ag.calls)
+	}
+	e.catalogMu.Lock()
+	stamp, had := e.modelCatalog["fake"]
+	e.catalogMu.Unlock()
+	if had && stamp.at.Equal(catalogNow()) {
+		t.Errorf("the cancelled ask wrote the cache: %v", stamp.at)
+	}
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok || ag.calls != 4 {
+		t.Errorf("the cancelled ask suppressed the next good one (ok=%v, calls=%d)", ok, ag.calls)
+	}
+}
+
+// TestSessionModelCatalogAsksOpencodeWithoutStartingIt: opencode answers
+// without an adapter to start — its CLI is asked directly, through the
+// same *_BIN override every probe honors — so a picker offers its catalog
+// on a board that runs none of it.
+func TestSessionModelCatalogAsksOpencodeWithoutStartingIt(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	var starts atomic.Int32
+	e := New(Config{
+		Agents: map[string]agent.Agent{},
+		StartAgent: func(string) (agent.Agent, error) {
+			starts.Add(1)
+			return nil, errors.New("not installed")
+		},
+		Model: "fallback",
+	})
+	t.Cleanup(func() { e.Close() })
+	bin := filepath.Join(t.TempDir(), "opencode")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho opencode/claude-sonnet-5-5\necho opencode/gpt-5\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_OPENCODE_BIN", bin)
+
+	ids, ok := e.SessionModelCatalog(context.Background(), "opencode")
+	if !ok || !slices.Equal(ids, []string{"opencode/claude-sonnet-5-5", "opencode/gpt-5"}) {
+		t.Fatalf("opencode catalog = %v (ok=%v), want the CLI's own ids", ids, ok)
+	}
+	if starts.Load() != 0 {
+		t.Errorf("the probe started a backend to ask it")
 	}
 }

@@ -3,9 +3,6 @@ package web
 import (
 	"net/http"
 
-	tea "charm.land/bubbletea/v2"
-
-	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -14,17 +11,11 @@ func (s *Server) createRoutes() {
 	s.api("GET /api/form", s.handleForm)
 }
 
-// handleForm is GET /api/form[?repo=]: the new-card form's choices.
+// handleForm is GET /api/form[?repo=]: the new-card form's choices, the
+// session model picker's included — with each installed agent's own model
+// catalog merged in (Bridge.Form, off the loop).
 func (s *Server) handleForm(w http.ResponseWriter, r *http.Request) {
-	var (
-		f   webapi.Form
-		err error
-	)
-	repo := r.URL.Query().Get("repo")
-	s.opt.Board.RefreshBranches(r.Context())
-	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { f, err = m.WebForm(repo); return nil }) {
-		return
-	}
+	f, err := s.opt.Board.Form(r.Context(), r.URL.Query().Get("repo"))
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -8,8 +8,9 @@
 // first turn.
 //
 // The model picker beside Send, on a draft and on an open session: the
-// agents this host can run, the models the workspace's profiles already run
-// on each, the pairs sessions on the board use, and any id typed in. On a
+// agents this host can run, the models each agent says it provides (the
+// server asked them live) merged with the ids the workspace's profiles
+// run, the pairs sessions on the board use, and any id typed in. On a
 // session that exists, a pick is the card's "model" action. A card in the
 // workflow shows no picker: its stages take their models from its profile.
 
@@ -263,6 +264,14 @@ function openBudget (anchor) {
   input.select()
 }
 
+// modelShownMax bounds how many of one agent's rows the picker draws
+// before pointing at the rest: an agent that enumerates its catalog can
+// offer hundreds of ids, and every one of them as a row is exactly what
+// the search box was put there to prevent. The rows are the filtered
+// list's head; the note names how many wait behind the next character
+// typed.
+const modelShownMax = 30
+
 // openModelPicker opens the picker from the card's menu: anchored to the
 // model beside Send, which is where it lives.
 export function openModelPicker () {
@@ -307,8 +316,12 @@ async function openPicker (anchor) {
       if (q && models.includes(q)) exact = true
       const shown = models.filter(m => hit(m) || hit(a.name))
       if (!shown.length) continue
+      const cap = shown.slice(0, modelShownMax)
       append(list, [h('div', { class: 'mgh' }, a.name, a.hint ? h('span', { class: 'hint' }, a.hint) : null),
-        shown.map(m => rowEl(a.name, m, m ? '' : `${a.name} picks`, `model-${a.name}-${m || 'default'}`))])
+        cap.map(m => rowEl(a.name, m, m ? '' : `${a.name} picks`, `model-${a.name}-${m || 'default'}`)),
+        shown.length > cap.length
+          ? h('div', { class: 'mgh more' }, `+${shown.length - cap.length} more — search to narrow`)
+          : null])
     }
     // an id nobody suggested is still a model: offered once, on each agent
     // that could run it, below everything the workspace already uses
@@ -320,7 +333,7 @@ async function openPicker (anchor) {
     if (!list.children.length) list.append(h('div', { class: 'mempty' }, 'No agent on this host can run a session.'))
     clear(foot)
     append(foot, [state.sessionDraft
-      ? 'Any model an installed agent runs. Profiles do not apply to sessions.'
+      ? 'Any model an installed agent runs — the ones it names itself, plus the ids this workspace has used. Profiles do not apply to sessions.'
       : 'Switching keeps the conversation: the next turn runs on the new model with what was said so far.',
     missing.length ? h('span', { class: 'missing' }, ` Not installed here: ${missing.join(', ')}.`) : null])
   }

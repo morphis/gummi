@@ -363,6 +363,16 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			(research || needsWT) && !freeform,
 		},
 		{
+			// a session runs on the agent and model its person picked, not
+			// on a profile role (DESIGN §19.8), so its menu switches the
+			// model instead of the profile — the card-profile picker below
+			// never appears for one. Keyless like the other setting
+			// changes; the picker asks the agent what models it provides,
+			// which is IO, so it is fetched off the loop (sessionmodel.go).
+			"model", "", "model", "switch the agent and model this session runs on — from its next turn, with the conversation so far", false,
+			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
+		},
+		{
 			// the id and the dialog it opens (envelope.go) both keep the old
 			// name internally; the label and why are the only parts a reader
 			// sees, so those are what §5 renames to "budget".

@@ -2033,6 +2033,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePRLinkProbe(msg)
 		return m, nil
 
+	case sessionModelsMsg:
+		m.handleSessionModelsMsg(msg)
+		return m, nil
+
 	case prPullDoneMsg:
 		m.notice = msg.notice
 		cmds := []tea.Cmd{m.loadRows}

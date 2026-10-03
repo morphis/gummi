@@ -102,6 +102,42 @@ func (m *Shell) webFormRepo(d *cardForm, repo string) string {
 	return ""
 }
 
+// Form is GET /api/form: WebForm's choices, with each installed agent's
+// model list replaced by the merged view (SessionModelChoices) — the
+// agent's own catalog where it can say one, plus the workspace's
+// profile ids. The merge asks a backend and possibly runs its CLI, so it
+// happens here, off the loop; WebForm built the same rows inline from
+// SessionSuggestions alone.
+func (b *Bridge) Form(ctx context.Context, repo string) (webapi.Form, error) {
+	// the branch lists are a git read the loop must not make (the same
+	// call routes_create.go's handler made inline)
+	b.RefreshBranches(ctx)
+	var (
+		f    webapi.Form
+		werr error
+	)
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { f, werr = m.WebForm(repo); return nil }); err != nil {
+		return webapi.Form{}, err
+	}
+	if werr != nil {
+		return webapi.Form{}, werr
+	}
+	if eng := b.shell.engine; eng != nil {
+		for i := range f.Sessions.Agents {
+			a := &f.Sessions.Agents[i]
+			if !a.Installed {
+				continue
+			}
+			a.Models = eng.SessionModelChoices(ctx, a.Name)
+			if a.Models == nil {
+				// the contract spells an empty list as [], not null
+				a.Models = []string{}
+			}
+		}
+	}
+	return f, nil
+}
+
 // webFill sets the form's rows from a request, refusing a value no row
 // offers — the same set the form's own cycling can reach.
 func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {

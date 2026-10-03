@@ -24,7 +24,14 @@ func (m *Shell) cardActions() *cardActionList {
 	if !ok {
 		return newCardActionList(nil)
 	}
-	actions := append(cardActionsFor(m.nextInputFor(r), r), m.cardProfileActions(r.F.Stage)...)
+	actions := cardActionsFor(m.nextInputFor(r), r)
+	if !r.F.IsFreeform() {
+		// a session's menu switches the model instead of the profile
+		// (DESIGN §19.8) — the web face's inventory already withholds
+		// the profile row from one, so the terminal cannot offer what
+		// the page will not
+		actions = append(actions, m.cardProfileActions(r.F.Stage)...)
+	}
 	l := newCardActionList(actions)
 	l.expanded = m.actionsExpanded
 	if n := l.Len(); n > 0 {
@@ -190,8 +197,13 @@ func (m *Shell) cardCommands(existing []command) []command {
 			taken[c.key] = true
 		}
 	}
+	var all []cardAction
+	if !r.F.IsFreeform() {
+		all = append(all, m.cardProfileActions(r.F.Stage)...)
+	}
+	all = append(all, cardActionsFor(m.nextInputFor(r), r)...)
 	var out []command
-	for _, a := range append(m.cardProfileActions(r.F.Stage), cardActionsFor(m.nextInputFor(r), r)...) {
+	for _, a := range all {
 		id := a.id
 		if a.key != "" {
 			if taken[a.key] {
@@ -309,6 +321,8 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		return nil
 	case "profile":
 		return m.openCardProfilePicker()
+	case "model":
+		return m.openCardModelPicker()
 	case "new-freeform":
 		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
 		return nil
@@ -421,6 +435,10 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "profile":
 		return m.openCardProfilePicker()
+	case "model":
+		// the freeform card's model row (cardactions.go): the two-tier
+		// picker, the same offer the web face's picker makes
+		return m.openCardModelPicker()
 	case "ask":
 		// arms the same channel typing `ask` on the composer does
 		// (threadinput.go's routeVerb) — this is just the inventory's own

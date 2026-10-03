@@ -77,9 +77,11 @@ type Form struct {
 }
 
 // SessionModels is what a session's model picker offers (DESIGN §19.8).
-// There is deliberately no list of every model an agent can run: model ids
-// are opaque strings the adapters forward verbatim, so the picker suggests
-// the ones this workspace already uses and takes any other typed in.
+// There is deliberately no list of every model an agent can run kept by
+// gummi: model ids are opaque strings the adapters forward verbatim, so
+// the picker offers what each agent says it provides (asked live, where
+// it can say so), plus the ones this workspace already uses, and takes
+// any other typed in.
 type SessionModels struct {
 	// Default is what a new session runs on when nothing is picked: the
 	// default profile's implementer.
@@ -104,8 +106,11 @@ type SessionAgent struct {
 	// Installed is false for an agent this host cannot start: its CLI is
 	// not on PATH (or, for headless, no command line is configured).
 	Installed bool `json:"installed"`
-	// Models are the ids the workspace's profiles run on this agent, as
-	// suggestions; any other id may be typed.
+	// Models are the ids this agent offers by itself (its own catalog,
+	// asked live) merged with the ids the workspace's profiles run on it;
+	// any other id may be typed. Empty for an agent that cannot
+	// enumerate — the typed entry and the profile ids are then all a
+	// picker has.
 	Models []string `json:"models"`
 	// NeedsModel marks an agent that refuses to start without a model id.
 	NeedsModel bool `json:"needsModel,omitempty"`
