@@ -457,12 +457,18 @@ func (c *ConsultSession) armIdleTimer() {
 // a stale, non-nil agent handle read correctly as not-live) — this is
 // what makes the next Send's ensureBackend respawn rather than trying to
 // use a closed adapter. The transcript is untouched: sess.stop() never
-// clears it, so the respawn's seed still carries the full history.
+// clears it, so the respawn's seed still carries the full history. A turn
+// still in flight re-arms the timer instead (FreeformSession.onIdleTimeout
+// has the reasoning).
 func (c *ConsultSession) onIdleTimeout() {
 	c.mu.Lock()
 	sess := c.sess
 	c.mu.Unlock()
 	if sess == nil {
+		return
+	}
+	if sess.Busy() {
+		c.armIdleTimer()
 		return
 	}
 	sess.setState(StateDone)

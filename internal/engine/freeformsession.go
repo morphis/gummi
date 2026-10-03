@@ -795,11 +795,20 @@ func (ff *FreeformSession) armIdleTimer() {
 // transcript is untouched, and the card lock is kept: the worktree and
 // branch are still this session's, and nothing else may drive the card
 // just because its backend went to sleep.
+//
+// A busy backend is not idle: the clock is armed when a turn is sent, and
+// a turn can run past it, so a turn still in flight re-arms the timer
+// rather than having its backend killed under it. The idle span counts
+// from the turn's end.
 func (ff *FreeformSession) onIdleTimeout() {
 	ff.mu.Lock()
 	sess := ff.sess
 	ff.mu.Unlock()
 	if sess == nil {
+		return
+	}
+	if sess.Busy() {
+		ff.armIdleTimer()
 		return
 	}
 	sess.setState(StateDone)

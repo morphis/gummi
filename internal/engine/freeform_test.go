@@ -592,6 +592,44 @@ func TestInterruptingAFreeformTurnCommitsWhatItWrote(t *testing.T) {
 	}
 }
 
+// TestALongFreeformTurnOutlivesTheIdleTimeout: the idle clock is armed when
+// a turn is sent, and a turn that runs past it is still working, not idle.
+// Closing its backend there killed the agent mid tool call, with no reply
+// and nothing in the thread to say why.
+func TestALongFreeformTurnOutlivesTheIdleTimeout(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		// No idle: the turn is still in flight for the whole test.
+		return []agent.Event{{Kind: agent.EventTextDelta, Text: "working"}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	e.freeformIdleTimeout = 10 * time.Millisecond
+	ctx := context.Background()
+
+	f := freeformCard(11, "a long turn")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "take your time"); err != nil {
+		t.Fatal(err)
+	}
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+
+	time.Sleep(20 * e.freeformIdleTimeout)
+	if !sess.Live() {
+		t.Fatal("the idle timeout closed a backend that was mid-turn")
+	}
+	if !ff.Snapshot().Busy {
+		t.Error("the session no longer reports the turn in flight")
+	}
+}
+
 // TestAFreeformCardsWorktreeIsLeftAloneOnShutdown: a board quitting
 // mid-turn commits nothing on a freeform card's behalf. What the turn wrote
 // stays in the worktree, uncommitted, for somebody to commit on purpose.
