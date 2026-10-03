@@ -156,7 +156,12 @@ test('a project command is offered while its name is typed', async ({ pairedPage
   await input.click();
   await input.fill('/re');
   await expect(offer).toBeVisible();
-  await expect(offer.getByRole('option')).toHaveText([/\/release\s*Cut a release\./, /\/review\s*review the diff/]);
+  // the card's own words complete beside the repository's command files
+  await expect(offer.getByRole('option')).toHaveText([
+    /\/release\s*Cut a release\./,
+    /\/review\s*review the diff/,
+    /\/rebase\s*rebase branch onto main \(conflicts go to an agent\)/,
+  ]);
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');
   await expect(input).toHaveValue('/review ');
@@ -167,4 +172,23 @@ test('a project command is offered while its name is typed', async ({ pairedPage
   await input.fill('/nosuch');
   await expect(page.getByTestId('composer-says')).toContainText('opens the card\'s menu');
   await expect(offer).toBeHidden();
+  // and on a session a menu word is handed over the same way: the menu
+  // opens and the line leaves the field, never looping back
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('card-actions-menu')).toBeVisible();
+  await expect(input).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('card-actions-menu')).toBeHidden();
+  await expect(input).toHaveValue('');
+
+  // the completed command sends as a turn: the session hears the command
+  await input.fill('/review');
+  await expect(offer).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(input).toHaveValue('/review ');
+  await input.fill('/review the parser');
+  await expect(page.getByTestId('composer-says')).toContainText('runs the project\'s /review');
+  await page.keyboard.press('Enter');
+  await expect(input).toHaveValue('');
+  await expect(page.getByTestId('thread')).toContainText('/review the parser', { timeout: 30_000 });
 });

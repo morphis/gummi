@@ -285,8 +285,11 @@ function renderSays () {
     says.textContent = state.draft.trim() ? 'starts the session with this message' : 'type what the session should do'
     return
   }
-  // with a decision pinned, a line that answers goes with it
-  if (d && (!state.draft.trim() || !c || c.route === 'answer')) {
+  // with a decision pinned, a line that answers goes with it — but a
+  // slash line never answers (the server refuses a command as an answer),
+  // so it keeps the command's own wording even before the server has
+  // classified it
+  if (d && (!state.draft.trim() || (!c && !state.draft.trim().startsWith('/')) || c.route === 'answer')) {
     says.textContent = enterSays(d)
     btn.textContent = 'Answer'
     return
@@ -354,9 +357,12 @@ async function submit ({ asLine = false } = {}) {
     if (attachments.length) body.attachments = attachments.map((a) => a.id)
     const r = await post(cardPath(id, 'send'), body)
     if (r?.route === 'menu') {
-      // the line names something in the card's menu: open it there
+      // the line names something in the card's menu: hand it over — the
+      // menu opens on the entries the line names, the composer lets the
+      // line go (the TUI's own "/" does the same), and enter again on the
+      // focused entry runs it
       if (r.card && state.sel === id) set({ card: r.card })
-      openActions(text)
+      if (openActions(text)) clearComposer()
       return
     }
     clearComposer()

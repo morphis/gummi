@@ -219,9 +219,11 @@ type Composer struct {
 	// where knowable, its model) can take images with a turn. The page
 	// offers the composer's attach control only when this is true.
 	Images bool `json:"images,omitempty"`
-	// Completions are the repository commands a partly typed "/word" on a
-	// freeform card could become, best first; the page offers them above
-	// the composer, and picking one puts "/name " in the field.
+	// Completions are the commands a partly typed "/word" could become —
+	// a freeform card's repository command files, then the card's own
+	// vocabulary (the actions its menu offers, named the way the TUI's "/"
+	// menu names them) — best first; the page offers them above the
+	// composer, and picking one puts "/name " in the field.
 	Completions []Completion `json:"completions,omitempty"`
 }
 

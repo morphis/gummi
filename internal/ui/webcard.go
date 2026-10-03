@@ -617,6 +617,56 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 		for _, c := range m.projectCommandsPrefixed(r, word, 8) {
 			out.Completions = append(out.Completions, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description})
 		}
+		// gummi's own words, while the word is still being typed — a
+		// completed one is a line for the server to route, not a picker
+		if !strings.ContainsAny(word, " \t\n") {
+			out.Completions = append(out.Completions, m.cardSlashCompletions(r, word)...)
+		}
+	}
+	return out
+}
+
+// cardSlashMax bounds how many of the card's own words one completion
+// offers, beside the project commands' own eight — enough for the bare
+// "/" that lists what the card can do, few enough that the picker stays a
+// picker. The box scrolls; a vocabulary this wide is what the menu is for.
+const cardSlashMax = 12
+
+// cardSlashCompletions is the card's own "/" vocabulary: the words a
+// reader can type after a "/" here, each named for the action it runs or
+// the menu row it lands on. The words are the ones the TUI's "/" menu
+// offers on a card page — cardCommandNames' aliases for the action, plus
+// the action's own id — filtered by the partly typed word, with the menu's
+// own description as the detail. What the card does not offer right now is
+// no word here either, exactly as it is no row in the menu.
+//
+// A word the verb vocabulary maps to a specific action is claimed only by
+// that action ("/land" completes toward the merge the verb fires, never
+// toward an advance row that also says "land"), so completing a word and
+// sending it routes the way the says line already promised.
+func (m *Shell) cardSlashCompletions(r featureRow, word string) []webapi.Completion {
+	lower := strings.ToLower(word)
+	var out []webapi.Completion
+	seen := map[string]bool{}
+	for _, a := range m.webActions(r) {
+		detail := a.Detail
+		if detail == "" {
+			detail = a.Label
+		}
+		for _, w := range append(strings.Fields(cardCommandNames[a.ID]), a.ID) {
+			w = strings.ToLower(w)
+			if w == "" || seen[w] || !strings.HasPrefix(w, lower) {
+				continue
+			}
+			if id, ok := verbActionIDs[w]; ok && id != a.ID {
+				continue
+			}
+			seen[w] = true
+			out = append(out, webapi.Completion{Text: "/" + w + " ", Detail: detail})
+			if len(out) >= cardSlashMax {
+				return out
+			}
+		}
 	}
 	return out
 }

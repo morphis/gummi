@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -119,4 +120,62 @@ func transcriptHas(h *cardBoard, id, text string) bool {
 		}
 	}
 	return false
+}
+
+// The composer offers the card's own slash vocabulary beside a project's
+// command files: while the word is still being typed, the actions the
+// card's menu offers come back as "/word" rows with what they do.
+func TestComposerOffersTheCardsSlashWords(t *testing.T) {
+	h := newCardBoard(t, agent.NewFake("ok"))
+	c := h.planCard("Dark mode")
+
+	comp := h.composer(c.ID, "/")
+	if len(comp.Completions) == 0 {
+		t.Fatal("a bare / offers nothing")
+	}
+	var words []string
+	for _, o := range comp.Completions {
+		words = append(words, o.Text)
+		if o.Detail == "" {
+			t.Errorf("%s carries no description", o.Text)
+		}
+		if !strings.HasPrefix(o.Text, "/") || !strings.HasSuffix(o.Text, " ") {
+			t.Errorf("completion %q is not a /word row", o.Text)
+		}
+	}
+	if !slices.Contains(words, "/run ") || !slices.Contains(words, "/verify ") {
+		t.Errorf("the vocabulary offers %v, want what the card's menu offers", words)
+	}
+	if got := h.composer(c.ID, "/ver").Completions; len(got) == 0 || got[0].Text != "/verify " {
+		t.Errorf("/ver offers %+v, want /verify", got)
+	}
+	if got := h.composer(c.ID, "/zzz").Completions; len(got) != 0 {
+		t.Errorf("/zzz offers %+v, want none", got)
+	}
+	// a completed word is a line for the server to route, not a picker
+	if got := h.composer(c.ID, "/verify ").Completions; len(got) != 0 {
+		t.Errorf("/verify␠ offers %+v, want none", got)
+	}
+}
+
+// A verb the card answers runs: /approve at the design gate crosses into
+// implement — the move the g key makes, from the composer.
+func TestASendVerbActs(t *testing.T) {
+	h := newCardBoard(t, agent.NewFake("ok"))
+	c := h.planCard("Dark mode")
+	st, raw := h.send(c.ID, "/approve")
+	var res webapi.SendResponse
+	if st != http.StatusOK || json.Unmarshal(raw, &res) != nil || res.Route != webapi.RouteVerb {
+		t.Fatalf("send /approve = %d %s, want route verb", st, raw)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if got := h.card(c.ID).Stage; got == string(domain.StageImplement) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("/approve left the card at %s", h.card(c.ID).Stage)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

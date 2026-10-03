@@ -12,7 +12,7 @@ import { shot } from '../fixtures/shots';
 // never offers the attach control at all).
 
 async function openForm(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('mnav-cards').click();
+  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-new').click();
   await expect(page.getByTestId('view-newcard')).toBeVisible();
 }
@@ -29,7 +29,6 @@ test('a new card attaches an image and its spec shows it', async ({ pairedPage: 
   await expect(page.getByTestId('view-newcard')).toHaveCount(0);
   await expect(page.getByTestId('card-title')).toHaveText('Fix the broken header layout');
 
-  if (phone(info)) await page.getByTestId('mnav-panel').click();
   await page.getByTestId('tab-spec').click();
   const img = page.getByTestId('spec-doc').locator('img');
   await expect(img).toHaveAttribute('alt', 'pixel.png');
@@ -43,7 +42,7 @@ test('the composer hides its attach control on the headless backend, and a threa
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  if (phone(info)) await page.getByTestId('mnav-thread').click();
+  if (phone(info)) await page.getByTestId('tab-thread').click();
 
   // every profile this harness configures runs the headless backend, which
   // never reports the image capability, so the control stays hidden

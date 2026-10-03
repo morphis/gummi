@@ -85,11 +85,13 @@ function commitButton (c, actions) {
 
 // openActions drops the card's menu from the head's "⋯". With a line (a
 // composer line the server routed to the menu, "/rebase"), the entries
-// that line names come first.
+// that line names come first. It answers true when the menu opened — a
+// line routed here has nowhere to go when it did not, and stays in the
+// composer instead.
 export function openActions (line = '') {
   const btn = document.getElementById('card-actions')
   const actions = state.card?.actions || []
-  if (!btn || !actions.length) return
+  if (!btn || !actions.length) return false
   const word = String(line).trim().replace(/^\//, '').split(/\s+/)[0].toLowerCase()
   const hit = (a) => word && (a.id.toLowerCase().startsWith(word) || a.label.toLowerCase().startsWith(word))
   const list = word ? [...actions.filter(hit), ...actions.filter(a => !hit(a))] : actions
@@ -99,6 +101,7 @@ export function openActions (line = '') {
     label: a.label, danger: a.danger, testid: `action-${a.id}`, hint: a.detail, onClick: () => runAction(state.card, a)
   }))
   openMenu(btn, items, { testid: 'card-actions-menu' })
+  return true
 }
 
 function stages (c) {
