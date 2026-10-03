@@ -41,13 +41,10 @@ type Today struct {
 	Spent float64 `json:"spent"`
 }
 
-// Counts are how many cards need a person, how many are running, and how
-// many are queued for a free lane. A queued card is never counted as
-// running: nothing is working on it yet.
+// Counts are how many cards need a person and how many are running.
 type Counts struct {
 	Needs   int `json:"needs"`
 	Running int `json:"running"`
-	Queued  int `json:"queued,omitempty"`
 }
 
 // RowStatus is the one word the rail groups a card under.
@@ -144,9 +141,6 @@ type RowRunning struct {
 	Autopilot bool `json:"autopilot,omitempty"`
 	// Pausing marks a pause asked for and not yet taken.
 	Pausing bool `json:"pausing,omitempty"`
-	// Why says what a queued card waits for, in the TUI's words ("queued
-	// — the attended lane is busy with BG-001"); empty for a running one.
-	Why string `json:"why,omitempty"`
 }
 
 // RowStack places a card in a stack: position Pos (0 at the bottom) of Of.

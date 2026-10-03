@@ -186,8 +186,6 @@ func (m *Shell) sendChangesToAutonomous(f domain.Feature, turn string, n int) te
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
 				return noticeMsg{text: fmt.Sprintf("%s: sent %d review comment(s) to the running %s agent", f.ID, n, f.Stage), reload: true}
-			case engine.StateQueued:
-				return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open comments when it starts", f.ID, f.Stage)}
 			}
 		}
 		if err := m.engine.RunWith(f, turn); err != nil {

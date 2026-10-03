@@ -885,7 +885,7 @@ func stageActions(in nextInput) []nextAction {
 		return acts
 	}
 	switch in.sess {
-	case engine.StateQueued, engine.StateRunning:
+	case engine.StateRunning:
 		// the run owns the screen; it will stop on the drift by itself
 		return acts
 	}
@@ -934,8 +934,6 @@ func stageAnswers(in nextInput) []nextAction {
 	// a scheduled or running agent owns the screen; only a blocking
 	// question needs the user before it finishes.
 	switch in.sess {
-	case engine.StateQueued:
-		return nil
 	case engine.StateRunning:
 		if in.hasAsk {
 			return append([]nextAction{answerIt()}, stopOrResume(in)...)
@@ -1547,7 +1545,7 @@ func stopHere(in nextInput) []nextAction {
 	case "", engine.StatePaused, engine.StateInteractive:
 		return nil
 	}
-	if in.sess == engine.StateRunning || in.sess == engine.StateQueued {
+	if in.sess == engine.StateRunning {
 		return []nextAction{keyed(nextStep("pause", "p", "stop here", "free the slot"),
 			" — enter re-runs the stage later", " — run the stage again later")}
 	}

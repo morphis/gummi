@@ -962,11 +962,10 @@ func correctiveLabel(m *Shell, f domain.Feature) string {
 }
 
 // autopilotField is the masthead's autopilot cell: the stored mode, and
-// — while a mode that is not off has the card — the scheduling state of
-// that work right now, at Info weight rather than Faint: running names
-// a turn in flight, queued names the wait for a free attention slot.
-// Queued is named, not folded into running; a parked card claiming a
-// turn was in flight is the one misleading thing this field could say.
+// — while a mode that is not off has the card — whether a turn is in flight
+// right now, at Info weight rather than Faint: running names a turn in
+// flight. A parked card claiming a turn was in flight is the one
+// misleading thing this field could say.
 //
 // This is the only thing about autopilot that stays pinned, and it is
 // pinned because it is the one autopilot fact that is about *now*. What
@@ -990,14 +989,9 @@ func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
 	if sess == nil {
 		return s.Faint.Render(label)
 	}
-	// Queued counts: the card has been handed over and is waiting on a
-	// lane, which is autopilot working on it as much as a turn in flight
-	// is — but it says so, rather than borrowing running's claim. Paused
-	// and done do not — a mode is what those cards carry, not what they
-	// are doing.
+	// Paused and done do not — a mode is what those cards carry, not what
+	// they are doing.
 	switch sess.State() {
-	case engine.StateQueued:
-		return s.Info.Render(label + " · queued")
 	case engine.StateRunning:
 		return s.Info.Render(label + " · running")
 	default:
@@ -1265,7 +1259,7 @@ func foldedReceiptLine(s *theme.Styles, seg threadfold.Segment, spend map[domain
 // context between stages, so the label is never conditional — then that
 // stage's whole conversation, then a status line for the state the
 // session is in right now: the streaming activity line while an agent
-// is mid-turn, the queued wait while it sits in the lane queue. It
+// is mid-turn. It
 // prefers a live engine.Session's Snapshot
 // (freshest, and the only place an open ask_user question lives); a
 // watched card another process drives renders its followed stream
@@ -1423,13 +1417,9 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 				lines = append(lines, "  "+s.Error.Render(l))
 			}
 		}
-		// The status switch names the session's now-state: queued checked
-		// before busy, as on the board — a queued session is never busy, but
-		// the order keeps the reading deterministic. Both lines are
-		// live-computed per frame, so neither outlives the state it names.
+		// The status line names the session's now-state. It is live-computed
+		// per frame, so it does not outlive the state it names.
 		switch {
-		case snap.State == engine.StateQueued:
-			lines = append(lines, "  "+s.Faint.Render("◔ "+m.queuedLabelFor(r.F.ID)))
 		case snap.Busy:
 			// at, not r.F.UpdatedAt: the row field names when the STAGE
 			// began, which a retry after a failed run does not move, so a

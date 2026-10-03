@@ -79,7 +79,7 @@ func commitMore(t *testing.T, wt *worktree.Manager, f domain.Feature, name strin
 func predraftEngine(t *testing.T, ag agent.Agent) (*Engine, *state.Store, *worktree.Manager) {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	return e, store, wt
 }

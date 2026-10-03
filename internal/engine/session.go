@@ -76,15 +76,15 @@ type Event struct {
 type SessionState string
 
 const (
-	// StateInteractive is a chat session; it holds no attention slot.
+	// StateInteractive is a chat session.
 	StateInteractive SessionState = "interactive"
-	// StateQueued is an autonomous session waiting for a free slot.
-	StateQueued SessionState = "queued"
-	// StateRunning is an autonomous session holding a slot, agent working.
+	// StateRunning is an autonomous session, from the moment it starts until
+	// its turn ends or it is stopped. Live reports whether its agent is
+	// attached yet.
 	StateRunning SessionState = "running"
-	// StatePaused is an autonomous session stopped by the user; slot freed.
+	// StatePaused is an autonomous session stopped by the user.
 	StatePaused SessionState = "paused"
-	// StateDone is an autonomous session that finished its turn; slot freed.
+	// StateDone is an autonomous session that finished its turn.
 	StateDone SessionState = "done"
 )
 
@@ -270,16 +270,7 @@ type Session struct {
 	// refuse mutating client tools (spec_replace_section, spec_annotate)
 	// even when a hand-crafted MCP call names them.
 	ReadOnly bool
-	// pool is the attention pool (attended/autopilot) this session
-	// competes in — decided by lanePoolFor at construction from the
-	// feature's gate-approval mode, and re-decided by repool whenever that
-	// mode changes under a live run. It is what lets freeSlot return a
-	// slot to the same pool the session took it from (see heldSlot and
-	// releaseSlot), which is why it is written under s.mu rather than
-	// being the construction-time constant it used to be: the `A` switch
-	// can flip a card mid-stage, and a slot returned to the pool the run
-	// no longer competes in corrupts both counts.
-	pool lanePool
+
 	// kickoffNote is extra content appended to an autonomous run's stage
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
@@ -313,7 +304,7 @@ type Session struct {
 	cancel context.CancelFunc
 
 	mu             sync.Mutex
-	agentSess      agent.Session // nil while queued
+	agentSess      agent.Session // nil until the backend attaches
 	agentName      string        // backend identity, for display
 	agentSessionID string        // backend session id (agent.Identified), "" if none
 	model          string        // model resolved at spawn
@@ -357,9 +348,8 @@ type Session struct {
 	verdict    string // review verdict from submit_verdict ("pass"/"changes")
 	err        error
 	stopped    bool
-	finalized  bool    // stopped; must not be persisted (may be dropped)
-	heldSlot   bool    // true between taking and releasing an attention slot
-	askYield   bool    // the slot was given back while a person answers (yieldSlotForAsk)
+	finalized  bool // stopped; must not be persisted (may be dropped)
+
 	budget     float64 // stage credit budget (0 = none)
 	creditRate float64 // adapter's token→credit rate (0 = engine default)
 	// cardSpent is the whole card's metered spend (credit-equivalent) as
@@ -539,7 +529,8 @@ func (s *Session) setState(st SessionState) {
 	s.live.Emit(livelog.Record{Kind: livelog.KindState, State: string(st)})
 }
 
-// agent returns the session's agent session (nil while queued).
+// agent returns the session's agent session (nil until the backend attaches).
+
 func (s *Session) agent() agent.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -598,83 +589,6 @@ func (s *Session) finishRunning() bool {
 	}
 	s.state = StateDone
 	return true
-}
-
-// takeSlot marks that this session holds an attention slot in its pool.
-func (s *Session) takeSlot() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.heldSlot = true
-}
-
-// slot reports whether the session holds an attention slot, and in
-// which pool.
-func (s *Session) slot() (held bool, pool lanePool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.heldSlot, s.pool
-}
-
-// yieldSlot gives back an attended session's slot while it waits on a
-// person, reporting whether it did. Only an attended run yields: an
-// autopilot card's questions are answered by autopilot (or its goal's
-// lead) at once, and yielding there would let the pool run over its cap
-// the moment the answer lands.
-func (s *Session) yieldSlot() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.heldSlot || s.pool != poolAttended {
-		return false
-	}
-	s.heldSlot, s.askYield = false, true
-	return true
-}
-
-// retakeSlot takes back a slot yieldSlot gave up, reporting the pool it
-// counts against, or false when nothing was yielded.
-func (s *Session) retakeSlot() (lanePool, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.askYield || s.state != StateRunning {
-		s.askYield = false
-		return 0, false
-	}
-	s.askYield, s.heldSlot = false, true
-	return s.pool, true
-}
-
-// repool re-binds the pool this session competes in, reporting whether
-// the pool actually changed and — when it did — whether a slot is
-// currently held and which pool it came out of, so the engine can move
-// the running count across under e.mu.
-//
-// The three answers come out of one critical section on purpose. freeSlot
-// clears heldSlot and reads s.pool in a single releaseSlot call and only
-// then takes e.mu to decrement, so a repool that split "is a slot held"
-// from "which pool is it in" could interleave between the two and either
-// decrement a pool twice or leak a slot into the other one forever.
-func (s *Session) repool(p lanePool) (moved, held bool, from lanePool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	from = s.pool
-	if from == p {
-		return false, false, from
-	}
-	s.pool = p
-	return true, s.heldSlot, from
-}
-
-// releaseSlot clears the slot flag, reporting whether it was held (so the
-// engine decrements the running count exactly once, and never for a
-// session — queued or interactive — that never took a slot) and which
-// pool it was held in, so the engine returns the slot to that same pool
-// and never the other one. pool is meaningful only when held is true.
-func (s *Session) releaseSlot() (held bool, pool lanePool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	held = s.heldSlot
-	s.heldSlot = false
-	return held, s.pool
 }
 
 func (s *Session) appendUser(text, by string) {

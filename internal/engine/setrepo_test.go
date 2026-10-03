@@ -65,7 +65,7 @@ func twoRepoEngine(t *testing.T) *Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
@@ -139,7 +139,7 @@ func TestSetRepoLockedAfterWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1,
+		Model: "m",
 	})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()

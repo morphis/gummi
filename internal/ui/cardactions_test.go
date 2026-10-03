@@ -462,7 +462,6 @@ func TestCardActionsForSessionState(t *testing.T) {
 		hasDeps bool // deps on p expected (p pauses while a stage session exists)
 	}{
 		{"no session offers deps not pause", "", false, true},
-		{"queued session offers pause, and deps only from the list", engine.StateQueued, true, false},
 		{"running session offers pause, and deps only from the list", engine.StateRunning, true, false},
 		{"paused session offers pause, and deps only from the list", engine.StatePaused, true, false},
 	}

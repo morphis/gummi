@@ -244,8 +244,9 @@ outside the sandbox parks the card. A research card parks before its
 document becomes new cards. **It never lands on main.** When it cannot
 finish, it parks to the inbox and notifies you.
 
-An attended card always gets a lane at once. Autopilot cards share two
-lanes by default and queue behind each other.
+Every autonomous run starts the moment you ask for it. Nothing caps how many
+run at once, or queues one behind another: how many you run in parallel is
+your call.
 
 Autopilot runs inside the board process, so quitting stops it. The quit
 dialog names the running cards, and reopening asks once whether to pick
@@ -475,7 +476,7 @@ credentials or writes them to a file it manages.
 Two files in `.gummi/`, both scaffolded on first run:
 
 - **`config.yaml`**: `permissions` (`allow-all` or `guarded`), `sandbox`,
-  `autopilot_lanes`, `repo` and `repos` when `.gummi` sits above the
+  `repo` and `repos` when `.gummi` sits above the
   repository, `checks.default` to fix the verify commands instead of
   discovering them, `env` prerequisites the verification plan can cite,
   `instructions` files, and `hooks` scripts run on board events.
@@ -493,7 +494,6 @@ The environment variables you meet first:
 |---|---|
 | `GUMMI_AGENT` | default backend |
 | `GUMMI_ENVELOPE` | default credit envelope for new cards |
-| `GUMMI_MAX_ACTIVE` | attended lanes (default 1) |
 | `GUMMI_THEME` | `dark`, `light`, `neon` |
 | `GUMMI_NOTIFY` | `bell`, `desktop`, `off` |
 

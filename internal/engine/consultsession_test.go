@@ -276,7 +276,7 @@ func TestConsultSeedsFromFinishedStageSession(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
@@ -403,7 +403,7 @@ func TestSessionLivePausedReportsFalse(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventToolCall, Tool: "noop"}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(11, "pause me", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -454,7 +454,7 @@ func TestConsultSeedStampsTheProducingRole(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 

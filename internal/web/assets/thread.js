@@ -365,13 +365,11 @@ function renderLive () {
     }
     if (l) {
       parts.push(...conversation('stage', l, role, stage))
-      if (l.busy || l.state === 'queued') {
-        const words = l.state === 'queued' && !l.busy
-          ? (r.running?.why || 'queued for a free slot')
-          : [`${role} is ${l.verb || 'working'}`, l.tool ? String(l.tool.label || l.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
+      if (l.busy) {
+        const words = [`${role} is ${l.verb || 'working'}`, l.tool ? String(l.tool.label || l.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
         parts.push(h('div', { class: 'live', testid: 'live' },
-          h('span', { class: ['spinner', !l.busy && 'still'] }),
-          h('span', { class: l.busy ? 'shimmer' : null }, words + (pausing ? ' · pauses after this turn' : '')),
+          h('span', { class: 'spinner' }),
+          h('span', { class: 'shimmer' }, words + (pausing ? ' · pauses after this turn' : '')),
           l.spent ? h('span', { class: 'spent' }, `${cr(l.spent)} cr`) : null))
       }
       if (l.err) parts.push(h('div', { class: 'live badc', testid: 'live-error' }, l.err))

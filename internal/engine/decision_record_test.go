@@ -21,7 +21,7 @@ func TestAskOpensItsDecisionRow(t *testing.T) {
 	})
 	ag := clientToolFake(args)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 
 	f := feature(1, "Dark mode", domain.StagePlan)
 	putFeature(t, store, f)
@@ -59,7 +59,7 @@ func TestAskDecisionClosesOnAnswer(t *testing.T) {
 	})
 	ag := clientToolFake(args)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 
 	f := feature(1, "Dark mode", domain.StagePlan)
 	putFeature(t, store, f)

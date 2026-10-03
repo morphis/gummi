@@ -27,7 +27,7 @@ func TestWriterKickoffCarriesOpenSpecComments(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "planned", domain.StagePlan)

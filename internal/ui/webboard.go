@@ -43,11 +43,7 @@ func (m *Shell) WebBoard() webapi.Board {
 		case webapi.StatusNeeds:
 			b.Counts.Needs++
 		case webapi.StatusRunning:
-			if row.Running != nil && row.Running.Verb == "queued" {
-				b.Counts.Queued++
-			} else {
-				b.Counts.Running++
-			}
+			b.Counts.Running++
 		}
 		b.Rows = append(b.Rows, row)
 	}
@@ -97,9 +93,6 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		// can act on a raised gate, not on a check still running under it.
 		row.Status = webapi.StatusNeeds
 		row.Needs = webNeeds(it, f.Stage)
-	case sess != nil && sess.State() == engine.StateQueued:
-		row.Status = webapi.StatusRunning
-		row.Running = &webapi.RowRunning{Verb: "queued", Why: m.queuedLabelFor(f.ID), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}

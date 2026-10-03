@@ -76,7 +76,7 @@ func TestClassifyReentry(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "dark mode", domain.StageVerify)
 	withWorktree(t, wt, f)
@@ -125,7 +125,7 @@ func TestClassifyReentry(t *testing.T) {
 // than turning an offered answer into a chat message.
 func TestClassifyReentryWithNoBackend(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: map[string]agent.Agent{}, Store: store, Worktrees: wt, Workspace: ws, MaxActive: 1})
+	e := New(Config{Agents: map[string]agent.Agent{}, Store: store, Worktrees: wt, Workspace: ws})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "dark mode", domain.StageVerify)
 	if _, err := e.ClassifyReentry(context.Background(), f, "the toggle never persists", ""); err == nil {
@@ -139,7 +139,7 @@ func TestClassifyReentryWithNoBackend(t *testing.T) {
 // gate-blocking predicate now sees it.
 func TestApplyReentryEditWritesTheArtifact(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "dark mode", domain.StageVerify)
 	withWorktree(t, wt, f)
@@ -218,7 +218,7 @@ func TestOneShotSpendIsMeteredAgainstTheStage(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Persist: true,
+		Model: "m", Persist: true,
 	})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "dark mode", domain.StageVerify)

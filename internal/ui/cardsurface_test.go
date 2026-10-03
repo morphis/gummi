@@ -24,7 +24,7 @@ import (
 // convenient to write down.
 func surfaceInputs() []nextInput {
 	var out []nextInput
-	sessions := []engine.SessionState{"", engine.StateQueued, engine.StateRunning, engine.StatePaused, engine.StateDone, engine.StateInteractive}
+	sessions := []engine.SessionState{"", engine.StateRunning, engine.StatePaused, engine.StateDone, engine.StateInteractive}
 	attns := []attnKind{"", attnGate, attnFailure, attnBudget, attnQuestion}
 	verdicts := []reviewVerdict{verdictUnclear, verdictPass, verdictFail, verdictChanges, verdictBlocked}
 	for _, kind := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch} {
@@ -199,8 +199,7 @@ func TestInvariantLockstepStopHere(t *testing.T) {
 // cache key is named in narration.go's own doc for when it does.
 func TestInvariantFreeAtRest(t *testing.T) {
 	for _, in := range surfaceInputs() {
-		working := in.sess == engine.StateQueued ||
-			(in.sess == engine.StateRunning && !in.hasAsk)
+		working := in.sess == engine.StateRunning && !in.hasAsk
 		if working && !in.closed() && narrationStop(in) {
 			t.Errorf("%+v: narrated a card that is working", in)
 		}
@@ -217,7 +216,6 @@ func TestInvariantFreeAtRest(t *testing.T) {
 	row := m.rows[m.sel]
 	for _, in := range []nextInput{
 		{stage: domain.StageVerify, kind: domain.KindFeature, sess: engine.StateRunning, verdict: verdictFail, failedCheck: "go vet"},
-		{stage: domain.StageVerify, kind: domain.KindFeature, sess: engine.StateQueued, attn: attnFailure},
 	} {
 		if got := m.cardNarration(in, row); len(got) != 0 {
 			t.Errorf("%+v: narrated a working card: %+v", in, got)

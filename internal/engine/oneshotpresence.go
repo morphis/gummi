@@ -19,8 +19,7 @@ import (
 // gate, 14–25% of what each card in that drive cost. In that window the
 // board drew a live card as "autopilot stopped without saying so" beside a
 // masthead reading "autopilot: on" and a spend still climbing, offered
-// "run implement — no active run — start the stage", and counted 0 of 2
-// autopilot lanes in use; a goal declared its own healthy child card
+// "run implement — no active run — start the stage", and a goal declared its own healthy child card
 // "stuck: stopped with nothing running" and spent a lead turn restarting
 // it, 90 seconds (goalIdleGrace) into a pass that takes three times that.
 //

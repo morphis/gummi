@@ -23,7 +23,8 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// StopForQuit stops every running or queued stage session — autopilot
+// StopForQuit stops every running stage session — autopilot
+
 // and attended alike — and records why in the card-event log, so a
 // later QuitStoppedCards can tell this card apart from one a human
 // parked with p, and the reopen can offer it back.
@@ -38,7 +39,7 @@ func (e *Engine) StopForQuit(ctx context.Context) {
 	var targets []*Session
 	for _, s := range e.live {
 		switch s.State() {
-		case StateRunning, StateQueued:
+		case StateRunning:
 		default:
 			continue
 		}
@@ -66,13 +67,9 @@ func (e *Engine) StopForQuit(ctx context.Context) {
 		if a := s.agent(); a != nil {
 			_ = a.Interrupt(ctx)
 		}
-		e.mu.Lock()
-		e.removeFromQueue(s.Feature.ID)
-		e.mu.Unlock()
 		s.setState(StatePaused)
 		e.persist(s) // record the paused snapshot before finalizing, like Pause
 		s.stop()
-		e.freeSlot(s)
 
 		if e.cfg.Store == nil {
 			continue

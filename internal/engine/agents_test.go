@@ -26,7 +26,7 @@ func singleAgent(a agent.Agent) map[string]agent.Agent {
 func TestResearchReadOnlyRefusedOnNonEnforcingBackend(t *testing.T) {
 	rec := &recorder{Fake: agent.NewFake("ok")} // Caps omit ReadOnlyEnforce
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "rs investigate", domain.StageImplement)

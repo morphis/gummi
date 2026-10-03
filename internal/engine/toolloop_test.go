@@ -36,7 +36,7 @@ func toolTurn(n int, ok func(i int) bool, detail func(i int) string) []agent.Eve
 func runUntilTerminal(t *testing.T, ag *agent.Fake) (*Engine, error) {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "one", domain.StageImplement)
 	withWorktree(t, wt, f)

@@ -18,7 +18,7 @@ func TestBaselineChecksPersists(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+		Model: "m", Permission: agent.PermissionAllowAll,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -60,7 +60,7 @@ func TestBaselineChecksGuardedNoop(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded,
+		Model: "m", Permission: agent.PermissionGuarded,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -87,7 +87,7 @@ func TestBaselineChecksSkipsBaselineFalse(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+		Model: "m", Permission: agent.PermissionAllowAll,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -131,7 +131,7 @@ func TestBaselineChecksMalformedYAMLErrors(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+		Model: "m", Permission: agent.PermissionAllowAll,
 	})
 	t.Cleanup(func() { e.Close() })
 

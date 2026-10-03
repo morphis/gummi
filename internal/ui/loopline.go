@@ -28,11 +28,11 @@ const (
 // or ok=false when there is no loop activity to show (nothing live, no
 // gate raised).
 func (m *Shell) planLoopLeg(id domain.FeatureID) (leg int, escalated, ok bool) {
-	// only a scheduled/running session marks an agent leg — a finished one
+	// only a running session marks an agent leg — a finished one
 	// lingers for its transcript while the gate below owns the loop state.
 	if sess := m.sessionFor(id); sess != nil &&
 		sess.Feature.Stage == domain.StagePlan && !sess.Interactive {
-		if st := sess.State(); st == engine.StateRunning || st == engine.StateQueued {
+		if sess.State() == engine.StateRunning {
 			if sess.Critique {
 				return planLegCritique, false, true
 			}
@@ -130,65 +130,6 @@ func (m *Shell) cardBusyWord(r featureRow) string {
 		return "running"
 	}
 	return ""
-}
-
-// queuedLabel names the queued state everywhere the UI speaks it: the
-// why the card actions offer on a queued card (cardactions.go's
-// runLabelWhy) and the wait line the thread's live stage block shows for
-// the same state both draw from here, so a card's board-row vocabulary
-// and its thread-detail vocabulary can never disagree — the same
-// contract runningLabel carries for the busy word. A queued session is
-// never busy (the engine sets busy only around an in-flight turn), but
-// every surface still checks queued before busy, so its reading does
-// not depend on arm order.
-func queuedLabel() string {
-	return "queued — waiting for a free slot"
-}
-
-// queuedLabelFor is queuedLabel with what the card waits for, from the
-// engine's own queue: whose runs hold the lane it waits in, and how many
-// runs are ahead of it. A card that sat "queued" for minutes behind a
-// question nobody had answered said nothing about why; it now names the
-// card holding the lane. Falls back to queuedLabel when the engine cannot
-// say (no engine, or the card left the queue since).
-func (m *Shell) queuedLabelFor(id domain.FeatureID) string {
-	if m.engine == nil {
-		return queuedLabel()
-	}
-	w, ok := m.engine.LaneWait(id)
-	if !ok {
-		return queuedLabel()
-	}
-	return queuedWaitLabel(w)
-}
-
-// queuedWaitLabel words a queue wait.
-func queuedWaitLabel(w engine.LaneWait) string {
-	lane := "attended"
-	if w.Autopilot {
-		lane = "autopilot"
-	}
-	out := "queued — "
-	switch n := len(w.Holders); {
-	case n == 0:
-		return queuedLabel()
-	case n == 1 && w.Max <= 1:
-		out += "the " + lane + " lane is busy with " + string(w.Holders[0])
-	default:
-		ids := make([]string, 0, min(n, 3))
-		for _, h := range w.Holders[:min(n, 3)] {
-			ids = append(ids, string(h))
-		}
-		list := strings.Join(ids, ", ")
-		if n > 3 {
-			list += fmt.Sprintf(" and %d more", n-3)
-		}
-		out += fmt.Sprintf("all %d %s lanes are busy (%s)", n, lane, list)
-	}
-	if w.Ahead > 0 {
-		out += fmt.Sprintf(" · %d ahead in line", w.Ahead)
-	}
-	return out
 }
 
 // runningLabel is the thread's own busy line: runningVerb's word plus how

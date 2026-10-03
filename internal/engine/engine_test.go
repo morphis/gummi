@@ -144,12 +144,12 @@ func waitActivity(t *testing.T, e *Engine, id domain.FeatureID, wants ...string)
 	}
 }
 
-// newEngine builds a single-slot engine (MaxActive 1); multi-slot tests
-// construct New directly.
+// newEngine builds an engine over one fake agent. Tests that need more
+// than one run construct New directly.
 func newEngine(t *testing.T, ag agent.Agent) *Engine {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
@@ -218,7 +218,7 @@ func TestAutonomousRunKicksOff(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -258,7 +258,7 @@ func TestErrorFreesSlotAndUnwedgesQueue(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f1 := feature(1, "boom", domain.StageImplement)
@@ -301,7 +301,7 @@ func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "planned", domain.StagePlan)
@@ -324,103 +324,7 @@ func TestRunWithAppendsCommentsToKickoff(t *testing.T) {
 	}
 }
 
-func TestSchedulerQueuesBeyondMaxActive(t *testing.T) {
-	// a responder that blocks until released, so slot 1 stays occupied
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
-	t.Cleanup(func() {
-		close(release)
-		e.Close()
-	})
-
-	f1 := autopilotFeature(1, "one")
-	f2 := autopilotFeature(2, "two")
-	withWorktree(t, wt, f1)
-	withWorktree(t, wt, f2)
-
-	if err := e.Run(f1); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateRunning)
-	if err := e.Run(f2); err != nil {
-		t.Fatal(err)
-	}
-	// slot is full → f2 queues
-	waitState(t, e, "FD-002", StateQueued)
-
-	// release f1's turn → it goes done, frees the slot, f2 starts
-	release <- struct{}{}
-	waitState(t, e, "FD-001", StateDone)
-	waitState(t, e, "FD-002", StateRunning)
-}
-
-func TestPauseFreesSlotAndPromotes(t *testing.T) {
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
-	t.Cleanup(func() {
-		close(release)
-		e.Close()
-	})
-
-	f1 := autopilotFeature(1, "one")
-	f2 := autopilotFeature(2, "two")
-	withWorktree(t, wt, f1)
-	withWorktree(t, wt, f2)
-	if err := e.Run(f1); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateRunning)
-	if err := e.Run(f2); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-002", StateQueued)
-
-	// pause f1 → slot frees, f2 promoted to running
-	if err := e.Pause(context.Background(), "FD-001"); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StatePaused)
-	waitState(t, e, "FD-002", StateRunning)
-}
-
-func TestMaxActiveTwo(t *testing.T) {
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 2})
-	t.Cleanup(func() {
-		close(release)
-		e.Close()
-	})
-
-	for i := 1; i <= 3; i++ {
-		f := autopilotFeature(i, "f")
-		withWorktree(t, wt, f)
-		if err := e.Run(f); err != nil {
-			t.Fatal(err)
-		}
-	}
-	waitState(t, e, "FD-001", StateRunning)
-	waitState(t, e, "FD-002", StateRunning)
-	waitState(t, e, "FD-003", StateQueued) // third waits behind two slots
-}
-
-// An unset MaxActive means no cap: however many cards the operator
-// starts, all of them drive — nothing sits in StateQueued behind a slot.
-func TestUncappedByDefault(t *testing.T) {
+func TestPauseLeavesOtherRunsRunning(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		<-release
@@ -433,16 +337,25 @@ func TestUncappedByDefault(t *testing.T) {
 		e.Close()
 	})
 
-	for i := 1; i <= 5; i++ {
-		f := feature(i, "f", domain.StageImplement)
-		withWorktree(t, wt, f)
-		if err := e.Run(f); err != nil {
-			t.Fatal(err)
-		}
+	f1 := autopilotFeature(1, "one")
+	f2 := autopilotFeature(2, "two")
+	withWorktree(t, wt, f1)
+	withWorktree(t, wt, f2)
+	if err := e.Run(f1); err != nil {
+		t.Fatal(err)
 	}
-	for _, id := range []domain.FeatureID{"FD-001", "FD-002", "FD-003", "FD-004", "FD-005"} {
-		waitState(t, e, id, StateRunning)
+	waitState(t, e, "FD-001", StateRunning)
+	if err := e.Run(f2); err != nil {
+		t.Fatal(err)
 	}
+	waitState(t, e, "FD-002", StateRunning)
+
+	// pause f1: it stops, and f2 keeps running beside nothing in its way
+	if err := e.Pause(context.Background(), "FD-001"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StatePaused)
+	waitState(t, e, "FD-002", StateRunning)
 }
 
 func TestRunRequiresWorktree(t *testing.T) {
@@ -457,54 +370,6 @@ func TestRunRequiresWorktree(t *testing.T) {
 		t.Error("missing worktree produced no error")
 	}
 	waitState(t, e, "FD-001", StatePaused)
-}
-
-func TestDroppingQueuedDoesNotOverfreeSlot(t *testing.T) {
-	// Regression: dropping/pausing a QUEUED session must not decrement
-	// the running count (it never held a slot), which would let an extra
-	// autonomous session start beyond the pool's cap.
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
-	t.Cleanup(func() {
-		close(release)
-		e.Close()
-	})
-
-	f1 := autopilotFeature(1, "one")
-	f2 := autopilotFeature(2, "two")
-	f3 := autopilotFeature(3, "three")
-	for _, f := range []domain.Feature{f1, f2, f3} {
-		withWorktree(t, wt, f)
-	}
-	if err := e.Run(f1); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-001", StateRunning)
-	if err := e.Run(f2); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.Run(f3); err != nil {
-		t.Fatal(err)
-	}
-	waitState(t, e, "FD-002", StateQueued)
-	waitState(t, e, "FD-003", StateQueued)
-
-	// drop the queued FD-002 — the slot is still held by FD-001, so
-	// FD-003 must NOT start (that would be 2 running with AutopilotLanes 1).
-	e.Drop("FD-002")
-	// give any erroneous scheduling a moment to happen
-	time.Sleep(50 * time.Millisecond)
-	if s := e.Get("FD-003"); s == nil || s.State() != StateQueued {
-		t.Fatalf("FD-003 wrongly promoted past the pool cap after dropping a queued session: %v", s)
-	}
-	if e.Get("FD-001").State() != StateRunning {
-		t.Error("FD-001 stopped running unexpectedly")
-	}
 }
 
 func TestDropStopsSession(t *testing.T) {
@@ -532,7 +397,7 @@ func TestSendUnknownFeature(t *testing.T) {
 func TestWorktreeStageLocatesWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl me", domain.StageImplement)
@@ -559,7 +424,7 @@ func TestArtifactPathOnStageSession(t *testing.T) {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)
 			rec := recordingAgent()
-			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 			t.Cleanup(func() { e.Close() })
 
 			withWorktree(t, wt, f)
@@ -582,7 +447,7 @@ func TestArtifactPathOnStageSession(t *testing.T) {
 func TestAttachMaterializesDraftAndKicksOff(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "Dark mode", domain.StagePlan)
@@ -686,7 +551,7 @@ func TestNewAgentSessionAlwaysBindsMCPAndFeatureID(t *testing.T) {
 				return []agent.Event{{Kind: agent.EventIdle}}
 			}}
 			ws, store, wt := newRepo(t)
-			e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 			t.Cleanup(func() { e.Close() })
 
 			f := feature(1, "x", domain.StagePlan)

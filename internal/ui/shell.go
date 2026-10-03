@@ -2742,7 +2742,7 @@ func (m *Shell) quitNow() tea.Cmd {
 	return tea.Quit
 }
 
-// liveAutopilotSplit splits the board's live (StateRunning/StateQueued)
+// liveAutopilotSplit splits the board's live (StateRunning)
 // sessions by whether their card is on autopilot — domain.Feature.GateMode
 // anything but domain.GateAttended, same as everywhere else the field is
 // interpreted.
@@ -2759,9 +2759,7 @@ func (m *Shell) liveAutopilotSplit() (autopilot, plain []string) {
 		return nil, nil
 	}
 	for id, s := range m.engine.Sessions() {
-		switch s.State() {
-		case engine.StateRunning, engine.StateQueued:
-		default:
+		if s.State() != engine.StateRunning {
 			continue
 		}
 		if s.Feature.GateMode() == domain.GateAttended {
@@ -3111,8 +3109,8 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			if cmd, handled := m.interruptFreeform(r.F); handled {
 				return cmd
 			}
-			// p pauses the card's own autonomous session (running, queued,
-			// or a finished one p can park) — the existing pause binding —
+			// p pauses the card's own autonomous session (running, or a
+			// finished one p can park) — the existing pause binding —
 			// and otherwise opens the dependency picker for the selected card.
 			if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
 				return m.pauseRun(r.F)
@@ -3912,12 +3910,6 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 				return m.openCard()
 			}
 			return nil
-		case engine.StateQueued:
-			// the ◔ queued pill (runCounts) says this on the board, but a
-			// person who just asked for the run is owed an answer to the
-			// ask itself: silence here read as the request being dropped.
-			m.notice = noticeMsg{text: string(f.ID) + ": " + string(f.Stage) + " is already queued — it starts when a lane frees", id: f.ID}
-			return nil
 		case engine.StateDone:
 			// A finished session on a stage that ends with a critique
 			// resumes the loop at its position instead of re-running the
@@ -3994,8 +3986,8 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 			// under an answer that looked taken.
 			return noticeMsg{text: string(f.ID) + ": " + string(f.Stage) + " did not start — try again", isErr: true, id: f.ID}
 		}
-		// no bare "queued" text: the ◔ queued / ⬤ running pills
-		// (runCounts) already say it, computed live from engine state on
+		// no bare "queued" text: the ⬤ running pill
+		// (runCounts) already says it, computed live from engine state on
 		// every render, so they can't go stale the way this free-text
 		// notice did once the run left the queue. A note riding the
 		// kickoff still gets its own line — nothing else says that.
@@ -4309,17 +4301,6 @@ func (m *Shell) setGateApproval(id domain.FeatureID, mode string) tea.Cmd {
 		if err := m.store.SetGateApproval(context.Background(), id, mode); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		// A card already running (or queued) competes in the pool its OLD
-		// mode named, and nothing else ever revisits that: the session
-		// carries the feature snapshot it was dispatched with, and only the
-		// next stage's session is built from the row this call just wrote.
-		// Without this, handing a running card to autopilot left it holding
-		// the attended slot — so the next attended card queued behind
-		// unattended work, which is the one thing the two pools exist to
-		// prevent (engine.Repool says what the move does in each state).
-		if m.engine != nil {
-			m.engine.Repool(id, mode)
-		}
 		// The confirmation reads back in the words the choice was made in.
 		// Two modes, so two sentences — no table to look them up in.
 		text := fmt.Sprintf("%s: attended — every gate stops for you", id)
@@ -4467,36 +4448,28 @@ func (m *Shell) statusView(w int) string {
 }
 
 // runCounts summarizes live agent sessions for the status bar
-// (⬤ running · ◔ queued), empty when nothing is running.
+// (⬤ running), empty when nothing is running.
 func (m *Shell) runCounts() string {
 	if m.engine == nil {
 		return ""
 	}
 	// counted the way the board row and the web header count a running
-	// card (webRow): needs-you outranks busy, a queued session is queued,
-	// and anything else at work — a freeform turn, a check, a scribe pass
-	// — is running, so the status bar and the stats tab say one number
-	var running, queued int
+	// card (webRow): needs-you outranks busy, and anything else at work — a
+	// freeform turn, a check, a scribe pass — is running, so the status bar
+	// and the stats tab say one number
+	var running int
 	for _, r := range m.rows {
 		if _, needs := m.inbox.get(r.F.ID); needs {
-			continue
-		}
-		if s := m.sessionFor(r.F.ID); s != nil && s.State() == engine.StateQueued {
-			queued++
 			continue
 		}
 		if m.cardBusy(r) {
 			running++
 		}
 	}
-	var parts []string
-	if running > 0 {
-		parts = append(parts, "⬤ "+strconv.Itoa(running)+" running")
+	if running == 0 {
+		return ""
 	}
-	if queued > 0 {
-		parts = append(parts, "◔ "+strconv.Itoa(queued)+" queued")
-	}
-	return strings.Join(parts, " · ")
+	return "⬤ " + strconv.Itoa(running) + " running"
 }
 
 // markMergePrep notes that a card's landing preconditions are being

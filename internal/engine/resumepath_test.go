@@ -50,7 +50,7 @@ func TestResumeSessionPathKeysOnFeatureRoleFlavor(t *testing.T) {
 func TestNewAgentSessionStampsResumePath(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -92,7 +92,7 @@ func TestNewAgentSessionStampsResumePath(t *testing.T) {
 func TestFreshSpawnClearsExistingTranscript(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -122,7 +122,7 @@ func TestFreshSpawnClearsExistingTranscript(t *testing.T) {
 func TestRestoreDoesNotClearTranscript(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)

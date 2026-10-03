@@ -143,8 +143,6 @@ func narrationStop(in nextInput) bool {
 		return true
 	}
 	switch in.sess {
-	case engine.StateQueued:
-		return false
 	case engine.StateRunning:
 		// mid-turn the agent owns the screen; a blocking question is the
 		// one thing that stops it and needs a person.

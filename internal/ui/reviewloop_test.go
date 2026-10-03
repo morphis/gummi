@@ -720,7 +720,7 @@ func TestPlanRoundsWriteThroughFailsClosed(t *testing.T) {
 		if !m.notice.isErr {
 			t.Error("no error notice on a failing seed read")
 		}
-		if s := eng.Get("FD-001"); s != nil && (s.State() == engine.StateRunning || s.State() == engine.StateQueued) {
+		if s := eng.Get("FD-001"); s != nil && s.State() == engine.StateRunning {
 			t.Error("plan session started despite a failing seed read")
 		}
 	})
@@ -919,7 +919,7 @@ func TestReviewRoundsWriteThroughFailsClosed(t *testing.T) {
 	if !m.notice.isErr {
 		t.Error("no error notice on a failing seed read")
 	}
-	if s := eng.Get("FD-001"); s != nil && (s.State() == engine.StateRunning || s.State() == engine.StateQueued) {
+	if s := eng.Get("FD-001"); s != nil && s.State() == engine.StateRunning {
 		t.Error("review session started despite a failing seed read")
 	}
 }

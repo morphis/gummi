@@ -123,7 +123,7 @@ func TestDiffRequestChangesGuardsStage(t *testing.T) {
 	m, _ := diffWorkspace(t)
 	eng := engine.New(engine.Config{
 		Agents: singleAgent(agent.NewFake("ok")), Store: m.store, Pool: m.wt,
-		Workspace: m.ws, MaxActive: 1,
+		Workspace: m.ws,
 	})
 	t.Cleanup(func() { eng.Close() })
 	m.AttachEngine(eng)
@@ -161,7 +161,7 @@ func TestDiffRequestChangesRerunsWorkStage(t *testing.T) {
 	ctx := context.Background()
 	eng := engine.New(engine.Config{
 		Agents: singleAgent(agent.NewFake("addressed")), Store: m.store, Pool: m.wt,
-		Workspace: m.ws, MaxActive: 1,
+		Workspace: m.ws,
 	})
 	t.Cleanup(func() { eng.Close() })
 	m.AttachEngine(eng)

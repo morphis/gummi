@@ -71,7 +71,7 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 // to start one, not by defaulting to somebody else's budget.
 func TestRunCritiqueOnlyWhereARoundCounterIsDeclared(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	// declared: the plan stage and the work stages
@@ -114,7 +114,7 @@ func TestCritiqueRunsAsReviewer(t *testing.T) {
 			}
 		},
 	}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	if err := e.RunCritique(f, ""); err != nil {

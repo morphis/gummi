@@ -353,10 +353,9 @@ func waitChangeAfter(t *testing.T, log *changeLog, mark int, kind webapi.ChangeK
 	}
 }
 
-// A queued card is not running: the header's count said "3 running" with
-// two of the three waiting for a lane. And a queued card says what it
-// waits for, in the words the TUI's own thread uses for it.
-func TestAQueuedCardIsCountedApartAndSaysWhy(t *testing.T) {
+// Two autopilot cards started together both run: nothing holds the second
+// back, and the header counts both as running.
+func TestTwoAutopilotCardsBothRun(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		<-release
@@ -367,7 +366,7 @@ func TestAQueuedCardIsCountedApartAndSaysWhy(t *testing.T) {
 			Stage: domain.StageImplement, GateApproval: domain.GateAutopilot}
 	}
 	feats := []domain.Feature{card(1, "one"), card(2, "two")}
-	b, _, eng, _ := headlessBoardWith(t, ag, feats, func(c *engine.Config) { c.AutopilotLanes = 1 })
+	b, _, eng, _ := headlessBoardWith(t, ag, feats, func(*engine.Config) {})
 	t.Cleanup(func() { close(release) })
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 2 })
 	for _, f := range feats {
@@ -376,19 +375,10 @@ func TestAQueuedCardIsCountedApartAndSaysWhy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	bd := waitBoard(t, b, func(bd webapi.Board) bool { return bd.Counts.Running+bd.Counts.Queued == 2 })
-	if bd.Counts.Running != 1 || bd.Counts.Queued != 1 {
-		t.Fatalf("counts = %+v, want 1 running and 1 queued", bd.Counts)
-	}
+	bd := waitBoard(t, b, func(bd webapi.Board) bool { return bd.Counts.Running == 2 })
 	for _, r := range bd.Rows {
-		if r.ID != "FD-002" {
-			continue
-		}
-		if r.Running == nil || r.Running.Verb != "queued" {
-			t.Fatalf("FD-002 = %+v, want queued", r.Running)
-		}
-		if want := "queued — the autopilot lane is busy with FD-001"; r.Running.Why != want {
-			t.Errorf("why = %q, want %q", r.Running.Why, want)
+		if r.Running == nil || r.Running.Verb == "queued" {
+			t.Errorf("%s = %+v, want a running card", r.ID, r.Running)
 		}
 	}
 }

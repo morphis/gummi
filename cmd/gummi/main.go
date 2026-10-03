@@ -232,9 +232,6 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 	var sandboxMode string
 	var instructions []string
 	var forwardSkills []string
-	// autopilotLanesCfg is the configured autopilot_lanes value (0 = unset,
-	// resolved to the built-in default of 2 below).
-	var autopilotLanesCfg int
 	userPath, err := config.UserConfigPath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
@@ -253,7 +250,6 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		sandboxMode = cfg.Sandbox
 		instructions = cfg.Instructions
 		forwardSkills = cfg.Skills.Forward
-		autopilotLanesCfg = cfg.AutopilotLanes
 	}
 	// Adapter selection: GUMMI_AGENT picks the default backend, and any
 	// distinct `backend:` referenced across the loaded profiles is
@@ -268,30 +264,6 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		return nil, nil, nil, "none of the backends the profiles name could start", nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
-	// Two independent attention pools (internal/engine): attended — every
-	// card that is not explicitly on autopilot, which after
-	// engine.lanePoolFor's resolution through domain.Feature.GateMode
-	// means the empty default and so every ordinary card — defaults to one
-	// lane, so it never queues behind autopilot work. Autopilot (cards
-	// whose mode is domain.GateAutopilot, and only those) defaults to two.
-	// GUMMI_MAX_ACTIVE overrides only the attended pool's size;
-	// autopilot_lanes in config.yaml overrides the autopilot pool's.
-	//
-	// The one lane is therefore what an everyday board runs at: a card you
-	// have not handed over is one you are expected to be reading, and two
-	// of those at once is two things to attend to. Widen it with
-	// GUMMI_MAX_ACTIVE, or hand cards to autopilot to reach the other two
-	// lanes. (This comment used to describe the reverse split — the
-	// default in the autopilot pool, one attended lane for the rare
-	// opted-in card — which is the classification lanePoolFor no longer
-	// makes.)
-	maxActive := 1
-	if v := os.Getenv("GUMMI_MAX_ACTIVE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxActive = n
-		}
-	}
-	autopilotLanes := cmp.Or(autopilotLanesCfg, 2)
 	var stageBudget float64
 	if v := os.Getenv("GUMMI_STAGE_BUDGET"); v != "" {
 		if b, err := strconv.ParseFloat(v, 64); err == nil && b > 0 {
@@ -308,7 +280,7 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 	}
 	eng := engine.New(engine.Config{
 		Agents: agents, Store: store, Pool: pool, Workspace: ws,
-		Model: model, MaxActive: maxActive, AutopilotLanes: autopilotLanes, Persist: true,
+		Model: model, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
 		Skills: forwardSkills,

@@ -18,7 +18,7 @@ func lockingEngine(t *testing.T, ag agent.Agent) (*Engine, state.Workspace) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fake-model", MaxActive: 1,
+		Model:     "fake-model",
 		CardLocks: state.NewCardLocks(ws),
 	})
 	t.Cleanup(func() { e.Close() })

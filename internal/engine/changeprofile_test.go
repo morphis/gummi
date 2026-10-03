@@ -39,7 +39,7 @@ func TestChangeProfileUnknownNameErrors(t *testing.T) {
 	one.name = "one"
 	e := New(Config{
 		Agents: map[string]agent.Agent{"": one, "one": one}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: changeProfileFixture(),
+		Model: "fallback", Profiles: changeProfileFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -72,7 +72,7 @@ func TestChangeProfilePersistsWithNoLiveSession(t *testing.T) {
 	one.name = "one"
 	e := New(Config{
 		Agents: map[string]agent.Agent{"": one, "one": one}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: changeProfileFixture(),
+		Model: "fallback", Profiles: changeProfileFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -115,7 +115,7 @@ func TestChangeProfileRestartsLiveAutonomousSession(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: map[string]agent.Agent{"": one, "one": one, "two": two}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: changeProfileFixture(),
+		Model: "fallback", Profiles: changeProfileFixture(),
 	})
 	t.Cleanup(func() {
 		close(release)
@@ -165,7 +165,7 @@ func TestChangeProfileRestartsLiveInteractiveSession(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: map[string]agent.Agent{"": one, "one": one, "two": two}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: changeProfileFixture(),
+		Model: "fallback", Profiles: changeProfileFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -219,7 +219,7 @@ func TestChangeProfilePersistsAcrossNextStage(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: map[string]agent.Agent{"": one, "one": one, "two": two}, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: changeProfileFixture(),
+		Model: "fallback", Profiles: changeProfileFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 

@@ -38,7 +38,7 @@ func TestExhaustWithCommittedWorkReadsAsReady(t *testing.T) {
 			{Kind: agent.EventBudgetExhausted, Usage: agent.Usage{Credits: 120}},
 		}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100, Persist: true})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100, Persist: true})
 	t.Cleanup(func() { e.Close() })
 
 	if err := e.Run(f); err != nil {
@@ -65,7 +65,7 @@ func TestExhaustMidEditKeepsStoppedWording(t *testing.T) {
 			{Kind: agent.EventBudgetExhausted, Usage: agent.Usage{Credits: 120}},
 		}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100, Persist: true})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100, Persist: true})
 	t.Cleanup(func() { e.Close() })
 
 	if err := e.Run(f); err != nil {
@@ -85,7 +85,7 @@ func TestSessionErrorPersistsForReconstruction(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventError, Err: errBoom}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)

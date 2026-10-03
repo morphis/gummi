@@ -37,7 +37,6 @@ func TestNextActionsByState(t *testing.T) {
 		// destructive one.
 		{"landed wins over everything", nextInput{stage: domain.StageVerify, kind: feat, landed: true, attn: attnGate}, " c"},
 		{"done and cleaned up is quiet", nextInput{stage: domain.StageDone, kind: feat}, ""},
-		{"queued run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateQueued}, ""},
 		{"busy run is quiet", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, busy: true}, ""},
 		{"blocking ask interrupts the run", nextInput{stage: domain.StageImplement, kind: feat, sess: engine.StateRunning, hasAsk: true}, "enter p"},
 		// attach is plumbing, not an answer: it is in the inventory and

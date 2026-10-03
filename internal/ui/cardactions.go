@@ -606,7 +606,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 // same chat/run/watch adaptation boardBindings() makes for the status bar
 // (shell.go), plus the hasAsk nuance nextsteps.go's StateRunning branch
 // carries. The fallback is only seen when nextActions(in) has nothing for
-// this state (a queued or busy-without-ask run, or a finished autonomous
+// this state (a busy-without-ask run, or a finished autonomous
 // stage with no live session) — everywhere else cardActionsFor's why
 // override wins.
 func runLabelWhy(in nextInput) (label, why string) {
@@ -615,8 +615,6 @@ func runLabelWhy(in nextInput) (label, why string) {
 		return "answer the agent", "it asked a question and is blocked on your reply"
 	case in.sess == engine.StateRunning:
 		return "watch", "watch the running agent (scrollable transcript)"
-	case in.sess == engine.StateQueued:
-		return "run", "queued — waiting for a free slot"
 	default:
 		return "run", "re-run " + string(in.stage) + " (starts a fresh session)"
 	}
@@ -624,12 +622,10 @@ func runLabelWhy(in nextInput) (label, why string) {
 
 // pauseLabelWhy words the p action for the session state it will act on.
 // boardVerb pauses any non-interactive session, so this row appears for
-// queued, running, paused and finished sessions alike — and describing
-// all four as "pause the running agent" was wrong for three of them.
+// running, paused and finished sessions alike — and describing
+// all three as "pause the running agent" was wrong for three of them.
 func pauseLabelWhy(in nextInput) (label, why string) {
 	switch in.sess {
-	case engine.StateQueued:
-		return "pause", "drop it out of the queue before it starts"
 	case engine.StateRunning:
 		return "pause", "stop the running agent mid-turn, freeing its slot"
 	default:

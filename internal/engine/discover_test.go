@@ -26,7 +26,7 @@ func discoverFixture(t *testing.T, reply string) (*Engine, domain.Feature, strin
 		atomic.AddInt32(&sessions, 1)
 		return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "discover me", domain.StagePlan)
@@ -149,7 +149,7 @@ func TestDiscoverChecksUsesConfiguredDefault(t *testing.T) {
 		atomic.AddInt32(&sessions, 1)
 		return []agent.Event{{Kind: agent.EventMessage, Text: "should not run"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "default checks", domain.StagePlan)
@@ -191,7 +191,7 @@ func TestDiscoverChecksConfiguredDefaultMergesIntoAHandAuthoredBlock(t *testing.
 		atomic.AddInt32(&sessions, 1)
 		return []agent.Event{{Kind: agent.EventMessage, Text: "should not run"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "existing block", domain.StagePlan)
@@ -247,7 +247,7 @@ func TestDiscoverChecksCarriesArtifactPath(t *testing.T) {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)
 			rec := recordingAgent()
-			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 			t.Cleanup(func() { e.Close() })
 
 			withWorktree(t, wt, f)
@@ -280,7 +280,7 @@ func TestDiscoverChecksPassesSpecPathAsExtraRead(t *testing.T) {
 		t.Run(string(f.ID), func(t *testing.T) {
 			ws, store, wt := newRepo(t)
 			rec := recordingAgent()
-			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 			t.Cleanup(func() { e.Close() })
 
 			withWorktree(t, wt, f)
@@ -319,7 +319,7 @@ func TestDiscoverChecksCarriesEnvironmentCard(t *testing.T) {
 				mu.Unlock()
 				return []agent.Event{{Kind: agent.EventMessage, Text: "```gummi-checks\n```"}, {Kind: agent.EventIdle}}
 			}}
-			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+			e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 			t.Cleanup(func() { e.Close() })
 
 			withWorktree(t, wt, f)

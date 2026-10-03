@@ -45,7 +45,7 @@ func newSandboxEngine(t *testing.T, sandboxMode string, profiles config.Profiles
 	}
 	e := New(Config{
 		Agents: fleet, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Sandbox: sandboxMode, Profiles: profiles,
+		Model: "m", Sandbox: sandboxMode, Profiles: profiles,
 	})
 	t.Cleanup(func() { e.Close() })
 	return e

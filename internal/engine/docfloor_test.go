@@ -35,7 +35,7 @@ func runResearchVerify(t *testing.T, doc string) (*Session, string) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "all good\nVERDICT: pass"}, {Kind: agent.EventIdle}}
 	}}
 	fk.Caps.ReadOnlyEnforce = true
-	e := New(Config{Agents: singleAgent(fk), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(fk), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "lines semantics", domain.StageVerify)

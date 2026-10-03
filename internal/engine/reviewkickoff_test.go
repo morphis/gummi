@@ -39,7 +39,7 @@ func newReviewRig(t *testing.T, body string) *reviewRig {
 		}
 	}}
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+		Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "review me", domain.StageImplement)
@@ -138,7 +138,7 @@ func TestReviewKickoffNoDiffStaysQuiet(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "VERDICT: pass"}, {Kind: agent.EventIdle}}
 	}}
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+		Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "nothing yet", domain.StageVerify)

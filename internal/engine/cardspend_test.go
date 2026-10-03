@@ -25,7 +25,7 @@ func TestCardSpentTracksTheStoreRow(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Persist: true,
+		Model: "m", Persist: true,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -62,7 +62,7 @@ func TestCardSpentSeededForInteractiveChat(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{
 		Agents: singleAgent(agent.NewFake("hello")), Store: store, Worktrees: wt,
-		Workspace: ws, Model: "m", MaxActive: 1, Persist: true,
+		Workspace: ws, Model: "m", Persist: true,
 	})
 	t.Cleanup(func() { e.Close() })
 

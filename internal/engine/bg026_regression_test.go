@@ -20,7 +20,7 @@ func TestBG026PauseLeavesBusySet(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { close(release); e.Close() })
 
 	f1 := feature(1, "one", domain.StageImplement)
@@ -40,18 +40,16 @@ func TestBG026PauseLeavesBusySet(t *testing.T) {
 	}
 }
 
-// TestBG026BackendDeathLeaksLaneSlot locks in that a backend death (the
+// TestBG026BackendDeathLeavesRunRetryable locks in that a backend death (the
 // agent's event stream closing without a terminal event) routes through
-// failRun: busy clears, the session lands in StatePaused, and its lane
-// slot returns to the pool instead of leaking for the rest of the process.
-func TestBG026BackendDeathLeaksLaneSlot(t *testing.T) {
+// failRun: busy clears, the session lands in StatePaused, and the card can
+// be run again rather than being refused as still in flight.
+func TestBG026BackendDeathLeavesRunRetryable(t *testing.T) {
 	ag := &agent.Fake{DieAfter: 1}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", AutopilotLanes: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
-	// An explicit autopilot card: the slot this test watches for a leak is
-	// the autopilot pool's, and only domain.GateAutopilot lands there.
 	f := autopilotFeature(1, "one")
 	withWorktree(t, wt, f)
 	if err := e.Run(f); err != nil {
@@ -62,8 +60,11 @@ func TestBG026BackendDeathLeaksLaneSlot(t *testing.T) {
 	if e.Get("FD-001").Busy() {
 		t.Fatal("BG-026: backend death left Busy() true")
 	}
-	lc := e.LaneCounts()
-	if lc.AutopilotRunning != 0 {
-		t.Fatalf("BG-026: backend death leaked a lane slot, AutopilotRunning=%d", lc.AutopilotRunning)
+	if st := e.Get("FD-001").State(); st != StatePaused {
+		t.Fatalf("BG-026: backend death left the run %s, want paused", st)
 	}
+	if err := e.Run(f); err != nil {
+		t.Fatalf("BG-026: a paused run could not be run again: %v", err)
+	}
+	waitFor(t, e, EventError)
 }

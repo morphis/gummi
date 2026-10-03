@@ -283,7 +283,7 @@ func TestDecomposeForCardArchitectPass(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	rsCard := researchCard(1, "research topic")
@@ -340,7 +340,7 @@ func TestDecomposeForCardArchitectPassByokMetersDecomposeTokenBucket(t *testing.
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	rsCard := researchCard(1, "research topic")
@@ -401,7 +401,7 @@ func TestDecomposeForCardCapsSessionAtRemainingReserve(t *testing.T) {
 	var caps []float64
 	ag := oneRowFakeArchitect(&caps)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	rsCard := researchCard(1, "research topic")
@@ -431,7 +431,7 @@ func TestDecomposeForCardExhaustedWhenReserveDrained(t *testing.T) {
 	var caps []float64
 	ag := oneRowFakeArchitect(&caps)
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	rsCard := researchCard(1, "research topic")
@@ -484,7 +484,7 @@ func TestDecomposeForCardRerunShrinksSessionCap(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	rsCard := researchCard(1, "research topic")

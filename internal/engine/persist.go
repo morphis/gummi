@@ -436,18 +436,10 @@ func (e *Engine) Restore(ctx context.Context) error {
 			// agent mid-turn and hand the driver a paused snapshot, which
 			// reads as "died mid-turn, re-dispatch" — the double-spawn a
 			// resume onto an in-flight stage must not do (DESIGN §4.2).
-			// Nothing enforced this but the attention-slot cap, which is
-			// off by default now.
-			if st := old.State(); st == StateRunning || st == StateQueued {
+			if st := old.State(); st == StateRunning {
 				continue
 			}
 			old.stop()
-			// a paused/done session freed its slot on the way out; release
-			// defensively so a replaced holder can never leak the count
-			// (Restore runs under e.mu, so freeSlot's own lock is out).
-			if held, p := old.releaseSlot(); held && e.lanes[p].running > 0 {
-				e.lanes[p].running--
-			}
 		}
 		e.live[snap.Feature] = s
 	}
@@ -488,7 +480,8 @@ type restoredErr string
 func (e restoredErr) Error() string { return string(e) }
 
 // restoredState maps a persisted state to the state a reloaded session
-// resumes in: a running/queued session was interrupted by the restart,
+// resumes in: a running session was interrupted by the restart,
+
 // so it comes back paused (resumable); done/paused/interactive persist.
 func restoredState(st string) SessionState {
 	switch SessionState(st) {

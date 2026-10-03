@@ -748,7 +748,7 @@ func (f *Feature) GoalSettled() bool {
 // is documented as "empty reads as GateAttended" and ValidGateApproval
 // accepts empty as storable, so a bare `f.GateApproval == GateAttended`
 // silently classifies an unset card as autopilot. That is exactly what
-// engine.lanePoolFor did — every card minted by `bugs new` stores the
+// the engine's old pool split did — every card minted by `bugs new` stores the
 // empty string, so every bug card competed in the autopilot lane pool
 // while its own card page read "autopilot: off".
 func (f *Feature) GateMode() string {

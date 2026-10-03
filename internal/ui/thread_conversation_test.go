@@ -36,8 +36,7 @@ func agentWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 // directly (CardProfiles), so the fixture builds the config.Profiles
 // value in memory rather than writing and loading a profiles.yaml file
 // nothing else in this package's tests needs. opts mutates the engine
-// config before New — the hook queuedWorkspace uses to cap the autopilot
-// lanes.
+// config before New — the hook a test uses to tune the engine.
 func agentWorkspaceProfiles(t *testing.T, ag agent.Agent, profiles config.Profiles, opts ...func(*engine.Config)) (*Shell, *engine.Engine) {
 	t.Helper()
 	root := t.TempDir()
@@ -885,113 +884,6 @@ func waitForState(t *testing.T, eng *engine.Engine, id domain.FeatureID, want en
 			t.Fatalf("%s did not reach %s (at %s)", id, want, cur)
 		case <-time.After(10 * time.Millisecond):
 		}
-	}
-}
-
-// queuedWorkspace is agentWorkspaceProfiles with the engine's autopilot
-// lanes capped at one and a fake whose stage turns block on a release
-// channel — internal/engine's scheduler recipe re-hosted in the ui
-// fixture, so a card's queued rendering can be read live: a second
-// card's run holds the only slot, and FD-001's parks behind it in
-// StateQueued. Both cards are switched to autopilot first, the pool the
-// cap applies to. The channel is returned for the test that opens the
-// slot; cleanup closes it, so a turn still blocked at teardown drains
-// instead of wedging the engine's Close.
-func queuedWorkspace(t *testing.T) (*Shell, *engine.Engine, chan struct{}) {
-	t.Helper()
-	release := make(chan struct{})
-	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
-		if opts.Role == agent.RoleScribe {
-			return []agent.Event{{Kind: agent.EventIdle}}
-		}
-		<-release
-		return []agent.Event{{Kind: agent.EventIdle}}
-	}}
-	m, eng := agentWorkspaceProfiles(t, ag, config.Profiles{}, func(c *engine.Config) { c.AutopilotLanes = 1 })
-
-	// a second card takes the slot first: created at todo, advanced to
-	// the design stage like FD-001, then both switched into the capped pool
-	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
-	m = typeString(t, m, "Second card")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	selectRow(t, m, "FD-002")
-	m = pressAdvance(t, m)
-	if r := m.rows[m.sel]; r.F.ID != "FD-002" || r.F.Stage != domain.StagePlan {
-		t.Fatalf("setup: selected card = %+v, want FD-002 at the design stage", r.F)
-	}
-	for _, id := range []domain.FeatureID{"FD-001", "FD-002"} {
-		if err := m.store.SetGateApproval(context.Background(), id, domain.GateAutopilot); err != nil {
-			t.Fatal(err)
-		}
-	}
-	m = pump(t, m, m.loadRows)
-	t.Cleanup(func() { close(release) })
-
-	rowByID := func(id domain.FeatureID) domain.Feature {
-		for _, r := range m.rows {
-			if r.F.ID == id {
-				return r.F
-			}
-		}
-		t.Fatalf("setup: row %s not found", id)
-		return domain.Feature{}
-	}
-	// the first run holds the only lane, its turn in flight; the second
-	// parks queued behind it
-	if err := eng.Run(rowByID("FD-002")); err != nil {
-		t.Fatal(err)
-	}
-	waitForState(t, eng, "FD-002", engine.StateRunning)
-	if err := eng.Run(rowByID("FD-001")); err != nil {
-		t.Fatal(err)
-	}
-	waitForState(t, eng, "FD-001", engine.StateQueued)
-	return m, eng, release
-}
-
-// TestThreadShowsQueuedWait: the live stage block of a queued card names
-// the wait — until now that block rendered the stage rule and its meta
-// line with no status line at all, while the masthead above claimed a
-// turn was in flight. The line is live-computed per frame, so it is gone
-// the moment the slot opens, and the busy word the spinner carries takes
-// its place.
-func TestThreadShowsQueuedWait(t *testing.T) {
-	m, eng, release := queuedWorkspace(t)
-
-	selectRow(t, m, "FD-001")
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // open the queued card's page
-	if !m.cardOpen {
-		t.Fatal("enter did not open the queued card's page")
-	}
-	view := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(view, "◔ "+m.queuedLabelFor("FD-001")) {
-		t.Fatalf("queued card's thread missing the wait line:\n%s", view)
-	}
-	// and the line says what it waits for: the card holding the lane
-	if !strings.Contains(m.queuedLabelFor("FD-001"), "busy with FD-002") {
-		t.Errorf("the wait line does not name the card holding the lane: %q", m.queuedLabelFor("FD-001"))
-	}
-
-	// the slot opens: the wait line disappears with the state it named
-	release <- struct{}{}
-	deadline := time.After(testWaitTimeout)
-	for {
-		s := eng.Get("FD-001")
-		if s != nil && s.State() == engine.StateRunning && s.Snapshot().Busy {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("FD-001 never took the freed slot mid-turn")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	view = ansi.Strip(m.threadView(100, 30))
-	if strings.Contains(view, "waiting for a free slot") {
-		t.Errorf("the wait line outlived the wait:\n%s", view)
-	}
-	if !strings.Contains(view, "writing plan") {
-		t.Errorf("the running card's spinner word is missing:\n%s", view)
 	}
 }
 

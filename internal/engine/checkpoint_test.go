@@ -31,7 +31,7 @@ func TestAutonomousTurnCheckpointsWorktree(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -74,7 +74,7 @@ func TestCleanTurnAddsNoCheckpoint(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -115,7 +115,7 @@ func TestCheckpointWorktreeGoneFailsRunWithoutIdle(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -196,7 +196,7 @@ func TestCheckpointDriftEmitsWarning(t *testing.T) {
 	var store *state.Store
 	var wt *worktree.Manager
 	ws, store, wt = newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)

@@ -113,7 +113,6 @@ export class Workspace {
         '# gummi e2e workspace',
         'permissions: allow-all',
         'sandbox: off',
-        'autopilot_lanes: 2',
         '',
       ].join('\n'),
     );

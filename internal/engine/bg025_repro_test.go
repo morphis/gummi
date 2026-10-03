@@ -25,7 +25,7 @@ func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	// Generation 1: a fresh Engine (as a headless `resume` process
 	// constructs), asks one question over the MCP bridge path, and gets
 	// answered — mirroring the first `resume`/`--answer` round trip.
-	e1 := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+	e1 := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 	s1, err := e1.Attach(ctx, f)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestHeadlessGenerationsMintCollidingMCPCallIDs(t *testing.T) {
 	// Generation 2: a brand-new Engine against the same store and card,
 	// exactly what the next headless `gummi resume` constructs. Its
 	// mcpSeq starts back at zero, so its first ask mints "mcp-1" again.
-	e2 := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", MaxActive: 1})
+	e2 := New(Config{Agents: singleAgent(agent.NewFake("hi")), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
 	defer e2.Close()
 	s2, err := e2.Attach(ctx, f)
 	if err != nil {

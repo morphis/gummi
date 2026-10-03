@@ -79,7 +79,7 @@ func TestGitHubSourceDropsUnusableIssues(t *testing.T) {
 
 func TestIngestBugsDedupesAgainstBoard(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
@@ -116,7 +116,7 @@ func TestIngestBugsDedupesAgainstBoard(t *testing.T) {
 
 func TestMaterializeBugsCreatesSeededBugs(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 
@@ -215,7 +215,7 @@ func multiRepoEngine(t *testing.T) *Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
@@ -306,7 +306,7 @@ func reposOnlyEngine(t *testing.T) *Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Pool: pool, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	return e
 }
@@ -348,8 +348,8 @@ func TestMaterializeBugsReposOnlyNamedRepo(t *testing.T) {
 // mint half of the empty-gate defect — MaterializeBugs' domain.Feature
 // literal carried no GateApproval at all, so every bug `bugs new` and the
 // GitHub import created was persisted with the empty string, and any
-// reader comparing that string rather than resolving it (lanePoolFor,
-// StopForQuit) read the card as autopilot work. cardmint.Mint resolves
+// reader comparing that string rather than resolving it (the old pool
+// split, StopForQuit) read the card as autopilot work. cardmint.Mint resolves
 // empty to the same value, so both mint paths now write identical rows.
 func TestMaterializeBugsStoresAGateMode(t *testing.T) {
 	ws, store, wt := newRepo(t)
@@ -377,8 +377,8 @@ func TestMaterializeBugsStoresAGateMode(t *testing.T) {
 	if got.GateApproval != domain.GateAttended {
 		t.Errorf("stored GateApproval = %q, want %q", got.GateApproval, domain.GateAttended)
 	}
-	if lanePoolFor(got) != poolAttended {
-		t.Error("an ingested bug must compete in the attended pool, not autopilot")
+	if got.GateMode() != domain.GateAttended {
+		t.Error("an ingested bug must read as attended, not autopilot")
 	}
 }
 

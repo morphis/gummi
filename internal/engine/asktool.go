@@ -801,7 +801,6 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	e.openAskDecision(s, ask)
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
-	e.yieldSlotForAsk(s)
 }
 
 // decisionIDFor mints the ask's durable identity: the tool-call id on the
@@ -1233,7 +1232,8 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	defer mu.(*sync.Mutex).Unlock()
 	s := e.Get(id)
 	// e.live never holds a freeform card's session (DESIGN §19: no
-	// attention-pool slot, nothing scheduled) — its own session lives in
+	// nothing scheduled) — its own session lives in
+
 	// e.freeform instead, and this is the one place that difference would
 	// otherwise matter: an ask_user call blocks on a person exactly the
 	// same way there, and the answer has to reach it the same way.
@@ -1398,9 +1398,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		}
 		return nil
 	}
-	e.retakeSlotAfterAnswer(s)
 	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer), nil); err != nil {
-		defer e.yieldSlotForAsk(s) // the question is open again: so is the lane
 		// Restore the question, exactly as every other failing branch
 		// above does. This is the branch a restored ask always takes, and
 		// deliverTurn refuses a session with no agent behind it — which a
@@ -1409,7 +1407,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		// recorded an answer that reached nobody: the card was left with
 		// nothing open to answer and no agent to answer it, and the
 		// person who had just typed the answer was told only that the
-		// card was "queued, not yet running".
+		// card was "still starting".
 		s.trySetPendingAsk(ask)
 		return err
 	}
@@ -1422,7 +1420,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 // backend died or failed its turn while the question was up. It is the
 // attach the headless driver does before `resume --answer` and the TUI
 // does on enter; the web face has no such step, and every answer given
-// there was refused ("queued, not yet running", "no longer waiting")
+// there was refused ("still starting", "no longer waiting")
 // while the question stayed up asking for one. (A run in the same state
 // is run again instead — see AnswerAs — so it carries on to its gate.)
 //
@@ -1530,7 +1528,6 @@ func askOptionLabels(ask *Ask) []string {
 // Sending a message appeared to restart it only because Send sets the
 // flag on its way past.
 func (e *Engine) resumeAfterAnswer(s *Session) {
-	e.retakeSlotAfterAnswer(s)
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})

@@ -60,7 +60,7 @@ func TestEnvironmentCardIsFirstHint(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	writeEnvironmentCard(t, ws.Root, testCard)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -82,7 +82,7 @@ func TestEnvironmentCardStageAgnostic(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	writeEnvironmentCard(t, ws.Root, testCard)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	// Triage is an interactive bug stage: the card should still be first.
@@ -107,7 +107,7 @@ func TestEnvironmentCardNotInOneShot(t *testing.T) {
 		ws, store, wt := newRepo(t)
 		writeEnvironmentCard(t, ws.Root, testCard)
 		rec := recordingAgent()
-		e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+		e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 		t.Cleanup(func() { e.Close() })
 
 		// Use an interactive stage so no worktree is required.
@@ -133,7 +133,7 @@ func TestEnvironmentCardNotInOneShot(t *testing.T) {
 				{Kind: agent.EventIdle},
 			}
 		}
-		e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+		e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 		t.Cleanup(func() { e.Close() })
 
 		f := feature(1, "x", domain.StageImplement)
@@ -157,7 +157,7 @@ func TestEnvironmentCardOversizeTruncates(t *testing.T) {
 	writeEnvironmentCard(t, ws.Root, oversize)
 
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	var warnings int32
@@ -190,7 +190,7 @@ func TestEnvironmentCardOversizeSurfacesOnNextSession(t *testing.T) {
 	writeEnvironmentCard(t, ws.Root, oversize)
 
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	// Trigger the lazy read (and warning) without a session that flushes.
@@ -226,7 +226,7 @@ func TestEnvironmentCardAppendsInstructions(t *testing.T) {
 	}
 
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Instructions: []string{inst}})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Instructions: []string{inst}})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -256,7 +256,7 @@ func TestEnvironmentCardCapWithInstructions(t *testing.T) {
 	}
 
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Instructions: []string{inst}})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Instructions: []string{inst}})
 	t.Cleanup(func() { e.Close() })
 
 	var warnings int32
@@ -278,7 +278,7 @@ func TestEnvironmentCardMissingInstructionWarns(t *testing.T) {
 	writeEnvironmentCard(t, ws.Root, testCard)
 
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Instructions: []string{"/no/such/file.md"}})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Instructions: []string{"/no/such/file.md"}})
 	t.Cleanup(func() { e.Close() })
 
 	var warnings int32
@@ -301,7 +301,7 @@ func TestEnvironmentCardOversizeSurfacesAfterDiscoverChecks(t *testing.T) {
 	writeEnvironmentCard(t, ws.Root, oversize)
 
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "discover env", domain.StagePlan)

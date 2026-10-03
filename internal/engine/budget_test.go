@@ -18,7 +18,7 @@ func TestBudgetHintAndCap(t *testing.T) {
 	rec := recordingAgent()
 	e := New(Config{
 		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, StageBudget: 100,
+		Model: "m", StageBudget: 100,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -50,7 +50,7 @@ func TestBudgetHintReadMostlyForVerify(t *testing.T) {
 	rec := recordingAgent()
 	e := New(Config{
 		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, StageBudget: 100,
+		Model: "m", StageBudget: 100,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -81,7 +81,7 @@ func TestBudgetNoCapForInteractive(t *testing.T) {
 	rec := recordingAgent()
 	e := New(Config{
 		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, StageBudget: 100,
+		Model: "m", StageBudget: 100,
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -110,7 +110,7 @@ func TestBudgetThresholdNudges(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 10})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 10})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -174,7 +174,7 @@ func TestBudgetNudgeFoldedIntoSentTurn(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 10})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 10})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -236,7 +236,7 @@ func TestBudgetOverspendEnforcedGummiSide(t *testing.T) {
 		OnInterrupt: func() { interrupted <- struct{}{} },
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 10})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 10})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -262,7 +262,7 @@ func TestEnvelopeDrivesStageBudget(t *testing.T) {
 	// budget, not the flat config value.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -294,7 +294,7 @@ func TestTopUpRaisesEnvelopeDurably(t *testing.T) {
 	// with real headroom.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify", domain.StageVerify)
@@ -340,7 +340,7 @@ func TestTopUpOverTightEnvelopeNoRegate(t *testing.T) {
 	// leave real multi-turn headroom.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "plan", domain.StagePlan)
@@ -385,7 +385,7 @@ func TestRaiseEnvelopeExplicitFigure(t *testing.T) {
 	// turn immediately), and zero removes the cap.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "plan", domain.StagePlan)
@@ -442,7 +442,7 @@ func TestBudgetUsesAdapterCreditRate(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 8})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 8})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -468,7 +468,7 @@ func TestBudgetTokenOnlySessionEnforced(t *testing.T) {
 		OnInterrupt: func() { interrupted <- struct{}{} },
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 8})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 8})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -494,7 +494,7 @@ func TestBudgetExhaustionIsIdempotent(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -542,7 +542,7 @@ func TestBudgetExhaustionStopsSession(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventBudgetExhausted, Usage: agent.Usage{Credits: 90}}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -573,7 +573,7 @@ func TestBudgetExhaustionSurvivesTrailingIdle(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 10})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 10})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -605,7 +605,7 @@ func TestBudgetExhaustedRaisesCheckpoint(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -639,7 +639,7 @@ func TestBudgetExhaustedRaisesCheckpoint(t *testing.T) {
 // the boundary sees exactly that headroom, not a full turn's worth.
 func TestStageBudgetRSReserveFloorHoldsUnderTurnReserveFloorUp(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := researchCard(1, "topic")
@@ -663,7 +663,7 @@ func TestStageBudgetRSReserveFloorHoldsUnderTurnReserveFloorUp(t *testing.T) {
 // reserve boundary is capped exactly like a hosted one.
 func TestStageBudgetRSReserveUnderByok(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(&agent.Fake{}), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := researchCard(1, "topic")
@@ -689,7 +689,7 @@ func TestStageCapFlooredAtTurnReserve(t *testing.T) {
 	// instead.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -721,7 +721,7 @@ func TestExhaustedPlanStillGatesDespiteFloor(t *testing.T) {
 	// session opens.
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -762,7 +762,7 @@ func TestDiffReviewHintsFollowRoleBackend(t *testing.T) {
 		},
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: agents, Store: store, Worktrees: wt, Workspace: ws, Model: "fallback", MaxActive: 1, Profiles: profiles})
+	e := New(Config{Agents: agents, Store: store, Worktrees: wt, Workspace: ws, Model: "fallback", Profiles: profiles})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(2, "impl", domain.StageImplement)
@@ -805,7 +805,7 @@ func TestStageReceiptCountsDistinctModels(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Persist: true})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)

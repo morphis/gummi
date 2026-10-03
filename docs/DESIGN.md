@@ -31,17 +31,12 @@ gummi solves three problems at once:
    and review, cheap/local models for mechanical steps.
 
 The parallelism model is **attention-based, not throughput-based**: you are
-the scarce resource. Autonomous runs draw from two independent attention
-pools, each with its own cap and its own FIFO queue (internal/engine): one
-**attended** lane for a card whose gate-approval mode is `off` — you've
-said you'll stay with it, so it must never queue behind unattended
-work — and, by default, two **autopilot** lanes for every other card
-(`gates` or `full`, including the everyday default). A slot freed in one
-pool is never handed to a session waiting in the other; an attended run
-always starts immediately. `GUMMI_MAX_ACTIVE` overrides the attended
-pool's size (default 1); `autopilot_lanes` in `config.yaml` overrides the
-autopilot pool's (default 2). gummi's job is to make the "waiting on you"
-queue visible and make context-switching between features cheap.
+the scarce resource. Autonomous runs start the moment you ask for them, and
+nothing caps or queues them: how many run in parallel is your decision, and
+gummi does not second-guess it. A card's gate-approval mode decides how its
+gates are crossed and who answers its questions, never when it runs.
+gummi's job is to make the "waiting on you" queue visible and make
+context-switching between features cheap.
 
 ## 2. Core concepts (domain model)
 
@@ -318,7 +313,7 @@ the audit trail is part of the quality story.
                 │ (Elm msgs; engine events via channel)
 ┌───────────────┴─────────────────────────────────────────┐
 │  Orchestrator (engine)                                   │
-│  workflow state machine · scheduler (attention slots) ·  │
+│  workflow state machine · scheduler (no caps)         ·  │
 │  event bus · persistence                                 │
 └──┬──────────────┬───────────────┬───────────────────────┘
    │              │               │
@@ -399,24 +394,13 @@ stream-json) and **codex** (Codex CLI, `codex exec --json`).
   configured; the only non-forward movement is the rerun edges.
   Transitions fire actions (start session, run checks, request human gate)
   and emit events.
-- **Scheduler with attention slots, split into two pools** (§1): an
-  attended lane (default cap 1, `GUMMI_MAX_ACTIVE`) for a card whose
-  gate-approval mode is `off`, and autopilot lanes (default cap 2,
-  `autopilot_lanes`) for every other card. Each pool has its own FIFO
-  queue; a slot freed in one pool is never handed to a session waiting in
-  the other, so an attended run always starts immediately regardless of
-  how full the autopilot pool is. Either cap can be raised (or, internally,
-  set to 0 for uncapped) and excess autopilot sessions queue behind it; a
-  paused/blocked session frees its slot. That includes an attended run
-  waiting on a person's `ask_user` answer: its slot goes to the next
-  queued attended card, and the answer takes a slot back at once — even
-  if the lane filled meanwhile, so for that turn it runs one over its cap
-  — because the agent is live inside its own tool call and an answer
-  that then queued behind another card's turn would land while nothing
-  moved. An autopilot card never yields this way: autopilot answers its
-  own questions at once. Parallel token burn is the
-  operator's call: cards drive in disjoint worktrees under per-card locks
-  (§8.2 Decision 12), so nothing in the engine needs the serialization.
+- **Autonomous runs start when asked, uncapped** (§1): every run (plan,
+  implement, review, verify, rebase) starts as soon as it is requested. The
+  engine keeps no attention pool, cap, queue or slot. A session waiting on a
+  person's `ask_user` answer stays running, and a card's gate mode never
+  delays another card's run. Parallel token burn is the operator's call:
+  cards drive in disjoint worktrees under per-card locks (§8.2 Decision 12),
+  so nothing in the engine needs the serialization.
   Interactive stages only run when you attach.
 - **Needs-attention queue**: gates, agent questions, budget exhaustion, and
   failures — plus permission requests when running in `guarded` mode — land
@@ -1401,7 +1385,7 @@ autonomous implement with streamed activity. The fixed workflow, single
 active session. *Proves: the core loop feels good.*
 
 **M2 — the fleet**
-Scheduler with attention slots, pause/resume, needs-attention queue,
+Scheduler, pause/resume, needs-attention queue,
 multiple concurrent features, session resume across gummi restarts,
 review stage (fresh-context autonomous, capped auto re-review loop) +
 verify stage (config checks + spec plan). Skip flags at feature creation.
@@ -1488,9 +1472,11 @@ Decided in the design interview (2026-07-03):
 8. **First-class providers**: GitHub Copilot Pro/Pro+ (premium-request
    pool) and OpenAI-compatible BYOK endpoints (llama.cpp, vLLM, hosted).
    Profiles are designed around exactly these two paths.
-9. **Attention slots are uncapped by default** — as many concurrent
-   autonomous sessions as you start. A cap is configurable for anyone who
-   wants one.
+9. **No cap on autonomous runs, and none is configurable** — every run starts
+   when it is asked for, and nothing queues one behind another. How many run
+   at once is the operator's decision. *Amended 2026-10-03 (FD-054):* the
+   attended and autopilot caps, their queues and the settings that sized them
+   were removed.
 10. **One repo per gummi instance** — *reversed 2026-08-19* (FD-070..073).
     One workspace can now manage several repositories, and the repository
     is a per-card choice. `.gummi/config.yaml` takes **at most one** of two
@@ -3446,9 +3432,8 @@ because nothing gated it.
 that already existed: `ConsultSession`'s lifecycle (one per card,
 idempotent to open, a backend that idles out after 20 minutes and respawns
 carrying its own transcript) and a read-only session's absences (no attention
-slot — the lanes ration contention between autonomous stages, and a
-human-paced conversation competes with nothing there — no gate, no
-verdict, no advance).
+slot and no scheduling: a human-paced conversation is never rationed against
+autonomous stages — no gate, no verdict, no advance).
 
 What it has that neither of them does is that it **writes**:
 

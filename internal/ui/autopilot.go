@@ -215,7 +215,7 @@ func (m *Shell) sessionWorking(id domain.FeatureID) bool {
 	if s == nil {
 		return false
 	}
-	if st := s.State(); st == engine.StateRunning || st == engine.StateQueued {
+	if s.State() == engine.StateRunning {
 		return true
 	}
 	return s.Snapshot().Busy
@@ -243,7 +243,7 @@ func (m *Shell) atGate(id domain.FeatureID) bool {
 	if s == nil {
 		return false
 	}
-	if st := s.State(); st == engine.StateRunning || st == engine.StateQueued {
+	if s.State() == engine.StateRunning {
 		return false
 	}
 	if s.Snapshot().Busy {

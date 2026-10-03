@@ -26,7 +26,7 @@ func TestBG094ReadOnlyRefusalNamesTheBackend(t *testing.T) {
 	// no Profiles: resolveRole falls back to the single-model config and
 	// returns an empty backend name, exactly as an unconfigured workspace
 	// does.
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "rs investigate", domain.StageImplement)

@@ -607,7 +607,7 @@ func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks stat
 	}
 	if s := e.Get(c.ID); s != nil {
 		switch s.State() {
-		case StateRunning, StateQueued:
+		case StateRunning:
 			return goalpolicy.Running, ""
 		case StateInteractive:
 			// An interactive session is a conversation, and a conversation
@@ -2481,7 +2481,6 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		return err
 	}
 	goal.GateApproval = domain.GateAutopilot
-	e.Repool(goal.ID, domain.GateAutopilot)
 	return nil
 }
 
@@ -2549,7 +2548,6 @@ func (e *Engine) goalAttach(ctx context.Context, goal domain.Feature, id domain.
 	if err := e.cfg.Store.SetGateApproval(ctx, c.ID, domain.GateAutopilot); err != nil {
 		return err
 	}
-	e.Repool(c.ID, domain.GateAutopilot)
 	if envelope > 0 {
 		c.Budget.Envelope = before + envelope
 		if err := e.cfg.Store.UpdateFeature(ctx, &c); err != nil {

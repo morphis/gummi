@@ -51,7 +51,7 @@ func TestRunImplementWhileApprovalScribesRuns(t *testing.T) {
 	if s == nil {
 		t.Fatalf("run implement while the scribe passes ran started nothing (notice %q)", m.notice.text)
 	}
-	if st := s.State(); st != engine.StateRunning && st != engine.StateQueued && st != engine.StateDone {
+	if st := s.State(); st != engine.StateRunning && st != engine.StateDone {
 		t.Errorf("implement session state = %v", st)
 	}
 }

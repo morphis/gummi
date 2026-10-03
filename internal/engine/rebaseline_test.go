@@ -34,7 +34,7 @@ func TestABrokenBaseDoesNotExcuseACardForGood(t *testing.T) {
 		}
 		return []agent.Event{{Kind: agent.EventMessage, Text: "VERDICT: pass"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 

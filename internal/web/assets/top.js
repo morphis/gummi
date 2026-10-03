@@ -28,8 +28,6 @@ function renderCounts () {
   $('#p-needs').textContent = b?.counts?.needs ?? 0
   $('#p-run').textContent = b?.counts?.running ?? 0
   $('#p-running').classList.toggle('quiet', !b?.counts?.running)
-  // queued cards are not running: they are named beside the pill, not in it
-  $('#p-running').title = b?.counts?.queued ? `${b.counts.queued} queued for a free lane` : ''
   $('#p-today').textContent = cr(b?.today?.spent)
   document.title = b?.counts?.needs ? `(${b.counts.needs}) gummi · ${b.repo}` : `gummi · ${b?.repo || ''}`
 }

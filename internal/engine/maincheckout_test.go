@@ -55,7 +55,7 @@ func TestMainCheckoutWriteDoesNotEndTheRun(t *testing.T) {
 		writeAt(t, root, "cmd/gummi/main.go")
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := implFeature(1)
@@ -78,7 +78,7 @@ func TestResearchPreExistingDirtStartsAnyway(t *testing.T) {
 	rec := &recorder{Fake: agent.NewFake("ack")}
 	rec.Caps.ReadOnlyEnforce = true
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "rs investigate", domain.StageImplement)

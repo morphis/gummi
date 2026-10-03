@@ -30,7 +30,7 @@ func TestResolveRolePerProfile(t *testing.T) {
 	rec := recordingAgent()
 	e := New(Config{
 		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
+		Model: "fallback-model", Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -63,7 +63,7 @@ func TestResolveRoleBackend(t *testing.T) {
 	}
 	e := New(Config{
 		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: profilesFixture(),
+		Model: "fallback", Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -87,7 +87,7 @@ func TestResolveRoleFallback(t *testing.T) {
 	rec := recordingAgent()
 	e := New(Config{
 		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
+		Model: "fallback-model", Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -115,7 +115,7 @@ func TestVerifyStageUsesReviewerRole(t *testing.T) {
 	rec := recordingAgent()
 	e := New(Config{
 		Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback-model", MaxActive: 1, Profiles: profilesFixture(),
+		Model: "fallback-model", Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 
@@ -144,7 +144,7 @@ func TestResolveRoleUnknownProfileUsesDefault(t *testing.T) {
 	}
 	e := New(Config{
 		Agents: agents, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "fallback", MaxActive: 1, Profiles: profilesFixture(),
+		Model: "fallback", Profiles: profilesFixture(),
 	})
 	t.Cleanup(func() { e.Close() })
 

@@ -1089,7 +1089,7 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 // (engine.Engine.OpenConsult is idempotent, so every later call just
 // reuses it). Unlike sendThreadMessage's steer path, there is no
 // live-session precondition to fail against synchronously — a consult
-// session takes no lock and competes for no attention slot — so the
+// session takes no lock and competes with nothing — so the
 // composer always clears here.
 func (m *Shell) sendConsultMessage(f domain.Feature, text string, images []engine.AttachmentRef) tea.Cmd {
 	if m.engine == nil {

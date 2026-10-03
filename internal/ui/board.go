@@ -149,14 +149,8 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	glyph := s.Stage(r.F.Stage).Render(stageGlyph(r.F.Stage))
 	// the stage glyph is never overwritten — busy or not, it stays the
 	// card's shape-plus-colour stage marker (board.go's own promise). A
-	// queued session gets its own distinct marker instead; a busy card
-	// gets a trailing spinner+word in the loop slot, checked after (so a
-	// session that is somehow both queued and busy still reads queued).
 	loop := ""
-	sess := m.sessionFor(r.F.ID)
-	if sess != nil && sess.State() == engine.StateQueued {
-		glyph = s.Warning.Render("◔")
-	} else if icon, ok := m.needsAttention(r); ok {
+	if icon, ok := m.needsAttention(r); ok {
 		// needs-you outranks busy: the user can act on a raised gate, not
 		// on a check run still going underneath it — showing the spinner
 		// here would tell them to wait when they should instead look.
@@ -257,7 +251,7 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	// from before it was paused. A parked card (never started) has no
 	// session at all and renders no mark, so the two read distinctly.
 	paused := ""
-	if sess != nil && sess.State() == engine.StatePaused {
+	if sess := m.sessionFor(r.F.ID); sess != nil && sess.State() == engine.StatePaused {
 		paused = " " + s.Warning.Render("⏸")
 	}
 	tag := ""
@@ -361,7 +355,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 func boardGlyphLegend() [][2]string {
 	return [][2]string{
 		{"○ ● ◐ ✔", "stage: todo · in progress · review/verify · done"},
-		{"◔", "queued — waiting for a driver"},
 		{"⚡", "autopilot gate-approval (gates cross unattended)"},
 		{"⎇", "worktree present"},
 		{"⏸", "paused — a run the user stopped"},
@@ -459,55 +452,10 @@ func (m *Shell) boardCounts() string {
 			}
 		}
 	}
-	if m.engine != nil {
-		if lanes := laneCountsText(m.engine.LaneCounts()); lanes != "" {
-			parts = append(parts, lanes)
-		}
-	}
 	if out := m.closeOutText(); out != "" {
 		parts = append(parts, out)
 	}
 	return strings.Join(parts, " · ")
-}
-
-// laneCountsText renders the two attention pools in the board's compact
-// count shape: "attended 1/1 · autopilot 2/2". Empty when neither pool
-// has a cap to report or anything running in it — an uncapped, idle
-// engine has nothing to say here, and "attended 0 · autopilot 0" beside
-// a card count reads like a contradiction rather than an absence.
-//
-// The second pool is named "autopilot", matching the `autopilot_lanes`
-// config key, the masthead's own "autopilot: on" field and this same
-// line's ⚡ badge — it used to say "unattended", a word that appeared
-// nowhere else the concept was named and read as unexplained jargon
-// next to those three. Its population is exactly the cards the ⚡ badge
-// marks — engine.lanePoolFor sends only GateAutopilot here, and the
-// empty default every TUI-created card stores pools as attended — so
-// every surface that names this pool agrees on which cards it means.
-//
-// The label did not always agree even with itself. This comment used to
-// justify the old "unattended" label by claiming lanePoolFor pooled
-// every non-attended card here "including the empty default", and that
-// the badge lit for GateAttended. Both were the pre-GateMode
-// classification read backwards; the badge (below) has only ever lit
-// for GateAutopilot.
-func laneCountsText(lc engine.LaneCounts) string {
-	if lc.AttendedMax <= 0 && lc.AutopilotMax <= 0 &&
-		lc.AttendedRunning == 0 && lc.AutopilotRunning == 0 {
-		return ""
-	}
-	return laneCountText("attended", lc.AttendedRunning, lc.AttendedMax) + " · " +
-		laneCountText("autopilot", lc.AutopilotRunning, lc.AutopilotMax)
-}
-
-// laneCountText renders one pool's running/cap pair. An uncapped pool
-// (max <= 0 — see engine.LaneCounts) has no total to divide by, so it
-// shows the running count alone.
-func laneCountText(name string, running, max int) string {
-	if max <= 0 {
-		return fmt.Sprintf("%s %d", name, running)
-	}
-	return fmt.Sprintf("%s %d/%d", name, running, max)
 }
 
 func formatCount(super domain.SuperState, n int) string {

@@ -30,7 +30,7 @@ func newSandboxEng(t *testing.T, mode, write string) *Engine {
 	fleet := map[string]agent.Agent{"good": good, "mcp": mcp, "bad": bad, "": good}
 	e := New(Config{
 		Agents: fleet, Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Sandbox: mode, Profiles: sandboxProfiles(),
+		Model: "m", Sandbox: mode, Profiles: sandboxProfiles(),
 	})
 	t.Cleanup(func() { e.Close() })
 	return e

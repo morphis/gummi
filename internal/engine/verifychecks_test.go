@@ -41,7 +41,7 @@ func TestVerifyStageRunsChecksGummiSide(t *testing.T) {
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -80,7 +80,7 @@ func kickoffAfterVerify(t *testing.T, seed func(store *state.Store, f domain.Fea
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -180,7 +180,7 @@ func TestVerifyLiveCheckFailureFloorsVerdict(t *testing.T) {
 	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "Repo checks clean; verification plan satisfied. VERDICT: pass"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -209,7 +209,7 @@ func TestVerifyPreexistingCheckFailureDoesNotFloorVerdict(t *testing.T) {
 	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "Pre-existing failure only. VERDICT: pass"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -245,7 +245,7 @@ func TestVerifyStageGuardedSkipsGummiSide(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	// guarded mode: gummi does not auto-run the spec's commands; the agent does
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionGuarded})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -286,7 +286,7 @@ func TestVerifyKickoffRunsEnvProbes(t *testing.T) {
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventMessage, Text: "recorded"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)
@@ -395,7 +395,7 @@ func TestVerifyKickoffRunsEnvProbesInGuardedMode(t *testing.T) {
 		mu.Unlock()
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionGuarded})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionGuarded})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "verify me", domain.StageVerify)

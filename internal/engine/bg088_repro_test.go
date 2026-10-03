@@ -37,7 +37,7 @@ func researchFeature(stage domain.Stage) domain.Feature {
 // report a real failure.
 func TestBG088CheckpointSaysNothingOnAWorktreeLessStage(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	for _, stage := range domain.Stages {
@@ -69,7 +69,7 @@ func TestBG088CheckpointSaysNothingOnAWorktreeLessStage(t *testing.T) {
 // covers end to end).
 func TestBG088CheckpointStillReportsARealFailure(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement) // no worktree created

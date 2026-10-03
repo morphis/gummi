@@ -193,7 +193,7 @@ func waitLive(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
 	for {
 		if s := eng.Get(id); s != nil {
 			switch s.State() {
-			case engine.StateRunning, engine.StateQueued:
+			case engine.StateRunning:
 				return
 			}
 		}

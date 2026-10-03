@@ -32,7 +32,7 @@ func sampleResult() domain.IngestResult {
 
 func TestMaterializeCreatesFeaturesAndDrafts(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -92,7 +92,7 @@ func TestMaterializeCreatesFeaturesAndDrafts(t *testing.T) {
 // adds no edge.
 func TestMaterializeWritesDependencyEdges(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	ctx := context.Background()
@@ -117,7 +117,7 @@ func TestMaterializeWritesDependencyEdges(t *testing.T) {
 // document order is no constraint.
 func TestMaterializeWiresForwardDependency(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	res := domain.IngestResult{
@@ -143,7 +143,7 @@ func TestMaterializeWiresForwardDependency(t *testing.T) {
 
 func TestMaterializeRejectsUnslugifiableTitle(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	res := domain.IngestResult{Proposals: []domain.FeatureProposal{{Title: "!!!"}}}
@@ -210,7 +210,7 @@ func TestMaterializeUnknownRepo(t *testing.T) {
 // cards carrying a bug report — not FD cards carrying a spec.
 func TestMaterializeMintsBugProposalsAsBugs(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	res := domain.IngestResult{
@@ -263,7 +263,7 @@ func TestMaterializeMintsBugProposalsAsBugs(t *testing.T) {
 // consumed, matching the slug pre-flight beside it.
 func TestMaterializeRefusesAnUnmintableProposalKind(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	res := domain.IngestResult{Proposals: []domain.FeatureProposal{{Title: "a goal", Kind: domain.KindGoal}}}

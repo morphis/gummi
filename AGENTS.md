@@ -57,7 +57,7 @@ leaf services.
 | `gatepolicy` | Shared checkpoint policy used by both the TUI and headless driver to raise and cross workflow gates. |
 | `spec` | The markdown spec artifact + its `gummi-checks` verification block. |
 | `state` | SQLite store: features, sessions, diff annotations, dependency edges, sequences, workspace. |
-| `engine` | The orchestrator. Binds stages to agent sessions, schedules autonomous runs across attention slots, routes turns, streams activity. Start here to trace behavior. |
+| `engine` | The orchestrator. Binds stages to agent sessions, starts autonomous runs (nothing caps or queues them), routes turns, streams activity. Start here to trace behavior. |
 | `agent` | Adapter layer over concrete agents. Interfaces hide the backend: `copilot` (default), `opencode`, `headless`, plus `fake.go` for tests. |
 | `worktree` | Per-feature git worktrees under `.gummi/worktrees/`: create, rebase-on-main, dirty/landed detection, cleanup. Every feature and bug stage runs in the card's own branch worktree, from its first stage. Research keeps the per-card **scratch tree** (`scratch.go`, `.gummi/scratch/<ID>`) — a detached throwaway checkout, since a research card never gets a branch. `adopt.go` is the other half: attaching to a branch gummi did **not** cut, and the custody rules that follow from that. |
 | `verify` | Runs a spec's `gummi-checks` in the worktree, reports pass/fail. |

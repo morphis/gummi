@@ -1,19 +1,13 @@
 // Package engine is gummi's orchestrator: it binds features' stages to
-// agent sessions, schedules autonomous runs (DESIGN §4.2), routes turns,
+// agent sessions, starts autonomous runs (DESIGN §4.2), routes turns,
 // and streams typed activity to the UI.
 //
-// Interactive sessions (brainstorm/spec chat) run whenever you attach
-// and hold no slot — you are the scarce resource. Autonomous sessions
-// (plan/implement/review/verify) compete for one of two independent
-// attention pools: attended (a card whose gate-approval mode reads as
-// domain.GateAttended — a human is expected to stay with it, and the
-// empty default reads that way too) and autopilot (domain.GateAutopilot,
-// and only that). Each pool has its own
-// cap and its own FIFO queue, so a slot freed in one pool is never handed
-// to a session waiting in the other — an attended card never queues
-// behind autopilot work. Excess runs queue and start automatically as
-// slots free (a session freeing its slot on pause, or on going idle when
-// its turn completes). A pool's cap of 0 means uncapped.
+// Every autonomous run (plan/implement/review/verify) starts the moment
+// it is asked for. Nothing caps how many run at once, and nothing queues
+// one behind another: parallelism is the operator's decision. A card's
+// gate-approval mode decides how its gates are crossed and who answers
+// its questions, never when it runs. The per-card lock is what keeps two
+// runs of the same card from overlapping.
 package engine
 
 import (
@@ -217,23 +211,6 @@ type Config struct {
 	// taken from .gummi/config.yaml. Empty means a profile that also omits
 	// a value falls back to the built-in default (warn).
 	Sandbox string
-	// MaxActive caps concurrent autonomous slots in the ATTENDED pool — a
-	// card whose gate-approval mode reads as domain.GateAttended, which
-	// includes the empty default (domain.Feature.GateMode). Zero or
-	// negative — the default — means no cap: every attended run started
-	// begins immediately. cmd/gummi's own default for this field is 1;
-	// GUMMI_MAX_ACTIVE overrides it from there. A positive value queues
-	// attended runs beyond it.
-	MaxActive int
-	// AutopilotLanes caps concurrent autonomous slots in the AUTOPILOT
-	// pool — every card whose gate-approval mode is domain.GateAutopilot,
-	// and only those: the empty default reads as attended and competes in
-	// the other pool (see domain.Feature.GateMode). Zero or negative means no cap, the
-	// same "unlimited" semantics MaxActive has always had — kept
-	// available here for tests and any caller that wants both pools
-	// uncapped. internal/config.Config's autopilot_lanes key supplies
-	// cmd/gummi's real default (2).
-	AutopilotLanes int
 	// StageTimeout is how long a stage may be silent before its driver
 	// cuts it off (the headless --stage-timeout; zero disables it). The
 	// engine does not enforce it — the driver does — but a goal's quiet
@@ -270,52 +247,7 @@ type Config struct {
 	Skills []string
 }
 
-// lanePool identifies which of the two attention pools an autonomous
-// session competes in. See lanePoolFor.
-type lanePool int
-
-const (
-	poolAttended lanePool = iota
-	poolAutopilot
-	numLanePools
-)
-
-// laneState is one pool's scheduling bookkeeping: its cap (0 =
-// uncapped), how many sessions currently hold a slot, and the FIFO of
-// features waiting for one. Each pool schedules from its own queue —
-// see Engine.schedule — so a slot freed in one pool is never handed to a
-// session waiting in the other.
-type laneState struct {
-	max     int
-	running int
-	queue   []domain.FeatureID // autonomous features awaiting this pool's slot, FIFO
-}
-
-// lanePoolFor decides which attention pool an autonomous session for f
-// competes in. Attended is the mode that reads as attended: a human is
-// expected to stay with that card, so it must never queue behind
-// unattended work. Only GateAutopilot belongs in the autopilot pool.
-//
-// The test goes through GateMode(), never the raw field: an unset
-// GateApproval is storable and documented as reading like GateAttended,
-// and comparing the raw string put every one of those cards — every card
-// `bugs new` and the GitHub import ever minted — in the autopilot pool
-// while its own card page read "autopilot: off".
-func lanePoolFor(f domain.Feature) lanePool { return lanePoolForMode(f.GateMode()) }
-
-// lanePoolForMode is lanePoolFor over a bare mode string, for the callers
-// that have the mode a card was just given rather than the row it was
-// written to (Repool). It applies GateMode's own rule — only
-// GateAutopilot is autopilot, everything else including the empty default
-// is attended — so a raw stored value is safe to pass.
-func lanePoolForMode(mode string) lanePool {
-	if mode == domain.GateAutopilot {
-		return poolAutopilot
-	}
-	return poolAttended
-}
-
-// Engine orchestrates all live sessions and the autonomous run queue.
+// Engine orchestrates all live sessions and the autonomous runs.
 type Engine struct {
 	cfg Config
 	now func() time.Time // injectable clock (spec-capture timestamps)
@@ -335,12 +267,11 @@ type Engine struct {
 	// the card cost. Everything that asks "is this card still working?"
 	// asked e.live and was told no, so the board rendered a live card as
 	// "autopilot stopped without saying so" and offered to restart the
-	// stage, its footer counted 0 of 2 autopilot lanes in use, and a goal
+	// stage, and a goal
 	// declared its own healthy child stuck and spent a lead turn
 	// restarting it. Refcounted, not a flag: baseline follows discovery
 	// and a card can be re-entered.
 	oneShots map[domain.FeatureID]int
-	lanes    [numLanePools]laneState // per-pool cap/running/queue — see laneState
 	closed   bool
 
 	// consult holds every card's consult session, keyed by feature:
@@ -514,10 +445,6 @@ func New(cfg Config) *Engine {
 	if cfg.Permission == "" {
 		cfg.Permission = agent.PermissionAllowAll
 	}
-	// 0 = uncapped; a negative value is normalized to it so every
-	// "no cap configured" spelling behaves the same, in either pool.
-	attendedMax := normalizeCap(cfg.MaxActive)
-	autopilotMax := normalizeCap(cfg.AutopilotLanes)
 	pool := cfg.Pool
 	if pool == nil && cfg.Worktrees != nil {
 		pool = worktree.WrapSingle(cfg.Worktrees)
@@ -543,8 +470,6 @@ func New(cfg Config) *Engine {
 	e.initProfiles()
 	e.consultIdleTimeout = consultIdleTimeout
 	e.freeformIdleTimeout = freeformIdleTimeout
-	e.lanes[poolAttended].max = attendedMax
-	e.lanes[poolAutopilot].max = autopilotMax
 	e.envWarn = func(msg string) {
 		e.envMu.Lock()
 		e.envNotices = append(e.envNotices, msg)
@@ -552,15 +477,6 @@ func New(cfg Config) *Engine {
 	}
 	go e.forward()
 	return e
-}
-
-// normalizeCap folds a negative cap to 0, so every "no cap configured"
-// spelling (unset, explicit 0, or negative) behaves identically: uncapped.
-func normalizeCap(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
 }
 
 // mgr resolves the manager for a card's repository. With a pool configured
@@ -639,130 +555,6 @@ func (e *Engine) Sessions() map[domain.FeatureID]*Session {
 	return out
 }
 
-// LaneCounts is a point-in-time snapshot of each attention pool's
-// occupancy and cap, for display (e.g. the board's "attended 1/1 ·
-// autopilot 2/2"). A Max of 0 means that pool is uncapped.
-type LaneCounts struct {
-	AttendedRunning, AttendedMax   int
-	AutopilotRunning, AutopilotMax int
-}
-
-// LaneCounts reports the current running/cap figures for both attention
-// pools.
-func (e *Engine) LaneCounts() LaneCounts {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return LaneCounts{
-		AttendedRunning:  e.lanes[poolAttended].running,
-		AttendedMax:      e.lanes[poolAttended].max,
-		AutopilotRunning: e.lanes[poolAutopilot].running,
-		AutopilotMax:     e.lanes[poolAutopilot].max,
-	}
-}
-
-// LaneWait is why a queued run is waiting: the attention pool it waits
-// in, that pool's cap, the cards holding the pool's slots right now, and
-// how many runs are queued ahead of it.
-type LaneWait struct {
-	Autopilot bool
-	Max       int
-	Holders   []domain.FeatureID
-	Ahead     int
-}
-
-// LaneWait reports what card id's queued run waits for. ok is false when
-// the card has no run in a queue.
-func (e *Engine) LaneWait(id domain.FeatureID) (LaneWait, bool) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	s := e.live[id]
-	if s == nil || s.State() != StateQueued {
-		return LaneWait{}, false
-	}
-	for p := range e.lanes {
-		i := slices.Index(e.lanes[p].queue, id)
-		if i < 0 {
-			continue
-		}
-		w := LaneWait{Autopilot: lanePool(p) == poolAutopilot, Max: e.lanes[p].max, Ahead: i}
-		for fid, other := range e.live {
-			if held, pool := other.slot(); held && int(pool) == p {
-				w.Holders = append(w.Holders, fid)
-			}
-		}
-		slices.Sort(w.Holders)
-		return w, true
-	}
-	return LaneWait{}, false
-}
-
-// Repool moves a card's live autonomous run into the attention pool its
-// gate-approval mode now names, and is what every writer of that mode
-// must call after persisting it.
-//
-// A session's pool used to be decided once, at dispatch, from the feature
-// snapshot run() was handed. The mode is not fixed for a run's lifetime:
-// the `A` switch hands a card to autopilot mid-stage — the "set a running
-// card to autopilot and go to bed" flow it is largely there for — and the
-// run went on holding the ATTENDED slot it took, so the next attended
-// card queued behind unattended work. That is the one thing the split
-// pools exist to prevent. The reverse leaked the other way: cards taken
-// back from autopilot kept their unattended lanes, and two of them ran at
-// once under an attended cap of one.
-//
-// Both live states are handled, and the queued one is the more important:
-// a card still waiting in a queue has not started, so there is no reason
-// for it to take a slot in the pool it has stopped belonging to.
-//
-//   - queued: the entry moves to the other pool's FIFO, at the back —
-//     a card changing pools takes its turn in the new one, it does not
-//     inherit a position it earned somewhere else.
-//   - running: the slot moves with it, which can briefly put the
-//     destination pool over its cap. That is accounted honestly rather
-//     than avoided: the run really is in that pool now, and the
-//     alternative is stopping a working agent to satisfy a count. The cap
-//     throttles the next start, and the over-subscription drains on its
-//     own as the run ends.
-//
-// The session's own Feature copy is deliberately left alone. It is read
-// without a lock all over the engine, and the pool is the only thing that
-// has to agree with the row here; every continuation reloads the feature
-// from the store anyway, so the next stage's session is built from the
-// new mode regardless.
-//
-// A no-op when the card has no live session, when its session never
-// competes for a slot (interactive), or when the mode maps to the pool it
-// is already in.
-func (e *Engine) Repool(id domain.FeatureID, mode string) {
-	want := lanePoolForMode(mode)
-	e.mu.Lock()
-	s := e.live[id]
-	if s == nil || s.Interactive {
-		e.mu.Unlock()
-		return
-	}
-	queued := s.State() == StateQueued
-	moved, held, from := s.repool(want)
-	if !moved {
-		e.mu.Unlock()
-		return
-	}
-	switch {
-	case held:
-		if e.lanes[from].running > 0 {
-			e.lanes[from].running--
-		}
-		e.lanes[want].running++
-	case queued:
-		e.removeFromQueue(id)
-		e.lanes[want].queue = append(e.lanes[want].queue, id)
-	}
-	e.mu.Unlock()
-	// the pool it left may now have room, and the pool it joined may have
-	// gained a waiter; schedule covers both.
-	e.schedule()
-}
-
 // noAgentAtStage is the refusal for a stage no role is mapped to — in
 // practice todo, the one stage that exists before any agent has been
 // asked for anything. It names the way forward rather than only the
@@ -777,7 +569,7 @@ func noAgentAtStage(stage domain.Stage) error {
 }
 
 // Attach starts (or reuses) an interactive chat session for a feature's
-// current stage. Interactive sessions hold no attention slot.
+// current stage.
 func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error) {
 	role, ok := roleForStage(f)
 	if !ok {
@@ -920,8 +712,9 @@ func (e *Engine) Attach(ctx context.Context, f domain.Feature) (*Session, error)
 	return s, nil
 }
 
-// Run enqueues an autonomous stage for a feature and fills any free
-// slot. A no-op if the feature is already queued or running.
+// Run starts an autonomous stage for a feature. A no-op if the feature is
+// already running.
+
 func (e *Engine) Run(f domain.Feature) error { return e.RunWith(f, "") }
 
 // RunWith is Run with the user's review comments attached: note (the
@@ -1082,9 +875,9 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		// State() takes old.mu (state is written under it from pump
 		// goroutines); the engine's lock order is e.mu → s.mu, so taking it
 		// here while holding e.mu is safe.
-		if st := old.State(); st == StateRunning || st == StateQueued {
+		if st := old.State(); st == StateRunning {
 			e.mu.Unlock()
-			return nil // already scheduled
+			return nil // already running
 		}
 	}
 	unlock, err := e.lockCard(f.ID)
@@ -1100,63 +893,25 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	pool := lanePoolFor(f)
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), pool: pool, state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateRunning, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
-	e.lanes[pool].queue = append(e.lanes[pool].queue, f.ID)
 	e.mu.Unlock()
 
 	if old != nil {
 		old.stop() // a replaced done/paused session; free its goroutine
-		e.freeSlot(old)
 	}
 	// after the replaced session's writer is closed, never before: two
 	// writers on one live file would interleave.
 	e.bindLiveLog(s)
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
-	e.schedule()
+	e.startAutonomous(s)
 	return nil
 }
 
-// schedule fills free slots from each pool's own queue. With a pool's cap
-// at 0 (the default) there is no cap on it, so it drains that queue on
-// every pass and a run never sits in StateQueued waiting on another card
-// in the SAME pool. The two pools are scheduled independently — see
-// scheduleLane — so a card waiting in one never starts by way of a slot
-// freed in the other.
-func (e *Engine) schedule() {
-	for p := lanePool(0); p < numLanePools; p++ {
-		e.scheduleLane(p)
-	}
-}
-
-// scheduleLane drains pool p's queue into its free slots.
-func (e *Engine) scheduleLane(p lanePool) {
-	for {
-		e.mu.Lock()
-		lane := &e.lanes[p]
-		if (lane.max > 0 && lane.running >= lane.max) || len(lane.queue) == 0 {
-			e.mu.Unlock()
-			return
-		}
-		id := lane.queue[0]
-		lane.queue = lane.queue[1:]
-		s := e.live[id]
-		if s == nil || s.State() != StateQueued {
-			e.mu.Unlock()
-			continue
-		}
-		lane.running++
-		s.takeSlot()
-		e.mu.Unlock()
-		e.startAutonomous(s)
-	}
-}
-
-// startAutonomous creates the agent session for a queued run and kicks
-// it off. On setup failure it frees the slot and records the error.
+// startAutonomous creates the agent session for a run and kicks it off.
+// On setup failure it records the error and leaves the session paused.
 func (e *Engine) startAutonomous(s *Session) {
 	// price this session's token spend at the resolved adapter's rate
 	// (0 = default), and use the same rate for the remaining-envelope
@@ -1196,7 +951,6 @@ func (e *Engine) startAutonomous(s *Session) {
 		s.setError(err)
 		s.setState(StatePaused)
 		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
-		e.freeSlot(s)
 		return
 	}
 	s.setSpecPath(specPath)
@@ -1204,10 +958,9 @@ func (e *Engine) startAutonomous(s *Session) {
 	s.setMCPTeardown(mcpTeardown)
 	// Pause/Drop/Close may have finalized this session while newAgentSession
 	// was spawning the backend (seconds). If so, attachAgent refuses: close
-	// the orphaned agent and free the slot rather than run it unwatched.
+	// the orphaned agent rather than run it unwatched.
 	if !s.attachAgent(sess) {
 		_ = sess.Close()
-		e.freeSlot(s)
 		return
 	}
 	e.trackAgentPID(s.Feature.ID, sess)
@@ -1233,9 +986,9 @@ func (e *Engine) startAutonomous(s *Session) {
 	s.appendSystem(s.kickoffMessage())
 	s.setBusy(true)
 	e.persist(s)
-	// The kickoff is sent off the scheduler goroutine: the Verify stage
+	// The kickoff is sent off the starting goroutine: the Verify stage
 	// runs the repo's fixed checks gummi-side first, which can take
-	// minutes, and must not stall slot scheduling.
+	// minutes, and must not hold up the run's start.
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.sendKickoff(s, sess) }()
 }
@@ -1310,12 +1063,8 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 }
 
 // failRun records an unrecoverable autonomous-run failure: it sets the
-// error, moves the session to paused (so Run can retry it), frees its
-// attention slot, and promotes the queue. Without this a failed run would
-// hold its slot forever — and Run, seeing StateRunning, would treat the
-// feature as still scheduled and silently refuse to retry. Interactive
-// sessions hold no slot and keep their state; freeSlot is a no-op for
-// them. Idempotent via freeSlot's exactly-once latch.
+// error and moves the session to paused, so Run can retry it. Interactive
+// sessions keep their state.
 func (e *Engine) failRun(s *Session, err error) {
 	s.setError(err)
 	if !s.Interactive {
@@ -1323,7 +1072,6 @@ func (e *Engine) failRun(s *Session, err error) {
 	}
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventError, Err: err})
-	e.freeSlot(s)
 }
 
 // fileManifestPreamble hands the implement session the plan's file
@@ -2198,7 +1946,7 @@ func (e *Engine) SendTurn(ctx context.Context, id domain.FeatureID, msg string, 
 	}
 	a := s.agent()
 	if a == nil {
-		return fmt.Errorf("%s is queued, not yet running", id)
+		return fmt.Errorf("%s is still starting", id)
 	}
 	// A turn blocked inside ask_user cannot take another one: the session
 	// reports itself not-busy there (handleAsk drops the spinner so the
@@ -2370,7 +2118,7 @@ func (e *Engine) structurallyTakesImages(backend string) bool {
 // it.
 func (e *Engine) deliverTurn(ctx context.Context, s *Session, msg string, images []AttachmentRef) error {
 	if s.agent() == nil {
-		return fmt.Errorf("%s is queued, not yet running", s.Feature.ID)
+		return fmt.Errorf("%s is still starting", s.Feature.ID)
 	}
 	s.setBusy(true)
 	e.persist(s)
@@ -2517,8 +2265,8 @@ func (e *Engine) Interrupt(ctx context.Context, id domain.FeatureID) error {
 	return nil
 }
 
-// Pause stops a feature's autonomous session, freeing its slot and
-// promoting the queue. The stage is unchanged; Run resumes it.
+// Pause stops a feature's autonomous session. The stage is unchanged; Run
+// resumes it.
 func (e *Engine) Pause(ctx context.Context, id domain.FeatureID) error {
 	s := e.Get(id)
 	if s == nil {
@@ -2527,14 +2275,9 @@ func (e *Engine) Pause(ctx context.Context, id domain.FeatureID) error {
 	if a := s.agent(); a != nil {
 		_ = a.Interrupt(ctx)
 	}
-	// dequeue if it was still waiting
-	e.mu.Lock()
-	e.removeFromQueue(id)
-	e.mu.Unlock()
 	s.setState(StatePaused)
 	e.persist(s) // record the paused state before finalizing
 	s.stop()
-	e.freeSlot(s)
 	return nil
 }
 
@@ -2546,31 +2289,13 @@ func (e *Engine) Drop(id domain.FeatureID) {
 	e.mu.Unlock()
 	if s != nil {
 		s.stop()
-		e.freeSlot(s)
 	}
 	e.persistDelete(id)
 }
 
-// dropLocked removes a feature's live session and any queue entry.
-// Caller holds e.mu.
+// dropLocked removes a feature's live session. Caller holds e.mu.
 func (e *Engine) dropLocked(id domain.FeatureID) {
 	delete(e.live, id)
-	e.removeFromQueue(id)
-}
-
-// removeFromQueue drops id from whichever pool's queue holds it (a
-// feature is only ever queued in the one pool its session took, but the
-// caller here doesn't always know which). Caller holds e.mu.
-func (e *Engine) removeFromQueue(id domain.FeatureID) {
-	for p := range e.lanes {
-		q := e.lanes[p].queue
-		for i, qid := range q {
-			if qid == id {
-				e.lanes[p].queue = append(q[:i], q[i+1:]...)
-				return
-			}
-		}
-	}
 }
 
 // replace installs a session for a feature, stopping any prior one. It
@@ -2584,72 +2309,12 @@ func (e *Engine) replace(id domain.FeatureID, s *Session) bool {
 		return false
 	}
 	old := e.live[id]
-	e.removeFromQueue(id)
 	e.live[id] = s
 	e.mu.Unlock()
 	if old != nil {
 		old.stop()
-		e.freeSlot(old)
 	}
 	return true
-}
-
-// freeSlot releases an autonomous session's attention slot — returning it
-// to the pool the session actually took it from, per its remembered
-// pool — and promotes that pool's queue. It is a no-op for a session that
-// never took a slot (interactive, or queued-and-dropped), and idempotent
-// for one that did.
-func (e *Engine) freeSlot(s *Session) {
-	held, p := s.releaseSlot()
-	if !held {
-		return
-	}
-	e.mu.Lock()
-	if e.lanes[p].running > 0 {
-		e.lanes[p].running--
-	}
-	e.mu.Unlock()
-	e.schedule()
-}
-
-// yieldSlotForAsk gives an attended stage's slot back while it waits on a
-// person's answer, and lets the next queued attended card start.
-//
-// A session blocked on a question is blocked on a person, and a blocked
-// session frees its slot (DESIGN §4.2). It used to hold it: with the one
-// attended lane, a card whose question nobody had answered yet kept every
-// other attended card queued behind it for as long as the question sat
-// there, and nothing said what they were waiting for.
-//
-// The answer takes the slot back at once (retakeSlotAfterAnswer), even
-// when the lane has filled in the meantime: the agent is live and blocked
-// inside its own tool call, and an answer that then waited on some other
-// card's turn would be a person told their answer landed while nothing
-// moved. So a lane can run one over its cap for the length of that turn
-// — the card that started meanwhile keeps its slot, and the lane settles
-// back as either finishes.
-func (e *Engine) yieldSlotForAsk(s *Session) {
-	if s.Interactive || !s.yieldSlot() {
-		return
-	}
-	e.mu.Lock()
-	if e.lanes[poolAttended].running > 0 {
-		e.lanes[poolAttended].running--
-	}
-	e.mu.Unlock()
-	e.schedule()
-}
-
-// retakeSlotAfterAnswer is yieldSlotForAsk's other half: the answered
-// session holds a slot again for the rest of its run.
-func (e *Engine) retakeSlotAfterAnswer(s *Session) {
-	p, ok := s.retakeSlot()
-	if !ok {
-		return
-	}
-	e.mu.Lock()
-	e.lanes[p].running++
-	e.mu.Unlock()
 }
 
 // TopUp durably raises a feature's envelope and resumes the exhausted
@@ -2741,7 +2406,7 @@ func (e *Engine) ChangeProfile(ctx context.Context, id domain.FeatureID, profile
 	flavor := s.flavor()
 	note := s.kickoffNote
 
-	// the single-session interrupt/dequeue/persist/stop/freeSlot path —
+	// the single-session interrupt/persist/stop path —
 	// not StopForQuit's bulk, GateApproval-gated, quit-park-event path,
 	// which this restart has no use for.
 	if err := e.Pause(ctx, id); err != nil {
@@ -2803,7 +2468,6 @@ func (e *Engine) exhaust(s *Session) {
 	}
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventExhausted, Committed: committed})
 	s.stop() // finalizes the session, closing the underlying agent and MCP teardown
-	e.freeSlot(s)
 }
 
 // stageWorkCommitted reports whether the exhausted stage left its work
@@ -2856,9 +2520,6 @@ func (e *Engine) Close() error {
 		freeforms = append(freeforms, ff)
 	}
 	e.freeform = map[domain.FeatureID]*FreeformSession{}
-	for p := range e.lanes {
-		e.lanes[p].queue = nil
-	}
 	e.mu.Unlock()
 
 	for _, s := range sessions {
@@ -3027,7 +2688,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	case agent.EventIdle:
 		s.setBusy(false)
 		// a turn that already exhausted its budget has raised the
-		// budget gate and freed its slot; the trailing idle must not
+		// budget gate; the trailing idle must not
 		// downgrade that gate to a generic "finished" one.
 		if s.isExhausted() {
 			e.persist(s)
@@ -3039,7 +2700,6 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		if e.maybeConventionAsk(s) {
 			e.persist(s)
 			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
-			e.yieldSlotForAsk(s)
 			return
 		}
 		// a turn that ended with its question still open has not finished
@@ -3050,17 +2710,9 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			return
 		}
 		kind = EventIdle
-		// an autonomous turn completing frees the slot (atomically, so a
+		// an autonomous turn completing finishes the run (atomically, so a
 		// racing Pause isn't overwritten)
 		if !s.Interactive && s.finishRunning() {
-			// the slot frees the moment the agent itself stops, not after
-			// its git/bookkeeping epilogue below — settle's checkpoint
-			// commit can run up to checkpointTimeout, and the footer must
-			// not claim an occupied slot for a card whose agent has
-			// already gone idle. freeSlot's own held-latch makes this
-			// safe to call again from failRun's path below: the second
-			// call is simply a no-op.
-			e.freeSlot(s)
 			// a fatal settle (the worktree itself is gone, not just dirty or
 			// uncommitted) must fail the run instead of reading as a clean
 			// finish — otherwise the caller advances the stage with no
@@ -3083,8 +2735,8 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	case agent.EventError:
 		// a terminal error ends the turn with no trailing idle (the
 		// opencode/copilot failure paths emit only this), so recover the
-		// slot and mark the run failed here — otherwise it wedges the
-		// scheduler and Run refuses to retry the feature.
+		// mark the run failed here, so Run can retry the feature.
+
 		e.failRun(s, ev.Err)
 		return
 	}

@@ -18,11 +18,11 @@ import (
 // Run synchronously drives schedule → startAutonomous → locate, where the
 // guard fires; the error is captured on the session (StatePaused) and the
 // stored stage never moves off the pre-entry stage. The session stays in
-// e.live[] because freeSlot only releases the running slot, so the paused
-// shape (not nil) is what Run leaves behind.
+// e.live[] after the run fails, so the paused shape (not nil) is what Run
+// leaves behind.
 func TestLocateRefusesOnDriftForFeatureWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "locate drift", domain.StageImplement)
@@ -69,7 +69,7 @@ func TestLocateRefusesOnDriftForFeatureWorktree(t *testing.T) {
 // advice for parked cards.
 func TestLocateRecreatesWorktreeAfterFilesystemLoss(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "locate recover", domain.StageVerify)
@@ -107,7 +107,7 @@ func TestLocateRecreatesWorktreeAfterFilesystemLoss(t *testing.T) {
 // name the manual recovery instead of guessing a base.
 func TestLocateRefusesRecreateWithNoForkPoint(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "locate no fork", domain.StageVerify)
@@ -135,7 +135,7 @@ func TestLocateRefusesRecreateWithNoForkPoint(t *testing.T) {
 // guard is reached, so a rewind must not refuse an interactive attach.
 func TestLocateInteractiveStageIgnoresDrift(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "interactive ignore", domain.StagePlan)
@@ -158,7 +158,7 @@ func TestLocateInteractiveStageIgnoresDrift(t *testing.T) {
 // of the operator's checkout.
 func TestLocateResearchScratchTree(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("ok")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "locate rs", domain.StagePlan)
@@ -203,7 +203,7 @@ func TestLocateResearchScratchTree(t *testing.T) {
 func TestRunResearchInvestigateSpawnsArchitectNoWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "run rs investigate", domain.StageImplement)
@@ -236,7 +236,7 @@ func TestRunResearchInvestigateSpawnsArchitectNoWorktree(t *testing.T) {
 func TestRunResearchReviewSpawnsReviewerReadOnly(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(2, "run rs review", domain.StageVerify)
@@ -270,7 +270,7 @@ func TestRunResearchReviewSpawnsReviewerReadOnly(t *testing.T) {
 func TestAttachResearchShapeNotReadOnly(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(3, "run rs shape", domain.StagePlan)
@@ -309,7 +309,7 @@ func TestAttachResearchShapeNotReadOnly(t *testing.T) {
 func TestAttachResearchShapeUsesRealArtifactNotDraft(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(3, "run rs shape", domain.StagePlan)
@@ -371,7 +371,7 @@ func TestTheRebasePassStartsOnADriftedCard(t *testing.T) {
 		kicked = msg
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "rebase drift", domain.StageImplement)
@@ -426,7 +426,7 @@ func TestTheRebasePassIsToldWhyTheRebaseStopped(t *testing.T) {
 		kicked = msg
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "stopped", domain.StageImplement)
 	if err := store.CreateFeature(context.Background(), &f); err != nil {

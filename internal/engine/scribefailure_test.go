@@ -23,7 +23,7 @@ func TestAScribeFailureIsSaidOnceOnTheCard(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventError, Err: errors.New("There's an issue with the selected model (claude-haiku-4.5)")}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "claude-haiku-4.5", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "claude-haiku-4.5"})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 	f := feature(1, "count chars", domain.StageImplement)
@@ -72,7 +72,7 @@ func runVerifyWithoutChecks(t *testing.T, priorDiscoveryFailed bool) (*Session, 
 		return []agent.Event{{Kind: agent.EventMessage, Text: "VERDICT: pass"}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "count chars", domain.StageVerify)
 	createFeature(t, store, f)

@@ -418,7 +418,7 @@ func TestAutopilotCrossesParkedGateToAutonomousStage(t *testing.T) {
 	// completion and the fake answers instantly, so what is being asserted
 	// is that a session for the new stage exists at all — the crossing
 	// started the work rather than only writing a mode.
-	if st := s.State(); st != engine.StateRunning && st != engine.StateQueued && st != engine.StateDone {
+	if st := s.State(); st != engine.StateRunning && st != engine.StateDone {
 		t.Errorf("session state = %v, want the new stage started", st)
 	}
 }

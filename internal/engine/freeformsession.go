@@ -28,9 +28,8 @@ import (
 //     own transcript. A freeform conversation outlives any one backend.
 //   - From an engine.Session: folded so every surface renders it with
 //     the same Snapshot machinery, and outside every stage mechanism —
-//     no attention-pool slot (the lanes ration contention between
-//     autonomous STAGES; a human-paced conversation competes with
-//     nothing there), no gate, no verdict, no advance.
+//     no scheduling (a human-paced conversation is never rationed against
+//     autonomous STAGES), no gate, no verdict, no advance.
 //
 // What it has that neither of them does is the reason it needed its own
 // file: it WRITES. So it takes the card's worktree as its cwd, the card's
@@ -39,7 +38,7 @@ import (
 // freeform card's branch is one the agent made on purpose, so what a turn
 // leaves loose stays in the worktree until somebody means to keep it.
 //
-// What it deliberately does NOT have is an attention slot, a gate, a
+// What it deliberately does NOT have is a gate, a
 // verdict, a round cap or a kickoff. The corrective-round cap exists to
 // stop an unattended loop from spinning; here the human is the loop, and
 // the envelope is the only bound.

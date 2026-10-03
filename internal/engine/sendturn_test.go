@@ -214,7 +214,7 @@ func TestKickoffImagesDelivered(t *testing.T) {
 	ag.Caps.Images = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -249,7 +249,7 @@ func TestKickoffImagesNamedWhenBackendCannot(t *testing.T) {
 	ag := agent.NewFake("ack") // Caps.Images left false
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -293,7 +293,7 @@ func TestKickoffImagesFallsBackOnLateRefusal(t *testing.T) {
 	ag.RefuseImages = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)
@@ -337,7 +337,7 @@ func TestKickoffImagesMissingFileIsNotFatal(t *testing.T) {
 	ag := agent.NewFake("ack")
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
 	defer unregister()
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "impl", domain.StageImplement)

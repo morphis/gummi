@@ -35,9 +35,6 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
 		live.State = string(snap.State)
-		if snap.State == engine.StateQueued {
-			live.Verb = "queued"
-		}
 		live.Spent = snap.SpentCredits
 		live.Stage, live.Role, live.Model = string(snap.Feature.Stage), string(snap.Role), runModel(snap)
 		live.Session = snap.StartedAt

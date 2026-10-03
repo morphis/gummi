@@ -39,7 +39,7 @@ func TestVerifyFinishOmissionGateArmsForBug(t *testing.T) {
 	}
 
 	ag := toolCallFake("submit_verdict", json.RawMessage(`{"verdict":"pass"}`))
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := bugFeature("omission gate arms")
@@ -82,7 +82,7 @@ func TestVerifyFinishOmissionGateDoesNotArmForFeature(t *testing.T) {
 	}
 
 	ag := toolCallFake("submit_verdict", json.RawMessage(`{"verdict":"pass"}`))
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "feature no gate", domain.StageVerify)
@@ -111,7 +111,7 @@ func TestVerifyFinishOmissionGateDisarmedByAbsentProbe(t *testing.T) {
 	}
 
 	ag := toolCallFake("submit_verdict", json.RawMessage(`{"verdict":"pass"}`))
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := bugFeature("absent probe no gate")
@@ -141,7 +141,7 @@ func TestVerifyFinishOmissionGateDisarmedByEnvTag(t *testing.T) {
 	}
 
 	ag := toolCallFake("submit_verdict", json.RawMessage(`{"verdict":"pass"}`))
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := bugFeature("env tag disarms")
@@ -171,7 +171,7 @@ func TestVerifyFinishOmissionGateDisarmedByWaiver(t *testing.T) {
 	}
 
 	ag := toolCallFake("submit_verdict", json.RawMessage(`{"verdict":"pass"}`))
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := bugFeature("waiver disarms")
@@ -201,7 +201,7 @@ func TestVerifyFinishOmissionGateSkippedOnSpecReadError(t *testing.T) {
 	}
 
 	ag := toolCallFake("submit_verdict", json.RawMessage(`{"verdict":"pass"}`))
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 	t.Cleanup(func() { e.Close() })
 
 	f := bugFeature("spec unreadable no gate")
@@ -300,7 +300,7 @@ func TestVerifyKickoffAnnouncesArmedOmissionGate(t *testing.T) {
 				return []agent.Event{{Kind: agent.EventIdle}}
 			}
 
-			e := New(Config{Agents: singleAgent(f), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll})
+			e := New(Config{Agents: singleAgent(f), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Permission: agent.PermissionAllowAll})
 			t.Cleanup(func() { e.Close() })
 
 			var feat domain.Feature
@@ -396,7 +396,7 @@ func TestGateVerifyVerdictDirectArming(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	e := New(Config{Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := bugFeature("direct gate test")

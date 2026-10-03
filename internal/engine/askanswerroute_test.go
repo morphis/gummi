@@ -184,7 +184,7 @@ func TestAnAnswerDoesNotRunPastABudgetStop(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", StageBudget: 100})
 	t.Cleanup(func() { e.Close() })
 	ctx := context.Background()
 	f := feature(1, "Dark mode", domain.StagePlan)

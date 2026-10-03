@@ -40,7 +40,7 @@ func implementKickoff(t *testing.T, body string) string {
 	}}
 	e := New(Config{
 		Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws,
-		Model: "m", MaxActive: 1, Permission: agent.PermissionAllowAll,
+		Model: "m", Permission: agent.PermissionAllowAll,
 	})
 	t.Cleanup(func() { e.Close() })
 

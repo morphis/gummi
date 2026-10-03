@@ -94,7 +94,7 @@ func TestDraftCommitMsgRunsScribe(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -125,7 +125,7 @@ func TestDraftCommitMsgZeroToolSession(t *testing.T) {
 		}
 	}}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -156,7 +156,7 @@ func TestDraftCommitMsgZeroToolSession(t *testing.T) {
 
 func TestDraftCommitMsgNilBackend(t *testing.T) {
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: map[string]agent.Agent{}, Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: map[string]agent.Agent{}, Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -174,7 +174,7 @@ func TestDraftCommitMsgBackendErrorIsEmpty(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventError, Err: errors.New("boom")}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -195,7 +195,7 @@ func TestDraftCommitMsgChattyReplyFallsBackEmpty(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -216,7 +216,7 @@ func TestDraftCommitMsgScrubsAttribution(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -430,7 +430,7 @@ func TestDraftCommitMsgWrapsLongBody(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -457,7 +457,7 @@ func TestDraftCommitMsgDiscardsDiffDump(t *testing.T) {
 		}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -490,7 +490,7 @@ func TestDraftCommitMsgTimeoutReturnsEmpty(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	f := feature(1, "impl", domain.StageImplement)
 	withWorktree(t, wt, f)
@@ -513,7 +513,7 @@ func TestDraftCommitMsgTimeoutReturnsEmpty(t *testing.T) {
 func TestDraftCommitMsgSurfacesDistinctReasons(t *testing.T) {
 	newEngine := func(ag agent.Agent) (*Engine, domain.Feature) {
 		ws, store, wt := newRepo(t)
-		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 		t.Cleanup(func() { e.Close() })
 		f := feature(1, "impl", domain.StageImplement)
 		withWorktree(t, wt, f)

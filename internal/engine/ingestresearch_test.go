@@ -43,7 +43,7 @@ func writeResearchArtifact(t *testing.T, root string, rsCard domain.Feature, bod
 func ingestResearchEngine(t *testing.T) (*Engine, string) {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(agent.NewFake("x")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 	return e, wt.RepoRoot()
 }

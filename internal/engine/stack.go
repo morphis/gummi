@@ -278,7 +278,7 @@ func sessionHoldsTree(s *Session) bool {
 		return false
 	}
 	switch s.State() {
-	case StateRunning, StateQueued:
+	case StateRunning:
 		return true
 	}
 	return s.Live()

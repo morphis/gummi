@@ -21,7 +21,7 @@ import (
 func TestDesignStageRunsInTheCardsWorktree(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "Dark mode", domain.StagePlan)
@@ -71,7 +71,7 @@ func TestDesignStageWritesStayOutOfMain(t *testing.T) {
 		writeAt(t, opts.WorkDir, "README.md", "explored\n")
 		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
 	}
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "Dark mode", domain.StagePlan)
@@ -104,7 +104,7 @@ func TestDesignStageWritesStayOutOfMain(t *testing.T) {
 func TestDesignStageEditsSurviveTheApprovalGate(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	rec := recordingAgent()
-	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
 
 	f := feature(1, "Dark mode", domain.StagePlan)

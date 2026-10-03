@@ -284,8 +284,6 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 					return noticeMsg{text: sanitize(err.Error()), isErr: true}
 				}
 				return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the running %s agent", f.ID, n, plural(n), f.Stage), reload: true}
-			case engine.StateQueued:
-				return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open diff comments when it starts", f.ID, f.Stage)}
 			}
 		}
 		m.dropSession(f.ID)
