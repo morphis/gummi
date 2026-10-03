@@ -268,6 +268,9 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .tools li.running,.tools li.watching{color:var(--accent)}
 .tools li .ms{color:var(--fg3);margin-left:6px}
 .tools.thinking .body{padding:4px 12px 8px;border-top:1px solid var(--line);color:var(--fg3);font-size:12.5px}
+.tools.activity .body{padding:4px 10px 8px;border-top:1px solid var(--line)}
+.tools.activity .body ol{border-top:0;padding:2px 0 2px 20px}
+.tools.activity .thought{padding:4px 2px;color:var(--fg3);font-size:12.5px}
 .tools.tasks ul{list-style:none;margin:0;padding:4px 12px 8px;border-top:1px solid var(--line);font-size:12.5px}
 .tools.tasks .task.completed{color:var(--fg3);text-decoration:line-through}
 .tools.tasks .task.in_progress{color:var(--fg);font-weight:600}

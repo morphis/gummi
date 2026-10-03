@@ -186,7 +186,7 @@ export function itemEl (it) {
   switch (it.t) {
     case 'message': return message(it)
     case 'you': return you(it)
-    case 'tools': return h('div', { class: 'indent' }, tools(it.tools || []))
+    case 'activity': return activity(it.items || [])
     case 'receipt': return receipt(it)
     case 'verify': return verify(it)
     case 'decision': return decision(it)
@@ -256,32 +256,42 @@ function attachmentThumbs (refs) {
       h('img', { src: attachmentURL(r.id), alt: r.name || 'attached image', loading: 'lazy' }))))
 }
 
-export function tools (list) {
-  const fails = list.filter(t => t.status === 'fail').length
-  const running = list.some(t => t.status === 'running')
+function toolRows (list) {
+  return h('ol', null, list.map(t => {
+    const label = String(t.label || '').replace(/\s+/g, ' ').trim()
+    const named = label.startsWith(t.tool + ' ') || label === t.tool
+    const rest = named ? label.slice(t.tool.length).trim() : label
+    return h('li', { class: t.status || null, title: t.output || null }, t.tool, ' ',
+      h('span', null, [rest, t.detail].filter(Boolean).join(' ')),
+      t.ms ? h('span', { class: 'ms' }, dur(t.ms)) : null,
+      t.status === 'fail' && t.output ? h('pre', { class: 'tool-out' }, t.output) : null)
+  }))
+}
+
+// activity is everything the agent did between two messages — its tool calls
+// and thoughts, in order — folded into one row that says what it came to.
+export function activity (items) {
+  const calls = items.flatMap(i => i.tools || [])
+  const thoughts = items.filter(i => i.t === 'message').length
+  const fails = calls.filter(t => t.status === 'fail').length
+  const inFlight = calls.find(t => t.status === 'running')
   // a Monitor watch (webapi.StatusWatching) never settles on its own the
-  // way an ordinary call does — it stays outstanding past the turn that
-  // started it going idle — so it earns its own word and a spinner that
+  // way an ordinary call does, so it earns its own word and a spinner that
   // doesn't spin: there, but not "busy", so a reply stays obviously safe
   // to send.
-  const watching = list.some(t => t.status === 'watching')
-  // a call in flight gets dots rather than the live row's own spinner:
-  // the two can be on screen together (the session thinking, a tool
-  // under it running), and a shared glyph read as one thing twice.
-  return h('details', { class: 'tools', testid: 'tool-group' },
-    h('summary', null, plural(list.length, 'tool call'),
-      fails ? h('span', { class: 'fails' }, `· ${fails} failed`) : null,
-      watching ? h('span', { class: 'watching' }, '· watching') : null,
-      running ? h('span', { class: 'dots' }, h('i'), h('i'), h('i')) : watching ? h('span', { class: 'spinner still' }) : null),
-    h('ol', null, list.map(t => {
-      const label = String(t.label || '').replace(/\s+/g, ' ').trim()
-      const named = label.startsWith(t.tool + ' ') || label === t.tool
-      const rest = named ? label.slice(t.tool.length).trim() : label
-      return h('li', { class: t.status || null, title: t.output || null }, t.tool, ' ',
-        h('span', null, [rest, t.detail].filter(Boolean).join(' ')),
-        t.ms ? h('span', { class: 'ms' }, dur(t.ms)) : null,
-        t.status === 'fail' && t.output ? h('pre', { class: 'tool-out' }, t.output) : null)
-    })))
+  const watching = calls.some(t => t.status === 'watching')
+  const parts = []
+  if (calls.length) parts.push(plural(calls.length, 'tool call'))
+  if (fails) parts.push(h('span', { class: 'fails' }, `${fails} failed`))
+  if (thoughts) parts.push(plural(thoughts, 'thought'))
+  if (watching) parts.push(h('span', { class: 'watching' }, 'watching'))
+  else if (inFlight) parts.push(h('span', { class: 'shimmer' }, String(inFlight.label || inFlight.tool).replace(/\s+/g, ' ').trim()))
+  return h('div', { class: 'indent' },
+    h('details', { class: 'tools activity', testid: 'activity' },
+      h('summary', null, parts.flatMap((p, i) => i ? [' · ', p] : [p])),
+      h('div', { class: 'body' }, items.map(it => it.t === 'tools'
+        ? toolRows(it.tools || [])
+        : h('div', { class: 'thought' }, md(it.text))))))
 }
 
 function receipt (it) {
@@ -443,37 +453,39 @@ function tasks (list) {
         h('li', { class: ['task', t.status] }, `${TASK_MARK[t.status] || '○'} ${t.text}`)))))
 }
 
-// thinking is the agent's reasoning, folded behind its summary line so a
-// reply is never buried under how the agent got to it.
-function thinking (text, live) {
-  return h('div', { class: 'indent' },
-    h('details', { class: 'tools thinking', open: live, testid: 'thinking' },
-      h('summary', null, live ? h('span', { class: 'watching' }, 'thinking…') : 'thought'),
-      h('div', { class: 'body' }, md(text))))
+// activityItems shapes a live run of tool and thinking turns the way the
+// server shapes a settled activity item.
+function activityItems (run) {
+  const items = []
+  for (const t of run) {
+    if (!t.tool) { items.push({ t: 'message', author: 'thinking', text: t.text }); continue }
+    const last = items[items.length - 1]
+    if (last?.t === 'tools') last.tools.push(t.tool)
+    else items.push({ t: 'tools', tools: [t.tool] })
+  }
+  return items
 }
 
-// conversation draws a session's settled turns (tool turns folded into one
-// block per run) and the message still streaming.
+// conversation draws a session's settled turns (each run of tool calls and
+// thoughts folded into one activity row) and the message still streaming.
 function conversation (kind, c, role, stage) {
   const out = []
   const turns = c.turns || []
   let run = []
-  const flush = (i) => {
+  let start = 0
+  const flush = () => {
     if (!run.length) return
-    const sig = run.map(t => `${t.tool?.status}|${t.tool?.label}`).join(';')
-    out.push(cached(`${kind}:tools:${i}`, sig, () => h('div', { class: 'indent' }, tools(run.map(t => t.tool)))))
+    const sig = run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}` : `k|${(t.text || '').length}`).join(';')
+    out.push(cached(`${kind}:act:${start}`, sig, () => activity(activityItems(run))))
     run = []
   }
   turns.forEach((t, i) => {
-    if (t.tool) { run.push(t); return }
-    flush(i)
-    if (t.author === 'thinking') {
-      // the newest thought of a busy session is what it is thinking now:
-      // open, and labelled live; every other one folds away
-      const live = c.busy && i === turns.length - 1 && !c.streaming
-      out.push(cached(`${kind}:${i}`, `thinking|${live}|${(t.text || '').length}`, () => thinking(t.text, live)))
+    if (t.tool || t.author === 'thinking') {
+      if (!run.length) start = i
+      run.push(t)
       return
     }
+    flush()
     // a freeform session's own messages can be rewound to, between turns:
     // back counts them from the newest, which is how the server names one
     const back = kind === 'freeform' && t.author === 'you' && !c.busy
@@ -484,7 +496,7 @@ function conversation (kind, c, role, stage) {
       ? you({ text: t.text, by: t.by, rewind: back ? () => rewind(state.sel, back) : null })
       : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text })))
   })
-  flush(turns.length)
+  flush()
   if (c.streaming) {
     out.push(h('div', { class: ['msg live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),

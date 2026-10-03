@@ -40,7 +40,7 @@ func TestWebBoardItemsFoldsTheConversation(t *testing.T) {
 	if tool != nil {
 		t.Errorf("tool = %+v: a running call that is not last is not the live one", tool)
 	}
-	want := []webapi.ItemType{webapi.ItemYou, webapi.ItemTools, webapi.ItemMessage, webapi.ItemNote, webapi.ItemTools}
+	want := []webapi.ItemType{webapi.ItemYou, webapi.ItemActivity, webapi.ItemMessage, webapi.ItemNote, webapi.ItemActivity}
 	if len(items) != len(want) {
 		t.Fatalf("items = %d, want %d: %+v", len(items), len(want), items)
 	}
@@ -52,11 +52,11 @@ func TestWebBoardItemsFoldsTheConversation(t *testing.T) {
 	if items[0].By != "sam" || items[0].Key != "b0" {
 		t.Errorf("you item = %+v", items[0])
 	}
-	if got := items[1].Tools; len(got) != 2 || got[0].Status != "ok" || got[0].Ms != 250 || got[1].Status != "fail" {
-		t.Errorf("a run of calls should be one block with each call's outcome: %+v", got)
+	if got := items[1].Items; len(got) != 1 || len(got[0].Tools) != 2 || got[0].Tools[0].Status != "ok" || got[0].Tools[0].Ms != 250 || got[0].Tools[1].Status != "fail" {
+		t.Errorf("a run of calls should be one activity with each call's outcome: %+v", got)
 	}
 	if items[1].Seq != 3 {
-		t.Errorf("a grown block's Seq = %d, want the last call's position (3)", items[1].Seq)
+		t.Errorf("a grown activity's Seq = %d, want the last call's position (3)", items[1].Seq)
 	}
 
 	// a call still running as the last message is the live block's tool

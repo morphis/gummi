@@ -96,7 +96,7 @@ registerView('agent', {
       const want = []
       for (const it of a.items || []) {
         // keys restart with a new conversation: the time and text tell them apart
-        const sig = `${it.seq}|${it.time}|${(it.text || '').length}|${(it.tools || []).map(t => t.status).join('')}`
+        const sig = `${it.seq}|${it.time}|${(it.text || '').length}|${(it.tools || []).concat((it.items || []).flatMap(c => c.tools || [])).map(t => t.status).join('')}`
         let n = nodes.get(it.key)
         if (!n || n.sig !== sig) {
           const view = it.t === 'message' ? { ...it, author: null, role: 'agent' } : it

@@ -29,6 +29,10 @@ const (
 	ItemYou ItemType = "you"
 	// ItemTools is a run of tool calls folded into one block.
 	ItemTools ItemType = "tools"
+	// ItemActivity is everything the agent did between two messages — its
+	// tool calls and thoughts, in order — folded into one row; Items holds
+	// the run.
+	ItemActivity ItemType = "activity"
 	// ItemReceipt is a crossing's receipt: approved, sent back, landed.
 	ItemReceipt ItemType = "receipt"
 	// ItemVerify is a verify run's checks.
@@ -81,13 +85,16 @@ type Item struct {
 	// Edge is "open" or "close"; a closing marker says How the stretch
 	// ended and the Reason its closing event gave. Mode is the autopilot
 	// mode the stretch ran in.
-	Label   string     `json:"label,omitempty"`
-	Tally   string     `json:"tally,omitempty"`
-	Edge    string     `json:"edge,omitempty"`
-	How     string     `json:"how,omitempty"`
-	Reason  string     `json:"reason,omitempty"`
-	Mode    string     `json:"mode,omitempty"`
-	Tools   []ToolCall `json:"tools,omitempty"`
+	Label  string     `json:"label,omitempty"`
+	Tally  string     `json:"tally,omitempty"`
+	Edge   string     `json:"edge,omitempty"`
+	How    string     `json:"how,omitempty"`
+	Reason string     `json:"reason,omitempty"`
+	Mode   string     `json:"mode,omitempty"`
+	Tools  []ToolCall `json:"tools,omitempty"`
+	// Items is an activity item's run, oldest first: tools items and
+	// thinking messages.
+	Items   []Item     `json:"items,omitempty"`
 	Receipt *Receipt   `json:"receipt,omitempty"`
 	Checks  []CheckRun `json:"checks,omitempty"`
 	// Decision is the decision a decision item raised, with Answer set once

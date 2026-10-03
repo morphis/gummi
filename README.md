@@ -232,8 +232,9 @@ long-lived session that can read and act on every card through the same
 tools a hosted agent reaches. It is a coding-agent prompt and behaves like
 one: `enter` sends, `alt+enter` (or `ctrl+j`) breaks a line, `↑` recalls
 what you have already sent, `pgup`/`pgdn` scroll the transcript, `alt+o`
-expands captured tool outputs, and `/` opens the command list. `ctrl+c`
-empties the composer; with nothing typed it interrupts the turn, and with
+expands the activity rows and captured tool outputs, and `/` opens the
+command list. `ctrl+c` empties the composer; with nothing typed it
+interrupts the turn, and with
 nothing running it quits. `esc` interrupts too, and never touches your
 draft. `/clear` starts a fresh session — the transcript, its context and
 the spend it ran up all go with the old one.

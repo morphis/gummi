@@ -243,7 +243,7 @@ func TestDocsThreadPagesAndUpsertsByKey(t *testing.T) {
 	if st := b.get("/api/cards/FD-001/thread", &first); st != http.StatusOK {
 		t.Fatalf("thread = %d", st)
 	}
-	if len(first.Items) != 3 || first.Items[0].T != webapi.ItemStage || first.Items[1].T != webapi.ItemMessage || first.Items[2].T != webapi.ItemTools {
+	if len(first.Items) != 3 || first.Items[0].T != webapi.ItemStage || first.Items[1].T != webapi.ItemMessage || first.Items[2].T != webapi.ItemActivity {
 		t.Fatalf("items = %+v", first.Items)
 	}
 	if first.Items[1].Author != "implementer" || first.Items[1].Text != "Starting **now**." {
@@ -274,7 +274,7 @@ func TestDocsThreadPagesAndUpsertsByKey(t *testing.T) {
 	if d, ok := byKey[divider]; !ok || !d.Exited || d.Verdict != "done" {
 		t.Errorf("the divider did not come back settled under its key: %+v", next.Items)
 	}
-	if g, ok := byKey[tools]; !ok || len(g.Tools) != 2 || g.Tools[1].Status != "fail" || g.Tools[1].Output != "boom" {
+	if g, ok := byKey[tools]; !ok || len(g.Items) != 1 || len(g.Items[0].Tools) != 2 || g.Items[0].Tools[1].Status != "fail" || g.Items[0].Tools[1].Output != "boom" {
 		t.Errorf("the tool group did not come back grown under its key: %+v", g)
 	}
 	if _, ok := byKey[first.Items[1].Key]; ok {

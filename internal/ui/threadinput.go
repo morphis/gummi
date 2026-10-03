@@ -1483,9 +1483,9 @@ func verbEnterLabel(verb, remainder string) (label, help string) {
 // read off the bar itself; before this the label stayed "outputs"
 // either way and only the help text (behind alt+/) said which (F19).
 func (m *Shell) threadOutputsBinding() binding {
-	label, help := "outputs", "expand the captured tool outputs"
+	label, help := "outputs", "expand the activity rows and captured tool outputs"
 	if m.threadOutputs {
-		label, help = "fold", "fold the captured tool outputs back"
+		label, help = "fold", "fold the activity rows and captured tool outputs back"
 	}
 	return binding{key: "alt+o", label: label, help: help, bar: true}
 }

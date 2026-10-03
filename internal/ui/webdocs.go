@@ -184,9 +184,15 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 		last = min(last, it.Seq-1)
 	}
 	cmds := d.checkCommands(ctx)
+	converted := make([]webapi.Item, 0, len(items))
+	for _, it := range items {
+		converted = append(converted, webItem(it, cmds))
+	}
 	out := webapi.Thread{Items: []webapi.Item{}, Live: d.live, LastSeq: max(last, 0)}
-	for _, it := range threadfold.Since(items, after) {
-		out.Items = append(out.Items, webItem(it, cmds))
+	for _, it := range groupActivity(converted) {
+		if it.Seq > after {
+			out.Items = append(out.Items, it)
+		}
 	}
 	return out, nil
 }

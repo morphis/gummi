@@ -55,10 +55,8 @@ func TestRunAutonomousStage(t *testing.T) {
 	// this fixture's 24-row frame ("↑ 3 more · pgup"). What the test is
 	// for — the thread IS the run's surface — is the feed.
 	view := m.View().Content
-	for _, want := range []string{"edit internal/theme/palette.go", "run go test ./..."} {
-		if !strings.Contains(view, want) {
-			t.Errorf("thread missing live activity %q", want)
-		}
+	if !strings.Contains(view, "2 tool calls") {
+		t.Errorf("thread does not summarise the run's activity feed:\n%s", view)
 	}
 }
 

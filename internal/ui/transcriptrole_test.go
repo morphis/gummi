@@ -107,7 +107,7 @@ func TestTranscriptShowsThinkingCollapsed(t *testing.T) {
 		},
 	}
 	collapsed := stripANSI(strings.Join(transcriptLines(s, snap, 80, false), "\n"))
-	if !strings.Contains(collapsed, "thinking · 2 more lines") || strings.Contains(collapsed, "alpha") || !strings.Contains(collapsed, "epsilon") {
+	if !strings.Contains(collapsed, "1 thought") || strings.Contains(collapsed, "alpha") || strings.Contains(collapsed, "epsilon") {
 		t.Errorf("collapsed thinking:\n%s", collapsed)
 	}
 	if !labelPrecedes(collapsed, "implementer", "done") {

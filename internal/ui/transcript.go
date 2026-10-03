@@ -32,7 +32,21 @@ import (
 // every entry's full output.
 func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bool) []string {
 	var lines []string
-	for i, msg := range snap.Transcript {
+	for i := 0; i < len(snap.Transcript); i++ {
+		msg := snap.Transcript[i]
+		// everything the agent did between two messages is one summary row
+		// until alt+o expands it; expanded, each entry renders as below.
+		if isActivityMsg(msg) && !showOutput {
+			j := i
+			for j < len(snap.Transcript) && isActivityMsg(snap.Transcript[j]) {
+				j++
+			}
+			if line := activityLine(s, snap.Transcript[i:j], w); line != "" {
+				lines = append(lines, line, "")
+			}
+			i = j - 1
+			continue
+		}
 		// tool calls render as compact ticker lines, in order with the
 		// messages around them; consecutive ones group without blanks.
 		if msg.Author == engine.AuthorTool {
@@ -196,6 +210,51 @@ func thinkingLines(s *theme.Styles, content string, w int, showOutput bool) []st
 		lines = append(lines, "  "+s.Faint.Render(l))
 	}
 	return append(lines, "")
+}
+
+func isActivityMsg(msg engine.Message) bool {
+	return msg.Author == engine.AuthorTool || msg.Author == engine.AuthorThinking
+}
+
+// activityLine is a run of tool calls and thoughts as one summary row: the
+// call in flight, if any, is named on it. Empty when the run holds nothing
+// but a folded answer note.
+func activityLine(s *theme.Styles, run []engine.Message, w int) string {
+	var calls, fails, thoughts int
+	var inFlight string
+	for _, msg := range run {
+		switch {
+		case msg.Author == engine.AuthorThinking:
+			thoughts++
+		case msg.Content == engine.AnswerCapturedNote:
+		default:
+			calls++
+			switch msg.ToolStatus {
+			case engine.ToolFail:
+				fails++
+			case engine.ToolOK:
+			default:
+				inFlight = msg.Content
+			}
+		}
+	}
+	if calls+thoughts == 0 {
+		return ""
+	}
+	var parts []string
+	if calls > 0 {
+		parts = append(parts, s.Faint.Render(fmt.Sprintf("%d tool call%s", calls, plural(calls))))
+	}
+	if fails > 0 {
+		parts = append(parts, s.Error.Render(fmt.Sprintf("%d failed", fails)))
+	}
+	if thoughts > 0 {
+		parts = append(parts, s.Faint.Render(fmt.Sprintf("%d thought%s", thoughts, plural(thoughts))))
+	}
+	if inFlight != "" {
+		parts = append(parts, toolLineView(s, sanitize(inFlight), max(w-6, 8)))
+	}
+	return "  " + s.Faint.Render("▸ ") + strings.Join(parts, s.Faint.Render(" · ")) + s.Faint.Render("  (alt+o)")
 }
 
 // failTailLines is how much of a failed tool's output shows inline

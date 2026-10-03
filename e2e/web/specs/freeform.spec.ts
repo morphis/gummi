@@ -31,11 +31,11 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
   await expect(page.getByTestId('decision-question').filter({ hasText: 'working on a turn' })).toHaveCount(0);
   // what the agent thought is there, folded behind its summary, and the
   // call it made settled with an outcome rather than hanging unresolved
-  const thought = page.getByTestId('thinking').last();
-  await expect(thought).toContainText('thought');
-  await expect(thought).not.toHaveAttribute('open', '');
-  await thought.locator('summary').click();
-  await expect(thought).toContainText('The ask belongs in NOTES.md');
+  const activity = page.getByTestId('activity').last();
+  await expect(activity).toContainText('thought');
+  await expect(activity).not.toHaveAttribute('open', '');
+  await activity.locator('summary').click();
+  await expect(activity).toContainText('The ask belongs in NOTES.md');
   const live = (await api('GET', `/api/cards/${id}/live`)).json;
   const turns = JSON.stringify(live.freeform?.turns ?? []);
   expect(turns).toContain('"author":"thinking"');

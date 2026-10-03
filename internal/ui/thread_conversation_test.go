@@ -637,10 +637,10 @@ func TestThreadShowsTheFullTranscript(t *testing.T) {
 	}
 }
 
-// TestThreadFailureTailShowsWithoutExpansion: a failed tool call's
-// output tail renders inline under the tool line, expanded or not — the
-// failure's diagnosis is the point, and the tail is what carries it.
-func TestThreadFailureTailShowsWithoutExpansion(t *testing.T) {
+// TestThreadFailureIsCountedUntilExpanded: a failed tool call is counted in
+// its collapsed activity row, and its output tail shows once alt+o expands
+// the row.
+func TestThreadFailureIsCountedUntilExpanded(t *testing.T) {
 	m, eng := agentWorkspace(t, &agent.Fake{
 		Responder: func(_ agent.SessionOpts, _ string) []agent.Event {
 			return []agent.Event{
@@ -669,16 +669,24 @@ func TestThreadFailureTailShowsWithoutExpansion(t *testing.T) {
 	// twenty-odd lines of stack and the verify stage's artifact header sits
 	// above it, so at 30 the tool line and its ✗ scroll off the top ("↑ 6
 	// more") and the assertions below measure nothing. The subject is that the
-	// tail renders inline without expansion, not that it fits in 30 rows.
+	// tail renders once the row is expanded, not that it fits in 30 rows.
 	view := ansi.Strip(m.threadView(100, 44))
+	if !strings.Contains(view, "1 failed") {
+		t.Errorf("the collapsed row does not count the failure:\n%s", view)
+	}
+	if strings.Contains(view, "FAIL\tgummi") {
+		t.Errorf("failure tail shown without expansion:\n%s", view)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModAlt})
+	view = ansi.Strip(m.threadView(100, 80))
 	if !strings.Contains(view, "✗") {
-		t.Errorf("failed tool not marked ✗:\n%s", view)
+		t.Errorf("failed tool not marked ✗ once expanded:\n%s", view)
 	}
 	if !strings.Contains(view, "FAIL") {
-		t.Errorf("failure tail not shown inline:\n%s", view)
+		t.Errorf("failure tail not shown on expansion:\n%s", view)
 	}
 	if !strings.Contains(view, "go test ./...") {
-		t.Errorf("tool line missing:\n%s", view)
+		t.Errorf("tool line missing on expansion:\n%s", view)
 	}
 }
 
