@@ -505,6 +505,18 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .toc a:hover{color:var(--fg);background:var(--sunk)}
 .doc{padding:18px 22px 40px;max-width:72ch;min-width:0}
 .doc .src{font-family:var(--mono);font-size:11.5px;color:var(--fg3);margin-bottom:10px;overflow-wrap:anywhere}
+
+/* the memory tab's documents fold to a header row: title, path and a
+   one-line content hint, with the body beneath */
+.memdoc{padding-bottom:0}
+.memdoc[open]{padding-bottom:40px}
+.memdoc > summary{list-style:none;cursor:pointer;margin:22px 0 10px;display:flex;align-items:baseline;gap:8px;font-size:14px;font-weight:600}
+.memdoc > summary::-webkit-details-marker{display:none}
+.memdoc > summary .mt{white-space:nowrap}
+.memdoc > summary .mh{flex:1;min-width:0;font-size:12px;font-weight:400;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.memdoc > summary .src{margin:0;font-size:11px}
+.memdoc > summary .chev{font-size:10px;color:var(--fg3);transition:transform .15s}
+.memdoc[open] > summary .chev{transform:rotate(90deg)}
 .doc h1{font-size:20px;margin:0 0 12px;letter-spacing:-.01em;text-wrap:balance}
 .doc h2.sec{font-size:14px;margin:22px 0 6px;font-weight:600;scroll-margin-top:12px;display:flex;align-items:center;gap:8px}
 .doc h2 .sc{margin-left:auto;font-size:12px;font-weight:400;color:var(--fg3);opacity:0;transition:opacity .15s}
@@ -819,7 +831,7 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
   .shimmer{animation:none;color:var(--fg2);background:none}
   .spinner{animation:none}
   .dots i{animation:none;opacity:.6}
-  .ev-stage .fold,.tools summary::before,.mdec .sum .chev,.doc h2 .sc{transition:none}
+  .ev-stage .fold,.tools summary::before,.mdec .sum .chev,.doc h2 .sc,.memdoc > summary .chev{transition:none}
 }
 
 /* gummi's own prompts fold to their first line; failed tool output */

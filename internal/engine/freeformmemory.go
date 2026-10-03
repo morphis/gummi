@@ -32,11 +32,12 @@ import (
 //     it is the later, separate feature; a session that learned
 //     something the others should start with records it in its own
 //     session memory.
-//   - Session memory (.gummi/memory/<card>/plan.md and dead-ends.md) is
+//   - Session memory (.gummi/memory/<card>/memory.md and dead-ends.md) is
 //     one card's own: the working plan, kept current, and the dead ends,
 //     recorded. What they hold is what the next backend of the same
 //     conversation starts from — whether it can resume its predecessor's
-//     own transcript or not.
+//     own transcript or not. A card whose memory still sits in the
+//     former plan.md is migrated on first touch (Workspace.LegacyPlanRename).
 //
 // Nothing distills one tier into the other: memory that outlives a card
 // is a later, separate feature. And none of it is required — no section
@@ -48,9 +49,12 @@ const (
 	memoryWriteToolName = "memory_write"
 
 	// The three files, as the tools' which argument names them: the
-	// workspace's global memory, and a card's own session memory.
+	// workspace's global memory, and a card's own session memory. The
+	// working-notes file was which "plan" (plan.md) until the tier
+	// carried one name end to end; a card still holding the old name is
+	// migrated on first touch.
 	memoryGlobal   = "global"
-	memoryPlan     = "plan"
+	memoryMemory   = "memory"
 	memoryDeadEnds = "dead-ends"
 
 	// maxMemoryFile caps one memory file, as written and as read back
@@ -69,7 +73,7 @@ func memoryReadTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: memoryReadToolName,
 		Description: "Read one project-memory file. \"global\" is the workspace's global " +
-			"memory, shared by every freeform session here; \"plan\" and \"dead-ends\" are " +
+			"memory, shared by every freeform session here; \"memory\" and \"dead-ends\" are " +
 			"this card's own session memory. Returns the file's content, or a note that " +
 			"nothing has been written yet.",
 		Parameters: map[string]any{
@@ -77,7 +81,7 @@ func memoryReadTool() agent.ToolDef {
 			"properties": map[string]any{
 				"which": map[string]any{
 					"type":        "string",
-					"description": "One of \"global\", \"plan\", \"dead-ends\".",
+					"description": "One of \"global\", \"memory\", \"dead-ends\".",
 				},
 			},
 			"required": []any{"which"},
@@ -89,8 +93,9 @@ func memoryWriteTool() agent.ToolDef {
 	return agent.ToolDef{
 		Name: memoryWriteToolName,
 		Description: "Fill one of this card's own project-memory files — the same " +
-			"two memory_read reads that are yours: \"plan\" — your working plan for " +
-			"this card, replace to rewrite it or append to add — and \"dead-ends\" — " +
+			"two memory_read reads that are yours: \"memory\" — your working " +
+			"notes for this card, replace to rewrite them or append to add — and " +
+			"\"dead-ends\" — " +
 			"what you tried that failed, appended so the attempts stay listed. " +
 			"\"global\" is not writable through this tool: it is filled elsewhere " +
 			"and read with memory_read.",
@@ -99,7 +104,7 @@ func memoryWriteTool() agent.ToolDef {
 			"properties": map[string]any{
 				"which": map[string]any{
 					"type":        "string",
-					"description": "One of \"plan\", \"dead-ends\".",
+					"description": "One of \"memory\", \"dead-ends\".",
 				},
 				"content": map[string]any{
 					"type":        "string",
@@ -121,15 +126,15 @@ func memoryWriteTool() agent.ToolDef {
 const freeformMemoryHint = `You also have gummi's memory tools, memory_read and memory_write: this
 card's project memory, plain files under .gummi/memory/ — not in your
 worktree, so reach them only through the tools. Session memory —
-"plan" and "dead-ends" — is this card's own and yours to write: keep plan
-current as you work (the next backend of this conversation starts from it,
-in place of turns it cannot replay), and record a dead end when you hit
-one, so no later turn pays for it twice. Global memory is read-only to
-you: the person fills it by hand and a later distillation pass folds
-session memory into it, so if something you learned should move up,
-record it in your own memory and say so in the thread. None of it is
-required — no gate reads it and no section is demanded; this is not the
-spec process the workflow cards run.`
+"memory" and "dead-ends" — is this card's own and yours to write: keep
+memory current as you work (the next backend of this conversation starts
+from it, in place of turns it cannot replay), and record a dead end when
+you hit one, so no later turn pays for it twice. Global memory is
+read-only to you: the person fills it by hand and a later distillation
+pass folds session memory into it, so if something you learned should
+move up, record it in your own memory and say so in the thread. None of
+it is required — no gate reads it and no section is demanded; this is
+not the spec process the workflow cards run.`
 
 // memoryPath maps a which argument to its file. ok is false for anything
 // the tools do not serve; the refusal lists the three, which is the
@@ -138,8 +143,8 @@ func memoryPath(w state.Workspace, id domain.FeatureID, which string) (path stri
 	switch which {
 	case memoryGlobal:
 		return w.GlobalMemoryFile(), true
-	case memoryPlan:
-		return filepath.Join(w.SessionMemoryDir(id), "plan.md"), true
+	case memoryMemory:
+		return w.SessionMemoryFile(id), true
 	case memoryDeadEnds:
 		return filepath.Join(w.SessionMemoryDir(id), "dead-ends.md"), true
 	default:
@@ -158,7 +163,7 @@ func (ff *FreeformSession) memoryPathChecked(which string) (string, error) {
 	path, ok := memoryPath(w, ff.id, which)
 	if !ok {
 		return "", fmt.Errorf("which is one of %q, %q or %q — %q is none of them",
-			memoryGlobal, memoryPlan, memoryDeadEnds, which)
+			memoryGlobal, memoryMemory, memoryDeadEnds, which)
 	}
 	return path, nil
 }
@@ -206,8 +211,15 @@ func (e *Engine) handleMemoryTool(s *Session, tc *agent.ToolCall) {
 
 // readMemory returns a memory file's content. A file nothing has written
 // yet is a normal state, not an error — the tools are how the first write
-// happens — so it reads back as a note.
+// happens — so it reads back as a note. A card's session memory is
+// migrated off its former name before the read; the rename needs no
+// lock, because it never replaces an existing target.
 func (ff *FreeformSession) readMemory(which string) (string, error) {
+	if which == memoryMemory {
+		if _, err := ff.engine.cfg.Workspace.LegacyPlanRename(ff.id); err != nil {
+			return "", err
+		}
+	}
 	path, err := ff.memoryPathChecked(which)
 	if err != nil {
 		return "", err
@@ -226,7 +238,7 @@ func (ff *FreeformSession) readMemory(which string) (string, error) {
 	}
 }
 
-// writeMemory fills one memory file. plan and dead-ends are the card's
+// writeMemory fills one memory file. memory and dead-ends are the card's
 // own and take either form; global is not a session's to write at all —
 // the person fills it by hand and a later distillation pass owns what
 // goes into it, so the tool refuses it before anything touches a file.
@@ -246,7 +258,7 @@ func (ff *FreeformSession) writeMemory(which, content string, addTo bool) (strin
 	if which == memoryGlobal {
 		return "", errors.New("global memory is not written by sessions: it is filled by hand " +
 			"and distilled from session memory later — record what you learned in " +
-			"your own \"plan\" or \"dead-ends\" and say in the thread if it should " +
+			"your own \"memory\" or \"dead-ends\" and say in the thread if it should " +
 			"move up to global")
 	}
 	// the cap is checked before the append/replace split: an append onto
@@ -263,6 +275,13 @@ func (ff *FreeformSession) writeMemory(which, content string, addTo bool) (strin
 	// free to race them.
 	ff.writeMu.Lock()
 	defer ff.writeMu.Unlock()
+	// the card's session memory may still sit under its former name:
+	// migrate before this write lands under the current one
+	if which == memoryMemory {
+		if _, err := ff.engine.cfg.Workspace.LegacyPlanRename(ff.id); err != nil {
+			return "", err
+		}
+	}
 	if err := ensureMemoryDir(path); err != nil {
 		return "", err
 	}
@@ -341,10 +360,15 @@ func (e *Engine) memoryCard(id domain.FeatureID) string {
 	if w.Root == "" {
 		return ""
 	}
+	// the session memory may still sit under its former name; the
+	// migration is best effort here — a read that finds nothing after a
+	// failed rename degrades exactly as an absent file does today
+	_, _ = w.LegacyPlanRename(id)
 	global, gCut := readMemoryInline(w.GlobalMemoryFile(), maxGlobalInline)
-	plan, pCut := readMemoryInline(filepath.Join(w.SessionMemoryDir(id), "plan.md"), maxSessionMemoryInline)
+	memPath, _ := memoryPath(w, id, memoryMemory)
+	mem, mCut := readMemoryInline(memPath, maxSessionMemoryInline)
 	dead, dCut := readMemoryInline(filepath.Join(w.SessionMemoryDir(id), "dead-ends.md"), maxSessionMemoryInline)
-	if global == "" && plan == "" && dead == "" {
+	if global == "" && mem == "" && dead == "" {
 		return ""
 	}
 	var b strings.Builder
@@ -358,11 +382,11 @@ func (e *Engine) memoryCard(id domain.FeatureID) string {
 		}
 		b.WriteString("\n")
 	}
-	if plan != "" || dead != "" {
+	if mem != "" || dead != "" {
 		fmt.Fprintf(&b, "\nSession memory, this card's own (%s):\n", id)
-		if plan != "" {
-			fmt.Fprintf(&b, "\nPlan:\n\n%s", plan)
-			if pCut {
+		if mem != "" {
+			fmt.Fprintf(&b, "\nMemory:\n\n%s", mem)
+			if mCut {
 				b.WriteString("\n\n(truncated — read the rest with memory_read)")
 			}
 			b.WriteString("\n")

@@ -17,9 +17,9 @@ type Memory struct {
 	// here reads it at spawn; it is filled by hand, and sessions record
 	// what should move up to it in their own memory.
 	Global MemoryDoc `json:"global"`
-	// Plan and DeadEnds are the card's own session memory: the working
-	// plan, kept current, and what it tried that failed.
-	Plan     MemoryDoc `json:"plan"`
+	// Memory and DeadEnds are the card's own session memory: the working
+	// notes, kept current, and what it tried that failed.
+	Memory   MemoryDoc `json:"memory"`
 	DeadEnds MemoryDoc `json:"deadEnds"`
 }
 

@@ -181,7 +181,7 @@ func TestMemoryShape(t *testing.T) {
 		Populated: Memory{
 			Dir:      ".gummi/memory",
 			Global:   MemoryDoc{Path: ".gummi/memory/global.md", Text: "The repo's checks are make ci."},
-			Plan:     MemoryDoc{Path: ".gummi/memory/FF-002/plan.md", Text: "# Plan\n- split the parser"},
+			Memory:   MemoryDoc{Path: ".gummi/memory/FF-002/memory.md", Text: "# Plan\n- split the parser"},
 			DeadEnds: MemoryDoc{},
 		},
 		None: Memory{

@@ -3587,12 +3587,15 @@ and `memory_write`, to read the lot and fill the card's own.
   memory and says so in the thread. The reason is ownership, not caution:
   the tier a workspace curates must not be writable underneath whoever
   curates it.
-- **Session memory** (`<card>/plan.md` and `<card>/dead-ends.md`) is the
+- **Session memory** (`<card>/memory.md` and `<card>/dead-ends.md`) is the
   card's own — the working plan, kept current, and the dead ends,
   recorded so no later turn pays for a failure twice. A replace goes
   through `atomicfile`, an append through a single `O_APPEND` write, and
   a card's writes serialize on the session — an MCP backend can issue
-  two at once.
+  two at once. Cards whose memory still sits in the file's former name,
+  `plan.md`, are migrated on first touch by a no-replace rename
+  (`state.Workspace.LegacyPlanRename`), so existing sessions start from
+  what they learned.
 
 None of it is required: no gate reads it, no section is demanded, and no
 stage session is ever offered the tools — a stage's durable context

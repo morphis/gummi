@@ -114,12 +114,55 @@ func (w Workspace) GlobalMemoryFile() string {
 	return filepath.Join(w.MemoryDir(), "global.md")
 }
 
-// SessionMemoryDir is one freeform card's own memory directory (its plan
-// and dead-ends). Keyed by card, so a session's memory is its own and
-// outlives its worktree: a card whose tree was cleaned still has what it
-// learned, and no card ever has another's.
+// SessionMemoryDir is one freeform card's own memory directory (its
+// memory and dead-ends). Keyed by card, so a session's memory is its own
+// and outlives its worktree: a card whose tree was cleaned still has what
+// it learned, and no card ever has another's.
 func (w Workspace) SessionMemoryDir(id domain.FeatureID) string {
 	return filepath.Join(w.MemoryDir(), string(id))
+}
+
+// SessionMemoryFile is the card's own working-notes file inside its
+// session memory directory. It was named plan.md until the memory tier
+// carried one name end to end; LegacyPlanRename moves an old file aside
+// on first touch.
+func (w Workspace) SessionMemoryFile(id domain.FeatureID) string {
+	return filepath.Join(w.SessionMemoryDir(id), "memory.md")
+}
+
+// LegacyPlanRename migrates a card's session memory from its former file
+// name, plan.md, to the current one: it is what a reader or writer that
+// finds memory.md absent and plan.md present calls before touching the
+// file, so existing cards keep their working notes under the renamed
+// name without a migration pass.
+//
+// The rename is no-replace by construction, not by check: os.Link lands
+// a second name on the old file's inode — atomic, and it fails with
+// EEXIST when memory.md already exists — and only then is plan.md
+// removed. A checked os.Rename would be check-then-act and would replace
+// the target on collision: a web GET could find memory.md absent, watch
+// a session's write land it, and clobber the fresh write. No lock is
+// what makes this safe to call from anywhere: the link replaces nothing,
+// so a concurrent write always wins, and EEXIST (already migrated, or a
+// fresh write won the race) and ENOENT (nothing to migrate) are both
+// benign — not renamed, nil error. A crash between link and remove
+// leaves both files; the next touch reads EEXIST as already-migrated and
+// the stray plan.md is ignored.
+func (w Workspace) LegacyPlanRename(id domain.FeatureID) (bool, error) {
+	old := filepath.Join(w.SessionMemoryDir(id), "plan.md")
+	next := w.SessionMemoryFile(id)
+	err := os.Link(old, next)
+	switch {
+	case err == nil:
+		// the link landed on the absent target: drop the old name, best
+		// effort — a failed remove is the stray-plan.md case above
+		_ = os.Remove(old)
+		return true, nil
+	case errors.Is(err, fs.ErrExist), errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, fmt.Errorf("migrating %s to %s: %w", old, next, err)
+	}
 }
 
 // ConfigFile is the repo-controlled config (verify checks, permissions).

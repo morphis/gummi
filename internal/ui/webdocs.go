@@ -449,7 +449,11 @@ func sortMarkers(ms []spec.Marker) {
 // document is its spec, and memory belongs to no stage of it.
 //
 // A read, like Spec's: it reports what is on disk and says nothing about
-// the session — the files are plain markdown, editable by hand.
+// the session — the files are plain markdown, editable by hand. The
+// card's session memory is migrated off its former file name first, so a
+// card whose notes still sit in plan.md reads them under the current
+// one; the migration never replaces an existing file, so it needs no
+// lock.
 func (d *WebDocs) Memory() (webapi.Memory, error) {
 	if !d.f.IsFreeform() {
 		return webapi.Memory{None: true, Why: "memory is a freeform session's; this card's documents are its stages'"}, nil
@@ -458,7 +462,10 @@ func (d *WebDocs) Memory() (webapi.Memory, error) {
 	if err != nil {
 		return webapi.Memory{}, err
 	}
-	plan, err := d.memoryDoc(filepath.Join(d.ws.SessionMemoryDir(d.f.ID), "plan.md"))
+	if _, err := d.ws.LegacyPlanRename(d.f.ID); err != nil {
+		return webapi.Memory{}, err
+	}
+	mem, err := d.memoryDoc(d.ws.SessionMemoryFile(d.f.ID))
 	if err != nil {
 		return webapi.Memory{}, err
 	}
@@ -469,7 +476,7 @@ func (d *WebDocs) Memory() (webapi.Memory, error) {
 	return webapi.Memory{
 		Dir:      d.rel(d.ws.MemoryDir()),
 		Global:   global,
-		Plan:     plan,
+		Memory:   mem,
 		DeadEnds: dead,
 	}, nil
 }

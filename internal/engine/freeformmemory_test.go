@@ -124,11 +124,12 @@ func TestAFreeformSessionIsOfferedMemoryTools(t *testing.T) {
 }
 
 // TestMemoryToolsRoundTrip: a freeform session's memory is filled through
-// the tools and read back — plan replaced and appended, dead-ends
+// the tools and read back — memory replaced and appended, dead-ends
 // appended — and each write lands where the next backend's spawn hint
 // reads it from (memoryCard). Global is refused outright: not a
 // session's to write — the person fills it by hand and a later
-// distillation pass owns what goes into it.
+// distillation pass owns what goes into it — and the refusal names the
+// card's own files under their current names.
 func TestMemoryToolsRoundTrip(t *testing.T) {
 	ag := agent.NewFake("")
 	ag.Caps = agent.Capabilities{ClientTools: true, UsageEvents: true, Interrupt: true}
@@ -150,27 +151,27 @@ func TestMemoryToolsRoundTrip(t *testing.T) {
 	sess := ff.Session()
 
 	// reads of files nothing wrote yet are normal, not errors
-	if got := driveMemoryTool(t, e, sess, memoryReadToolName, `{"which":"plan"}`); !strings.Contains(got, "nothing written yet") {
-		t.Errorf("read of empty plan = %q", got)
+	if got := driveMemoryTool(t, e, sess, memoryReadToolName, `{"which":"memory"}`); !strings.Contains(got, "nothing written yet") {
+		t.Errorf("read of empty memory = %q", got)
 	}
 
-	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"# Plan\n- split the parser"}`); got != "wrote plan" {
-		t.Errorf("plan replace resolved %q", got)
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"memory","content":"# Plan\n- split the parser"}`); got != "wrote memory" {
+		t.Errorf("memory replace resolved %q", got)
 	}
-	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"- part two","append":true}`); got != "appended to plan" {
-		t.Errorf("plan append resolved %q", got)
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"memory","content":"- part two","append":true}`); got != "appended to memory" {
+		t.Errorf("memory append resolved %q", got)
 	}
-	planPath := filepath.Join(ws.SessionMemoryDir(f.ID), "plan.md")
-	if b, err := fRead(planPath); err != nil || !strings.Contains(b, "split the parser") || !strings.Contains(b, "part two") {
-		t.Errorf("plan.md lost an entry (%v):\n%s", err, b)
+	memPath := ws.SessionMemoryFile(f.ID)
+	if b, err := fRead(memPath); err != nil || !strings.Contains(b, "split the parser") || !strings.Contains(b, "part two") {
+		t.Errorf("memory.md lost an entry (%v):\n%s", err, b)
 	}
 
 	// a replace starts over: what it said is the whole file
-	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"# Plan, second try"}`); got != "wrote plan" {
-		t.Errorf("plan re-replace resolved %q", got)
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"memory","content":"# Plan, second try"}`); got != "wrote memory" {
+		t.Errorf("memory re-replace resolved %q", got)
 	}
-	if b, _ := fRead(planPath); strings.Contains(b, "split the parser") {
-		t.Errorf("plan replace did not replace:\n%s", b)
+	if b, _ := fRead(memPath); strings.Contains(b, "split the parser") {
+		t.Errorf("memory replace did not replace:\n%s", b)
 	}
 
 	// dead-ends accumulate
@@ -185,7 +186,8 @@ func TestMemoryToolsRoundTrip(t *testing.T) {
 		t.Errorf("dead-ends.md lost an entry:\n%s", b)
 	}
 
-	// global is not a session's to write — no replace, no append
+	// global is not a session's to write — no replace, no append, and
+	// the refusal points at the card's own files under their current names
 	for _, args := range []string{
 		`{"which":"global","content":"overwrite the world"}`,
 		`{"which":"global","content":"sneak in with append","append":true}`,
@@ -193,6 +195,9 @@ func TestMemoryToolsRoundTrip(t *testing.T) {
 		if got := driveMemoryTool(t, e, sess, memoryWriteToolName, args); !strings.Contains(got, "not written by sessions") {
 			t.Errorf("global write %s resolved %q, want the refusal", args, got)
 		}
+	}
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"global","content":"x"}`); !strings.Contains(got, `"memory"`) {
+		t.Errorf("global refusal does not name the card's own memory: %q", got)
 	}
 	if _, err := fRead(ws.GlobalMemoryFile()); err == nil {
 		t.Error("a refused global write created global.md anyway")
@@ -209,9 +214,16 @@ func TestMemoryToolsRoundTrip(t *testing.T) {
 		t.Errorf("read of global = %q", got)
 	}
 
-	// an unknown which is refused by name, listing the three
+	// an unknown which is refused by name, listing the three — and the
+	// former name is unknown like any other: no alias is kept
 	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"notebook","content":"x"}`); !strings.Contains(got, `"dead-ends"`) {
 		t.Errorf("unknown which resolved %q, want the three listed", got)
+	}
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"x"}`); !strings.Contains(got, `"plan" is none of them`) {
+		t.Errorf("the former which was served: %q", got)
+	}
+	if got := driveMemoryTool(t, e, sess, memoryReadToolName, `{"which":"plan"}`); !strings.Contains(got, `"memory"`) {
+		t.Errorf("read refusal does not list the current values: %q", got)
 	}
 
 	// and the next spawn's hint carries what was written
@@ -236,20 +248,20 @@ func TestMemoryCardInlineIsCapped(t *testing.T) {
 		t.Errorf("memory card with nothing written = %q, want none", got)
 	}
 
-	// a plan far past its inline budget is cut, with the tail gone
-	plan := strings.Repeat("a", maxSessionMemoryInline+100) + "TAIL-MARKER"
-	if err := writeMemoryFile(t, ws, f.ID, "plan.md", plan); err != nil {
+	// a memory far past its inline budget is cut, with the tail gone
+	mem := strings.Repeat("a", maxSessionMemoryInline+100) + "TAIL-MARKER"
+	if err := writeMemoryFile(t, ws, f.ID, "memory.md", mem); err != nil {
 		t.Fatal(err)
 	}
 	card := e.memoryCard(f.ID)
 	if strings.Contains(card, "TAIL-MARKER") {
-		t.Error("the inline card carried a plan past its budget")
+		t.Error("the inline card carried a memory past its budget")
 	}
 	if !strings.Contains(card, "(truncated — read the rest with memory_read)") {
 		t.Errorf("the truncation is silent:\n%s", card)
 	}
 
-	// a plan inside the budget rides whole
+	// a memory inside the budget rides whole
 	small := "the approach is one file"
 	if err := writeMemoryFile(t, ws, f.ID, "dead-ends.md", small); err != nil {
 		t.Fatal(err)
@@ -274,12 +286,12 @@ func TestMemoryReadsAreCappedAndRuneSafe(t *testing.T) {
 	// not a spawned backend
 	ff := &FreeformSession{engine: e, id: f.ID}
 
-	// the plan's last runes straddle the cap, so a byte cut splits one
+	// the memory's last runes straddle the cap, so a byte cut splits one
 	content := strings.Repeat("a", maxMemoryFile-2) + "日本語"
-	if err := writeMemoryFile(t, ws, f.ID, "plan.md", content); err != nil {
+	if err := writeMemoryFile(t, ws, f.ID, "memory.md", content); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ff.readMemory("plan")
+	got, err := ff.readMemory("memory")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,26 +324,26 @@ func TestMemoryRefusesAnOversizeWrite(t *testing.T) {
 	waitFreeformIdle(t, ff)
 	sess := ff.Session()
 	big := strings.Repeat("x", maxMemoryFile+1)
-	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"`+big+`"}`); !strings.Contains(got, "capped") {
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"memory","content":"`+big+`"}`); !strings.Contains(got, "capped") {
 		t.Errorf("oversize replace resolved %q, want the cap", got)
 	}
 
 	// the cap holds on the append form too — an append onto a file
 	// nothing wrote yet would otherwise bypass appendMemory's own
 	// size check, which sees only the growth of a file with content
-	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"`+big+`","append":true}`); !strings.Contains(got, "capped") {
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"memory","content":"`+big+`","append":true}`); !strings.Contains(got, "capped") {
 		t.Errorf("oversize append onto an empty file resolved %q, want the cap", got)
 	}
-	if b, err := fRead(filepath.Join(ws.SessionMemoryDir(f.ID), "plan.md")); err == nil && b != "" {
-		t.Errorf("a refused oversize append wrote plan.md anyway:\n%.80s", b)
+	if b, err := fRead(ws.SessionMemoryFile(f.ID)); err == nil && b != "" {
+		t.Errorf("a refused oversize append wrote memory.md anyway:\n%.80s", b)
 	}
 
 	// and a file already at the cap refuses further growth with the
 	// way out named: replace it tighter
-	if err := writeMemoryFile(t, ws, f.ID, "plan.md", strings.Repeat("y", maxMemoryFile-4)); err != nil {
+	if err := writeMemoryFile(t, ws, f.ID, "memory.md", strings.Repeat("y", maxMemoryFile-4)); err != nil {
 		t.Fatal(err)
 	}
-	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"plan","content":"abcd","append":true}`); !strings.Contains(got, "replace it") {
+	if got := driveMemoryTool(t, e, sess, memoryWriteToolName, `{"which":"memory","content":"abcd","append":true}`); !strings.Contains(got, "replace it") {
 		t.Errorf("append at the cap resolved %q, want the way out", got)
 	}
 }
@@ -347,9 +359,89 @@ func TestMemoryToolsAreRefusedOutsideFreeform(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{memoryReadToolName, memoryWriteToolName} {
-		if got := driveMemoryTool(t, e, s, name, `{"which":"plan","content":"x"}`); !strings.Contains(got, "only available in a freeform session") {
+		if got := driveMemoryTool(t, e, s, name, `{"which":"memory","content":"x"}`); !strings.Contains(got, "only available in a freeform session") {
 			t.Errorf("%s on a stage session resolved %q", name, got)
 		}
+	}
+}
+
+// TestMemoryMigratesTheFormerPlanName: a card whose session memory still
+// sits in plan.md keeps it — the first tool read, the first write and
+// the spawn hint all move the file to memory.md before touching it, and
+// the content survives byte for byte. The rename never replaces: an
+// existing memory.md is authoritative and a stray plan.md beside it is
+// ignored, left on disk, read by nothing. A card with no memory yet
+// reads "nothing written" and gains no file.
+func TestMemoryMigratesTheFormerPlanName(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(agent.NewFake("")), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+
+	// content preserved byte for byte, plan.md gone, before the read
+	f := freeformCard(6, "carry the notes over")
+	createFeature(t, store, f)
+	notes := "# Working notes\n- the parser split three ways\n"
+	if err := writeMemoryFile(t, ws, f.ID, "plan.md", notes); err != nil {
+		t.Fatal(err)
+	}
+	ff := &FreeformSession{engine: e, id: f.ID}
+	got, err := ff.readMemory(memoryMemory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "the parser split three ways") {
+		t.Errorf("read after migration = %q", got)
+	}
+	if b, err := fRead(ws.SessionMemoryFile(f.ID)); err != nil || b != notes {
+		t.Errorf("memory.md after migration (%v) =\n%q, want the plan.md bytes", err, b)
+	}
+	if _, err := os.Stat(filepath.Join(ws.SessionMemoryDir(f.ID), "plan.md")); !os.IsNotExist(err) {
+		t.Errorf("plan.md survived the migration (stat err %v)", err)
+	}
+
+	// and what the spawn hint inlines is the migrated content, under
+	// the renamed name — the next backend starts from it
+	if card := e.memoryCard(f.ID); !strings.Contains(card, "the parser split three ways") || !strings.Contains(card, "\nMemory:\n") {
+		t.Errorf("spawn hint lacks the migrated memory:\n%s", card)
+	}
+
+	// an existing memory.md is never clobbered: the fresh write wins,
+	// the stray plan.md is ignored and left on disk
+	f2 := freeformCard(7, "fresh wins")
+	createFeature(t, store, f2)
+	if err := writeMemoryFile(t, ws, f2.ID, "plan.md", "stale notes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMemoryFile(t, ws, f2.ID, "memory.md", "fresh notes"); err != nil {
+		t.Fatal(err)
+	}
+	fff := &FreeformSession{engine: e, id: f2.ID}
+	got, err = fff.readMemory(memoryMemory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "fresh notes" {
+		t.Errorf("read with both files = %q, want the existing memory.md", got)
+	}
+	if b, _ := fRead(ws.SessionMemoryFile(f2.ID)); b != "fresh notes" {
+		t.Errorf("the rename clobbered memory.md:\n%s", b)
+	}
+	if _, err := os.Stat(filepath.Join(ws.SessionMemoryDir(f2.ID), "plan.md")); err != nil {
+		t.Errorf("the stray plan.md did not survive beside memory.md: %v", err)
+	}
+
+	// absent stays absent: no rename fabricates an empty memory.md
+	f3 := freeformCard(8, "nothing yet")
+	createFeature(t, store, f3)
+	fff = &FreeformSession{engine: e, id: f3.ID}
+	if got, err := fff.readMemory(memoryMemory); err != nil || !strings.Contains(got, "nothing written yet") {
+		t.Errorf("read of absent memory = %q, %v", got, err)
+	}
+	if _, err := os.Stat(ws.SessionMemoryFile(f3.ID)); !os.IsNotExist(err) {
+		t.Errorf("an absent memory.md was fabricated (stat err %v)", err)
+	}
+	if card := e.memoryCard(f3.ID); card != "" {
+		t.Errorf("spawn hint with nothing written = %q, want none", card)
 	}
 }
 
