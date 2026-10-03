@@ -518,6 +518,15 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 	if a == nil {
 		return fmt.Errorf("%s's freeform session has no live agent", ff.id)
 	}
+	// A line typed while a question is open is an answer waiting to be
+	// given, not a turn: the agent is blocked on the question, and a line
+	// delivered as a turn would reach it without closing the decision, so
+	// the card would keep asking for the answer it already has. Refused
+	// before anything is echoed or recorded, as Engine.SendTurn does; the
+	// answer goes through the question itself.
+	if sess.Snapshot().PendingAsk != nil {
+		return fmt.Errorf("%s is waiting on your answer: %w", ff.id, agent.ErrBusy)
+	}
 	if len(images) > 0 {
 		if err := ff.engine.checkImageCapable(sess); err != nil {
 			return err

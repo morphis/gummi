@@ -1164,3 +1164,43 @@ func TestATurnTheBackendStartsItselfIsBusy(t *testing.T) {
 		}
 	}
 }
+
+// TestAFreeformLineWhileAskOpenIsRefusedNotTurned: a freeform card's
+// person typing while the agent is blocked on a question must be refused
+// the way a stage session refuses it, not delivered as a turn. A turn
+// reaches the agent without closing the decision, so the card keeps
+// showing an open question that was already answered in the thread.
+func TestAFreeformLineWhileAskOpenIsRefusedNotTurned(t *testing.T) {
+	ag := agent.NewFake("ack")
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	f := freeformCard(2, "wire up the picker")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "start"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	sess := ff.Session()
+	sess.setPendingAsk(&Ask{Question: "Which picker?", DecisionID: "call:1:mcp-1"})
+
+	const line = "Yes"
+	err = ff.Send(ctx, line)
+	if !errors.Is(err, agent.ErrBusy) {
+		t.Fatalf("a line with a question open returned %v, want ErrBusy", err)
+	}
+	if snap := sess.Snapshot(); snap.PendingAsk == nil {
+		t.Fatal("the refusal dropped the question it was refusing on behalf of")
+	}
+	for _, m := range sess.Snapshot().Transcript {
+		if m.Content == line {
+			t.Fatalf("a refused line is in the transcript as if it had been delivered: %+v", m)
+		}
+	}
+}
