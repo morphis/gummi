@@ -81,13 +81,17 @@ function pickedOnly (d) {
 
 // startSession sends the draft's first message: the card is created with
 // it, the page moves onto the card, and its first turn is already running.
-// A refusal is thrown back to the composer, which keeps the line.
-export async function startSession (text) {
+// A refusal is thrown back to the composer, which keeps the line. atts
+// are the ids of images already uploaded (the composer's paperclip) —
+// they ride the description the card is seeded with, and its first turn
+// carries them natively when the agent it starts on can take images.
+export async function startSession (text, atts = []) {
   const d = state.sessionDraft
   const req = { kind: 'freeform', description: text, backend: d.backend, model: d.model, envelope: d.envelope }
   if (d.repo) req.repo = d.repo
   if (d.mainCheckout) req.mainCheckout = true
   else if (d.base) req.base = d.base
+  if (atts.length) req.attachments = atts
   const c = await post('/api/cards', req)
   set({ sessionDraft: null })
   await ctx.refreshBoard?.()
@@ -134,6 +138,22 @@ function cancelDraft () {
   ctx.clearComposer?.()
   const first = state.board?.rows?.[0]?.id
   if (first) ctx.select(first)
+}
+
+// draftTakesImages is whether the session this draft would start can
+// take a turn's images: the agent its pair names, the form's default
+// pair answering for one that has not picked (or has not loaded its
+// form) — the backend-level half of the live answer a card's composer
+// state reports once the session exists. The first message's attachments
+// ride the description the card is seeded with, and an agent that cannot
+// take them natively still gets each one by its path, so nothing here
+// can be refused.
+export function draftTakesImages () {
+  const d = state.sessionDraft
+  if (!d) return false
+  const backend = d.backend || form?.sessions?.default?.backend || ''
+  const a = (form?.sessions?.agents || []).find((x) => x.name === backend)
+  return !!a?.images
 }
 
 // sessionPair is what the picker shows: the draft's pick, or the pair an

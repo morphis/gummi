@@ -379,6 +379,16 @@ func (e *Engine) recordConsult(id domain.FeatureID, author Author, content, by s
 	_ = e.cfg.Store.AppendEvent(context.Background(), ev)
 }
 
+// Session returns c's current backend session, or nil if none has ever
+// spawned — SessionTakesImages's hook into the consult session's own
+// capability, which it must ask without a turn in flight. It never
+// spawns: OpenConsult is the only opener.
+func (c *ConsultSession) Session() *Session {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sess
+}
+
 // Snapshot returns a render-safe copy of the consult session's current
 // backend state (an empty Snapshot if none has ever spawned).
 func (c *ConsultSession) Snapshot() Snapshot {

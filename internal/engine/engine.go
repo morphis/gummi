@@ -2275,34 +2275,91 @@ type imagesSupporter interface {
 	SupportsImages(ctx context.Context, model string) (bool, error)
 }
 
-// SessionTakesImages reports whether a card's live session can take a
-// turn's images right now — the composer's attach control reads this,
+// SessionTakesImages reports whether the next line a card's composer
+// sends can carry images — the composer's attach control reads this,
 // unlike checkImageCapable (SendTurn's own gate), which stays backend-
 // level only so a model-level refusal still surfaces as an error at the
-// adapter rather than needing a live check on every send.
+// adapter rather than needing a live check on every send. The line
+// reaches the session it would be routed to: a freeform card's own
+// session (never in e.live — OpenFreeform's doc comment on
+// FreeformSession.Session), a live stage session (the steer path), or —
+// any other card in the workflow — its consult session.
 //
-// A freeform card's session is never in e.live (OpenFreeform's doc
-// comment on FreeformSession.Session) — it is checked there too, or the
-// control would stay hidden on every freeform card regardless of backend.
+// The consult path answers even before a session exists: an idle card's
+// first prose line opens one (OpenConsult), and its attach control would
+// otherwise be hidden exactly where a screenshot of the thing being asked
+// about is most wanted. Nothing is spawned to answer; the backend the
+// open would resolve answers structurally, and only the per-model part
+// (copilot's vision flag) stays unknowable until the session is live — a
+// refusal then surfaces at the send, with the line restored. The same
+// structural answer covers a freeform card whose session nothing has
+// opened yet — a restart before its first turn.
+//
+// A goal takes no turns at all — its notes ride the lead's next turn — so
+// it is false here.
 func (e *Engine) SessionTakesImages(ctx context.Context, id domain.FeatureID) bool {
-	s := e.Get(id)
-	if s == nil {
-		if ff := e.Freeform(id); ff != nil {
-			s = ff.Session()
+	if s := e.Get(id); s != nil {
+		return e.imageCapable(ctx, s)
+	}
+	if ff := e.Freeform(id); ff != nil {
+		if s := ff.Session(); s != nil {
+			return e.imageCapable(ctx, s)
 		}
 	}
-	if s == nil {
+	f, err := e.feature(ctx, id)
+	if err != nil {
 		return false
 	}
+	if f.IsFreeform() {
+		if f.Stage == domain.StageDone {
+			// landed: the card's session is closed, and its open refuses
+			// a closed card — the same floor OpenFreeform enforces
+			return false
+		}
+		_, backend := e.sessionRole(f)
+		return e.structurallyTakesImages(backend)
+	}
+	if f.IsGoal() {
+		return false
+	}
+	if c := e.Consult(id); c != nil {
+		if s := c.Session(); s != nil {
+			return e.imageCapable(ctx, s)
+		}
+	}
+	_, backend := e.resolveConsultRole(f.Profile)
+	return e.structurallyTakesImages(backend)
+}
+
+// imageCapable is the live answer an existing session gives about its own
+// next turn: the structural gate (an ImageSender backend whose advertised
+// capabilities take images) plus, for an adapter that can answer per
+// model (copilot, via the CLI's own cached model list), the model's.
+func (e *Engine) imageCapable(ctx context.Context, s *Session) bool {
 	if e.checkImageCapable(s) != nil {
 		return false
 	}
-	snap := s.Snapshot()
 	if sup, ok := s.agent().(imagesSupporter); ok {
-		can, err := sup.SupportsImages(ctx, snap.Model)
+		can, err := sup.SupportsImages(ctx, s.Snapshot().Model)
 		return err == nil && can
 	}
 	return true
+}
+
+// structurallyTakesImages is imageCapable for a session that does not
+// exist yet — the backend the session's open would resolve answers
+// structurally, without spawning anything. An agentFor fallback to the
+// default (a named backend this host does not run) is a no: the open
+// would refuse that name rather than silently switch.
+func (e *Engine) structurallyTakesImages(backend string) bool {
+	a := e.agentFor(backend)
+	if a == nil {
+		return false
+	}
+	if backend != "" && a.Name() != backend {
+		return false
+	}
+	return a.Capabilities().Images
 }
 
 // deliverTurn dispatches msg (and any images) as the session's next turn

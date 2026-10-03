@@ -121,6 +121,11 @@ type SessionAgent struct {
 	// The picker hides a typed id that does not match; the server still
 	// checks every pick.
 	Pattern string `json:"pattern,omitempty"`
+	// Images is whether the agent can take images natively with a turn
+	// (agent.Capabilities.Images) — the backend-level half of the live
+	// answer Composer.Images reports for a card whose session is open. A
+	// session draft's composer reads it for the agent its pair names.
+	Images bool `json:"images,omitempty"`
 }
 
 // Choice is one option in a select: a value and the words for it.

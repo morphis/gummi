@@ -21,7 +21,7 @@ import { toast } from './toast.js?v=__ASSET_V__'
 import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick } from './decision.js?v=__ASSET_V__'
 import { openActions } from './head.js?v=__ASSET_V__'
 import { openView } from './views.js?v=__ASSET_V__'
-import { startSession } from './session.js?v=__ASSET_V__'
+import { startSession, draftTakesImages } from './session.js?v=__ASSET_V__'
 
 let classify = true // POST …/composer is answered by this server
 let said = null // { id, text, says, route } for the open card
@@ -104,7 +104,7 @@ export function initComposer (ctx) {
   })
   on(['sel'], () => { clearComposer(); said = null; setNote('') })
   on(['card', 'hi', 'conn', 'picked', 'sessionDraft'], renderSays)
-  on(['card'], renderAttachButton)
+  on(['card', 'sessionDraft'], renderAttachButton)
   ctx.clearComposer = clearComposer
   ctx.restoreComposer = restore
   // a line enter would otherwise have given to an answer that takes no
@@ -124,12 +124,16 @@ export function clearComposer () {
   renderSays()
 }
 
-// renderAttachButton shows the paperclip only when the card's current
-// agent can take images with a turn (Composer.Images) — a control the
-// backend would refuse is worse than none, since it invites a line that
-// comes straight back.
+// renderAttachButton shows the paperclip only when the turn this line
+// would produce can take images — a control the backend would refuse is
+// worse than none, since it invites a line that comes straight back. On
+// a card that is its agent's live answer (Composer.Images). With a
+// session draft open there is no card yet, and the first message is what
+// mints one: the draft's pair answers structurally (draftTakesImages),
+// and an agent that cannot take the images natively still gets each one
+// by its path, so nothing is refused here.
 function renderAttachButton () {
-  $('#composer-attach').hidden = !state.card?.composer?.images
+  $('#composer-attach').hidden = !state.card?.composer?.images && !draftTakesImages()
 }
 
 // addFiles uploads each file (POST /api/attachments) and tracks it as a
@@ -310,13 +314,13 @@ function placeholder () {
   return 'Message the agent, or type a command'
 }
 
-async function submitDraft (text) {
+async function submitDraft (text, atts = []) {
   if (!text || sending) return
   if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
   sending = true
   renderSays()
   try {
-    await startSession(text)
+    await startSession(text, atts)
     setNote('')
   } catch (err) {
     setNote(sentence(err.data?.error || err.message), 'err')
@@ -327,14 +331,14 @@ async function submitDraft (text) {
 }
 
 async function submit ({ asLine = false } = {}) {
-  if (state.sessionDraft) return submitDraft(state.draft.trim())
   const d = openDecision()
   const text = state.draft.trim()
   if (d && !text) { answer(); return }
-  if (!text || sending || !state.sel) return
-  if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
   if (attachments.some((a) => a.pending)) { setNote('Still uploading an image — wait a moment and send again.', 'info'); return }
   if (attachments.some((a) => a.error)) { setNote('Remove the failed attachment before sending.', 'err'); return }
+  if (state.sessionDraft) return submitDraft(text, [...attachments])
+  if (!text || sending || !state.sel) return
+  if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
   const id = state.sel
   if (d && !asLine) {
     // enter was pressed before the line was classified: ask now

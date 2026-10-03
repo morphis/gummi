@@ -498,3 +498,59 @@ func TestConsultSeedStampsTheProducingRole(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionTakesImagesChecksTheConsultPath: an idle workflow card's
+// prose line goes to its consult session — the one already open if there
+// is one, otherwise the one a first consult send would open — so the
+// composer's attach control answers for that session's capability, not
+// only for a live stage session's. A consult session that has never been
+// opened is answered structurally (nothing is spawned to ask): the
+// backend its open would resolve. A goal takes no turns at all — its
+// notes ride the lead's next turn — so it is false whatever the backend
+// can do.
+func TestSessionTakesImagesChecksTheConsultPath(t *testing.T) {
+	ctx := context.Background()
+	for _, images := range []bool{true, false} {
+		ag := agent.NewFake("ack")
+		ag.Caps.Images = images
+		unregister := agent.RegisterCapabilities("fake", ag.Caps)
+		ws, store, wt := newRepo(t)
+		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+		t.Cleanup(func() { e.Close() })
+
+		f := feature(7, "why does the sync flake", domain.StageTodo)
+		createFeature(t, store, f)
+
+		// idle, nothing opened yet: the consult a first send would spawn,
+		// answered structurally
+		if got := e.SessionTakesImages(ctx, f.ID); got != images {
+			t.Errorf("SessionTakesImages = %v on an idle card with no consult yet, want %v", got, images)
+		}
+
+		// opened: its own session answers
+		c, err := e.OpenConsult(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := e.SessionTakesImages(ctx, f.ID); got != images {
+			t.Errorf("SessionTakesImages = %v with the consult session open, want %v", got, images)
+		}
+		_ = c
+		unregister()
+	}
+
+	// a goal: no turn for it to take
+	gid, _ := domain.NewID(domain.KindGoal, 1)
+	g := domain.Feature{ID: gid, Num: 1, Kind: domain.KindGoal, Title: "an objective", Slug: "an-objective", Stage: domain.StagePlan, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	ws, store, wt := newRepo(t)
+	ag := agent.NewFake("ack")
+	ag.Caps.Images = true
+	unregister := agent.RegisterCapabilities("fake", ag.Caps)
+	defer unregister()
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	createFeature(t, store, g)
+	if e.SessionTakesImages(ctx, g.ID) {
+		t.Errorf("SessionTakesImages = true on a goal card, want false: a goal's notes ride its lead's next turn")
+	}
+}

@@ -99,8 +99,36 @@ func TestAFreeformTurnDoesNotCommit(t *testing.T) {
 // never in e.live (OpenFreeform's doc comment), so SessionTakesImages —
 // what the web composer's attach control reads — must still find it
 // through the freeform registry, or the control would stay hidden on
-// every freeform card regardless of backend.
+// every freeform card regardless of backend. A card nothing has been
+// sent to yet — a restart before its first turn — has no session at all:
+// the pair its open would use answers structurally, or the control would
+// be hidden on the very first message too.
 func TestSessionTakesImagesChecksFreeformToo(t *testing.T) {
+	ctx := context.Background()
+	for _, images := range []bool{true, false} {
+		ag := agent.NewFake("ack")
+		ag.Caps.Images = images
+		unregister := agent.RegisterCapabilities("fake", ag.Caps)
+		ws, store, wt := newRepo(t)
+		e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+		f := freeformCard(1, "poke at the attachments")
+		createFeature(t, store, f)
+
+		if got := e.SessionTakesImages(ctx, f.ID); got != images {
+			t.Errorf("SessionTakesImages = %v before any session opened, want %v (the pair its open would use, structurally)", got, images)
+		}
+		if _, err := e.OpenFreeform(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		if got := e.SessionTakesImages(ctx, f.ID); got != images {
+			t.Errorf("SessionTakesImages = %v for a freeform card with its session open, want %v", got, images)
+		}
+		unregister()
+		e.Close()
+	}
+
+	// a landed session is closed, and its open refuses a closed card: the
+	// control is hidden there whatever the backend can do
 	ag := agent.NewFake("ack")
 	ag.Caps.Images = true
 	unregister := agent.RegisterCapabilities("fake", ag.Caps)
@@ -108,19 +136,11 @@ func TestSessionTakesImagesChecksFreeformToo(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
 	t.Cleanup(func() { e.Close() })
-	ctx := context.Background()
-
-	f := freeformCard(1, "poke at the attachments")
+	f := freeformCard(2, "landed already")
+	f.Stage = domain.StageDone
 	createFeature(t, store, f)
-
 	if e.SessionTakesImages(ctx, f.ID) {
-		t.Fatalf("SessionTakesImages = true before any session opened")
-	}
-	if _, err := e.OpenFreeform(ctx, f); err != nil {
-		t.Fatal(err)
-	}
-	if !e.SessionTakesImages(ctx, f.ID) {
-		t.Errorf("SessionTakesImages = false for a freeform card on a capable backend")
+		t.Errorf("SessionTakesImages = true on a landed session, want false: its open refuses a closed card")
 	}
 }
 

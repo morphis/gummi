@@ -118,7 +118,7 @@ func TestSessionModelsShape(t *testing.T) {
 		Sessions: SessionModels{
 			Default: SessionModel{Backend: "claude", Model: "claude-sonnet-5-5"},
 			Agents: []SessionAgent{
-				{Name: "claude", Installed: true, Models: []string{"claude-opus-5-5", "claude-sonnet-5-5"}, Hint: "versions with dashes"},
+				{Name: "claude", Installed: true, Models: []string{"claude-opus-5-5", "claude-sonnet-5-5"}, Hint: "versions with dashes", Images: true},
 				{Name: "opencode", Installed: false, Models: []string{}, NeedsModel: true, Hint: "provider/model"},
 			},
 			Recent: []SessionModel{{Backend: "codex", Model: "gpt-5"}},

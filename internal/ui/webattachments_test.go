@@ -333,3 +333,61 @@ func TestSpecNoteWithAttachmentIsOneLine(t *testing.T) {
 		t.Errorf("note text %q is not one line", note.Text)
 	}
 }
+
+// TestCreateCardAttachmentsRideTheSessionFirstTurn asserts that a session
+// (a freeform card) started with a first message that carries attachment
+// ids delivers those images to the session's first turn itself, the way a
+// capable backend takes them — not only as links in the text.
+func TestCreateCardAttachmentsRideTheSessionFirstTurn(t *testing.T) {
+	ag := agent.NewFake("ack")
+	ag.Caps.Images = true
+	unregister := agent.RegisterCapabilities("fake", ag.Caps)
+	defer unregister()
+	b, _, eng, _, _ := headlessBoard(t, ag)
+	ctx := context.Background()
+
+	ref, err := b.PutAttachment(bytes.NewReader(testPNG), "shot.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := b.CreateCard(ctx, webapi.CreateCardRequest{
+		Kind:        "freeform",
+		Description: "Fix the header: the screenshot shows it wrapping.\n\nSee the attached image.",
+		Attachments: []string{ref.ID},
+	}, "Simon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := domain.FeatureID(c.ID)
+
+	deadline := time.Now().Add(10 * time.Second)
+	var snap engine.Snapshot
+	for time.Now().Before(deadline) {
+		if ff := eng.Freeform(id); ff != nil {
+			snap = ff.Snapshot()
+			if !snap.Busy && len(snap.Transcript) > 0 {
+				break
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+		if time.Now().After(deadline) {
+			t.Fatalf("%s's first turn never settled: %+v", id, snap)
+		}
+	}
+	var found *engine.Message
+	for i := range snap.Transcript {
+		if snap.Transcript[i].Author == "user" {
+			found = &snap.Transcript[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("transcript has no user turn: %+v", snap.Transcript)
+	}
+	if len(found.Images) != 1 || found.Images[0].Name != "shot.png" {
+		t.Fatalf("first turn images = %+v, want shot.png", found.Images)
+	}
+	if strings.Contains(found.Content, "Attached image:") {
+		t.Errorf("a capable backend got the image by path line: %q", found.Content)
+	}
+}

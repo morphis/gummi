@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
@@ -54,11 +55,13 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 	}
 	for _, name := range engine.SessionBackends {
 		needs, hint, pattern := engine.SessionModelRule(name)
+		caps, _ := agent.CapabilitiesFor(name)
 		out.Agents = append(out.Agents, webapi.SessionAgent{
 			Name:       name,
 			Installed:  (m.engine != nil && m.engine.HasAgent(name)) || agentInstalled(name),
 			Models:     append([]string{}, suggest[name]...),
 			NeedsModel: needs, Hint: hint, Pattern: pattern,
+			Images: caps.Images,
 		})
 	}
 	var named []domain.Feature

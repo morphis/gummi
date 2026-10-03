@@ -12,7 +12,8 @@
           "claude-opus-5-5",
           "claude-sonnet-5-5"
         ],
-        "hint": "versions with dashes"
+        "hint": "versions with dashes",
+        "images": true
       },
       {
         "name": "opencode",

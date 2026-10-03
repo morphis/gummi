@@ -8,8 +8,8 @@ import { shot } from '../fixtures/shots';
 // by reference (the spec shows the image once the card exists), and the
 // composer's own upload + thread rendering (the only surfaces every e2e
 // profile here can actually exercise, since every one of them runs the
-// headless backend — out of scope for image delivery, so its composer
-// never offers the attach control at all).
+// headless backend — out of scope for image delivery, so its composer and
+// a session draft's attach control are never offered at all).
 
 async function openForm(page: Page, phone: boolean) {
   if (phone) await page.getByTestId('card-back').click();
@@ -35,6 +35,19 @@ test('a new card attaches an image and its spec shows it', async ({ pairedPage: 
   await expect(img).toHaveAttribute('src', /\/api\/attachments\/[0-9a-f]{64}$/);
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
   await shot(page, info, 'attachments-spec');
+});
+
+test('a session draft hides its attach control on the headless backend', async ({ pairedPage: page }, info) => {
+  const phone = info.project.name === 'phone';
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  if (phone) await page.getByTestId('card-back').click();
+  await page.getByTestId('rail-new-session').click();
+  await expect(page.getByTestId('draft-hero')).toBeVisible();
+
+  // the draft has no card yet, so its paperclip answers for the agent the
+  // draft's pair names — every profile this harness configures runs the
+  // headless backend, which never reports the image capability
+  await expect(page.getByTestId('composer-attach')).toBeHidden();
 });
 
 test('the composer hides its attach control on the headless backend, and a thread thumbnail loads the real bytes behind it', async ({ pairedPage: page, server, api }, info) => {
