@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -436,6 +437,56 @@ func sortMarkers(ms []spec.Marker) {
 			ms[j], ms[j-1] = ms[j-1], ms[j]
 		}
 	}
+}
+
+// ---------------------------------------------------------------- memory
+
+// Memory is a freeform card's project memory as it stands: the
+// workspace's global memory and the card's own session memory — the
+// documents its session reads at spawn (engine.memoryCard) and fills as
+// it works, shown the way a workflow card's spec is. A workflow card
+// answers None with Why, the way Spec answers a freeform card: its
+// document is its spec, and memory belongs to no stage of it.
+//
+// A read, like Spec's: it reports what is on disk and says nothing about
+// the session — the files are plain markdown, editable by hand.
+func (d *WebDocs) Memory() (webapi.Memory, error) {
+	if !d.f.IsFreeform() {
+		return webapi.Memory{None: true, Why: "memory is a freeform session's; this card's documents are its stages'"}, nil
+	}
+	global, err := d.memoryDoc(d.ws.GlobalMemoryFile())
+	if err != nil {
+		return webapi.Memory{}, err
+	}
+	plan, err := d.memoryDoc(filepath.Join(d.ws.SessionMemoryDir(d.f.ID), "plan.md"))
+	if err != nil {
+		return webapi.Memory{}, err
+	}
+	dead, err := d.memoryDoc(filepath.Join(d.ws.SessionMemoryDir(d.f.ID), "dead-ends.md"))
+	if err != nil {
+		return webapi.Memory{}, err
+	}
+	return webapi.Memory{
+		Dir:      d.rel(d.ws.MemoryDir()),
+		Global:   global,
+		Plan:     plan,
+		DeadEnds: dead,
+	}, nil
+}
+
+// memoryDoc reads one memory file for the wire. A file nothing has
+// written yet reads as empty text — the page's placeholder — not an
+// error; any other read failure propagates.
+func (d *WebDocs) memoryDoc(path string) (webapi.MemoryDoc, error) {
+	rel := d.rel(path)
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return webapi.MemoryDoc{Path: rel}, nil
+	}
+	if err != nil {
+		return webapi.MemoryDoc{}, err
+	}
+	return webapi.MemoryDoc{Path: rel, Text: strings.TrimRight(string(raw), "\n")}, nil
 }
 
 // ----------------------------------------------------------------- files

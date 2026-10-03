@@ -69,6 +69,7 @@ export function keysHelp () {
       k('['), h('span', null, 'Collapse or expand the rail'),
       k(']'), h('span', null, 'Show or hide the document panel'),
       h('h3', null, 'Document panel'),
+      k('g', 'm'), h('span', null, 'Memory'),
       k('g', 's'), h('span', null, 'Spec'),
       k('g', 'd'), h('span', null, 'Diff'),
       k('g', 'l'), h('span', null, 'Log'),

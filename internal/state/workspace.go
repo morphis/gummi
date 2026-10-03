@@ -100,6 +100,28 @@ func (w Workspace) EvidenceDir(owner domain.FeatureID) string {
 	return filepath.Join(w.GummiDir(), "evidence", string(owner))
 }
 
+// MemoryDir holds freeform cards' project memory: the global memory file
+// every freeform session here reads, and one subdirectory per card
+// holding that card's own session memory. Workspace content, never
+// committed — like specs/, and for a sharper reason: a memory tier that
+// lived on branches would fork per branch and conflict across the
+// concurrent cards it exists to connect.
+func (w Workspace) MemoryDir() string { return filepath.Join(w.GummiDir(), "memory") }
+
+// GlobalMemoryFile is the global memory file: the tier every freeform
+// session in this workspace is handed at spawn.
+func (w Workspace) GlobalMemoryFile() string {
+	return filepath.Join(w.MemoryDir(), "global.md")
+}
+
+// SessionMemoryDir is one freeform card's own memory directory (its plan
+// and dead-ends). Keyed by card, so a session's memory is its own and
+// outlives its worktree: a card whose tree was cleaned still has what it
+// learned, and no card ever has another's.
+func (w Workspace) SessionMemoryDir(id domain.FeatureID) string {
+	return filepath.Join(w.MemoryDir(), string(id))
+}
+
 // ConfigFile is the repo-controlled config (verify checks, permissions).
 func (w Workspace) ConfigFile() string { return filepath.Join(w.GummiDir(), "config.yaml") }
 
@@ -195,7 +217,7 @@ var managedTreeDirs = []string{"worktrees", "scratch"}
 // filepath.Dir(root) so that root itself — where .gummi/ sits as a direct
 // child, not inside any managed tree — is never inspected. Each ancestor
 // .gummi/ and each managed tree directory must be a real directory (not a
-// symlink), matching the anti-symlink-smuggle convention of mkdirChecked.
+// symlink), matching the anti-symlink-smuggle convention of MkdirChecked.
 func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
 	for p := filepath.Dir(root); ; p = filepath.Dir(p) {
 		if fi, err := os.Lstat(filepath.Join(p, ".gummi")); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
@@ -277,7 +299,7 @@ func Init(ws, repo string) (Workspace, error) {
 		{w.IngestDir(), 0o750},
 	}
 	for _, d := range dirs {
-		if err := mkdirChecked(d.path, d.perm); err != nil {
+		if err := MkdirChecked(d.path, d.perm); err != nil {
 			return Workspace{}, err
 		}
 	}
@@ -296,12 +318,12 @@ func Init(ws, repo string) (Workspace, error) {
 	return w, nil
 }
 
-// mkdirChecked creates a gummi directory unless it already exists, but
+// MkdirChecked creates a gummi directory unless it already exists, but
 // first refuses a symlink or non-directory sitting at that path — the
 // committed-symlink escape a bare MkdirAll would silently follow. The
 // caller creates parents before children, so a verified parent means only
 // the leaf component here can be hostile.
-func mkdirChecked(path string, perm os.FileMode) error {
+func MkdirChecked(path string, perm os.FileMode) error {
 	if fi, err := os.Lstat(path); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", path)

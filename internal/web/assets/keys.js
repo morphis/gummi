@@ -1,5 +1,5 @@
 // keys.js — the board's keyboard: j/k walk the rail, n opens the next card
-// that needs you, g then s/d/p/r picks a panel tab, [ and ] fold the rail
+// that needs you, g then s/m/d/p/r picks a panel tab, [ and ] fold the rail
 // and the panel, / writes, ? lists the keys, ⌘K/Ctrl-K jumps. Digits pick
 // an answer and enter gives it. Letter keys never fire while typing, and
 // nothing uses alt (alt+d is the address bar on Windows and Linux).
@@ -23,7 +23,7 @@ export function initKeys (a) {
     if (t.getAttribute?.('role') === 'button' && (e.key === 'Enter' || e.key === ' ')) return
     if (gAt && Date.now() - gAt < 1200) {
       gAt = 0
-      const tab = { s: 'spec', d: 'diff', l: 'log', p: 'pr', r: 'stats' }[e.key]
+      const tab = { s: 'spec', m: 'memory', d: 'diff', l: 'log', p: 'pr', r: 'stats' }[e.key]
       if (tab) { e.preventDefault(); a.setTab(tab) }
       return
     }

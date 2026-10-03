@@ -122,7 +122,7 @@ dialog), `action-confirm`, `action-cancel`.
 | id | what |
 |---|---|
 | `panel` | the right landmark |
-| `panel-tabs`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
+| `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
 | `panel-close` | hide the panel |
 | `panel-pane` | the tab body; `data-tab` = open tab |
 | `panel-loading`, `panel-unavailable`, `panel-error` | tab states (unavailable = the route answers 501) |
@@ -135,6 +135,11 @@ Spec: `spec`, `spec-toc`, `spec-toc-<i>`, `spec-doc`, `spec-src`, `spec-title`,
 the note above it: "resolved by" when it closes it, "answered by" when an
 agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-pending` (how many notes hold the
 gate), `spec-request-changes` (sends them to the stage that owns them: the TUI's R), `spec-none`.
+
+Memory: `memory`, `memory-src` (where the files live), `memory-global`,
+`memory-plan`, `memory-dead-ends` (a document's title and its rendered
+markdown; nothing written yet reads as a placeholder), `memory-none`
+(why a card has none — the workflow-card answer).
 
 Request changes that sends a card back to an earlier stage asks first:
 `changes-confirm` (the dialog), `changes-question`, `changes-go`,

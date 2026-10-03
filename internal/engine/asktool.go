@@ -633,6 +633,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleSpecReplaceSection(s, tc)
 	case watchToolName, unwatchToolName:
 		e.handleWatchTool(s, tc)
+	case memoryReadToolName, memoryWriteToolName:
+		e.handleMemoryTool(s, tc)
 	default:
 		e.resolveNow(s, tc.ID, fmt.Sprintf("unknown tool %q — proceed without it", tc.Name))
 	}

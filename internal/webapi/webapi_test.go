@@ -169,3 +169,24 @@ func TestChangeKey(t *testing.T) {
 		}
 	}
 }
+
+// TestMemoryShape pins the fields the page reads for a freeform card's
+// project memory: the three documents, each a path and its content, and
+// the none-answer a workflow card gets.
+func TestMemoryShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Populated Memory
+		None      Memory
+	}{
+		Populated: Memory{
+			Dir:      ".gummi/memory",
+			Global:   MemoryDoc{Path: ".gummi/memory/global.md", Text: "The repo's checks are make ci."},
+			Plan:     MemoryDoc{Path: ".gummi/memory/FF-002/plan.md", Text: "# Plan\n- split the parser"},
+			DeadEnds: MemoryDoc{},
+		},
+		None: Memory{
+			None: true,
+			Why:  "memory is a freeform session's; this card's documents are its stages'",
+		},
+	}))
+}

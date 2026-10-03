@@ -1,0 +1,21 @@
+{
+  "Populated": {
+    "dir": ".gummi/memory",
+    "global": {
+      "path": ".gummi/memory/global.md",
+      "text": "The repo's checks are make ci."
+    },
+    "plan": {
+      "path": ".gummi/memory/FF-002/plan.md",
+      "text": "# Plan\n- split the parser"
+    },
+    "deadEnds": {}
+  },
+  "None": {
+    "none": true,
+    "why": "memory is a freeform session's; this card's documents are its stages'",
+    "global": {},
+    "plan": {},
+    "deadEnds": {}
+  }
+}

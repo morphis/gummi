@@ -31,6 +31,7 @@ func (s *Server) docsRoutes() {
 	s.api("GET /api/cards/{id}/thread", s.handleThread)
 	s.api("GET /api/cards/{id}/live", s.handleLive)
 	s.api("GET /api/cards/{id}/spec", s.handleSpec)
+	s.api("GET /api/cards/{id}/memory", s.handleMemory)
 	s.api("POST /api/cards/{id}/spec/notes", s.handleSpecNote)
 	s.api("POST /api/cards/{id}/spec/notes/resolve", s.handleSpecResolve)
 	s.api("POST /api/cards/{id}/spec/changes", s.handleSpecChanges)
@@ -152,6 +153,22 @@ func (s *Server) handleSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, sp)
+}
+
+// handleMemory is GET /api/cards/{id}/memory: a freeform card's project
+// memory — the workspace's global memory and the card's own session
+// memory — read the way the spec tab reads a workflow card's document.
+func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	mem, err := d.Memory()
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, mem)
 }
 
 func (s *Server) handleSpecNote(w http.ResponseWriter, r *http.Request) {

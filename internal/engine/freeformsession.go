@@ -94,6 +94,14 @@ type FreeformSession struct {
 	// instead" is said — and until then each can be taken back.
 	queue []queuedTurn
 
+	// writeMu serializes one card's memory writes (freeformmemory.go):
+	// an MCP backend may issue two memory_write calls in parallel —
+	// mcpsock dispatches each in its own goroutine — and a rename-based
+	// replace racing an append would drop the append onto the replaced
+	// inode. Native backends are pump-serialized and never race; this
+	// is for the ones that can.
+	writeMu sync.Mutex
+
 	// lockMu guards release, this engine's hold on the card's per-card
 	// lock. The hold spans a BACKEND's life, not the conversation's: a
 	// backend is what drives the card, and while one exists the worktree
@@ -319,6 +327,15 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			tools = append(tools, extra...)
 			hints = append(hints, freeformWatchHint)
 		}
+		// Project memory (freeformmemory.go): the workspace's global
+		// memory — read-only to the session — and the session's own
+		// files under .gummi/memory, inlined at spawn by memoryCard
+		// and filled as the session works. Offered on every freeform
+		// backend with a tool route — independent of whether it has
+		// a Monitor of its own.
+		extra = append(extra, memoryReadTool(), memoryWriteTool())
+		tools = append(tools, memoryReadTool(), memoryWriteTool())
+		hints = append(hints, freeformMemoryHint)
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage, extra...)
 		if merr != nil {
 			cancel()
@@ -409,6 +426,15 @@ func (e *Engine) freeformHints(ctx context.Context, f domain.Feature, workDir st
 			hints = append(hints, card)
 		}
 		if card := e.repoCard(mgr.RepoRoot()); card != "" {
+			hints = append(hints, card)
+		}
+	}
+	// Project memory — the workspace's global memory and this card's
+	// session memory — is the read-at-the-start half; it rides only a
+	// backend that has a tool route, because its own text promises the
+	// tools that fill it.
+	if caps := ag.Capabilities(); caps.ClientTools || caps.MCPTools {
+		if card := e.memoryCard(f.ID); card != "" {
 			hints = append(hints, card)
 		}
 	}
@@ -1137,9 +1163,10 @@ func (e *Engine) exhaustFreeform(ff *FreeformSession, sess *Session) {
 //
 // Inline on the pump goroutine, unlike dispatchConsultClientTool, which
 // hands its call to a goroutine because card_diff shells out to git and
-// would stall every event behind it. The only tool reachable here is
-// resolve_annotation — one store write, and it resolves itself
-// immediately — so it is dispatched the way a stage session's is.
+// would stall every event behind it. Every tool reachable here —
+// resolve_annotation, the watch pair, the memory pair — resolves at once
+// (store and file writes, no human in the loop), so it is dispatched the
+// way a stage session's is.
 func (e *Engine) dispatchFreeformClientTool(ff *FreeformSession, sess *Session, tc *agent.ToolCall) {
 	if tc == nil {
 		return

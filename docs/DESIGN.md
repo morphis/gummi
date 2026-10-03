@@ -3533,9 +3533,10 @@ excluded from. Between turns there is no backend and the tree is committed,
 so there is nothing left to exclude, and a board left open overnight stops
 blocking every CLI landing of every freeform card on it.
 
-Its tool surface is `resolve_annotation`, `ask_user` and, on a backend with
-no watch tool of its own, `watch`/`unwatch` — and no spec tools, since
-there is no document for them to reach. The review loop needs
+Its tool surface is `resolve_annotation`, `ask_user`, `memory_read` and
+`memory_write` (§19.3c), and, on a backend with no watch tool of its own,
+`watch`/`unwatch` — and no spec tools, since there is no document for
+them to reach. The review loop needs
 `resolve_annotation`; `ask_user` is how any coding-agent session stops for a
 decision instead of guessing. `watch` is gummi's stand-in for Claude Code's
 Monitor (`agent.Capabilities.NativeWatch`): gummi runs the command in the
@@ -3581,6 +3582,39 @@ runs — never rides into it. `Validate` holds the invariants (freeform
 only, and no base, no branch, no stack position), and `Manager.Ensure`
 refuses to cut the tree the card was minted to do without, whatever
 caller reaches it.
+
+### 19.3c Project memory — what a session starts from, and what it fills
+
+A freeform card's durable context is three markdown files under
+`.gummi/memory/`, never committed, read by its session at every spawn —
+the tier beneath the branch and beside the conversation, and the one
+thing a respawned backend starts from beyond whatever replay or resume
+§19.3a can hand it. Each spawn inlines what memory holds into the system
+hints, capped per file, and the session carries two tools, `memory_read`
+and `memory_write`, to read the lot and fill the card's own.
+
+- **Global memory** (`global.md`) is shared by every freeform session in
+  the workspace — the durable facts they should all start with. It is
+  **read-only to a session**: `memory_write` refuses it in either form.
+  The person fills and restructures it by hand, and a later, separate
+  distillation pass will own what goes into it; a session that learned
+  something the others should start with records it in its own session
+  memory and says so in the thread. The reason is ownership, not caution:
+  the tier a workspace curates must not be writable underneath whoever
+  curates it.
+- **Session memory** (`<card>/plan.md` and `<card>/dead-ends.md`) is the
+  card's own — the working plan, kept current, and the dead ends,
+  recorded so no later turn pays for a failure twice. A replace goes
+  through `atomicfile`, an append through a single `O_APPEND` write, and
+  a card's writes serialize on the session — an MCP backend can issue
+  two at once.
+
+None of it is required: no gate reads it, no section is demanded, and no
+stage session is ever offered the tools — a stage's durable context
+carrier is the spec, and memory is deliberately not that. The files sit
+inside the workspace's git exclusions, and the web face displays them
+read-only (§20). What distills from session memory into global is
+deferred with §19.7's list.
 
 ### 19.4 The review loop
 
@@ -3661,7 +3695,9 @@ card; today a freeform card's branch is cleaned up after it lands, or kept
 on purpose after a hand-off, exactly like any other card's. The PR
 landing route is withheld rather than wired: what "gummi follows the PR
 and waits" means for a card with no gate to wait at is a question nobody
-has answered.
+has answered. And project memory (§19.3c) waits for its distillation
+pass — the writer that folds what sessions record in their own memory up
+into the global tier they all read.
 
 Two things worth building next for their own sake: recording **which
 floor a landing crossed**, so "how much of this week landed without
