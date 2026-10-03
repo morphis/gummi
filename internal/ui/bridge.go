@@ -331,12 +331,14 @@ func (m *Shell) emitEngineChange(ev engine.Event) {
 		// reply. What the card offers turns on that flag — "stop this turn"
 		// or the review answers, what enter would do — so the update that
 		// flips it moves the card, not only its live block.
-		busy := m.webCardBusy(ev.Feature)
-		if was, seen := m.webBusy[ev.Feature]; !seen || was != busy {
-			if m.webBusy == nil {
-				m.webBusy = map[domain.FeatureID]bool{}
-			}
-			m.webBusy[ev.Feature] = busy
+		// the open watch is taken alongside the busy flag: a turn that
+		// starts and ends a watch can be read after it is already over, so
+		// the busy flag alone may never flip where the row's word changes
+		busy, watching := m.webCardBusy(ev.Feature), m.webCardWatching(ev.Feature)
+		was, seen := m.webBusy[ev.Feature]
+		wasWatching := m.webWatching[ev.Feature]
+		if !seen || was != busy || wasWatching != watching {
+			m.setWebState(ev.Feature, busy, watching)
 			m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
 			m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id})
 		}
@@ -348,13 +350,32 @@ func (m *Shell) emitEngineChange(ev engine.Event) {
 		// again here too, or a turn that ended in exhaustion or an error
 		// would leave it standing and the next turn's start would look
 		// like no change at all
-		if m.webBusy == nil {
-			m.webBusy = map[domain.FeatureID]bool{}
-		}
-		m.webBusy[ev.Feature] = m.webCardBusy(ev.Feature)
+		m.setWebState(ev.Feature, m.webCardBusy(ev.Feature), m.webCardWatching(ev.Feature))
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id})
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeLive, ID: id})
 	}
+}
+
+// setWebState records what the web last saw of card id: busy and watching.
+func (m *Shell) setWebState(id domain.FeatureID, busy, watching bool) {
+	if m.webBusy == nil {
+		m.webBusy = map[domain.FeatureID]bool{}
+	}
+	if m.webWatching == nil {
+		m.webWatching = map[domain.FeatureID]bool{}
+	}
+	m.webBusy[id] = busy
+	m.webWatching[id] = watching
+}
+
+// webCardWatching is whether card id has a watch open, gummi's or the
+// backend's own, whether or not a turn is running (freeform cards only).
+func (m *Shell) webCardWatching(id domain.FeatureID) bool {
+	if m.engine == nil {
+		return false
+	}
+	ff := m.engine.Freeform(id)
+	return ff != nil && ff.Watching()
 }
 
 // webCardBusy is whether card id has an agent mid-turn: its freeform

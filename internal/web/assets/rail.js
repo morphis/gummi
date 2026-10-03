@@ -115,7 +115,8 @@ function rowEl (r) {
     ? h('span', { class: 'badge needs' }, needsWord(r.needs, r.stage))
     : r.status === 'running'
       ? h('span', { class: ['badge run', r.running?.verb !== 'queued' && 'shimmer'], title: r.running?.why || null }, r.running?.pausing ? 'pausing' : r.running?.verb === 'queued' ? 'queued' : (r.running?.autopilot || r.autopilot) ? 'autopilot' : (r.running?.verb || 'working'))
-      : r.status === 'paused' ? h('span', { class: 'badge paused' }, 'paused') : null
+      : r.status === 'watching' ? h('span', { class: 'badge watch' }, 'watching')
+        : r.status === 'paused' ? h('span', { class: 'badge paused' }, 'paused') : null
   const title = [r.id, r.title, r.needs?.question, r.running?.why].filter(Boolean).join(' · ')
   return h('button', {
     class: ['row', sel && 'sel', r.status === 'needs' && 'needs'],

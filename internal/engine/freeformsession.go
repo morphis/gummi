@@ -802,6 +802,20 @@ func (ff *FreeformSession) Busy() bool {
 	return sess != nil && sess.Busy()
 }
 
+// Watching reports whether the card has a watch open, gummi's or the
+// backend's own, whether or not a turn is in flight. A watch is not work
+// in progress, so it is not Busy; it is what says the card will speak up
+// on its own.
+func (ff *FreeformSession) Watching() bool {
+	if len(ff.Watches()) > 0 {
+		return true
+	}
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+	return sess != nil && sess.openWatch(time.Now().Add(-freeformWatchMax))
+}
+
 // CardSpent is the card's running spend as the session has booked it
 // (Session.CardSpent), or 0 with no backend up.
 func (ff *FreeformSession) CardSpent() float64 {
@@ -828,6 +842,11 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 	for _, w := range ff.Watches() {
 		snap.Watches = append(snap.Watches, w.ID+" · "+w.Command)
 	}
+	// the backend's own watch (Claude Code's Monitor) is listed beside
+	// gummi's, so a reader sees it outside the activity row it was folded
+	// into; bounded like the idle timer's check, so a watch whose end was
+	// never reported does not stay listed forever
+	snap.Watches = append(snap.Watches, sess.openWatches(time.Now().Add(-freeformWatchMax))...)
 	return snap
 }
 

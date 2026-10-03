@@ -83,6 +83,16 @@ func (m *Shell) freeformTurnBusy(r featureRow) bool {
 	return ff != nil && ff.Snapshot().Busy
 }
 
+// freeformWatching reports a freeform card with a watch open and no turn in
+// flight: the agent will speak up on its own, so the idle row says so.
+func (m *Shell) freeformWatching(r featureRow) bool {
+	if !r.F.IsFreeform() || m.engine == nil {
+		return false
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	return ff != nil && ff.Watching()
+}
+
 // scribeSettled decrements a card's in-flight scribe-pass count by one,
 // removing the entry entirely once it reaches zero so "in flight" stays
 // testable as key-presence (m.baselining's own idiom).
@@ -145,6 +155,8 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		// busy (mark plus word on every row) without every glyph moving in
 		// lockstep off the shared clock.
 		loop = " " + s.Info.Render(m.spinnerGlyph(selected)) + " " + faint.Render(m.cardBusyWord(r))
+	} else if m.freeformWatching(r) {
+		loop = " " + s.Info.Render("◎") + " " + faint.Render("watching")
 	}
 	// the marker sits flush against the shortcut number, so it can't use
 	// BandMarker's padded form — same two styles, one column.

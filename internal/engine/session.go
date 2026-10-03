@@ -897,17 +897,23 @@ func (s *Session) appendTool(m Message) {
 	})
 }
 
-// openWatch reports whether the transcript holds a background watch
-// (agent.WatchTool) still pending that started after since.
-func (s *Session) openWatch(since time.Time) bool {
+// openWatches lists the background watches (agent.WatchTool) still pending
+// that started after since, as the transcript names them, oldest first.
+func (s *Session) openWatches(since time.Time) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var out []string
 	for _, m := range s.transcript {
 		if m.Author == AuthorTool && m.pending && agent.WatchTool(m.Tool) && m.At.After(since) {
-			return true
+			out = append(out, m.Content)
 		}
 	}
-	return false
+	return out
+}
+
+// openWatch reports whether a background watch is still pending since then.
+func (s *Session) openWatch(since time.Time) bool {
+	return len(s.openWatches(since)) > 0
 }
 
 // resolveToolResult attaches a backend-reported outcome to the pending

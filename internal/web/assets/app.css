@@ -159,6 +159,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .row.sel .badge.needs{background:color-mix(in srgb,var(--dc) 14%,var(--panel))}
 .badge.run{color:var(--fg2)}
 .badge.paused{color:var(--warn)}
+.badge.watch{color:var(--fg2)}
 .badge.stack{color:var(--fg3);border:1px solid var(--line2)}
 .row .badge.stack,.row .badge.else{line-height:15px}
 .badge.stack.stale{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,var(--line2))}

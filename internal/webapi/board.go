@@ -61,8 +61,11 @@ const (
 	StatusRunning RowStatus = "running"
 	StatusPaused  RowStatus = "paused"
 	StatusIdle    RowStatus = "idle"
-	StatusTodo    RowStatus = "todo"
-	StatusDone    RowStatus = "done"
+	// StatusWatching is a freeform card with no turn in flight but a watch
+	// still open: the agent will speak up on its own.
+	StatusWatching RowStatus = "watching"
+	StatusTodo     RowStatus = "todo"
+	StatusDone     RowStatus = "done"
 )
 
 // Row is one card on the rail.

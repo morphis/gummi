@@ -103,6 +103,8 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
+	case m.freeformWatching(r):
+		row.Status = webapi.StatusWatching
 	case sess != nil && sess.State() == engine.StatePaused:
 		row.Status = webapi.StatusPaused
 	default:

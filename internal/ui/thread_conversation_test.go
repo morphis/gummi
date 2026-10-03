@@ -994,3 +994,20 @@ func TestThreadShowsQueuedWait(t *testing.T) {
 		t.Errorf("the running card's spinner word is missing:\n%s", view)
 	}
 }
+
+// A still-open Monitor watch folds into its turn's summary as "watching",
+// not as a call in flight, so the thread says the card is listening.
+func TestActivityRowNamesAnOpenWatch(t *testing.T) {
+	s := theme.New(theme.GummiDark())
+	run := []engine.Message{
+		{Author: engine.AuthorTool, Tool: "Read", Content: "Read  a.go", ToolStatus: engine.ToolOK},
+		{Author: engine.AuthorTool, Tool: "Monitor", Content: "Monitor  tail -f build.log", ToolStatus: engine.ToolPending},
+	}
+	line := activityLine(s, run, 120)
+	if !strings.Contains(line, "watching") {
+		t.Errorf("activity row = %q, want it to name the open watch", line)
+	}
+	if strings.Contains(line, "tail -f build.log") {
+		t.Errorf("activity row = %q, the watch should read as watching, not as a call in flight", line)
+	}
+}

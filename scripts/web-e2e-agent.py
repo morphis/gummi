@@ -74,7 +74,8 @@ what the board answered.
 
 Any other message sent to a live session (a steer, a consult, a freeform
 turn, the board agent) gets a short acknowledgement quoting it; a freeform
-card's turn also edits a file so its diff is non-empty. A message opening
+card's turn also edits a file so its diff is non-empty. A freeform turn
+containing [watch] starts a Monitor watch it leaves open. A message opening
 with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
@@ -587,6 +588,12 @@ def stage_verify(turn, kickoff):
 
 
 def freeform_turn(turn, text):
+    if "[watch]" in text:
+        # a Monitor watch the turn leaves open: no result comes for it, so
+        # the card reads as watching once the turn is over
+        turn.tool("Monitor", "tail -f build.log", "ff-watch")
+        turn.say("Watching the build; I will tell you when it breaks.")
+        return
     wd = turn.ctx["workdir"]
     notes = os.path.join(wd, "NOTES.md")
     with open(notes, "a", encoding="utf-8") as fh:

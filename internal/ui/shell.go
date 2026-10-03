@@ -569,6 +569,9 @@ type Shell struct {
 	// streaming update moves only the live block, until the one that ends
 	// or starts a turn — that one moves the card's head and decision too.
 	webBusy map[domain.FeatureID]bool
+	// webWatching is the same for a freeform card's open watch: the turn
+	// that starts or settles one moves the board row's "watching" word too.
+	webWatching map[domain.FeatureID]bool
 	// webIngest is the ingest run as the web face names it (webingest.go).
 	webIngest webIngestState
 }

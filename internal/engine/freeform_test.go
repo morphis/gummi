@@ -937,6 +937,48 @@ func TestAnOpenWatchKeepsTheBackendUp(t *testing.T) {
 	}
 }
 
+// TestAnOpenWatchIsListedUntilItSettles: a card whose agent has a watch
+// open but no turn in flight still reads as watching, on the board and in
+// the thread's own list, and stops reading so once the watch settles.
+func TestAnOpenWatchIsListedUntilItSettles(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{
+			{Kind: agent.EventToolCall, Tool: "Monitor", Detail: "tail build.log", CallID: "w1"},
+			{Kind: agent.EventMessage, Text: "watching the build"},
+			{Kind: agent.EventIdle},
+		}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := freeformCard(1, "watch the build")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "tell me when it breaks"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if !ff.Watching() {
+		t.Fatal("an open watch does not read as watching with the turn over")
+	}
+	listed := false
+	for _, w := range ff.Snapshot().Watches {
+		listed = listed || strings.Contains(w, "tail build.log")
+	}
+	if !listed {
+		t.Errorf("snapshot watches = %q, want the open Monitor listed", ff.Snapshot().Watches)
+	}
+	ff.Session().resolveToolResult("w1", true, "build failed")
+	if ff.Watching() {
+		t.Error("a settled watch still reads as watching")
+	}
+}
+
 // TestAFreeformSessionKeepsOneChecklist: each restatement of the agent's
 // task list replaces the last in one transcript entry, which a restart
 // restores and a replay never hands back to the agent as conversation.

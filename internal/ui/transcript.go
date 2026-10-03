@@ -222,6 +222,7 @@ func isActivityMsg(msg engine.Message) bool {
 func activityLine(s *theme.Styles, run []engine.Message, w int) string {
 	var calls, fails, thoughts int
 	var inFlight string
+	var watching bool
 	for _, msg := range run {
 		switch {
 		case msg.Author == engine.AuthorThinking:
@@ -234,7 +235,13 @@ func activityLine(s *theme.Styles, run []engine.Message, w int) string {
 				fails++
 			case engine.ToolOK:
 			default:
-				inFlight = msg.Content
+				// a watch never settles while it runs, so it reads as
+				// watching, not as a call in flight (as on the web)
+				if threadfold.WatchTool(msg.Tool) {
+					watching = true
+				} else {
+					inFlight = msg.Content
+				}
 			}
 		}
 	}
@@ -251,7 +258,9 @@ func activityLine(s *theme.Styles, run []engine.Message, w int) string {
 	if thoughts > 0 {
 		parts = append(parts, s.Faint.Render(fmt.Sprintf("%d thought%s", thoughts, plural(thoughts))))
 	}
-	if inFlight != "" {
+	if watching {
+		parts = append(parts, s.Info.Render("watching"))
+	} else if inFlight != "" {
 		parts = append(parts, toolLineView(s, sanitize(inFlight), max(w-6, 8)))
 	}
 	return "  " + s.Faint.Render("▸ ") + strings.Join(parts, s.Faint.Render(" · ")) + s.Faint.Render("  (alt+o)")
