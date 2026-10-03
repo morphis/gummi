@@ -15,7 +15,14 @@
       "tools": 9,
       "toolFails": 0,
       "credits": 3.5,
-      "verdict": "approve"
+      "verdict": "approve",
+      "tokens": {
+        "input": 1200,
+        "cached": 800,
+        "output": 300
+      },
+      "contextPeak": 41000,
+      "contextLimit": 200000
     },
     {
       "stage": "implement",
@@ -64,7 +71,69 @@
     "agentMs": 60000,
     "onYouMs": 120000,
     "idleMs": 30000,
-    "elapsedMs": 210000
+    "elapsedMs": 210000,
+    "toFirstGateMs": 180000,
+    "toVerifiedMs": 210000
+  },
+  "hands": {
+    "turns": 6,
+    "toolCalls": 14,
+    "toolFails": 1,
+    "tools": [
+      {
+        "name": "read",
+        "calls": 9,
+        "totalMs": 40
+      },
+      {
+        "name": "run",
+        "calls": 5,
+        "fails": 1,
+        "detail": "go test ./...",
+        "totalMs": 2100
+      }
+    ],
+    "skills": [
+      {
+        "name": "skill",
+        "calls": 2,
+        "detail": "gummi-go-verify"
+      }
+    ],
+    "subagents": [
+      {
+        "name": "task",
+        "calls": 1,
+        "detail": "where do the stats render"
+      }
+    ],
+    "checks": [
+      {
+        "name": "build",
+        "runs": 3,
+        "fails": 1,
+        "excused": true
+      }
+    ]
+  },
+  "judgment": {
+    "gates": {
+      "total": 2,
+      "byYou": 1,
+      "byMachine": 1
+    },
+    "asks": {
+      "total": 1,
+      "byYou": 1,
+      "byMachine": 0
+    },
+    "parks": [
+      {
+        "reason": "verify failed",
+        "detail": "1 of 3 checks failed",
+        "at": "2026-09-27T09:12:00Z"
+      }
+    ]
   },
   "envelope": {
     "credits": 2000,

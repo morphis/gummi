@@ -13,6 +13,8 @@ type CardStats struct {
 	Sessions []StatSession `json:"sessions"`
 	Money    StatMoney     `json:"money"`
 	Clock    StatClock     `json:"clock"`
+	Hands    StatHands     `json:"hands"`
+	Judgment StatJudgment  `json:"judgment"`
 	// Envelope is the budget and how much of it is left.
 	Envelope StatEnvelope `json:"envelope"`
 }
@@ -33,6 +35,13 @@ type StatSession struct {
 	Credits     float64   `json:"credits"`
 	Estimated   float64   `json:"estimated,omitempty"`
 	Verdict     string    `json:"verdict,omitempty"`
+	// Tokens is what the pass spent in tokens — the grain Credits is the
+	// sum of. Absent when the backend reported no token figures.
+	Tokens Tokens `json:"tokens,omitzero"`
+	// ContextPeak and ContextLimit are how close the pass came to its
+	// context window; absent when the backend never reported occupancy.
+	ContextPeak  int64 `json:"contextPeak,omitempty"`
+	ContextLimit int64 `json:"contextLimit,omitempty"`
 	// Redo marks work the card had already done; RedoReason is
 	// "corrected" or "reproved".
 	Redo          bool   `json:"redo,omitempty"`
@@ -70,6 +79,74 @@ type StatClock struct {
 	OnYouMs   int64 `json:"onYouMs"`
 	IdleMs    int64 `json:"idleMs"`
 	ElapsedMs int64 `json:"elapsedMs"`
+	// ToFirstGateMs is how long until the card first crossed a design
+	// gate, and ToVerifiedMs until its verify stage first passed; absent
+	// until it has happened.
+	ToFirstGateMs int64 `json:"toFirstGateMs,omitempty"`
+	ToVerifiedMs  int64 `json:"toVerifiedMs,omitempty"`
+}
+
+// StatHands is what the card did, as against what it decided.
+type StatHands struct {
+	Turns     int `json:"turns"`
+	ToolCalls int `json:"toolCalls"`
+	ToolFails int `json:"toolFails"`
+	// Tools is every recorded agent tool call, by name and descending
+	// count. It is omitted — never empty — when the card's backend
+	// recorded none, so "this backend reports no tool calls" stays a
+	// different fact on the wire from "this card made none". The tag is
+	// omitzero, not the repo's usual omitempty: omitempty collapses nil
+	// and empty, and only the nil side may read as absent.
+	Tools     []StatToolUse  `json:"tools,omitzero"`
+	Skills    []StatToolUse  `json:"skills,omitempty"`
+	Subagents []StatToolUse  `json:"subagents,omitempty"`
+	Checks    []StatCheckRun `json:"checks,omitempty"`
+}
+
+// StatToolUse is one tool the card called, and how that went.
+type StatToolUse struct {
+	Name  string `json:"name"`
+	Calls int    `json:"calls"`
+	Fails int    `json:"fails,omitempty"`
+	// Detail is the argument of the most recent call — on a skill or a
+	// subagent, the only thing that says what was delegated.
+	Detail string `json:"detail,omitempty"`
+	// TotalMs is the summed duration of the calls that reported one.
+	TotalMs int64 `json:"totalMs,omitempty"`
+}
+
+// StatCheckRun is one named gummi check and its tally across the card.
+type StatCheckRun struct {
+	Name  string `json:"name"`
+	Runs  int    `json:"runs"`
+	Fails int    `json:"fails,omitempty"`
+	// Excused marks a failure written off as pre-existing by the card's
+	// baseline.
+	Excused bool `json:"excused,omitempty"`
+}
+
+// StatJudgment is what the card decided, and who decided it.
+type StatJudgment struct {
+	Gates StatAnswered `json:"gates"`
+	Asks  StatAnswered `json:"asks"`
+	// Parks is every time the card stopped and waited for someone. The
+	// ones the board process quit made are already out — the fold leaves
+	// them off, and the projection does not re-filter.
+	Parks []StatPark `json:"parks,omitempty"`
+}
+
+// StatAnswered is a count of decisions split by who took them.
+type StatAnswered struct {
+	Total     int `json:"total"`
+	ByYou     int `json:"byYou"`
+	ByMachine int `json:"byMachine"`
+}
+
+// StatPark is one time the card stopped and waited for someone.
+type StatPark struct {
+	Reason string    `json:"reason"`
+	Detail string    `json:"detail,omitempty"`
+	At     time.Time `json:"at"`
 }
 
 // StatEnvelope is the budget a card runs against.

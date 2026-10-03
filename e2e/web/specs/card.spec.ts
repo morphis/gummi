@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures/test';
-import { decision, mockCard } from '../fixtures/contract';
+import { decision, mockCard, stats } from '../fixtures/contract';
 import { shot } from '../fixtures/shots';
 
 // The card page's drawing against contract-shaped answers (fixtures/
@@ -124,7 +124,64 @@ test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info
   await expect(page.getByTestId('pr-push-cmd')).toHaveText('git push origin feat/add-a-wave-helper');
   await shot(page, info, 'pr');
   await page.getByTestId('tab-stats').click();
-  await expect(page.getByTestId('stats-spent')).toContainText('8.5');
+  await expect(page.getByTestId('stats-spent')).toContainText('11.0');
   await expect(page.getByTestId('stats-table').locator('tr.rework')).toHaveCount(1);
+  // where it went: the stage/role/model bars, the estimated mark among them
+  await expect(page.getByTestId('stats-bars')).toContainText('implement');
+  await expect(page.getByTestId('stats-bars')).toContainText('6.5');
+  await expect(page.getByTestId('stats-bars')).toContainText('estimated');
+  // the redo block names the pass, and flags the one that cost more than
+  // the first pass of the same work
+  await expect(page.getByTestId('stats-redo')).toContainText('corrected');
+  await expect(page.getByTestId('stats-redo')).toContainText('cost more than the first');
+  // the clock: a bar over the segments the card has, no idle one
+  await expect(page.getByTestId('stats-clock')).toContainText('agent working');
+  await expect(page.getByTestId('stats-clock')).toContainText('waiting on you');
+  await expect(page.getByTestId('stats-clock')).toContainText('elapsed');
+  await expect(page.getByTestId('stats-clock')).toContainText('to first gate');
+  await expect(page.getByTestId('stats-clock')).toContainText('to verified');
+  await expect(page.getByTestId('stats-clock')).not.toContainText('nothing running');
+  // its hands: the tool table, what was handed to a skill and a subagent,
+  // and gummi's checks with the excused marking
+  await expect(page.getByTestId('stats-hands')).toContainText('turns 9');
+  await expect(page.getByTestId('stats-hands')).toContainText('12 calls, 1 failed');
+  await expect(page.getByTestId('stats-tools')).toContainText('run');
+  await expect(page.getByTestId('stats-hands')).toContainText('gummi-go-verify');
+  await expect(page.getByTestId('stats-hands')).toContainText('1 spawned');
+  await expect(page.getByTestId('stats-hands')).toContainText('find the fold');
+  await expect(page.getByTestId('stats-checks')).toContainText('clean');
+  await expect(page.getByTestId('stats-checks')).toContainText('pre-existing, excused');
+  // its judgment: gates and asks split by who answered, and the park
+  await expect(page.getByTestId('stats-judgment')).toContainText('2 gates');
+  await expect(page.getByTestId('stats-judgment')).toContainText('1 asks');
+  await expect(page.getByTestId('stats-judgment')).toContainText('1 of 3 checks failed');
+  // the envelope line carries the utilization
+  await expect(page.getByTestId('stats-envelope')).toContainText('granted 40 · spent 11.0 · 28% used');
+  // the passes table's honesty marks: per-pass tokens with the components
+  // beside the total, and the context occupancy where the pass reported one
+  await expect(page.getByTestId('stats-table')).toContainText('81k');
+  await expect(page.getByTestId('stats-table')).toContainText('31k cached');
+  await expect(page.getByTestId('stats-table')).toContainText('2.1k out');
+  await expect(page.getByTestId('stats-table').locator('.ctxm')).toHaveCount(1);
   await shot(page, info, 'stats');
+});
+
+// The honesty sentence on an absent tools array: a backend that reports no
+// tool calls reads as words — never as a zeroed tools line.
+test('the stats tab says none recorded where a backend reports no tool calls', async ({ pairedPage: page }, info) => {
+  await mockCard(page, id);
+  // JSON.stringify drops undefined keys, so tools gone from the spread
+  // answers the wire's absent array, not an empty one the card made none of
+  await page.route(`**/api/cards/${id}/stats`, (r) => r.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ...stats, hands: { ...stats.hands, tools: undefined } }),
+  }));
+  await page.reload();
+  await page.getByTestId('tab-stats').click();
+  await expect(page.getByTestId('stats-hands')).toContainText('turns 9');
+  await expect(page.getByTestId('stats-no-tools')).toContainText('none recorded');
+  await expect(page.getByTestId('stats-hands')).not.toContainText('0 calls');
+  await expect(page.getByTestId('stats-tools')).toHaveCount(0);
+  await shot(page, info, 'stats-no-tools');
 });

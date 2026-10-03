@@ -630,6 +630,39 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .tablewrap{position:relative;overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);min-width:0;max-width:100%}
 .sect > *{min-width:0}
 .foot-note{margin:0;font-size:12px;color:var(--fg3)}
+.foot-note.warn{color:var(--warn)}
+
+/* the stats tab's sections: the fleet's part-to-whole bar, key rows and
+   section headings, panel-level here because stats draws them outside
+   the fleet view */
+.sblock{display:flex;flex-direction:column;gap:8px;min-width:0}
+.shead{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3);display:flex;gap:10px;align-items:baseline}
+.shead span{font-weight:400;text-transform:none;letter-spacing:0;color:var(--fg3);font-size:12px}
+.stack{display:flex;gap:2px;height:12px}
+.stack .part{width:var(--w);min-width:2px;background:var(--sc);border-radius:2px}
+.stack .part:first-child{border-radius:4px 2px 2px 4px}
+.stack .part:last-child{border-radius:2px 4px 4px 2px}
+.stack .part:only-child{border-radius:4px}
+.stack .part:hover{filter:brightness(1.12)}
+.c-agent{--sc:var(--accent)} .c-you{--sc:var(--warn)} .c-idle{--sc:var(--line2)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--sc,var(--fg4));flex-shrink:0}
+.keyrow{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--fg2)}
+.keyrow li{display:inline-flex;align-items:center;gap:6px}
+.keyrow b{font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+.keyrow .p{color:var(--fg3);font-variant-numeric:tabular-nums}
+.skv{margin:0;font-size:12.5px;color:var(--fg3)}
+.skv b{color:var(--fg2);font-weight:500}
+.skv.faint{color:var(--fg4)}
+.kvl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--fg3)}
+.kvl b{color:var(--fg2);font-weight:600;font-variant-numeric:tabular-nums}
+.redolist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--fg2);font-variant-numeric:tabular-nums}
+.redolist li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.redolist .what{font-family:var(--mono);color:var(--fg)}
+.redolist .why{color:var(--warn)}
+.redolist .num{font-family:var(--mono)}
+.redolist .dearer{color:var(--warn);font-weight:600}
+table.passes.bars th{width:34%;overflow:hidden;text-overflow:ellipsis}
+table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 
 /* overlays */
 /* an overlay covers what the reader can see — the visual viewport, which a

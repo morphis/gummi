@@ -94,15 +94,55 @@ export const pr = {
 
 export const stats = {
   id: 'FD-001', title: 'Add a wave helper', kind: 'feature', stage: 'verify',
-  money: { credits: 8.5, estimated: 0, firstPass: 7.6, rework: 0.9, corrected: 0, reproved: 0, elsewhere: 0, byStage: [], byRole: [], byModel: [] },
-  clock: { agentMs: 1_500_000, onYouMs: 2_460_000, idleMs: 0, elapsedMs: 4_000_000 },
-  envelope: { credits: 40, left: 31.5 },
+  money: {
+    credits: 11.0, estimated: 0.4, firstPass: 7.6, rework: 3.4, corrected: 3.4, reproved: 0, elsewhere: 0,
+    byStage: [{ name: 'plan', credits: 4.5 }, { name: 'implement', credits: 6.5 }],
+    byRole: [{ name: 'architect', credits: 4.5 }, { name: 'implementer', credits: 6.5 }],
+    byModel: [{ name: 'e2e-implementer', credits: 6.5 }, { name: 'e2e-architect', credits: 3.6 }, { name: 'e2e-reviewer', credits: 0.9 }],
+  },
+  clock: { agentMs: 1_500_000, onYouMs: 2_460_000, idleMs: 0, elapsedMs: 4_000_000, toFirstGateMs: 600_000, toVerifiedMs: 3_600_000 },
+  hands: {
+    turns: 9, toolCalls: 12, toolFails: 1,
+    tools: [
+      { name: 'read', calls: 6, totalMs: 480 },
+      { name: 'run', calls: 6, fails: 1, detail: 'go test ./internal/tiny', totalMs: 4_900 },
+    ],
+    skills: [{ name: 'skill', calls: 1, detail: 'gummi-go-verify' }],
+    subagents: [{ name: 'task', calls: 1, detail: 'find the fold' }],
+    checks: [
+      { name: 'build', runs: 2, fails: 0 },
+      { name: 'clean', runs: 1, fails: 1, excused: true },
+    ],
+  },
+  judgment: {
+    gates: { total: 2, byYou: 1, byMachine: 1 },
+    asks: { total: 1, byYou: 0, byMachine: 1 },
+    parks: [{ reason: 'verify failed', detail: '1 of 3 checks failed', at: at(42) }],
+  },
+  envelope: { credits: 40, left: 29.0 },
   sessions: [
-    { stage: 'plan', role: 'architect', model: 'e2e-architect', started: at(0), ended: at(11), turns: 3, tools: 4, toolFails: 0, credits: 3.6 },
+    { stage: 'plan', role: 'architect', model: 'e2e-architect', started: at(0), ended: at(11), turns: 3, tools: 4, toolFails: 0, credits: 3.6, tokens: { input: 48_000, cached: 31_000, output: 2_100 }, contextPeak: 41_000, contextLimit: 200_000 },
     { stage: 'plan', role: 'reviewer', flavor: 'critique', model: 'e2e-reviewer', started: at(11), ended: at(14), turns: 1, tools: 0, toolFails: 0, credits: 0.9 },
-    { stage: 'implement', role: 'implementer', model: 'e2e-implementer', started: at(20), ended: at(34), turns: 4, tools: 6, toolFails: 1, credits: 3.1 },
-    { stage: 'implement', role: 'implementer', model: 'e2e-implementer', started: at(35), ended: at(39), turns: 1, tools: 2, toolFails: 0, credits: 0.9, redo: true, redoReason: 'corrected' },
+    { stage: 'implement', role: 'implementer', model: 'e2e-implementer', started: at(20), ended: at(34), turns: 4, tools: 6, toolFails: 1, credits: 3.1, tokens: { input: 9_000, cached: 1_000, output: 500 } },
+    { stage: 'implement', role: 'implementer', model: 'e2e-implementer', started: at(35), ended: at(39), turns: 1, tools: 2, toolFails: 0, credits: 3.4, redo: true, redoReason: 'corrected' },
   ],
+};
+
+// A session's stats (the card is freeform, stage open): spend against its
+// envelope and the model table, with the stage/role buckets the session
+// view draws as bars. Sessions have no passes, so there is no hands or
+// judgment to carry.
+export const sessionStats = {
+  id: 'FF-001', title: 'Poke at the rounding', kind: 'freeform', stage: 'open',
+  money: {
+    credits: 3.2, estimated: 0, firstPass: 3.2, rework: 0, corrected: 0, reproved: 0, elsewhere: 0,
+    byStage: [{ name: 'open', credits: 3.2 }],
+    byRole: [{ name: 'session', credits: 3.2 }],
+    byModel: [{ name: 'e2e-implementer', credits: 3.2 }],
+  },
+  clock: { agentMs: 90_000, onYouMs: 0, idleMs: 0, elapsedMs: 120_000 },
+  envelope: { credits: 500, left: 496.8 },
+  sessions: [],
 };
 
 export async function mockCard(page: Page, id: string, opts: { kind?: string; decision?: any } = {}): Promise<MockHandle> {

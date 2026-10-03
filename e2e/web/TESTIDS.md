@@ -170,8 +170,12 @@ draft's bar), `log-plan-line` (what the dry run says), `log-confirm`
 (rewriting pushed commits), `log-reset`, `log-apply`, `log-push`,
 `log-push-cmd` (the force push a rewrite of pushed commits leaves).
 
-Stats: `stats`, `stats-spent`, `stats-passes`, `stats-rework`, `stats-table`,
-`stats-none`.
+Stats: `stats`, `stats-spent`, `stats-left` (a session's), `stats-passes`,
+`stats-rework`, `stats-models` (a session's), `stats-table`, `stats-none`,
+`stats-bars` (`-stage`, `-role`, `-model`), `stats-redo`, `stats-clock`
+(`-agent`, `-you`, `-idle`, its segments), `stats-hands`, `stats-tools`,
+`stats-no-tools` (the backend reports no tool calls), `stats-checks`,
+`stats-judgment` (`stats-gates`, `stats-asks`), `stats-envelope`.
 
 ## Phone (≤ 760px)
 

@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/test';
+import { sessionStats } from '../fixtures/contract';
 import { shot } from '../fixtures/shots';
 
 // A session (DESIGN §19.8) is started from a draft, not a form: New session
@@ -149,4 +150,28 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
   const session = (await api('GET', `/api/cards/${id}`)).json;
   expect(session.stage).toBe('done');
   expect(session.branch).not.toBe(card.branch);
+});
+
+// The session's Stats tab answers what a session has: its spend against
+// the envelope, the by-stage and by-role bars beside the model table, and
+// the envelope utilization. A session has no passes, so hands, judgment,
+// the clock and a pass table never render there.
+test('the session stats tab draws its spend, bars and envelope', async ({ pairedPage: page, server, api }, info) => {
+  test.setTimeout(90_000);
+  const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
+  const id = String(made.json?.id);
+  await page.route(`**/api/cards/${id}/stats`, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sessionStats) }));
+  await page.goto(`${server.url}/#${id}/stats`);
+  if (info.project.name === 'phone') await page.getByTestId('tab-stats').click();
+  await expect(page.getByTestId('stats-spent')).toContainText('3.2');
+  await expect(page.getByTestId('stats-bars')).toContainText('open');
+  await expect(page.getByTestId('stats-bars')).toContainText('session');
+  await expect(page.getByTestId('stats-table')).toContainText('e2e-implementer');
+  await expect(page.getByTestId('stats-envelope')).toContainText('granted 500 · spent 3.2 · 1% used');
+  // pass-derived surfaces a session has nothing of: absent, not zero
+  await expect(page.getByTestId('stats-hands')).toHaveCount(0);
+  await expect(page.getByTestId('stats-judgment')).toHaveCount(0);
+  await expect(page.getByTestId('stats-clock')).toHaveCount(0);
+  await expect(page.getByTestId('stats-redo')).toHaveCount(0);
+  await shot(page, info, 'session-stats');
 });

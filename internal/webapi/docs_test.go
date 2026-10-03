@@ -1,9 +1,10 @@
 package webapi
 
 import (
-	"time"
-
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/exp/golden"
 )
@@ -79,7 +80,11 @@ func TestCardStatsShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, CardStats{
 		ID: "FD-012", Title: "Dark mode", Kind: "feature", Stage: "verify",
 		Sessions: []StatSession{
-			{Stage: "plan", Role: "architect", Flavor: "stage", Model: "gpt-5", Started: at, Ended: at, Turns: 4, Tools: 9, Credits: 3.5, Verdict: "approve"},
+			{
+				Stage: "plan", Role: "architect", Flavor: "stage", Model: "gpt-5",
+				Started: at, Ended: at, Turns: 4, Tools: 9, Credits: 3.5, Verdict: "approve",
+				Tokens: Tokens{Input: 1200, Cached: 800, Output: 300}, ContextPeak: 41000, ContextLimit: 200000,
+			},
 			{Stage: "implement", Role: "implementer", Started: at, Turns: 2, Tools: 5, ToolFails: 1, Credits: 1.25, Redo: true, RedoReason: "corrected"},
 		},
 		Money: StatMoney{
@@ -87,9 +92,46 @@ func TestCardStatsShape(t *testing.T) {
 			ByStage: []Bucket{{Name: "plan", Credits: 3.5}, {Name: "implement", Credits: 1.25}},
 			ByRole:  []Bucket{{Name: "architect", Credits: 3.5}}, ByModel: []Bucket{{Name: "gpt-5", Credits: 4.75}},
 		},
-		Clock:    StatClock{AgentMs: 60000, OnYouMs: 120000, IdleMs: 30000, ElapsedMs: 210000},
+		Clock: StatClock{AgentMs: 60000, OnYouMs: 120000, IdleMs: 30000, ElapsedMs: 210000, ToFirstGateMs: 180000, ToVerifiedMs: 210000},
+		Hands: StatHands{
+			Turns: 6, ToolCalls: 14, ToolFails: 1,
+			Tools: []StatToolUse{
+				{Name: "read", Calls: 9, TotalMs: 40},
+				{Name: "run", Calls: 5, Fails: 1, Detail: "go test ./...", TotalMs: 2100},
+			},
+			Skills:    []StatToolUse{{Name: "skill", Calls: 2, Detail: "gummi-go-verify"}},
+			Subagents: []StatToolUse{{Name: "task", Calls: 1, Detail: "where do the stats render"}},
+			Checks:    []StatCheckRun{{Name: "build", Runs: 3, Fails: 1, Excused: true}},
+		},
+		Judgment: StatJudgment{
+			Gates: StatAnswered{Total: 2, ByYou: 1, ByMachine: 1},
+			Asks:  StatAnswered{Total: 1, ByYou: 1},
+			Parks: []StatPark{{Reason: "verify failed", Detail: "1 of 3 checks failed", At: at}},
+		},
 		Envelope: StatEnvelope{Credits: 2000, Left: 1995.25},
 	}))
+}
+
+// The nil-vs-empty distinction on hands.tools must survive the wire: a
+// nil Tools marshals absent — the backend records no tool calls — and an
+// empty one marshals []. omitempty would collapse the two, so the field
+// is omitzero and this is the test that holds it to that.
+func TestCardStatsToolsNilVsEmpty(t *testing.T) {
+	var hands map[string]json.RawMessage
+	if err := json.Unmarshal(marshal(t, CardStats{ID: "FD-012", Hands: StatHands{Turns: 2}}), &hands); err != nil {
+		t.Fatal(err)
+	}
+	var h map[string]json.RawMessage
+	if err := json.Unmarshal(hands["hands"], &h); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h["tools"]; ok {
+		t.Errorf("a nil Tools must marshal absent, got %s", hands["hands"])
+	}
+	empty := marshal(t, CardStats{ID: "FD-012", Hands: StatHands{Tools: []StatToolUse{}}})
+	if !strings.Contains(string(empty), `"tools": []`) {
+		t.Errorf("an empty non-nil Tools must marshal as [], got %s", empty)
+	}
 }
 
 func TestFleetShape(t *testing.T) {

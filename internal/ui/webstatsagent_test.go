@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/fleetrun"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 func wantWebErr(t *testing.T, what string, err error, code WebErrorCode) {
@@ -25,14 +26,37 @@ func TestWebCardStatsProjectsTheRun(t *testing.T) {
 	run := cardrun.Run{
 		ID: "FD-001", Title: "Dark mode", Kind: domain.KindFeature, Stage: domain.StageVerify,
 		Sessions: []cardrun.Session{
-			{Stage: domain.StageImplement, Role: "implementer", Model: "m", Started: start, Ended: start.Add(time.Minute), Closed: true, Turns: 3, Credits: 4},
+			{
+				Stage: domain.StageImplement, Role: "implementer", Model: "m",
+				Started: start, Ended: start.Add(time.Minute), Closed: true,
+				Turns: 3, Credits: 4, InputTokens: 1200, CachedTokens: 800, OutputTokens: 300,
+				ContextPeak: 41000, ContextLimit: 200000,
+			},
 			{Stage: domain.StageImplement, Role: "implementer", Model: "m", Started: start.Add(time.Hour), Redo: true, RedoReason: "corrected"},
 		},
 		Money: cardrun.Money{
 			Credits: 5, Rework: 1, FirstPass: 4,
 			ByStage: []cardrun.Bucket{{Name: "implement", Credits: 5}},
 		},
-		Clock:    cardrun.Clock{Agent: 90 * time.Second, Elapsed: time.Hour},
+		Clock: cardrun.Clock{Agent: 90 * time.Second, Elapsed: time.Hour, ToFirstGate: 30 * time.Minute, ToVerified: time.Hour},
+		Hands: cardrun.Hands{
+			Turns: 7, ToolCalls: 9, ToolFails: 1,
+			Tools: []cardrun.ToolUse{
+				{Name: "read", Calls: 6, Fails: 1, Total: 40 * time.Millisecond},
+				{Name: "run", Calls: 3, Detail: "go test ./...", Total: 2 * time.Second},
+			},
+			Skills:    []cardrun.ToolUse{{Name: "skill", Calls: 2, Detail: "gummi-go-verify"}},
+			Subagents: []cardrun.ToolUse{{Name: "task", Calls: 1, Detail: "find the fold"}},
+			Checks:    []cardrun.CheckRun{{Name: "build", Runs: 3, Fails: 1, Excused: true}},
+		},
+		Judgment: cardrun.Judgment{
+			Gates: cardrun.Answered{Total: 2, ByYou: 1, ByMachine: 1},
+			Asks:  cardrun.Answered{Total: 1, ByYou: 1},
+			// A quit park rides through as-is: the fold already leaves
+			// board-quit parks off, and the projection must not grow a
+			// second copy of that exclusion.
+			Parks: []cardrun.Park{{Reason: "quit", Detail: "board quit", At: start}},
+		},
 		Envelope: cardrun.Envelope{Granted: 100, Spent: 5},
 	}
 	got := WebCardStats(run)
@@ -51,8 +75,57 @@ func TestWebCardStatsProjectsTheRun(t *testing.T) {
 	if got.Clock.AgentMs != 90000 || got.Clock.ElapsedMs != 3600000 {
 		t.Errorf("clock = %+v", got.Clock)
 	}
+	if got.Clock.ToFirstGateMs != 1800000 || got.Clock.ToVerifiedMs != 3600000 {
+		t.Errorf("clock extras lost: %+v", got.Clock)
+	}
 	if got.Envelope.Credits != 100 || got.Envelope.Left != 95 {
 		t.Errorf("envelope = %+v, want 100 granted and 95 left", got.Envelope)
+	}
+
+	// hands project one-to-one, with the tool's summed duration in ms.
+	h := got.Hands
+	if h.Turns != 7 || h.ToolCalls != 9 || h.ToolFails != 1 {
+		t.Errorf("hands tallies = %+v", h)
+	}
+	if len(h.Tools) != 2 || h.Tools[0].Name != "read" || h.Tools[0].Calls != 6 || h.Tools[0].Fails != 1 || h.Tools[0].TotalMs != 40 ||
+		h.Tools[1].Name != "run" || h.Tools[1].Detail != "go test ./..." || h.Tools[1].TotalMs != 2000 {
+		t.Errorf("tools = %+v", h.Tools)
+	}
+	if len(h.Skills) != 1 || h.Skills[0].Detail != "gummi-go-verify" || len(h.Subagents) != 1 || h.Subagents[0].Calls != 1 {
+		t.Errorf("delegation = %+v / %+v", h.Skills, h.Subagents)
+	}
+	if len(h.Checks) != 1 || h.Checks[0].Name != "build" || h.Checks[0].Runs != 3 || h.Checks[0].Fails != 1 || !h.Checks[0].Excused {
+		t.Errorf("checks = %+v", h.Checks)
+	}
+
+	// judgment: the counts and the park, copied as the fold wrote them.
+	j := got.Judgment
+	if j.Gates.Total != 2 || j.Gates.ByYou != 1 || j.Gates.ByMachine != 1 || j.Asks.Total != 1 || j.Asks.ByYou != 1 {
+		t.Errorf("judgment tallies = %+v", j)
+	}
+	if len(j.Parks) != 1 || j.Parks[0].Reason != "quit" || j.Parks[0].Detail != "board quit" || !j.Parks[0].At.Equal(start) {
+		t.Errorf("parks = %+v, want the fold's park passed through unchanged", j.Parks)
+	}
+
+	// per-pass tokens and context occupancy, projected on the closed
+	// session and left zero on the open one.
+	if got.Sessions[0].Tokens != (webapi.Tokens{Input: 1200, Cached: 800, Output: 300}) ||
+		got.Sessions[0].ContextPeak != 41000 || got.Sessions[0].ContextLimit != 200000 {
+		t.Errorf("tokens = %+v / ctx = %d/%d", got.Sessions[0].Tokens, got.Sessions[0].ContextPeak, got.Sessions[0].ContextLimit)
+	}
+	if got.Sessions[1].Tokens != (webapi.Tokens{}) || got.Sessions[1].ContextPeak != 0 || got.Sessions[1].ContextLimit != 0 {
+		t.Errorf("a pass with no token record must stay zero: %+v", got.Sessions[1])
+	}
+
+	// The nil-vs-empty tools distinction survives the projection: a
+	// backend that records no tool calls keeps its nil, which the wire
+	// turns into an absent array.
+	bare := WebCardStats(cardrun.Run{Hands: cardrun.Hands{Turns: 2}})
+	if bare.Hands.Tools != nil {
+		t.Errorf("nil tools must stay nil, got %+v", bare.Hands.Tools)
+	}
+	if empty := WebCardStats(cardrun.Run{Hands: cardrun.Hands{Tools: []cardrun.ToolUse{}}}); empty.Hands.Tools == nil || len(empty.Hands.Tools) != 0 {
+		t.Errorf("empty non-nil tools must stay empty, got %+v", empty.Hands.Tools)
 	}
 }
 

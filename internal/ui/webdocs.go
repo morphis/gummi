@@ -928,7 +928,10 @@ func WebCardStats(r cardrun.Run) webapi.CardStats {
 		Clock: webapi.StatClock{
 			AgentMs: r.Clock.Agent.Milliseconds(), OnYouMs: r.Clock.OnYou.Milliseconds(),
 			IdleMs: r.Clock.Idle.Milliseconds(), ElapsedMs: r.Clock.Elapsed.Milliseconds(),
+			ToFirstGateMs: r.Clock.ToFirstGate.Milliseconds(), ToVerifiedMs: r.Clock.ToVerified.Milliseconds(),
 		},
+		Hands:    webStatHands(r.Hands),
+		Judgment: webStatJudgment(r.Judgment),
 		Envelope: webapi.StatEnvelope{Credits: r.Envelope.Granted, Left: float64(r.Envelope.Granted) - r.Envelope.Spent},
 	}
 	for _, s := range r.Sessions {
@@ -936,6 +939,8 @@ func WebCardStats(r cardrun.Run) webapi.CardStats {
 			Stage: string(s.Stage), Role: s.Role, Flavor: s.Flavor, Model: s.Model, Started: s.Started,
 			EndInferred: s.EndInferred, Turns: s.Turns, Tools: s.Tools, ToolFails: s.ToolFails,
 			Credits: s.Credits, Estimated: s.Estimated, Verdict: s.Verdict,
+			Tokens:      webapi.Tokens{Input: s.InputTokens, Cached: s.CachedTokens, Output: s.OutputTokens},
+			ContextPeak: s.ContextPeak, ContextLimit: s.ContextLimit,
 			Redo: s.Redo, RedoReason: s.RedoReason, Reconstructed: s.Reconstructed,
 		}
 		if s.Closed {
@@ -944,6 +949,57 @@ func WebCardStats(r cardrun.Run) webapi.CardStats {
 		out.Sessions = append(out.Sessions, ws)
 	}
 	return out
+}
+
+// webStatHands projects the card's hands. Tools keeps nil as nil: the
+// wire's absent array is "this backend reports no tool calls", a fact
+// about the record that an empty array ("this card made none") must not
+// collapse into.
+func webStatHands(h cardrun.Hands) webapi.StatHands {
+	out := webapi.StatHands{
+		Turns: h.Turns, ToolCalls: h.ToolCalls, ToolFails: h.ToolFails,
+		Skills:    make([]webapi.StatToolUse, 0, len(h.Skills)),
+		Subagents: make([]webapi.StatToolUse, 0, len(h.Subagents)),
+		Checks:    make([]webapi.StatCheckRun, 0, len(h.Checks)),
+	}
+	if h.Tools != nil {
+		out.Tools = make([]webapi.StatToolUse, 0, len(h.Tools))
+		for _, t := range h.Tools {
+			out.Tools = append(out.Tools, webStatToolUse(t))
+		}
+	}
+	for _, t := range h.Skills {
+		out.Skills = append(out.Skills, webStatToolUse(t))
+	}
+	for _, t := range h.Subagents {
+		out.Subagents = append(out.Subagents, webStatToolUse(t))
+	}
+	for _, c := range h.Checks {
+		out.Checks = append(out.Checks, webapi.StatCheckRun{Name: c.Name, Runs: c.Runs, Fails: c.Fails, Excused: c.Excused})
+	}
+	return out
+}
+
+func webStatToolUse(t cardrun.ToolUse) webapi.StatToolUse {
+	return webapi.StatToolUse{Name: t.Name, Calls: t.Calls, Fails: t.Fails, Detail: t.Detail, TotalMs: t.Total.Milliseconds()}
+}
+
+// webStatJudgment projects what the card decided. The parks pass through
+// as-is: the fold already leaves out the parks a board quit made, and a
+// second copy of that exclusion here is one more rule to keep in step.
+func webStatJudgment(j cardrun.Judgment) webapi.StatJudgment {
+	out := webapi.StatJudgment{
+		Gates: webStatAnswered(j.Gates), Asks: webStatAnswered(j.Asks),
+		Parks: make([]webapi.StatPark, 0, len(j.Parks)),
+	}
+	for _, p := range j.Parks {
+		out.Parks = append(out.Parks, webapi.StatPark{Reason: p.Reason, Detail: p.Detail, At: p.At})
+	}
+	return out
+}
+
+func webStatAnswered(a cardrun.Answered) webapi.StatAnswered {
+	return webapi.StatAnswered{Total: a.Total, ByYou: a.ByYou, ByMachine: a.ByMachine}
 }
 
 func webTokens(t fleetrun.Tokens) webapi.Tokens {
