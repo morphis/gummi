@@ -221,14 +221,10 @@ func TestOpenSurfacesAreScopedToTheBoardTab(t *testing.T) {
 	}
 }
 
-// TestTabCycleCoversEveryTab: the cycle skipped the agent tab for a
-// while, because the hosted CLI held tab unconditionally and cycling
-// onto a tab that will not cycle you off it is a one-way door. The lock
-// removes the reason rather than the tab — unlocked, which is how you
-// arrive, tab is always gummi's.
+// TestTabCycleCoversEveryTab: the cycle visits every tab and returns.
 func TestTabCycleCoversEveryTab(t *testing.T) {
 	m := populatedShell(100, 30)
-	want := []Tab{TabStats, TabInbox, TabAgent, TabBoard}
+	want := []Tab{TabStats, TabInbox, TabBoard}
 	for i, w := range want {
 		m.nextTab()
 		if m.tab != w {
@@ -245,10 +241,6 @@ func TestTabCycleCoversEveryTab(t *testing.T) {
 // the user types prose — the chat box, the bug-import filter. Those are
 // the surfaces whose key rules are least guessable, which left help
 // unreachable in the places it was most wanted.
-//
-// This used to assert the same thing over a hosted pty on the agent tab
-// as well. That pty is gone; the tab hosts the board's own conversation,
-// whose composer is an ordinary text field covered by the loop below.
 func TestAltSlashOpensHelpWhereQuestionMarkCannot(t *testing.T) {
 	altSlash := tea.KeyPressMsg{Code: '/', Mod: tea.ModAlt}
 
@@ -257,51 +249,6 @@ func TestAltSlashOpensHelpWhereQuestionMarkCannot(t *testing.T) {
 			m.handleKey(altSlash)
 			if !m.Overlay.Contains("help") {
 				t.Errorf("alt+/ did not open help over an open %s", name)
-			}
-		})
-	}
-}
-
-// TestADeadAgentTabAnswersNothing: the agent tab before its session has
-// opened still has gummi holding the keyboard, and the answer has to be
-// "nothing". It used to fall through to the inbox's keymap, so from a
-// tab showing "starting the board session…" an x silently dismissed an
-// inbox item, enter jumped to a card and switched tabs, and u spent
-// budget. The precondition used to read "no hosted child"; the hosted
-// child is gone, and an unopened board session is the same state.
-func TestADeadAgentTabAnswersNothing(t *testing.T) {
-	m := attachedBoard(t, 120, 34)
-	m.setTab(TabAgent)
-	if m.board != nil {
-		t.Fatal("precondition: expected no open board session")
-	}
-	for _, k := range []tea.KeyPressMsg{
-		{Code: 'x', Text: "x"},
-		{Code: 'u', Text: "u"},
-		{Code: 'i', Text: "i"},
-		{Code: tea.KeyEnter},
-	} {
-		m.setTab(TabAgent)
-		m.inbox.add("FD-001", attnGate, "spec approval pending")
-		m.handleKey(k)
-		if m.tab != TabAgent {
-			t.Errorf("%v moved off the agent tab", k)
-		}
-		if m.inbox.len() != 1 {
-			t.Errorf("%v reached the inbox from the agent tab", k)
-		}
-		m.inbox.remove("FD-001")
-	}
-}
-
-// TestAgentTabIsStillReachable: alt+4 goes straight there from anywhere,
-// which is what makes the tab the user is on never a dead end.
-func TestAgentTabIsStillReachable(t *testing.T) {
-	for name, m := range openSurfaces(t) {
-		t.Run(name, func(t *testing.T) {
-			m.handleKey(tea.KeyPressMsg{Code: '4', Mod: tea.ModAlt})
-			if m.tab != TabAgent {
-				t.Fatalf("alt+4 from an open %s: tab = %v, want TabAgent", name, m.tab)
 			}
 		})
 	}

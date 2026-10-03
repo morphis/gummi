@@ -1573,7 +1573,7 @@ func (e *Engine) resolveConflicts(ctx context.Context, goal domain.Feature, dir,
 // the tool list and dispatch passed in, so a goal's lead reaches exactly
 // its goal tools and nothing else.
 func (e *Engine) startToolEndpoint(ctx context.Context, id domain.FeatureID, label string, tools func() []agent.ToolDef, dispatch func(context.Context, string, json.RawMessage) (string, error)) (string, func(), error) {
-	path := filepath.Join(e.cfg.Workspace.StateDir(), "mcp", fmt.Sprintf("%s-%s-%s.sock", label, id, workspaceMCPNonce()))
+	path := filepath.Join(e.cfg.Workspace.StateDir(), "mcp", fmt.Sprintf("%s-%s-%s.sock", label, id, mcpNonce()))
 	if len(path) > unixPathMax {
 		sum := sha256.Sum256([]byte(path))
 		path = filepath.Join(os.TempDir(), fmt.Sprintf("gummi-mcp-%s-%x.sock", label, sum[:6]))

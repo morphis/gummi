@@ -292,8 +292,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		}
 	case engineClosedMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-	case boardOpenedMsg:
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeAgent})
 	case pausedMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.id)})
@@ -318,9 +316,6 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 func (m *Shell) emitEngineChange(ev engine.Event) {
 	id := string(ev.Feature)
 	switch ev.Kind {
-	case engine.EventBoard:
-		m.EmitChange(webapi.Change{Kind: webapi.ChangeAgent})
-		return
 	case engine.EventUpdated:
 		if id == "" {
 			return

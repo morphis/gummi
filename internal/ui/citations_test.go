@@ -356,8 +356,8 @@ func TestUnprintedCitationOpensNothing(t *testing.T) {
 		t.Error("alt+i opened something on a card with no ninth citation")
 	}
 	// the chords that must NOT be read as citations: the tab tier's own
-	// letters, and every alt+digit — those are the shell's board/inbox/
-	// agent tabs, answered above this tier.
+	// letters, and every alt+digit — those are the shell's board/stats/
+	// inbox tabs, answered above this tier.
 	for _, key := range []string{"alt+s", "alt+d", "alt+t", "alt+j", "alt+k", "alt+o", "alt+1", "alt+2", "alt+3", "alt+9"} {
 		if n, ok := citationChord(key); ok {
 			t.Errorf("%s was read as citation %d", key, n)

@@ -85,9 +85,9 @@ type Row struct {
 	Spend    float64 `json:"spend"`
 	Envelope int     `json:"envelope"`
 	// Context is the running session's context-window occupancy, when one
-	// is live and its backend reports it (AgentContext, shared with the
-	// board agent's own meter). Nil otherwise — a card with no live
-	// session, or whose backend never reports tokens, has none to show.
+	// is live and its backend reports it. Nil otherwise — a card with no
+	// live session, or whose backend never reports tokens, has none to
+	// show.
 	Context *AgentContext `json:"context,omitempty"`
 	// Profile names the card's profile, when it has one.
 	Profile string `json:"profile,omitempty"`

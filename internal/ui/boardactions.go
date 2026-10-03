@@ -24,7 +24,7 @@ func (m *Shell) cardActions() *cardActionList {
 	if !ok {
 		return newCardActionList(nil)
 	}
-	actions := append(cardActionsFor(m.nextInputFor(r), r), m.cardProfileActions()...)
+	actions := append(cardActionsFor(m.nextInputFor(r), r), m.cardProfileActions(r.F.Stage)...)
 	l := newCardActionList(actions)
 	l.expanded = m.actionsExpanded
 	if n := l.Len(); n > 0 {
@@ -40,10 +40,11 @@ func (m *Shell) cardActions() *cardActionList {
 // anything to pick from and cardActionsFor takes no engine at all (see
 // TestCardActionsDialogWideGolden/NarrowGolden, which call it directly
 // and would need no regeneration only if this row is appended here
-// instead). It applies uniformly to whichever card is selected, so it
-// takes no featureRow of its own.
-func (m *Shell) cardProfileActions() []cardAction {
-	if m.engine == nil || len(m.engine.BoardProfiles()) == 0 {
+// instead). It applies uniformly to whichever card is selected — the
+// stage only feeds the availability check, never the row itself — so it
+// takes a stage rather than a featureRow.
+func (m *Shell) cardProfileActions(stage domain.Stage) []cardAction {
+	if m.engine == nil || len(m.engine.CardProfiles(stage)) == 0 {
 		return nil
 	}
 	return []cardAction{{
@@ -124,12 +125,6 @@ func (m *Shell) globalCommands() []command {
 		{id: "G", name: "import", label: "Import a GitHub issue as a bug", key: "G", available: attached && m.engine != nil},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
-		// Named for what they actually change. "Switch the board's
-		// profile/model" reads as the default for new cards; it is the agent
-		// TAB's own chat session, and picking either silently jumped there
-		// (round 3 §5.5).
-		{id: "board-profile", name: "profile", label: "Switch the agent tab's profile", key: "", available: attached && m.engine != nil},
-		{id: "board-model", name: "model", label: "Switch the agent tab's model", key: "", available: attached && m.engine != nil},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},
 	}
@@ -162,9 +157,9 @@ func (m *Shell) globalCommands() []command {
 // trusted to — several of them adapt to card state ("hand to autopilot"
 // / "stop autopilot"), and one of the two wordings would always miss.
 //
-// These land in command.alias, not command.name: name is what the BOARD
-// thread's slash vocabulary is built from, and a card's actions have no
-// business there (boardCommandRows' own filter).
+// These land in command.alias, not command.name: name is the word a
+// command answers to in the command menu's own vocabulary, and a card's
+// actions must not shadow one of the board-root globals by word.
 var cardCommandNames = map[string]string{
 	"advance": "approve land",
 	"bounce":  "bounce",
@@ -196,7 +191,7 @@ func (m *Shell) cardCommands(existing []command) []command {
 		}
 	}
 	var out []command
-	for _, a := range append(m.cardProfileActions(), cardActionsFor(m.nextInputFor(r), r)...) {
+	for _, a := range append(m.cardProfileActions(r.F.Stage), cardActionsFor(m.nextInputFor(r), r)...) {
 		id := a.id
 		if a.key != "" {
 			if taken[a.key] {
@@ -314,8 +309,6 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		return nil
 	case "profile":
 		return m.openCardProfilePicker()
-	case "board-profile", "board-model":
-		return m.openBoardValuePicker(id)
 	case "new-freeform":
 		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
 		return nil

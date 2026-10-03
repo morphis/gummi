@@ -1,8 +1,8 @@
 // events.js — the board's event stream (GET /api/events). Events are
-// invalidations: "board", "card <id>", "live <id>", "agent" name a JSON
-// route to refetch; "toast" and "viewers" carry their small values; and
-// "resync" says the server cannot tell what this page missed, so it
-// refetches everything it shows.
+// invalidations: "board", "card <id>", "live <id>" name a JSON route to
+// refetch; "toast" and "viewers" carry their small values; and "resync"
+// says the server cannot tell what this page missed, so it refetches
+// everything it shows.
 //
 // While the browser retries the same EventSource it sends Last-Event-ID
 // itself and the server replays what was missed. When the stream is dead
@@ -14,7 +14,7 @@ import { set, state } from './store.js?v=__ASSET_V__'
 
 // ingest runs report progress on their own kind; a view listens with onEvent
 // and a device asking to join is "pairing" (approvals.js)
-const KINDS = ['board', 'card', 'live', 'agent', 'toast', 'viewers', 'ingest', 'pairing']
+const KINDS = ['board', 'card', 'live', 'toast', 'viewers', 'ingest', 'pairing']
 const listeners = new Map()
 
 let es = null
@@ -23,8 +23,8 @@ let backoff = 1000
 let timer = 0
 let fresh = true // the current EventSource was created by us, not retried
 
-// onEvent lets a view (the board agent, a goal page) hear one kind of
-// event while it is mounted. It returns the unsubscribe function.
+// onEvent lets a view (a goal page, ingest) hear one kind of event while
+// it is mounted. It returns the unsubscribe function.
 export function onEvent (kind, fn) {
   if (!listeners.has(kind)) listeners.set(kind, new Set())
   listeners.get(kind).add(fn)

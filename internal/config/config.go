@@ -475,7 +475,7 @@ func UserConfigPath() (string, error) {
 // merged Config plus a source map describing which file supplied each value.
 // A missing user config is treated as an empty Config. The returned map has
 // one entry per top-level field: "permissions", "sandbox", "autopilot_lanes",
-// "agent", "repo", "repos", "instructions", "skills", and "env.<name>" for each
+// "repo", "repos", "instructions", "skills", and "env.<name>" for each
 // distinct env key. Scalar fields that are unset in both files use the
 // literal "default". Instructions list both contributing paths when both
 // files supply entries.

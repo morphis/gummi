@@ -235,18 +235,6 @@ func (m *Shell) runningVerb(snap engine.Snapshot) string {
 	return "running"
 }
 
-// boardBusyWord is the board agent's busy word — cardBusyWord's
-// counterpart for the one session that is bound to the workspace rather
-// than a card. The board thread draws it under its spinner and the web's
-// agent live block carries it, so the two say the same thing. Empty when
-// no turn is in flight.
-func boardBusyWord(snap engine.Snapshot) string {
-	if !snap.Busy {
-		return ""
-	}
-	return "thinking"
-}
-
 // withElapsed appends a compact "· 4m12s" clause to a busy label once
 // since is known (non-zero) — see runningLabel. now is m.now() rather
 // than time.Now() so a test can fix both ends and assert a stable

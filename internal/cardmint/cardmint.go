@@ -7,16 +7,15 @@
 // That recipe used to live twice — once as (*driver.Driver).createFeature
 // for headless `gummi run`/`bugs new`, and a second time, differently
 // shaped, inside Engine.Materialize's bulk-ingest path. This package
-// exists to let a *third* caller mint a single card — the workspace MCP
-// endpoint's card_new tool, invoked by an agent hosted inside gummi's own
-// TUI — without adding a fourth copy or reaching across a package
-// boundary that would cycle: internal/driver already imports
-// internal/engine (Driver embeds *engine.Engine), so internal/engine
-// cannot import internal/driver to reuse createFeature, and neither can
-// import the other's package for this. cardmint sits below both — it
-// imports only internal/domain, internal/state, internal/spec, and
-// internal/workflow, none of which import driver or engine — so both
-// driver and engine import cardmint instead of each other.
+// exists so any third caller can mint a single card without adding a
+// fourth copy or reaching across a package boundary that would cycle:
+// internal/driver already imports internal/engine (Driver embeds
+// *engine.Engine), so internal/engine cannot import internal/driver to
+// reuse createFeature, and neither can import the other's package for
+// this. cardmint sits below both — it imports only internal/domain,
+// internal/state, internal/spec, and internal/workflow, none of which
+// import driver or engine — so both driver and engine import cardmint
+// instead of each other.
 //
 // cardmint knows nothing about either caller. It does not know what a
 // Driver's Options or an Engine's tool arguments look like; it takes an

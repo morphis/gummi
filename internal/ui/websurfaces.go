@@ -14,7 +14,7 @@ import (
 )
 
 // The board's surfaces beyond a single card — goals, stacks, spec ingest,
-// bug import and the board agent — for the web face (DESIGN §20.1). Each
+// bug import — for the web face (DESIGN §20.1). Each
 // is a pair: a projection read inside the Shell's loop, and an intent that
 // runs the same function the TUI's key or dialog runs, with the dialog's
 // answer passed in rather than asked for.
@@ -73,8 +73,6 @@ func webErr(code WebErrorCode, format string, args ...any) error {
 type WebOutcome struct {
 	Text string
 	Err  bool
-	// Busy is a line the agent would not take, handed back unsent.
-	Busy string
 	// ID names what the intent made or touched, when it made something.
 	ID string
 }
@@ -123,11 +121,7 @@ func (b *Bridge) deliver(msg tea.Msg) {
 func outcomeOf(msg tea.Msg) WebOutcome {
 	switch msg := msg.(type) {
 	case noticeMsg:
-		return WebOutcome{Text: msg.text, Err: msg.isErr, Busy: msg.restoreBoard}
-	case boardOpenedMsg:
-		if msg.err != nil {
-			return WebOutcome{Text: sanitize(msg.err.Error()), Err: true}
-		}
+		return WebOutcome{Text: msg.text, Err: msg.isErr}
 	}
 	return WebOutcome{}
 }

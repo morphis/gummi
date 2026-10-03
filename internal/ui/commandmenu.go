@@ -22,18 +22,13 @@ type command struct {
 	// name is the word this command answers to after a "/" in a thread
 	// composer (complete.go). Empty means it has none, and an unnamed
 	// command is simply not part of the slash vocabulary — which is how
-	// the card-scoped entries cardCommands appends stay out of the board
-	// thread's popup without a second list to keep in step.
 	name string
 	// alias is extra filter words, matched by commandMatches and by
-	// nothing else. It is deliberately NOT name: name is the word a
-	// command answers to on the BOARD thread's slash line, and
-	// boardCommandRows uses "has a name" as the test for what belongs in
-	// that vocabulary at all — a card's own actions must never reach it
-	// ("/park" on a board conversation would park a card on a tab that is
-	// not even visible). The card verbs need to be findable in THIS menu,
-	// which is a different surface with a different filter, so they get a
-	// different field.
+	// nothing else. It is deliberately NOT name: name is the canonical
+	// word a command answers to, and the card verbs need to stay findable
+	// in THIS menu without being mistaken for one of the board-root
+	// globals whose names are already taken — so they get a different
+	// field.
 	alias     string
 	available bool // false renders dimmed and cannot be run — visible but not offered
 }

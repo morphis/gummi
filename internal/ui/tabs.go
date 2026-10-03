@@ -5,15 +5,13 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 // Tab is one of gummi's top-level board views. It is a small int over a
-// slice of tabDefs, not a hardcoded three-way switch: adding a second
-// agent tab later (DESIGN's "out of scope for this pass" list) is then
-// a config change to tabDefs, not a refactor of everything that walks
-// the tab set.
+// slice of tabDefs, not a hardcoded switch: adding a tab is then a
+// config change to tabDefs, not a refactor of everything that walks the
+// tab set.
 type Tab int
 
 const (
@@ -28,15 +26,12 @@ const (
 	// TabInbox is the needs-attention queue, promoted out of its modal
 	// overlay onto a tab of its own (stage 2; a placeholder until then).
 	TabInbox
-	// TabAgent hosts gummi's own board conversation — an in-process
-	// engine.BoardSession, not a hosted external program (boardthread.go).
-	TabAgent
 )
 
 // tabChords is the tier-1 chord range that jumps straight to a tab, one
 // per tabDef in order. A fifth tab edits tabDefs and this string, and
 // nothing else — the whole claim tabs.go was built on.
-const tabChords = "alt+1/2/3/4"
+const tabChords = "alt+1/2/3"
 
 // tabDef names one tab in the bar: its identity and its label.
 type tabDef struct {
@@ -50,7 +45,6 @@ func (m *Shell) tabDefs() []tabDef {
 		{id: TabBoard, label: "board"},
 		{id: TabStats, label: "stats"},
 		{id: TabInbox, label: "inbox"},
-		{id: TabAgent, label: "agent"},
 	}
 }
 
@@ -59,8 +53,8 @@ func (m *Shell) tabDefs() []tabDef {
 // it so it can never reappear stale on a tab that doesn't own it.
 func (m *Shell) setTab(t Tab) {
 	// bounds come from tabDefs, not a hardcoded upper tab: this type's
-	// whole claim is that a fourth tab is a tabDefs edit, and a check
-	// written against TabAgent would silently reject one.
+	// whole claim is that a new tab is a tabDefs edit, and a check
+	// written against one of today's labels would silently reject it.
 	if int(t) < 0 || int(t) >= len(m.tabDefs()) {
 		return
 	}
@@ -86,16 +80,15 @@ func (m *Shell) setTab(t Tab) {
 	m.tab = t
 }
 
-// nextTab cycles every tab in tabDefs, the agent tab included. Every tab
-// is gummi's own keymap now, so cycling through the agent tab is no
-// different from cycling through any other — there is no hosted program
-// underneath it that could hold tab and turn the cycle into a one-way
-// door.
+// nextTab cycles every tab in tabDefs. Every tab is gummi's own keymap,
+// so cycling through any of them is like cycling through any other —
+// there is no hosted program underneath one that could hold tab and
+// turn the cycle into a one-way door.
 func (m *Shell) nextTab() tea.Cmd {
 	defs := m.tabDefs()
 	// Tab is an index into tabDefs by construction and setTab keeps it in
 	// range, so the successor is plain modular arithmetic over the same
-	// slice the bar draws from — a fourth tab needs no edit here.
+	// slice the bar draws from — a new tab needs no edit here.
 	return m.gotoTab(defs[(int(m.tab)+1)%len(defs)].id)
 }
 
@@ -117,11 +110,6 @@ func (m *Shell) tabBadge(t Tab) (text string, alert bool) {
 			}
 		}
 		return "✉" + strconv.Itoa(n), alert
-	case TabAgent:
-		// nothing to show yet — a future unread-output marker (a "·" once
-		// the board thread has produced output the user hasn't looked at)
-		// belongs here, but no such tracking exists today.
-		return "", false
 	default:
 		return "", false
 	}
@@ -164,17 +152,9 @@ func (m *Shell) tabBarView(w int) string {
 	// full at 120 columns, and it is the wrong place anyway — how to
 	// reach a tab belongs beside the tabs.
 	hint := s.Muted.Render("tab") + s.Faint.Render(" cycle · ") +
-		s.Muted.Render(tabChords) + s.Faint.Render(" board/stats/inbox/agent")
+		s.Muted.Render(tabChords) + s.Faint.Render(" board/stats/inbox")
 	if pad := w - ansi.StringWidth(bar) - ansi.StringWidth(hint) - 1; pad > 0 {
 		bar += strings.Repeat(" ", pad) + hint
 	}
 	return ansi.Truncate(bar, w, "…")
-}
-
-// centeredNotice places an already-styled message in the middle of a
-// w×h pane — the inbox and agent tabs' content until stage 2/3 give
-// them real views (logo.Splash uses the same lipgloss.Place for the
-// empty-board splash).
-func centeredNotice(w, h int, msg string) string {
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, msg)
 }

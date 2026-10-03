@@ -5,20 +5,10 @@ import "encoding/json"
 // buildOpencodeConfig renders the per-session OPENCODE_CONFIG file content
 // for an opencode-driven session. It emits exactly two blocks: opencode's
 // `permission` (always) and `mcp.gummi` (only when an MCP socket is present
-// alongside a feature id or workspace is set — the same "socket plus
-// something to bind it to" gate every other adapter uses). Anything else
-// opencode reads — models, keybinds, bash tool policies — stays under
-// operator control in the global opencode.jsonc, which this file merges on
-// top of.
-//
-// workspace mirrors SessionOpts.Workspace: it swaps the emitted
-// mcp.gummi.command's trailing args from ["__mcp","--feature",featureID]
-// to ["__mcp","--workspace"], so the spawned child binds the board-level
-// endpoint instead of naming a card. featureID is otherwise unused when
-// workspace is true — same convention as the claudecode/codex builders in
-// gummi_mcp.go, kept here even though this file's config shape (a JSON
-// blob wrapping opencode's own schema, not gummi's) is otherwise unrelated
-// to theirs.
+// alongside a feature id — the same "socket plus something to bind it to"
+// gate every other adapter uses). Anything else opencode reads — models,
+// keybinds, bash tool policies — stays under operator control in the
+// global opencode.jsonc, which this file merges on top of.
 //
 // The permission block cages opencode's file tools to the worktree: edit
 // (which gates both opencode's edit and write tools) is pinned to a
@@ -50,7 +40,7 @@ import "encoding/json"
 // Every pattern map relies on opencode letting the LAST matching rule
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly, workspace bool, skillDirs []string, scratchDir string) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, skillDirs []string, scratchDir string) ([]byte, error) {
 	worktreeOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
 	var external any = "deny"
 	if scratchDir != "" {
@@ -92,46 +82,15 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	if len(skillDirs) > 0 {
 		out["skills"] = map[string]any{"paths": skillDirs}
 	}
-	if mcpSock != "" && (featureID != "" || workspace) {
-		command := []string{execPath, "__mcp", "--feature", featureID}
-		if workspace {
-			command = []string{execPath, "__mcp", "--workspace"}
-		}
+	if mcpSock != "" && featureID != "" {
 		out["mcp"] = map[string]any{
 			"gummi": map[string]any{
 				"type":        "local",
-				"command":     command,
+				"command":     []string{execPath, "__mcp", "--feature", featureID},
 				"environment": map[string]string{"GUMMI_MCP_SOCK": mcpSock},
 				"timeout":     mcpCallTimeout.Milliseconds(),
 			},
 		}
 	}
 	return json.Marshal(out)
-}
-
-// buildHostedOpencodeMCPConfig renders the OPENCODE_CONFIG file content for
-// the agent tab's hosted opencode session: just the mcp.gummi block that
-// binds the workspace endpoint, with no permission key. This deliberately
-// differs from buildOpencodeConfig's scripted-session shape, which always
-// cages edits to a worktree — the hosted tab has no equivalent sandboxing
-// concept for any backend (see HostedMCPAttach's doc and the feature's
-// design notes on why applying a cage to opencode alone here would be a
-// backend-specific surprise), so this builder never emits one.
-func buildHostedOpencodeMCPConfig(execPath, sockPath string) []byte {
-	out := map[string]any{
-		"mcp": map[string]any{
-			"gummi": map[string]any{
-				"type":        "local",
-				"command":     []string{execPath, "__mcp", "--workspace"},
-				"environment": map[string]string{"GUMMI_MCP_SOCK": sockPath},
-				"timeout":     mcpCallTimeout.Milliseconds(),
-			},
-		},
-	}
-	b, err := json.Marshal(out)
-	if err != nil {
-		// Fixed shape of strings/slices; cannot fail on it.
-		panic(err)
-	}
-	return b
 }

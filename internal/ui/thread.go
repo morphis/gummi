@@ -1606,9 +1606,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 }
 
 // consultBlock renders the card's consult exchange, if any, as its own
-// visually distinct, captioned segment — the same idea boardHeader/
-// boardThreadRender use to keep the board's own conversation
-// recognizably not a card's, applied here to keep a consult exchange
+// visually distinct, captioned segment — keeping a consult exchange
 // recognizably not the stage's. It never spawns a session by being
 // drawn: m.consultFor is a lookup only, so a card nobody has asked
 // anything renders nothing here at all.

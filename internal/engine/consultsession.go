@@ -16,11 +16,11 @@ import (
 )
 
 // consultPermission is the fixed tool-call policy every consult session
-// spawns with — allow-all, the same reasoning boardPermission's own doc
-// comment gives (PermissionGuarded is refused outright by some adapters
-// and hangs the others, since nothing in this codebase ever emits
-// agent.EventPermission to answer it). A consult session's tool surface
-// is read-only regardless, so "allow" here never risks a mutation.
+// spawns with — allow-all (PermissionGuarded is refused outright by some
+// adapters and hangs the others, since nothing in this codebase ever
+// emits agent.EventPermission to answer it). A consult session's tool
+// surface is read-only regardless, so "allow" here never risks a
+// mutation.
 const consultPermission = agent.PermissionAllowAll
 
 // consultIdleTimeout is the golden value (Implementation notes): long
@@ -32,14 +32,12 @@ const consultPermission = agent.PermissionAllowAll
 // deterministically instead of waiting out the golden value.
 const consultIdleTimeout = 20 * time.Minute
 
-// ConsultSession is a card-scoped sibling of BoardSession: an
-// engine.Session wrapped the same way, with the same absences — no
-// lockCard, no attention-pool slot, no live-file binding, no checkpoint,
-// no store row, no MaxCredits. It differs from BoardSession in exactly
-// two ways: it is keyed by domain.FeatureID instead of being a workspace
-// singleton, and its tool surface is the read-only three (card_status,
-// card_spec, card_diff) instead of the full seven, each call implicitly
-// scoped to its own bound card.
+// ConsultSession is a card-scoped read-only conversation beside a card's
+// stage sessions: an engine.Session wrapped the same way as every other,
+// with its own absences — no lockCard, no attention-pool slot, no
+// live-file binding, no checkpoint, no store row, no MaxCredits. Its tool
+// surface is the read-only three (card_status, card_spec, card_diff),
+// each call implicitly scoped to its own bound card.
 //
 // One ConsultSession exists per card for this engine's whole lifetime
 // (OpenConsult is idempotent per card) — but the backend it holds is not
@@ -74,14 +72,13 @@ type ConsultSession struct {
 // any state — done, paused, restored) so a finished autonomous stage's
 // "best conversation available" carries into the read-only channel
 // rather than being lost. Every later call — another question, reopening
-// the card page — returns the identical *ConsultSession, mirroring
-// OpenBoard's own "reopening while one is already live returns it as-is"
-// rule.
+// the card page — returns the identical *ConsultSession: reopening while
+// one is already live returns it as-is.
 func (e *Engine) OpenConsult(ctx context.Context, f domain.Feature) (*ConsultSession, error) {
-	// Serialized end to end for the same reason boardMu exists: spawning
-	// a backend is too slow to do under e.mu, so a check-then-act around
-	// a released lock would let two concurrent callers for the same card
-	// both see "not open yet" and both spawn one.
+	// Serialized end to end: spawning a backend is too slow to do under
+	// e.mu, so a check-then-act around a released lock would let two
+	// concurrent callers for the same card both see "not open yet" and
+	// both spawn one.
 	e.consultMu.Lock()
 	defer e.consultMu.Unlock()
 
@@ -186,15 +183,14 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 	}
 	caps := ag.Capabilities()
 
-	// Both halves of OpenBoard's two-way wiring, card-scoped: native
-	// client tools (Tools, answered via dispatchConsultClientTool) for a
-	// ClientTools backend, or a dedicated per-open MCP endpoint
-	// (startConsultMCPEndpoint — never the workspace's own
-	// StartWorkspaceMCPEndpoint or a stage session's own mcpSockPath, to
-	// keep this session's tool surface pinned to the read-only three and
-	// this one card) for an MCPTools backend. A backend with neither
-	// capability gets no tools at all, the same "no tools" degradation
-	// OpenBoard applies.
+	// The same two-way wiring a card's stage session gets, scoped to this
+	// conversation: native client tools (Tools, answered via
+	// dispatchConsultClientTool) for a ClientTools backend, or a dedicated
+	// per-open MCP endpoint (startConsultMCPEndpoint — never a stage
+	// session's own mcpSockPath, to keep this session's tool surface
+	// pinned to the read-only three and this one card) for an MCPTools
+	// backend. A backend with neither capability gets no tools at all: it
+	// can still converse, just without reading the card.
 	var tools []agent.ToolDef
 	var mcpPath string
 	var mcpTeardown func()
@@ -239,10 +235,9 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		MCPSockPath:    mcpPath,
 		// No ArtifactPath, no MaxCredits: a consult session has no spec
 		// prompt to seed (card_spec answers that on demand instead) and no
-		// budget to enforce. Workspace is left false (the zero value) even
-		// when mcpPath is set: an MCP-reaching backend here always dials in
-		// --feature <id> mode (FeatureID above), never --workspace — this
-		// is a card-scoped endpoint, not the board's.
+		// budget to enforce. An MCP-reaching backend here always dials in
+		// --feature <id> mode (FeatureID above) — this endpoint is scoped
+		// to the one card it serves.
 	})
 	if err != nil {
 		if mcpTeardown != nil {
@@ -297,8 +292,7 @@ func (c *ConsultSession) ensureBackend(ctx context.Context) (*Session, error) {
 }
 
 // Send delivers a user turn to the card's consult session, respawning
-// its backend first if the last one idled out. It mirrors BoardSession's
-// own Send minus everything that doesn't apply here: no budget nudge (no
+// its backend first if the last one idled out. No budget nudge (no
 // budget), no persist (no store row backs a consult session — its spend
 // still lands in the feature's own totals, via recordUsage, and its turns
 // in the card's log, via recordConsult, but the session itself has

@@ -124,13 +124,6 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	shell.SetRepoNames(pool.Names())
 	// Wire the agent engine best-effort: a missing/unstartable CLI just
 	// leaves the board static (chat reports "no agent configured").
-	//
-	// Nothing binds a workspace MCP endpoint here any more. This used to,
-	// so that a coding CLI hosted in the agent tab could drive *this*
-	// gummi rather than starting a second one. That pty is gone, and the
-	// board session that replaced it binds its own endpoint when it
-	// starts (engine.BoardSession) — which is why mcpworkspace.go's
-	// socket path carries a nonce in the first place.
 	if eng, _, cleanup, why := buildEngine(store, pool, ws, locks); eng != nil {
 		h.engine = eng
 		shell.AttachEngine(eng)
@@ -180,9 +173,5 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	if strings.EqualFold(os.Getenv("GUMMI_MOTION"), "off") {
 		shell.SetMotion(false)
 	}
-	// The agent tab's hosted-CLI question is NOT asked here any more. It
-	// used to be the first thing a new user saw — a modal about a tab
-	// they had not opened, in front of a board they had not seen — and it
-	// is asked on arrival at that tab instead (Shell.gotoTab).
 	return h, nil
 }

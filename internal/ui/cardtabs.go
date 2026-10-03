@@ -274,7 +274,7 @@ const reservedChords = "tsdjkorl"
 // are not reserved.
 //
 // LETTERS, not digits, and not alt+digits either — the alt+digits are
-// the shell's own board/stats/inbox/agent tabs, answered above this
+// the shell's own board/stats/inbox tabs, answered above this
 // tier, so a numbered chord would switch tab instead of opening a
 // citation. Footnote letters are the convention anyway, and this leaves
 // the whole digit row to the picker (F14).

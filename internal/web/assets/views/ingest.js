@@ -46,9 +46,8 @@ registerView('ingest', {
         const f = await ctx.api.get('/api/form')
         Object.assign(c, { profiles: f.profiles || [], repos: f.repos || [], envelope: f.envelope || 0 })
       } catch {
-        // the form's choices are not served: the board agent lists the
-        // same profiles, and the default repository needs no choosing
-        try { c.profiles = ((await ctx.api.get('/api/agent')).profiles || []).map(p => p.name) } catch { /* none */ }
+        // the form's choices are not served: the default repository needs
+        // no choosing
       }
       v.choices = c
       if (v.alive) draw(true)

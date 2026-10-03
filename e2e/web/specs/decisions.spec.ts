@@ -535,36 +535,6 @@ test('a question answered behind a budget stop reaches the run the top-up starts
   expect(spec).toContain('Decided with the user: Extend the existing file');
 });
 
-// The board agent can start a card's stage, and a fresh stage session
-// holds no question. Told to run a card parked on a person's question, it
-// would have put the question out from under the person reading it; it
-// is told the card waits on that answer instead, and the question stays.
-test('the board agent cannot run a card over a person’s question', async ({ pairedPage: page, server, api }, info) => {
-  const phone = isPhone(info);
-  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask] Add a guarded helper' })).json;
-  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
-  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
-  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
-  const asked = (await api('GET', `/api/cards/${c.id}`)).json.decision;
-  expect((await api('POST', `/api/cards/${c.id}/actions/pause`, { against: asked.against.token })).status).toBe(200);
-
-  if (phone) await page.getByTestId('card-back').click();
-  await page.getByTestId('rail-agent').click();
-  await page.getByTestId('agent-open').click();
-  const input = page.getByTestId('agent-input');
-  await expect(input).toBeVisible({ timeout: 30_000 });
-  await input.fill(`[card-run ${c.id}] pick it back up`);
-  await input.press('Enter');
-  await expect(page.getByTestId('agent-transcript').locator('[data-type="message"]').last())
-    .toContainText('waiting on a person', { timeout: 30_000 });
-  await shot(page, info, 'agent-refused-over-question');
-
-  await open(page, server, c.id);
-  await expect(page.getByTestId('decision-question')).toContainText('Where should');
-  const now = (await api('GET', `/api/cards/${c.id}`)).json;
-  expect(now.decision?.ref).toBe(asked.ref);
-  expect(now.status).not.toBe('running');
-});
 
 test.describe('a verified card', () => {
   let id: string;

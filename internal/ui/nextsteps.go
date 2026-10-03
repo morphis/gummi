@@ -501,7 +501,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated, in.attnText = it.Kind, it.Escalated, it.Text
 	}
-	in.profiles = m.engine != nil && len(m.engine.BoardProfiles()) > 0
+	in.profiles = m.engine != nil && len(m.engine.CardProfiles(r.F.Stage)) > 0
 	in.cutByQuit = m.quitCut[r.F.ID]
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom = true, r.Drift.ForkedFrom

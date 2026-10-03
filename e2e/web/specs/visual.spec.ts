@@ -203,7 +203,6 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await L.view('ingest', () => L.more('ingest'));
     await L.view('bugs', () => L.more('bugs'));
     await L.view('doctor', () => L.more('doctor'));
-    await L.view('agent', async () => { await L.rail(); await page.getByTestId('rail-agent').click(); });
     await L.view('fleet', async () => { await L.rail(); await page.getByTestId('rail-fleet').click(); });
   }
 

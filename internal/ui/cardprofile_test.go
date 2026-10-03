@@ -115,7 +115,7 @@ func TestOpenCardProfilePickerMarksCardsCurrentProfile(t *testing.T) {
 
 // TestOpenCardProfilePickerLabelsPerCardRole: an implement-stage card
 // labels its choices with the implementer backend/model, not the
-// board/architect one BoardProfiles would report for the same profile —
+// architect's one a shared fallback would report for the same profile —
 // the exact divergence CardProfiles exists to fix.
 func TestOpenCardProfilePickerLabelsPerCardRole(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")

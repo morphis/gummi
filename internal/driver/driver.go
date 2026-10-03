@@ -2360,9 +2360,9 @@ func (d *Driver) fail(ctx context.Context, id string, err error) (Outcome, error
 // brainstorm+plan) and the overflow seeds a draft under ws.DraftsDir().
 // KindResearch has no brainstorm/plan and no draft step: the brief is
 // rendered straight to the RS artifact path via SeededResearchTemplate.
-// The actual recipe lives in internal/cardmint, shared with the workspace
-// MCP endpoint's card_new tool — this is now just the translation from a
-// Driver's own Options to a cardmint.Input.
+// The actual recipe lives in internal/cardmint, shared with every minting
+// caller — this is now just the translation from a Driver's own Options
+// to a cardmint.Input.
 func (d *Driver) createFeature(ctx context.Context, ct domain.CardType, desc string) (domain.Feature, error) {
 	repo := d.opts.Repo
 	if ct.Kind == domain.KindGoal && repo == "" {

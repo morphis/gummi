@@ -58,7 +58,6 @@ func TestSwitchingTabKeepsTheCardPage(t *testing.T) {
 	// all the way round and back
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
 	if m.tab != TabBoard {
 		t.Fatalf("cycling should return to the board tab, got %v", m.tab)
 	}

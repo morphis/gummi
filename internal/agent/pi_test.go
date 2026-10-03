@@ -606,7 +606,7 @@ func TestPiGuardedAccepted(t *testing.T) {
 }
 
 // The MCP extension is materialized only for a bound session (socket plus
-// a feature id, or the Workspace flag), written as a real file, handed to
+// a feature id), written as a real file, handed to
 // pi with --extension, and carries the child's scope in its baked config.
 func TestPiMaterializesMCPExtension(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -662,8 +662,8 @@ func TestPiMaterializesMCPExtension(t *testing.T) {
 	}
 }
 
-// An unbound session (no socket, no feature id, no Workspace) must get no
-// extension file and no --extension flag: the one case that stays toolless.
+// An unbound session (no socket, no feature id) must get no extension
+// file and no --extension flag: the one case that stays toolless.
 func TestPiOmitsMCPWhenUnbound(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
@@ -692,46 +692,6 @@ func TestPiOmitsMCPWhenUnbound(t *testing.T) {
 	}
 }
 
-// A board-level session (Workspace set, no FeatureID) binds its extension
-// to the workspace endpoint, not to a feature id.
-func TestPiWorkspaceExtension(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	saved := piExecPath
-	piExecPath = func() (string, error) { return "/opt/gummi/bin/gummi", nil }
-	t.Cleanup(func() { piExecPath = saved })
-	dir := t.TempDir()
-	path := dir + "/pi"
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nsleep 5\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewPi(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Model: "x", MCPSockPath: "/tmp/mcp/ws.sock", Workspace: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	ps := sess.(*piSession)
-	ext, err := os.ReadFile(ps.extPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(ext), `"__mcp","--workspace"`) {
-		t.Errorf("extension does not bind the workspace endpoint:\n%s", ext)
-	}
-	cfg := parsePiExtConfig(t, ext)
-	if cfg["cmd"] != "/opt/gummi/bin/gummi" {
-		t.Errorf("baked cmd = %v, want the rebound piExecPath", cfg["cmd"])
-	}
-}
-
 // parsePiExtConfig decodes the generated extension's baked config line.
 func parsePiExtConfig(t *testing.T, ext []byte) map[string]any {
 	t.Helper()
@@ -752,7 +712,7 @@ func parsePiExtConfig(t *testing.T, ext []byte) map[string]any {
 // first turn, and a first prompt that reaches the model before the
 // registration lands sees no gummi tools.
 func TestPiBakesToolDescriptors(t *testing.T) {
-	ext, err := buildPiExtension("/opt/gummi", "FD-011", "/tmp/mcp/x.sock", false, piMCPToolFromDefs([]ToolDef{
+	ext, err := buildPiExtension("/opt/gummi", "FD-011", "/tmp/mcp/x.sock", piMCPToolFromDefs([]ToolDef{
 		{Name: "ask_user", Description: "ask the orchestrator", Parameters: map[string]any{"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string"}}}},
 	}))
 	if err != nil {
@@ -770,18 +730,6 @@ func TestPiBakesToolDescriptors(t *testing.T) {
 	params, _ := tool["parameters"].(map[string]any)
 	if params["type"] != "object" {
 		t.Errorf("baked parameters = %v, want the tool's JSON schema", params)
-	}
-	// toolless sessions (board/hosted) fall back to a live tools/list
-	ext, err = buildPiExtension("/opt/gummi", "", "/tmp/mcp/ws.sock", true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(ext), "tools/list") {
-		t.Error("toolless extension carries no tools/list fallback")
-	}
-	cfg = parsePiExtConfig(t, ext)
-	if _, hasTools := cfg["tools"]; hasTools {
-		t.Errorf("toolless extension baked a tools array: %v", cfg["tools"])
 	}
 }
 

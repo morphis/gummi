@@ -584,67 +584,6 @@ func TestBugImportThroughTheBoard(t *testing.T) {
 	}
 }
 
-func TestBoardAgentThroughTheBoard(t *testing.T) {
-	b := newBoardHarness(t)
-	var a webapi.Agent
-	b.must(http.StatusOK, http.MethodGet, "/api/agent", nil, &a)
-	if a.Open || len(a.Profiles) != 2 || len(a.Models) != 1 {
-		t.Fatalf("before opening = %+v", a)
-	}
-	if got := b.call(http.MethodPost, "/api/agent/send", webapi.AgentSendRequest{Text: "hi"}, nil); got != http.StatusConflict {
-		t.Fatalf("sending before opening = %d, want 409", got)
-	}
-	events := b.events(b.c, "")
-	b.must(http.StatusOK, http.MethodPost, "/api/agent/open", nil, nil)
-	events.until("agent")
-	b.must(http.StatusOK, http.MethodGet, "/api/agent", nil, &a)
-	if !a.Open || a.Model != "fake-model" {
-		t.Fatalf("after opening = %+v", a)
-	}
-
-	b.must(http.StatusOK, http.MethodPost, "/api/agent/send", webapi.AgentSendRequest{Text: "what is stuck?"}, nil)
-	b.eventually("the agent's answer", func() bool {
-		b.must(http.StatusOK, http.MethodGet, "/api/agent", nil, &a)
-		for _, it := range a.Items {
-			if it.T == webapi.ItemMessage && it.Text == "ack: what is stuck?" {
-				return true
-			}
-		}
-		return false
-	})
-	if a.Items[0].T != webapi.ItemYou || a.Items[0].Text != "what is stuck?" {
-		t.Fatalf("items = %+v", a.Items)
-	}
-	b.must(http.StatusOK, http.MethodPost, "/api/agent/interrupt", nil, nil)
-
-	// a busy backend hands the line back
-	b.ag.SendErr = agent.ErrBusy
-	var refused webapi.Error
-	if got := b.call(http.MethodPost, "/api/agent/send", webapi.AgentSendRequest{Text: "again"}, &refused); got != http.StatusConflict ||
-		refused.Error != webapi.ConflictBusy || refused.Text != "again" {
-		t.Fatalf("a busy send = %d %+v", got, refused)
-	}
-	b.ag.SendErr = nil
-
-	// a switch with a conversation to lose asks first
-	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY"}, &refused); got != webapi.StatusQuestion || refused.Error != "confirm" || refused.Confirm == "" {
-		t.Fatalf("an unconfirmed switch = %d %+v", got, refused)
-	}
-	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "nope", Confirm: refused.Confirm}, nil); got != http.StatusBadRequest {
-		t.Fatalf("an unknown profile = %d, want 400", got)
-	}
-	// the yes to the switch to thrifty is not a yes to another switch
-	var other webapi.Error
-	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY", Model: "m2", Confirm: refused.Confirm}, &other); got != webapi.StatusQuestion || other.Error != "confirm" {
-		t.Fatalf("a switch confirmed for another question = %d %+v, want 202 confirm", got, other)
-	}
-	b.must(http.StatusOK, http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY", Confirm: refused.Confirm}, nil)
-	b.must(http.StatusOK, http.MethodGet, "/api/agent", nil, &a)
-	if !a.Open || a.Profile != "thrifty" || len(a.Items) != 0 {
-		t.Fatalf("after the switch = %+v", a)
-	}
-	b.must(http.StatusOK, http.MethodPost, "/api/agent/send", webapi.AgentSendRequest{Text: "/clear"}, nil)
-}
 
 func TestDoctorThroughTheBoard(t *testing.T) {
 	b := newBoardHarness(t)

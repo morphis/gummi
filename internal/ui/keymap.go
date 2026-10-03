@@ -82,16 +82,12 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "goal", m.goalPage.bindings()
 	case live && m.ingestRun != nil && !m.ingestRun.hidden:
 		return "ingest", ingestRunBindings
-	// the inbox and agent tabs own the main pane whenever they're active.
-	// The inbox has its own table now (inboxview.go); the agent tab is
-	// still stage 3's placeholder — it still has to answer ? and say how
-	// to get back to the board.
+	// the inbox owns the main pane whenever it's active. It has its own
+	// table now (inboxview.go), not a placeholder.
 	case m.tab == TabStats:
 		return "stats", m.wsStatsBindings()
 	case m.tab == TabInbox:
 		return "inbox", m.inboxBindings()
-	case m.tab == TabAgent:
-		return "agent", m.agentBindings()
 	case m.tab == TabBoard && len(m.rows) > 0 && m.cardOpen:
 		return "card", m.cardPageBindings()
 	case m.tab == TabBoard && len(m.rows) > 0:
@@ -99,61 +95,6 @@ func (m *Shell) activeSurface() (string, []binding) {
 	default:
 		return "board", m.splashBindings()
 	}
-}
-
-// agentBindings is the agent tab's key table. The tab hosts gummi's own
-// board conversation (boardthread.go), answerable by one ordinary table
-// like every other surface: there is no foreign keymap underneath it to
-// carve exceptions around.
-//
-// withHelpKey, not a bare alt+/ row: the board composer takes every
-// printable key including ?, the same reason threadInputBindings' own
-// callers reach for it (cardPageBindings) rather than listing the key
-// unconditionally — a literal question mark typed into a board message
-// must not open the help overlay instead.
-func (m *Shell) agentBindings() []binding {
-	// With the completion popup open the bar describes the popup, because
-	// that is what the next keystroke will act on: enter runs a command
-	// rather than sending a sentence, tab completes a word rather than
-	// leaving the tab, and esc closes the list rather than interrupting
-	// the board. Naming the other set here would be the bar promising a
-	// key the surface is not going to honour — the same rule
-	// threadInputBindings follows for its own confirm chip.
-	if m.boardComplete != nil {
-		return withHelpKey([]binding{
-			{key: "enter", label: "run", help: "run the highlighted command", bar: true},
-			{key: "tab", label: "complete", help: "finish the word without running it", bar: true},
-			{key: "↑↓", label: "move", help: "move through the matching commands", bar: true},
-			{key: "esc", label: "dismiss", help: "close the list and keep the line as typed", bar: true},
-		})
-	}
-	return withHelpKey([]binding{
-		{key: "enter", label: "send", help: "send the line to the board — it can read and act on every card through the same tools a hosted agent reaches", bar: true},
-		{key: "/", label: "commands", help: "on an empty line, open the command list and complete as you type", bar: true},
-		// The next three are state-dependent, like the outputs row below
-		// them: whether esc has a turn to interrupt, whether there is a
-		// draft for a newline to join, and which of three things ctrl+c
-		// will do. Each binding owns its own wording and decides whether
-		// this state earns a bar slot — the bar says what the next press
-		// does, not what the key means in general.
-		// ctrl+c ahead of the newline row: the bar sheds from the end, and on
-		// an 80-column terminal exactly one of the two survives — it should
-		// be the key that gets a draft out of the way, not the one that puts
-		// a second line into it.
-		m.boardEscBinding(),
-		m.boardCancelBinding(),
-		m.boardNewlineBinding(),
-		{key: "↑/↓", label: "history", help: "recall the lines you have already sent, from the composer's first row"},
-		{key: "pgup/pgdn", label: "scroll", help: "scroll the conversation without leaving the line", bar: true},
-		m.boardOutputsBinding(),
-		// Typed, not pressed — the same shape the card thread's own table
-		// gives its verb row ({key: "verb"}): the key column names what
-		// you enter on the line, because the composer takes every
-		// printable key and there is no chord to name instead.
-		{key: boardClearCommand, label: "clear", help: "start a fresh conversation — the transcript, its context and the running spend all go with the old session"},
-		{key: "tab", label: "next tab", help: "cycle the tabs (board, stats, inbox, agent)", bar: true},
-		{key: tabChords, label: "tab", help: "jump straight to board / stats / inbox / agent"},
-	})
 }
 
 // withHelpKey appends the alt+/ row to a surface's table.

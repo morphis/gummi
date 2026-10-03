@@ -1,8 +1,8 @@
 // views.js — the page's overlays, and a registry other surfaces plug into.
 //
 //   registerView(name, { title, wide, css, mount(body, ctx), unmount() })
-//     adds a surface (new card, goal, stacks, ingest, bugs, doctor, board
-//     agent, fleet) that the rail foot, the palette and the keys can open by
+//     adds a surface (new card, goal, stacks, ingest, bugs, doctor, fleet)
+//     that the rail foot, the palette and the keys can open by
 //     name. mount may return a cleanup function. ctx carries what a view
 //     needs from the page: { params, close, api, select, toast, state,
 //     onStore, onEvent, openModal }.
@@ -20,7 +20,6 @@ let current = null // { scrim, close }
 
 export const VIEW_LABELS = {
   newcard: 'New card',
-  agent: 'Board agent',
   fleet: 'Fleet stats',
   goals: 'Goals',
   goal: 'Goal',

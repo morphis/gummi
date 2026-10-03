@@ -2,7 +2,7 @@ import { expect, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // A card deleted while someone has it open — from another device, or by
-// the board agent — is said to be gone where it was open. The page used
+// the card's own page — is said to be gone where it was open. The page used
 // to move itself onto another card: the line being written was dropped,
 // and enter then answered that card's decision (here, a landing) unread.
 

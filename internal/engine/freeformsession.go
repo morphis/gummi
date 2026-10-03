@@ -26,11 +26,11 @@ import (
 //   - From ConsultSession: keyed per card, idempotent to open, and a
 //     backend that idles out after 20 minutes and respawns carrying its
 //     own transcript. A freeform conversation outlives any one backend.
-//   - From BoardSession: folded into an engine.Session so every surface
-//     renders it with the same Snapshot machinery, and outside every
-//     stage mechanism — no attention-pool slot (the lanes ration
-//     contention between autonomous STAGES; a human-paced conversation
-//     competes with nothing there), no gate, no verdict, no advance.
+//   - From an engine.Session: folded so every surface renders it with
+//     the same Snapshot machinery, and outside every stage mechanism —
+//     no attention-pool slot (the lanes ration contention between
+//     autonomous STAGES; a human-paced conversation competes with
+//     nothing there), no gate, no verdict, no advance.
 //
 // What it has that neither of them does is the reason it needed its own
 // file: it WRITES. So it takes the card's worktree as its cwd, the card's

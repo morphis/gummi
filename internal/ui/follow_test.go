@@ -247,13 +247,13 @@ func TestFollowerEmptyBeforeRecords(t *testing.T) {
 	}
 }
 
-// BG-023: a card minted while this process's own board is running (the
-// workspace MCP endpoint's card_new, which mints via cardmint.Mint the
-// same way this test does) must reach the board without a restart.
-// cardmint itself can't announce the mint — it sits below engine to avoid
-// an import cycle — so card_new sends an engine.EventCardCreated after a
-// successful Mint; this drives that event the way Shell's own engine
-// listener would and confirms it reloads rows to pick up the new card.
+// BG-023: a card minted while this process's own board is running — via
+// cardmint.Mint, as this test does — must reach the board without a
+// restart. cardmint itself can't announce the mint — it sits below engine
+// to avoid an import cycle — so the minting caller sends an
+// engine.EventCardCreated after a successful Mint; this drives that event
+// the way Shell's own engine listener would and confirms it reloads rows
+// to pick up the new card.
 func TestEventCardCreatedReloadsRows(t *testing.T) {
 	m, _ := newWorkspace(t)
 

@@ -39,9 +39,6 @@ const (
 	// ChangeLive: one card's live session streamed (ID set) — a delta, a
 	// tool call, spend. Refetch GET /api/cards/{id}/live.
 	ChangeLive ChangeKind = "live"
-	// ChangeAgent: the board-level agent session changed. Refetch
-	// GET /api/agent.
-	ChangeAgent ChangeKind = "agent"
 	// ChangeToast: a notice the TUI would have shown in its status band.
 	// Carries Text, Err and, when it is about one card, ID.
 	ChangeToast ChangeKind = "toast"
@@ -71,8 +68,8 @@ const EventResync = "resync"
 type Change struct {
 	Kind ChangeKind `json:"kind"`
 	// ID is the card the change is about: set for card and live, and for
-	// a toast about one card; the run, for ingest; empty for board, agent
-	// and viewers.
+	// a toast about one card; the run, for ingest; empty for board and
+	// viewers.
 	ID string `json:"id,omitempty"`
 	// Gone marks a card change whose card has left the board (it was
 	// deleted): there is nothing left to refetch, and a page showing it

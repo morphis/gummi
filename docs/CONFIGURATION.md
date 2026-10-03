@@ -101,7 +101,6 @@ Scaffolded on first run. Every key is optional.
 | `experiments` | the orchestrated live runs that prove work on a substrate, each `{describe, substrate, inputs, control, deploy, settle, run, collect, timeout}`; `substrate` and `run` are required. A goal's done-when item names one as its means of proof (`experiment: <name>`, optionally `assertions: [ids]`). Every command runs in the workspace root with `GUMMI_EVIDENCE` (a directory to write into — `results.ndjson` there, one `{"id","ok","detail"}` per line, is how a run reports its assertions), `GUMMI_TREE_<REPO>` and `GUMMI_HEAD_<REPO>` for each input (the unnamed default repo is `HOME`), `GUMMI_SUBSTRATE`, `GUMMI_EXPERIMENT`, `GUMMI_RUN`, `GUMMI_PURPOSE` and `GUMMI_ATTEMPT`. Exit 75 from any phase means *this run could not be judged*. `timeout` bounds each phase (default 30m). Operator configuration on purpose: a goal may change the rig it is tested on, and must not thereby change what counts as passing. See DESIGN §17.8 |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
 | `skills.forward` | workspace skills to forward into card sessions, as bare names (resolved against `.claude/skills`, `.agents/skills`, `.github/skills` at the workspace root, in that order) or absolute paths. A card runs in a worktree under `.gummi/worktrees/`, a sibling of the repository, so a skill kept beside `.gummi` is outside every backend's project scope and reaches nothing without this; a skill the repository itself ships is already in the worktree and needs no forwarding. Honored by the `opencode`, `copilot` and `claude` backends (`agent.Capabilities.SkillDirs`); on a backend that cannot load skills from outside the worktree gummi says so on the card's activity feed rather than dropping them silently. gummi's own skill is refused — a card must never drive a second gummi |
-| `agent` | which installed CLI (`copilot`, `claude`, `codex`, `opencode`, `pi`) hosts the board's **agent tab**. It has nothing to do with the engine's per-role backends. The first-run picker writes this key without disturbing the rest of the file |
 
 ## `.gummi/profiles.yaml`
 
@@ -256,7 +255,7 @@ re-raised decision that deduped to a no-op raises nothing).
 | `GUMMI_WEB_ADDR` | where `gummi web` listens when `--addr` is not given (default `127.0.0.1:7878`) |
 | `TS_AUTHKEY` | a Tailscale auth key for `gummi web --tailscale` when `--ts-authkey` is not given; skips the browser login on the node's first run |
 | `GUMMI_MOTION` | `off` freezes every activity glyph and stops the clock tick |
-| `GUMMI_ATTACH_CMD` | command for the board's raw-attach (`a`) and the agent tab, ahead of `GUMMI_AGENT` and the `agent:` key |
+| `GUMMI_ATTACH_CMD` | command for the board's raw-attach (`a`) |
 | `GUMMI_EVENT`, `GUMMI_CARD`, `GUMMI_WORKSPACE` | exported to `hooks:` scripts: the event name, the card id, the workspace root |
 
 ## The web host on a tailnet

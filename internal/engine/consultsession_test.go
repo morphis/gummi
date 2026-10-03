@@ -120,10 +120,8 @@ func TestConsultToolScopedToBoundCard(t *testing.T) {
 
 // TestConsultMCPToolsWiring: an MCPTools backend (claude/codex/opencode
 // shape — MCPTools true, ClientTools false) gets a card-scoped inbound MCP
-// endpoint (MCPSockPath set, Workspace left false since this dials in
-// --feature <id> mode, not --workspace) and no opts.Tools — mirrors
-// TestBoardMCPToolsWiring for the consult-session equivalent of that same
-// capability branch.
+// endpoint (MCPSockPath set, dialing --feature <id> mode) and no
+// opts.Tools — the consult session's own capability branch.
 func TestConsultMCPToolsWiring(t *testing.T) {
 	r := &recorder{Fake: agent.NewFake("ok")}
 	r.Fake.Caps = agent.Capabilities{MCPTools: true, UsageEvents: true, Interrupt: true}
@@ -140,9 +138,6 @@ func TestConsultMCPToolsWiring(t *testing.T) {
 	}
 	if opts.MCPSockPath == "" {
 		t.Fatalf("an MCPTools backend must get a card-scoped MCP endpoint: %+v", opts)
-	}
-	if opts.Workspace {
-		t.Errorf("a consult session's MCP endpoint dials in --feature mode, not --workspace: %+v", opts)
 	}
 	if opts.FeatureID != string(f.ID) {
 		t.Errorf("FeatureID = %q, want %q", opts.FeatureID, f.ID)

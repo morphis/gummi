@@ -233,7 +233,7 @@ func modelLabel(model string) string {
 
 // SessionSuggestions is the model ids the workspace's profiles run on each
 // backend, sorted, for a session's picker to offer. There is deliberately
-// no registry of every model an agent can run (KnownModels says why): the
+// no registry of every model an agent can run: the
 // ids a workspace already uses are the ones worth offering, and any other
 // may be typed. A role that names no backend runs on the default agent and
 // is filed under its name.

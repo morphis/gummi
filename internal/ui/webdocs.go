@@ -1011,3 +1011,28 @@ func webDiffFile(f diffannot.File, added map[int]bool, touched bool) webapi.Diff
 	}
 	return wf
 }
+
+// groupActivity folds each run of tool calls and thoughts between two other
+// items into one activity item. A run keeps its first item's key, so it
+// stays the same row as it grows.
+func groupActivity(items []webapi.Item) []webapi.Item {
+	out := make([]webapi.Item, 0, len(items))
+	for _, it := range items {
+		if !isActivity(it) {
+			out = append(out, it)
+			continue
+		}
+		if n := len(out); n > 0 && out[n-1].T == webapi.ItemActivity {
+			a := &out[n-1]
+			a.Items = append(a.Items, it)
+			a.Seq = max(a.Seq, it.Seq)
+			continue
+		}
+		out = append(out, webapi.Item{Key: "act:" + it.Key, Seq: it.Seq, T: webapi.ItemActivity, Time: it.Time, Stage: it.Stage, Items: []webapi.Item{it}})
+	}
+	return out
+}
+
+func isActivity(it webapi.Item) bool {
+	return it.T == webapi.ItemTools || it.T == webapi.ItemMessage && it.Author == string(engine.AuthorThinking)
+}

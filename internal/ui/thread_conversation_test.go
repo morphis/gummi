@@ -32,12 +32,12 @@ func agentWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine) {
 }
 
 // agentWorkspaceProfiles is agentWorkspace with profiles wired into the
-// engine, for the board's /profile and /model pickers (boardcomplete_test
-// .go): both read engine.Config.Profiles directly (BoardProfiles,
-// KnownModels), so the fixture builds the config.Profiles value in
-// memory rather than writing and loading a profiles.yaml file nothing
-// else in this package's tests needs. opts mutates the engine config
-// before New — the hook queuedWorkspace uses to cap the autopilot lanes.
+// engine, for the profile pickers: they read engine.Config.Profiles
+// directly (CardProfiles), so the fixture builds the config.Profiles
+// value in memory rather than writing and loading a profiles.yaml file
+// nothing else in this package's tests needs. opts mutates the engine
+// config before New — the hook queuedWorkspace uses to cap the autopilot
+// lanes.
 func agentWorkspaceProfiles(t *testing.T, ag agent.Agent, profiles config.Profiles, opts ...func(*engine.Config)) (*Shell, *engine.Engine) {
 	t.Helper()
 	root := t.TempDir()

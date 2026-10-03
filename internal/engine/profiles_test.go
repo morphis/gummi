@@ -171,58 +171,11 @@ func TestResolveRoleNoProfiles(t *testing.T) {
 	}
 }
 
-// TestBoardProfilesOrderAndResolution pins BoardProfiles to
-// config.Profiles.Names' order (declared default first, rest sorted)
-// and to resolveBoardRole's actual resolution — premium here has no
-// board role and must borrow the architect's, exactly as
-// TestBoardRolePairsModelAndBackend pins for resolveBoardRole itself.
-func TestBoardProfilesOrderAndResolution(t *testing.T) {
-	e := &Engine{cfg: Config{Profiles: profilesFixture()}}
-	got := e.BoardProfiles()
-	want := []BoardProfile{
-		{Name: "thrifty", Backend: "", Model: "claude-sonnet"}, // Default, first
-		{Name: "premium", Backend: "", Model: "claude-opus"},   // borrows architect
-	}
-	if len(got) != len(want) {
-		t.Fatalf("BoardProfiles() = %+v, want %+v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("entry %d = %+v, want %+v", i, got[i], want[i])
-		}
-	}
-}
-
-// TestBoardProfilesReportsEmptyBackendAsEmpty: a resolved backend of ""
-// (the engine's default) must be reported as-is, never papered over with
-// a placeholder string — wording that for a human is the UI's job.
-func TestBoardProfilesReportsEmptyBackendAsEmpty(t *testing.T) {
-	e := &Engine{cfg: Config{Profiles: config.Profiles{
-		Default: "p",
-		Profiles: map[string]config.Profile{
-			"p": {"architect": {Model: "m"}}, // no backend: declared
-		},
-	}}}
-	got := e.BoardProfiles()
-	if len(got) != 1 || got[0].Backend != "" {
-		t.Errorf("BoardProfiles() = %+v, want one entry with an empty Backend", got)
-	}
-}
-
-// TestBoardProfilesNoProfiles: an engine with no profiles.yaml returns
-// nil rather than panicking on a nil Profiles map.
-func TestBoardProfilesNoProfiles(t *testing.T) {
-	e := &Engine{cfg: Config{Model: "only-model"}}
-	if got := e.BoardProfiles(); got != nil {
-		t.Errorf("BoardProfiles() = %+v, want nil", got)
-	}
-}
-
 // cardRoleFixture declares one profile whose implementer and reviewer
 // roles diverge from each other and from the architect — so a picker
-// reading the wrong resolver (resolveBoardRole, which borrows the
-// architect's for any role it doesn't itself declare) is caught
-// red-handed rather than accidentally agreeing.
+// reading the wrong resolver (one that borrows the architect's for any
+// role it doesn't itself declare) is caught red-handed rather than
+// accidentally agreeing.
 func cardRoleFixture() config.Profiles {
 	return config.Profiles{
 		Default: "mixed",
@@ -238,8 +191,8 @@ func cardRoleFixture() config.Profiles {
 
 // TestCardProfilesResolvesPerCardRole pins CardProfiles to the card's own
 // role — implement and review resolve to their own distinct
-// backend/model, not the board/architect one BoardProfiles reports for
-// the same profile.
+// backend/model, not the architect's one a wrong resolver would borrow
+// for the same profile.
 func TestCardProfilesResolvesPerCardRole(t *testing.T) {
 	e := &Engine{cfg: Config{Profiles: cardRoleFixture()}}
 
@@ -250,12 +203,6 @@ func TestCardProfilesResolvesPerCardRole(t *testing.T) {
 	review := e.CardProfiles(domain.StageVerify)
 	if len(review) != 1 || review[0].Backend != "review-backend" || review[0].Model != "review-model" {
 		t.Errorf("CardProfiles(review) = %+v, want review-backend/review-model", review)
-	}
-	// sanity: BoardProfiles borrows the architect's, proving the two
-	// resolvers genuinely disagree for this fixture.
-	board := e.BoardProfiles()
-	if len(board) != 1 || board[0].Model != "architect-model" {
-		t.Errorf("BoardProfiles() = %+v, want architect-model", board)
 	}
 }
 
@@ -272,74 +219,10 @@ func TestCardProfilesFallsBackForUndeclaredRole(t *testing.T) {
 	}
 }
 
-// TestCardProfilesNoProfiles: nil-safe like BoardProfiles, for the
-// identical reason.
+// TestCardProfilesNoProfiles: nil-safe, for the same reason.
 func TestCardProfilesNoProfiles(t *testing.T) {
 	e := &Engine{cfg: Config{Model: "only-model"}}
 	if got := e.CardProfiles(domain.StageImplement); got != nil {
 		t.Errorf("CardProfiles() = %+v, want nil", got)
-	}
-}
-
-// TestKnownModelsDedupsAndSorts: a model reused across profiles/roles
-// collapses into one KnownModel entry naming every use, both the model
-// list and each entry's Uses sorted deterministically.
-func TestKnownModelsDedupsAndSorts(t *testing.T) {
-	e := &Engine{cfg: Config{Profiles: config.Profiles{
-		Default: "a",
-		Profiles: map[string]config.Profile{
-			"a": {
-				"architect":   {Model: "shared-model"},
-				"implementer": {Model: "a-only-model"},
-			},
-			"b": {
-				"reviewer": {Model: "shared-model"},
-			},
-		},
-	}}}
-	got := e.KnownModels()
-	want := []KnownModel{
-		{Model: "a-only-model", Uses: []string{"a · implementer"}},
-		{Model: "shared-model", Uses: []string{"a · architect", "b · reviewer"}},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("KnownModels() = %+v, want %+v", got, want)
-	}
-	for i := range want {
-		if got[i].Model != want[i].Model {
-			t.Errorf("entry %d Model = %q, want %q", i, got[i].Model, want[i].Model)
-		}
-		if len(got[i].Uses) != len(want[i].Uses) {
-			t.Fatalf("entry %d Uses = %v, want %v", i, got[i].Uses, want[i].Uses)
-		}
-		for j := range want[i].Uses {
-			if got[i].Uses[j] != want[i].Uses[j] {
-				t.Errorf("entry %d Uses[%d] = %q, want %q", i, j, got[i].Uses[j], want[i].Uses[j])
-			}
-		}
-	}
-}
-
-// TestKnownModelsIgnoresEmptyModel: a role with no model set (never
-// valid per ParseProfiles, but this package builds Profiles by literal
-// too, e.g. profilesFixture) must not surface as a KnownModel named "".
-func TestKnownModelsIgnoresEmptyModel(t *testing.T) {
-	e := &Engine{cfg: Config{Profiles: config.Profiles{
-		Profiles: map[string]config.Profile{
-			"a": {"architect": {Backend: "claude"}}, // no Model
-		},
-	}}}
-	got := e.KnownModels()
-	if got != nil {
-		t.Errorf("KnownModels() = %+v, want nil (no non-empty model declared)", got)
-	}
-}
-
-// TestKnownModelsNoProfiles: an engine with no profiles.yaml returns nil
-// rather than panicking on a nil Profiles map.
-func TestKnownModelsNoProfiles(t *testing.T) {
-	e := &Engine{cfg: Config{Model: "only-model"}}
-	if got := e.KnownModels(); got != nil {
-		t.Errorf("KnownModels() = %+v, want nil", got)
 	}
 }

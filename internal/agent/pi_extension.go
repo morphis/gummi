@@ -14,9 +14,7 @@ import "encoding/json"
 // first tool call, speaking this package's own mcp.Server shim: JSON-RPC
 // 2.0, line-delimited, initialize/tools-call, protocol version 2025-06-18 —
 // the same surface every other MCP-backed adapter (claude, codex, opencode)
-// reaches through their native transports. A session whose opts carry no
-// tools (the board-level hosted one) falls back to a live tools/list over
-// the child instead.
+// reaches through their native transports.
 
 // piMCPConfig is the baked-in config of one generated extension: the child
 // command it spawns, the environment the child needs, and the tool
@@ -47,18 +45,13 @@ func piMCPToolFromDefs(tools []ToolDef) []piMCPTool {
 }
 
 // buildPiExtension renders the per-session extension source. The gate
-// mirrors buildGummiMCPServerConfig's: a socket with neither a feature id
-// nor the Workspace flag is unbound — the one case that must stay toolless
-// (a transient session) — and workspace selects ["__mcp","--workspace"]
-// with featureID never consulted.
-func buildPiExtension(execPath, featureID, sockPath string, workspace bool, tools []piMCPTool) ([]byte, error) {
-	if sockPath == "" || (featureID == "" && !workspace) {
+// mirrors buildGummiMCPServerConfig's: a socket with no feature id is
+// unbound — the one case that must stay toolless (a transient session).
+func buildPiExtension(execPath, featureID, sockPath string, tools []piMCPTool) ([]byte, error) {
+	if sockPath == "" || featureID == "" {
 		return nil, nil
 	}
 	args := []string{"__mcp", "--feature", featureID}
-	if workspace {
-		args = []string{"__mcp", "--workspace"}
-	}
 	cfg, err := json.Marshal(piMCPConfig{
 		Cmd:   execPath,
 		Args:  args,
@@ -216,11 +209,6 @@ function firstText(result) {
     return "";
 }
 
-function diag(err) {
-    const msg = err && err.message ? err.message : String(err);
-    process.stderr.write("gummi tools unavailable: " + msg + "\n");
-}
-
 function registerTools(pi, tools) {
     for (const tool of tools) {
         if (!tool || !tool.name || seenNames.has(tool.name)) {
@@ -247,21 +235,5 @@ export default function gummiTools(pi) {
     // The stage's tool descriptors ride the generated file: they register
     // synchronously, before pi builds the first turn's system prompt.
     registerTools(pi, BAKED);
-    // A session with no baked tools (the board-level hosted one) discovers
-    // its tools live over the child instead. This races nothing: it
-    // registers whenever the child comes up, and a board agent converses
-    // before it calls.
-    if (BAKED.length === 0) {
-        connect()
-            .then(() => request("tools/list", {}))
-            .then((result) => {
-                const tools = result && Array.isArray(result.tools) ? result.tools : [];
-                registerTools(pi, tools);
-                if (tools.length === 0) {
-                    process.stderr.write("gummi tools: the session's tool set is empty\n");
-                }
-            })
-            .catch(diag);
-    }
 }
 `

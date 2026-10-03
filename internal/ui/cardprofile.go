@@ -8,22 +8,31 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// The card-scoped counterpart of boardcomplete.go's "/profile": switching
-// which profile drives the selected card rather than the board's own
-// hosted agent. The board's version lives inline in the composer's own
-// "/" completion popup; the card thread's composer has no such live-typing
-// popup at all, so this is the plan's reinterpretation of "the same kind
-// of value-tier picker" for that surface: two chained commandMenu
-// overlays (the command tier's "profile" row, then this file's value
-// tier) rather than porting boardcomplete.go's popup into the composer's
+// The card-scoped profile switch: switching which profile drives the
+// selected card. The card thread's composer has no live-typing popup at
+// all, so this is two chained commandMenu overlays (the command tier's
+// "profile" row, then this file's value tier) sitting on the composer's
 // already-intricate chip/decision/ask key routing.
+
+// labelBackendModel words an empty Backend or Model coming back from the
+// engine as the thing it falls back to, never left blank — a blank field
+// reads as missing data, not as "the default". Shared by the card-scoped
+// /profile picker (openCardProfilePicker, here) so its wording can't
+// drift from any other picker's.
+func labelBackendModel(backend, model string) (string, string) {
+	if backend == "" {
+		backend = "engine default"
+	}
+	if model == "" {
+		model = "backend default"
+	}
+	return backend, model
+}
 
 // openCardProfilePicker pushes the value tier: one row per profile
 // engine.CardProfiles(r.F.Stage) declares, labeled with what the card's
-// own current role would actually resolve to under it — never the
-// board/architect fallback BoardProfiles reports — and marked "current"
-// against the selected card's own Feature.Profile, never m.board.Profile()
-// (the board's /profile writes a different field entirely). No gotoTab:
+// own current role would actually resolve to under it, and marked
+// "current" against the selected card's own Feature.Profile. No gotoTab:
 // this stays on the card's own thread page.
 func (m *Shell) openCardProfilePicker() tea.Cmd {
 	r, ok := m.selected()
@@ -44,10 +53,8 @@ func (m *Shell) openCardProfilePicker() tea.Cmd {
 }
 
 // confirmCardProfileChange answers a value-tier pick. It applies at once
-// when the card has nothing live to lose — the same idle gating
-// confirmBoardReopen already uses for the board's own reopen — else
-// confirms first, since restarting a live session ends its in-flight
-// turn.
+// when the card has nothing live to lose, else confirms first, since
+// restarting a live session ends its in-flight turn.
 func (m *Shell) confirmCardProfileChange(id domain.FeatureID, profile string) tea.Cmd {
 	if m.engine == nil {
 		return nil

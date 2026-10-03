@@ -16,11 +16,10 @@ import (
 	"strings"
 )
 
-// AgentCLI describes one coding-agent CLI gummi knows how to host in the
-// agent tab: its stable name (matching GUMMI_AGENT, profiles.yaml's
-// `backend:` values, and agent.CapabilitiesFor's capsBase keys —
-// internal/agent/capabilities.go) and the binary Detect actually probes
-// for it.
+// AgentCLI describes one coding-agent CLI gummi knows: its stable name
+// (matching GUMMI_AGENT, profiles.yaml's `backend:` values, and
+// agent.CapabilitiesFor's capsBase keys — internal/agent/capabilities.go)
+// and the binary Detect actually probes for it.
 type AgentCLI struct {
 	Name      string // "copilot", "claude", "codex", "opencode", "pi"
 	Bin       string // the binary name/path actually probed (honors *_BIN overrides)

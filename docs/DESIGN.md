@@ -798,11 +798,11 @@ route through the one guarded `boardVerb`; only movement, `enter` and
 `esc` differ, and each level's binding table says which (`keymap.go`).
 
 The board sits behind a one-row tab bar shared with the status bar:
-`gummi │ board │ stats │ inbox │ agent │`. `tab` cycles all four;
-`alt+1`/`alt+2`/`alt+3`/`alt+4` jump straight to one — alt-prefixed
+`gummi │ board │ stats │ inbox │`. `tab` cycles all three;
+`alt+1`/`alt+2`/`alt+3` jump straight to one — alt-prefixed
 deliberately (the same reasoning as the thread's `alt+o` outputs
 toggle: a plain `ctrl`/bare key a terminal multiplexer might already
-claim, and a bare one the agent tab's composer would simply type). Both are answered at the top
+claim). Both are answered at the top
 of `handleKey`, above whatever surface holds the keyboard, so a tab is
 always one keystroke away from inside a card's thread, its spec view or
 its diff view. The stats tab is the board's ledger: the same run
@@ -811,52 +811,6 @@ by a pure workspace fold (`fleetrun`) — window and all-time money, the
 clock, and a per-card timeline of sessions, waits and marks. It is a
 tab rather than a board surface for the reason the board is the
 backlog: one list on screen at a time.
-**The agent tab is gummi's own conversation.** It used to host a pty
-running the user's own coding CLI, behind a `ctrl+g` keyboard lock that
-existed to settle one fight: a hosted CLI wants `tab` for completion and
-gummi wants it for the cycle, and neither can have it. The pty, its
-picker, its config key and the lock went together once the tab became a
-**board session** instead — gummi's own workspace-scoped conversation
-(`internal/engine/boardsession.go`), drawn by the same transcript
-machinery a card's thread uses and acting on the board through §16's tool
-contract. With no foreign keymap underneath it there is no key left to
-arbitrate: one composer over one transcript, answerable by one ordinary
-binding table like every other surface.
-
-What the tab does owe is the composer grammar a person arrives with. It
-is the one surface in gummi that *is* a coding-agent prompt, so it
-answers the keys those CLIs converged on:
-
-| key | agent tab |
-|---|---|
-| `enter` | send the line — a `/…` command word runs, unclaimed slash prose is still a message |
-| `alt+enter`, `ctrl+j`, `shift+enter` | a line break, since `enter` sends; three spellings because the terminal decides which one gummi ever sees |
-| `↑`/`↓` | recall the lines already sent, from the composer's first row, so a paragraph's own rows stay reachable with the same key |
-| `ctrl+c` | empty the composer; with nothing typed, interrupt the turn; with neither, quit |
-| `esc` | interrupt the in-flight turn — it never leaves the tab and never discards a draft |
-| `pgup`/`pgdn`, `alt+o` | scroll the transcript; fold or expand captured tool outputs |
-| `/clear` | close the session and open a fresh one: transcript, context window and running spend all go with the old one |
-
-Two of those rows are decisions rather than conventions. `ctrl+c` narrows
-by what there is to cancel, **draft before turn**, because an interrupted
-turn can be asked again and a cleared line cannot be got back; it is
-hoisted above the overlay stack with the rest of `ctrl+c`, so it stands
-down while a dialog is up and quit remains the fall-through. And `esc`
-does *not* clear the line, though several of those CLIs let it: in gummi
-leaving never discards — a card thread keeps its draft through `esc`, and
-a tab switch keeps both composers' — so an `esc` that emptied this one
-would be the single key in the program that throws typing away. The
-recall ring belongs to the composer, not the conversation: `/clear` opens
-a new session and `↑` still reaches what was typed into the old one,
-exactly as a shell's history outlives `clear`.
-
-The bar names whichever of those is live rather than reciting the set:
-`esc interrupt` only while a turn is in flight, `ctrl+c clear` only while
-there is something to clear, `alt+enter newline` only once there is a
-draft for a second line to join. A bar naming a key that will do nothing
-is how the retired lock's own one-way door went unnoticed for as long as
-it did.
-
 **`?` and `alt+/`.** `?` is the convenient help key, but it is ordinary
 punctuation, so it must yield wherever the user types prose: the thread's
 composer, the bug-import filter, and the board's own composer. Those are
@@ -872,8 +826,7 @@ import, dependency picker) are scoped to the board tab: each belongs to a
 card, and a card belongs to the board. Leaving the tab hides them and
 returning restores them — never discards, since a card's thread holds an
 unsent composer draft the same way. The inbox tab promotes the
-needs-attention queue out of its modal overlay; the agent tab hosts
-gummi's own board conversation (above).
+needs-attention queue out of its modal overlay onto a tab of its own.
 
 **The needs-you queue is a query, not a second list.** It is read from
 the open decision rows (§6.3) rather than kept as a queue of its own, so
@@ -1254,8 +1207,8 @@ Rules that make the control safe:
   the log rather than a flag maintained in it: a decision is open while
   no later `gate`/`ask` event carries its id *and* the card still sits at
   the stage that raised it. That second clause is what makes closure
-  self-healing — a gate crossed by `g`, by `gummi run`, or by the
-  workspace MCP all move the card, and moving the card abandons what the
+  self-healing — a gate crossed by `g`, by `gummi run`, or by a re-run
+  all move the card, and moving the card abandons what the
   stage before it was waiting on, whether or not the crossing remembered
   to say so. The one stop that resolves without moving is an exhausted
   envelope, which is answered by the stage simply running again on a
@@ -1412,9 +1365,9 @@ board where it raises a card to the inbox (`Shell.logDecision`).
   down, it sits outside it, and it pays for that by having no verified
   branch to point at — which is why the two landing floors are stated in
   one predicate rather than left implicit.
-- Not a second driver — a hosted agent acts on the running board through
-  the board-level tool contract (§16); it never reaches gummi by invoking
-  another `gummi` process.
+- Not a second driver — a card's own stage session acts on gummi through
+  its per-card tool contract (§16); nothing reaches gummi by invoking
+  another `gummi` process against a board that is running.
 - Not a second board — the web face (§20) is another view of the one
   process driving the cards, never a process of its own beside it, and
   a board has one interactive host at a time.
@@ -1819,7 +1772,7 @@ Decided in the design interview (2026-07-03):
     either face or `gummi rewrite`. Reordering and dropping are not
     offered, so the branch's tree is unchanged by construction and the
     verify that ran on it still stands. It is a human's act, like
-    `squash`: withheld from hosted agents (§16), refused while an agent
+    `squash`: refused while an agent
     holds the card, on an adopted branch (D22) and on a landed one, and
     on pushed commits until the person acknowledges the force push gummi
     prints and never runs.
@@ -2518,75 +2471,45 @@ envelope warns — a run can still take `--envelope` — rather than blocking).
 - Crush (the visual bar; UI architecture studied from
   `internal/ui/AGENTS.md`): <https://github.com/charmbracelet/crush>
 
-## 16. Hosted vs. outside: the two ways an agent drives gummi
+## 16. How an agent meets gummi: inside one card, or outside the board
 
-**The taxonomy is three-way, not two.** A human drives the board directly
-at the keyboard. An agent can drive the same running gummi process from
-*inside* — hosted in the TUI's agent tab, acting on the workspace through
-a board-level tool contract. An agent, script, or CI can drive a *fresh*
-gummi from *outside*, via the headless CLI driver (§14). The axis that
-matters for "how does an agent talk to gummi" is inside-vs-outside, not
-human-vs-agent — the TUI hosts both a human and (in its agent tab) an
-agent; only the outside path is a second process.
+An agent meets gummi one of two ways, and the two never overlap:
 
-**Why the inside path exists.** A card's stage session and the running
-board share one process, and that process holds the card's per-card lock
-for as long as it's driving it. A hosted agent that shells out to
-`gummi run`/`resume` spawns a *second* gummi contending for a lock its
-own parent already holds, and loses — the very process it's trying to
-help fails outright. The inside path exists so a hosted agent can act on
-the workspace without becoming a second driver.
+- **Inside a card.** The agent IS a card's stage session — an implementer,
+  reviewer, scribe, a consult beside a stage, a freeform card's session.
+  It reaches gummi's own tools over the per-card MCP endpoint (`gummi
+  __mcp --feature <id>`), and the endpoint is the boundary of what
+  it may act on: the one card it is bound to, the tools its stage hands
+  it. It never reaches gummi by invoking another `gummi` process: the
+  engine holds its card's per-card lock for the session's life, so a
+  shelled-out `run`/`resume` would contend for a lock already held and
+  lose.
+- **Outside the board.** An agent, a script, or CI drives a *fresh* gummi
+  through the headless CLI driver (`gummi run`/`resume`, §14) — its own
+  process, its own lock, NDJSON events and typed exit statuses to branch
+  on.
 
-**The board-level tool contract**, stated at the level §14.1 states the
-driver's flags (a stable summary, not a schema dump that would drift out
-of sync with the code):
-
-| tool | effect | lock |
-|---|---|---|
-| `board_list` | list every card: id, kind, title, stage, spend/envelope, verified/done | none |
-| `card_status` | one card's stage, branch state, spend, verified/done/running, open gate blockers | none |
-| `card_spec` | one card's current design artifact as markdown | none |
-| `card_diff` | one card's worktree diff against main | none |
-| `card_run` | start an autonomous stage session for a card, in this process | acquires (in-process) |
-| `card_resume` | resume a parked stage, optionally with a note, in this process | acquires (in-process) |
-| `card_new` | mint a new card onto the backlog; design gates default to checkpointing for the human, not auto-crossing | none to mint |
-
-`card_run`/`card_resume` don't *shell out* to acquire a lock — they ask
-the engine already running in this process to drive the card, the same
-way the TUI's own key bindings do. That's the whole trick: the lock gets
-acquired in-process either way, so routing through these tools instead of
-a second `gummi` process is what avoids the contention, not some
-different locking rule.
-
-**The shell-out line is lock-acquisition, not read-vs-write.** A hosted
-agent may shell out to a CLI verb iff that verb never touches the
-per-card lock, regardless of whether it writes:
-
-- Lock-free, safe to shell out to: `status`, `spec`, `diff`, `watch`,
-  `doctor` (all read-only) and `deps add`/`deps rm` (a write, but one that
-  opens the state store directly rather than starting a driven session —
-  no lock, no engine). `deps add`/`deps rm` are the exception worth
-  naming explicitly: they're writes, but the dividing line here is
-  lock-acquisition, not write-vs-read, and they don't acquire one.
-- Lock-holding, never safe to shell out to from inside: `run`, `resume`,
-  `merge`, `squash`, `commit`, `clean`. For `run`/`resume` the board-level
-  tools above are the in-process substitute; for the rest, see below.
-
-**Deliberately withheld vs. merely unbuilt** — the same "absent from the
-tool set" surface splits two ways, and a hosted agent (or a future card)
-must not conflate them:
-
-- *Withheld, permanently*: `merge`, `squash`, `clean`, and crossing any
-  workflow gate. These are human decisions at the board on purpose — the
-  inside path does not grow a tool for them regardless of future work.
-- *Unbuilt, not yet*: answering a delegated `ask_user`, a board-level
-  needs-attention view, `doctor`'s readiness checklist, the PR verbs, and
-  a run stream equivalent to the CLI's NDJSON. Nothing about the inside
-  path rules these out; they're absent because no card has built them.
+There is no third way, and there used to be one worth naming: an agent
+hosted inside the TUI, bound to the whole workspace rather than to any
+card, acting on every card through a board-level tool contract
+(`board_list`, `card_status`, `card_run`, `card_new`, …). It is gone, on
+purpose. Every one of its seven tools was either a re-wording of what
+the board's own driving loop already does (run a card, mint a card) or a
+read the outside path already serves (`gummi status`, `spec`, `diff` —
+lock-free, safe for an agent in another process to call). Keeping it
+meant keeping a second surface for the same verbs, a second lock story
+and a second place a decision could disagree with the board's own — for
+an agent whose only unique capability was acting on cards no person had
+asked it to act on. Where you want an agent to drive gummi at all, the
+headless driver is the way; where you want an agent to *work*, it is a
+card. An unattended goal's lead (§17) is the sanctioned form of "an agent
+acting on the whole board": it is inside gummi's own driving loop,
+constrained to the goal doc, and every turn it costs is recorded
+against the goal.
 
 **The knowledge-delivery contract.** Knowledge about *gummi* — the
 workflow, the gates, the lock, this taxonomy — travels with the agent's
-session (the skill/system context a hosted or outside agent is given),
+session (the skill/system context an inside or outside agent is given),
 identical regardless of which repo it's pointed at. Knowledge about *a
 repo* — its build commands, style, test and review conventions — lives in
 that repo's own instructions (its AGENTS.md/CLAUDE.md/equivalent) and
@@ -3522,7 +3445,7 @@ because nothing gated it.
 `engine.FreeformSession` is assembled out of the two non-stage sessions
 that already existed: `ConsultSession`'s lifecycle (one per card,
 idempotent to open, a backend that idles out after 20 minutes and respawns
-carrying its own transcript) and `BoardSession`'s absences (no attention
+carrying its own transcript) and a read-only session's absences (no attention
 slot — the lanes ration contention between autonomous stages, and a
 human-paced conversation competes with nothing there — no gate, no
 verdict, no advance).
@@ -3729,8 +3652,8 @@ The TUI treats a freeform card as a card and withholds the workflow:
 
 ### 19.7 Deferred
 
-A `gummi ff` CLI verb and `card_turn` for a hosted agent — a freeform card
-is an inside-path concept until then. A pass list on its stats tab, which
+A `gummi ff` CLI verb — a freeform card drives like its conversation does
+until then. A pass list on its stats tab, which
 needs its turns in the card-event log without the thread drawing them
 twice (§19.3a). The third ending, discard, which
 would delete the branch and worktree the way `clean` does for a landed
@@ -3971,8 +3894,8 @@ live ask. `gummi web` is therefore a **board host without a terminal**: it
 builds the board exactly as the TUI builds it — store, engine, worktree
 pool, card locks, hooks — runs the TUI's model with no renderer attached,
 and serves the page from that process. The TUI does not
-serve the page. This keeps the web face off §16's list of second drivers:
-it acts on the running board the way the TUI's own keys do.
+serve the page. This keeps the web face off the list of second drivers
+(§16): it acts on the running board the way the TUI's own keys do.
 
 The TUI and the web face are both first-class, and **one board has one
 interactive host at a time**. Both take the lock the TUI has always
@@ -4058,8 +3981,8 @@ the token; only running nothing untrusted on the board's host does.)
 device — from the page or from `gummi web unpair` — drops its push
 subscription and closes its open event streams within a second. Landing
 and gate-crossing are available on the web because a person is
-answering: §16 withholds them from *agents*, and the web face is a human
-at the board.
+answering: the workflow refuses them from agents (§16), and the web face
+is a human at the board.
 
 ### 20.4 Running unattended
 
@@ -4114,7 +4037,7 @@ cloud service: one binary, your machine, state in your repo, listening on
 loopback unless told otherwise. It never writes to GitHub: the PR tab
 reads, and shows the push command for a person to run. It never runs a
 workflow the TUI would not run, and it offers no agent a surface the
-board-level tools (§16) withhold.
+workflow (§16) withholds.
 
 That last sentence has a limit, and it is stated here rather than
 hidden. `gummi web pair` is the operator at the machine: it reads the
@@ -4266,8 +4189,8 @@ rewrite that did ends with the `git push --force-with-lease` it needs
 (`engine.PushCommandFor`, the line a replayed stack card prints) —
 printed, never run (§18.5, §20.5).
 
-Rewriting is withheld from hosted agents (§16) for the reason `squash`
-is: what a card's history says is the person's to decide. An outside
+Rewriting is refused while an agent holds the card, for the reason
+`squash` is: what a card's history says is the person's to decide. An outside
 agent can call `gummi rewrite`, and the skill tells it to ask first.
 
 ### 21.3 One read model

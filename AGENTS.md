@@ -8,15 +8,13 @@ Guidance for AI agents working on **gummi**. Read this first, then
 gummi is a **meta-harness for coding agents**: a single binary that
 drives a fleet of coding agents through a fixed, spec-driven workflow,
 each work item on its own git worktree and branch. It orchestrates other
-agents — it is not itself a coding agent. Three ways drive the same
-engine and quality floor: a human at the keyboard in the TUI; an agent
-hosted *inside* that same TUI, in its agent tab, acting on the running
-board through a board-level tool contract; and an agent, script, or CI
-driving a *fresh* gummi from *outside*, via the headless CLI driver
-(`gummi run`/`resume`). The axis that matters for an agent is
-inside-vs-outside, not human-vs-agent — see `docs/DESIGN.md` §16, plus
-`internal/driver` and README's "Running headlessly" for the outside
-path.
+agents — it is not itself a coding agent. Two ways drive the same
+engine and quality floor: a human at the keyboard in the TUI; and an
+agent, script, or CI driving a *fresh* gummi from *outside*, via the
+headless CLI driver (`gummi run`/`resume`). An agent working *inside* a
+card reaches gummi's tools only through that card's own session MCP
+endpoint (§16) — there is no board-level agent. See `internal/driver`
+and README's "Running headlessly" for the outside path.
 
 - **Language:** Go 1.26, single module `github.com/morphis/gummi`.
 - **Binary:** `cmd/gummi` → `bin/gummi`. Run with no args inside a git repo.
@@ -82,7 +80,7 @@ leaf services.
 | `webapi` | The JSON contract between `internal/web` and its page: types only, golden-tested shapes. Change a shape here first. |
 | `threadfold` | Pure fold of a card's event log into what a thread draws — stage sessions, answered decisions, autopilot stretches, and the structured `Items` the web page renders — in the words the TUI thread uses. Both faces read it. |
 | `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, and what an answer says. Both faces read it. |
-| `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to either a live stage session's tools (`--feature`) or the process-lifetime workspace scope's board-level tools (`--workspace`) a hosted agent uses to drive the gummi it lives inside. |
+| `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to a live stage session's tools (`--feature <id>`). |
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
 (spec decomposition), `bugs` (GitHub issue import / manual add), and the

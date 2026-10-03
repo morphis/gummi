@@ -22,7 +22,7 @@ import (
 // (mcpsock.go) because a card can have both a live stage session and a live
 // consult session bound to the same feature id at once (asking a question
 // about a card whose stage is still running), and the two must never share
-// a socket. The nonce half (workspaceMCPNonce, reused as-is) covers the
+// a socket. The nonce half (mcpNonce) covers the
 // same case it covers there: this card's consult backend respawning after
 // an idle timeout must never collide with the endpoint it is replacing.
 func consultMCPSockPath(w state.Workspace, id domain.FeatureID, nonce string) string {
@@ -63,7 +63,7 @@ type consultEndpoint struct {
 // timeout) or Engine.Close already drives for a stage session's own
 // endpoint.
 func (e *Engine) startConsultMCPEndpoint(ctx context.Context, id domain.FeatureID) (string, func(), error) {
-	path := consultMCPSockPath(e.cfg.Workspace, id, workspaceMCPNonce())
+	path := consultMCPSockPath(e.cfg.Workspace, id, mcpNonce())
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", nil, fmt.Errorf("consult mcp socket dir: %w", err)
@@ -225,7 +225,7 @@ func (ep *consultEndpoint) dispatch(conn net.Conn, wmu *sync.Mutex, req *mcp.Req
 }
 
 // listTools advertises consultTools() — the fixed, zero-argument
-// read-only three, never the full seven a workspaceEndpoint offers.
+// read-only three and nothing else.
 func (ep *consultEndpoint) listTools() (json.RawMessage, error) {
 	return mcp.MarshalTools(consultTools())
 }

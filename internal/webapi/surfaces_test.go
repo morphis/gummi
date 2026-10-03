@@ -106,19 +106,6 @@ func TestBugsShape(t *testing.T) {
 	}))
 }
 
-func TestAgentShape(t *testing.T) {
-	golden.RequireEqual(t, marshal(t, Agent{
-		Open: true, Profile: "balanced", Model: "gpt-5", Backend: "copilot",
-		Profiles: []AgentProfile{{Name: "balanced", Backend: "copilot", Model: "gpt-5"}},
-		Models:   []AgentModel{{Model: "gpt-5", Uses: []string{"balanced · architect"}}},
-		Items: []Item{
-			{Key: "b0", Seq: 1, T: ItemYou, Time: at, Text: "what is stuck?"},
-			{Key: "b1", Seq: 3, T: ItemTools, Time: at, Tools: []ToolCall{{Tool: "list_cards", Label: "list_cards", Status: "ok", Ms: 12}}},
-		},
-		Live:    &Live{Busy: true, Streaming: "FD-012 is waiting on", Spent: 0.4, State: "running"},
-		Context: &AgentContext{Tokens: 12000, Limit: 200000},
-	}))
-}
 
 // TestSessionModelsShape: what a session's model picker is offered, and
 // the pair a session card reports it runs on (DESIGN §19.8).

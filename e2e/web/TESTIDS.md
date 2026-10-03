@@ -51,7 +51,7 @@ and inside it `approval-person`, `approval-device`, `approval-source`,
 | `rail-group-<status>` | `needs`, `running`, `paused`, `idle`, `todo`, `done` |
 | `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open |
 | `rail-more-done`, `rail-empty` | "Show all N" landed; no cards / no match |
-| `rail-foot`, `rail-new-session`, `rail-new`, `rail-agent`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new` the new-card form) |
+| `rail-foot`, `rail-new-session`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new` the new-card form) |
 | `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Resume offer
@@ -187,7 +187,7 @@ cards), `mobile-decision` (docked decision bar), `mdec-toggle`,
 | `keys-help` | the `?` sheet |
 | `menu` | a popup menu opened with `openMenu` (its `testid` option overrides `menu`, e.g. `rail-more-menu`, `card-actions-menu`) |
 | `modal`, `modal-close` | a dialog opened with `openModal` (its `testid` option overrides `modal`) |
-| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `agent`, `fleet`, `goals`, `goal`, `stacks`, `ingest`, `bugs`, `doctor`) |
+| `view-<name>`, `view-<name>-body` | a registered view (`newcard`, `fleet`, `goals`, `goal`, `stacks`, `ingest`, `bugs`, `doctor`) |
 | `not-available` | body of a view nobody registered yet |
 | `unpair-dialog`, `unpair-confirm` | unpairing |
 
@@ -273,14 +273,6 @@ Doctor (`doctor`): `doctor-ready` (`data-ready`), `doctor-rerun`,
 `doctor-deep`, `doctor-deep-confirm` (+ `-yes`/`-no`), `doctor-checks`,
 `doctor-check-<name>` (`data-status` = `ok` | `warn` | `fail` | `unknown`),
 `doctor-loading`.
-Board agent (`agent`): `agent-head`, `agent-profile`, `agent-model`,
-`agent-model-use`, `agent-context`, `agent-spent`, `agent-transcript`,
-`agent-item` (`data-type`, `data-key`), `agent-empty`, `agent-live`,
-`agent-streaming`, `agent-busy`, `agent-composer`, `agent-input`,
-`agent-send`, `agent-interrupt`, `agent-confirm` (+ `-yes`/`-no`: a switch
-that would end the conversation), `agent-error`, `agent-open-error`;
-not open: `agent-opener`, `agent-open-profile`, `agent-open-model`,
-`agent-open`, `agent-opening`.
 Fleet stats (`fleet`): `fleet`, `fleet-window` (the window switch),
 `fleet-window-24h` / `-7d` / `-30d` / `-all`
 (`aria-pressed`), `fleet-span`, `fleet-headline`, `fleet-spent`, `fleet-tokens`, `fleet-busiest`,

@@ -1,8 +1,7 @@
 // rail.js — the card rail: the board's rows grouped by status (in the
 // server's order within a group), a filter and kind chips, a compact form
 // below 1280px or on `[`, and the foot that opens the board's other
-// surfaces (new session, new card, board agent, fleet stats, and the More
-// menu).
+// surfaces (new session, new card, fleet stats, and the More menu).
 
 import { $, h, icon, clear, kindTag, repoSlot, needsColor, needsWord, GLYPH, STAGES, cr, isMobile, storage } from './dom.js?v=__ASSET_V__'
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
@@ -188,7 +187,6 @@ function renderFoot (unpair, newSession) {
   foot.append(
     h('button', { class: 'newcard newsession', testid: 'rail-new-session', title: 'New session: one agent in its own worktree, no stages', type: 'button', onclick: () => newSession?.() }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '◆'), h('span', { class: 'lbl' }, 'New session')),
     h('button', { class: 'newcard', testid: 'rail-new', title: 'New card', type: 'button', onclick: () => openView('newcard') }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), h('span', { class: 'lbl' }, 'New card')),
-    h('button', { testid: 'rail-agent', title: 'Board agent', type: 'button', onclick: () => openView('agent') }, icon('agent'), h('span', { class: 'lbl' }, 'Board agent'), h('span', { class: 'sub', id: 'agent-sub' })),
     h('button', { testid: 'rail-fleet', title: 'Fleet stats', type: 'button', onclick: () => openView('fleet') }, icon('fleet'), h('span', { class: 'lbl' }, 'Fleet stats'), h('span', { class: 'sub' }, '7 days')),
     more)
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -47,7 +46,7 @@ func TestMCPHiddenFromParentHelp(t *testing.T) {
 }
 
 // …but __mcp --help still describes it (Hidden hides from parents, not
-// the leaf), including the workspace-scope flag alongside --feature.
+// the leaf), --feature included.
 func TestMCPHelpDescribesLeaf(t *testing.T) {
 	out := captureStdout(t, func() {
 		rootCmd.SetArgs([]string{"__mcp", "--help"})
@@ -57,9 +56,6 @@ func TestMCPHelpDescribesLeaf(t *testing.T) {
 	})
 	if !strings.Contains(out, "--feature") {
 		t.Fatalf("__mcp --help missing --feature flag:\n%s", out)
-	}
-	if !strings.Contains(out, "--workspace") {
-		t.Fatalf("__mcp --help missing --workspace flag:\n%s", out)
 	}
 }
 
@@ -93,46 +89,6 @@ func TestMCPDialFailure(t *testing.T) {
 	}
 }
 
-// Neither --feature nor --workspace given: a plain usage error, not a
-// dial attempt against an empty/sentinel target.
-func TestMCPRequiresFeatureOrWorkspace(t *testing.T) {
-	t.Setenv("GUMMI_MCP_SOCK", filepath.Join(t.TempDir(), "no.sock"))
-	c := workspaceMCPCmd(t, false)
-	err := runMCP(c, nil)
-	var ec *exitError
-	if !errors.As(err, &ec) || ec.code != 2 {
-		t.Fatalf("runMCP(neither flag) err = %v, want exitError{2}", err)
-	}
-}
-
-// --feature and --workspace together are rejected before any dial is
-// attempted — overloading one flag's meaning with the other is refused
-// outright rather than picking a silent precedence.
-func TestMCPFeatureAndWorkspaceMutuallyExclusive(t *testing.T) {
-	t.Setenv("GUMMI_MCP_SOCK", filepath.Join(t.TempDir(), "no.sock"))
-	c := freshMCPCmd(t)
-	if err := c.Flags().Set("workspace", "true"); err != nil {
-		t.Fatal(err)
-	}
-	err := runMCP(c, nil)
-	var ec *exitError
-	if !errors.As(err, &ec) || ec.code != 2 {
-		t.Fatalf("runMCP(--feature and --workspace) err = %v, want exitError{2}", err)
-	}
-}
-
-// --workspace against an unreachable socket also exits 2, mirroring
-// TestMCPDialFailure's --feature case.
-func TestMCPWorkspaceDialFailure(t *testing.T) {
-	t.Setenv("GUMMI_MCP_SOCK", filepath.Join(t.TempDir(), "no.sock"))
-	c := workspaceMCPCmd(t, true)
-	err := runMCP(c, nil)
-	var ec *exitError
-	if !errors.As(err, &ec) || ec.code != 2 {
-		t.Fatalf("runMCP(--workspace dial error) err = %v, want exitError{2}", err)
-	}
-}
-
 // TestMCPInitializeInstructionsEndToEnd exercises the real wire: a fake
 // engine socket answering the hello handshake, runMCP's actual __mcp
 // client dialing it, and a real initialize round trip over stdin/stdout —
@@ -141,12 +97,10 @@ func TestMCPWorkspaceDialFailure(t *testing.T) {
 func TestMCPInitializeInstructionsEndToEnd(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		workspace bool
 		featureID string
 		wantSub   string
 	}{
-		{"feature", false, "FD-042", "FD-042"},
-		{"workspace", true, "", "gummi run"},
+		{"feature", "FD-042", "FD-042"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sockPath := filepath.Join(t.TempDir(), "engine.sock")
@@ -174,14 +128,9 @@ func TestMCPInitializeInstructionsEndToEnd(t *testing.T) {
 			}()
 
 			t.Setenv("GUMMI_MCP_SOCK", sockPath)
-			var c *cobra.Command
-			if tc.workspace {
-				c = workspaceMCPCmd(t, true)
-			} else {
-				c = freshMCPCmd(t)
-				if err := c.Flags().Set("feature", tc.featureID); err != nil {
-					t.Fatal(err)
-				}
+			c := freshMCPCmd(t)
+			if err := c.Flags().Set("feature", tc.featureID); err != nil {
+				t.Fatal(err)
 			}
 
 			stdinR, stdinW, err := os.Pipe()
@@ -232,35 +181,17 @@ func TestMCPInitializeInstructionsEndToEnd(t *testing.T) {
 	}
 }
 
-// freshMCPCmd and workspaceMCPCmd both explicitly set *every* flag mcpCmd
-// registers, not just the one each test cares about: AddFlagSet copies
-// pflag.Flag pointers, not values, so every *cobra.Command built this way
-// shares mcpCmd's own underlying flag storage. Leaving a flag at
-// whatever a previous test last set it to would make these tests order-
-// dependent; pinning both flags on every build keeps them isolated.
+// freshMCPCmd explicitly sets *every* flag mcpCmd registers, not just the
+// one each test cares about: AddFlagSet copies pflag.Flag pointers, not
+// values, so every *cobra.Command built this way shares mcpCmd's own
+// underlying flag storage. Leaving a flag at whatever a previous test
+// last set it to would make these tests order-dependent; pinning every
+// flag on every build keeps them isolated.
 func freshMCPCmd(t *testing.T) *cobra.Command {
 	t.Helper()
 	c := &cobra.Command{}
 	c.Flags().AddFlagSet(mcpCmd.Flags())
 	if err := c.Flags().Set("feature", "FD-001"); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Flags().Set("workspace", "false"); err != nil {
-		t.Fatal(err)
-	}
-	return c
-}
-
-// workspaceMCPCmd is freshMCPCmd's --workspace-scoped counterpart: no
-// --feature, --workspace set to the given value.
-func workspaceMCPCmd(t *testing.T, workspace bool) *cobra.Command {
-	t.Helper()
-	c := &cobra.Command{}
-	c.Flags().AddFlagSet(mcpCmd.Flags())
-	if err := c.Flags().Set("feature", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Flags().Set("workspace", fmt.Sprintf("%t", workspace)); err != nil {
 		t.Fatal(err)
 	}
 	return c

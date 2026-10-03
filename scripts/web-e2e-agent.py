@@ -68,13 +68,9 @@ feature per `## ` heading of the source document; a heading that starts
 `Unmapped:` is reported in the coverage map as a requirement no proposal
 covers.
 
-The board agent calls its card_run (card_resume) tool on a card when a
-line names it as "[card-run FD-001]" ("[card-resume FD-001]"), and says
-what the board answered.
-
 Any other message sent to a live session (a steer, a consult, a freeform
-turn, the board agent) gets a short acknowledgement quoting it; a freeform
-card's turn also edits a file so its diff is non-empty. A freeform turn
+turn) gets a short acknowledgement quoting it; a freeform card's turn
+also edits a file so its diff is non-empty. A freeform turn
 containing [watch] starts a Monitor watch it leaves open. A message opening
 with [slow] is streamed slowly, so a test can interrupt it.
 
@@ -642,14 +638,6 @@ def ingest(turn):
 
 def chat_reply(turn, text):
     first = text.strip().splitlines()[0] if text.strip() else ""
-    # the board agent drives a card when told to: "[card-run FD-001]" calls
-    # its card_run tool on that card and reports what the board said
-    m = re.search(r"\[(card-run|card-resume) ((?:FD|BG|RS)-\d+)\]", text)
-    if m and turn.ctx.get("has_board_tools"):
-        tool = m.group(1).replace("-", "_")
-        result = call_tool(tool, {"id": m.group(2)})
-        turn.say("%s %s: %s" % (tool, m.group(2), result))
-        return
     turn.say("Noted: %s" % first[:200])
 
 
@@ -701,7 +689,6 @@ def detect(frame):
         "model": frame.get("model") or "e2e",
         "has_verdict_tool": any(t.get("name") == "submit_verdict" for t in frame.get("tools") or []),
         "has_propose_tool": any(t.get("name") == "propose_features" for t in frame.get("tools") or []),
-        "has_board_tools": any(t.get("name") == "card_run" for t in frame.get("tools") or []),
         "card": "", "kind": "", "title": "", "stage": "", "spec": "",
     }
     m = re.search(r"You are the \w+ for \w+ ((FD|BG|RS|FF|GL)-\d+): (.*)", hints)

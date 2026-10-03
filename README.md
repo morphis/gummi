@@ -171,7 +171,7 @@ The keys you need first:
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
 | `P` | a goal's page — done-when, its cards (`enter` watches one run), budget, the lead's log |
 | `i` | the needs-attention inbox |
-| `tab`, `alt+1/2/3/4` | the board, stats, inbox and agent tabs |
+| `tab`, `alt+1/2/3` | the board, stats and inbox tabs |
 | `?` or `alt+/` | the full key table |
 
 ### The stats tab
@@ -226,18 +226,6 @@ still in the composer. Backing out never costs you the
 sentence: `esc` at the reading keeps it, `esc` at the chip sends it as a
 message, and `esc` at the new card it may open puts it back where you
 typed it.
-
-The **agent tab** is a conversation with the board itself — one
-long-lived session that can read and act on every card through the same
-tools a hosted agent reaches. It is a coding-agent prompt and behaves like
-one: `enter` sends, `alt+enter` (or `ctrl+j`) breaks a line, `↑` recalls
-what you have already sent, `pgup`/`pgdn` scroll the transcript, `alt+o`
-expands the activity rows and captured tool outputs, and `/` opens the
-command list. `ctrl+c` empties the composer; with nothing typed it
-interrupts the turn, and with
-nothing running it quits. `esc` interrupts too, and never touches your
-draft. `/clear` starts a fresh session — the transcript, its context and
-the spend it ran up all go with the old one.
 
 ## Attended or autopilot
 
@@ -488,8 +476,7 @@ Two files in `.gummi/`, both scaffolded on first run:
   `autopilot_lanes`, `repo` and `repos` when `.gummi` sits above the
   repository, `checks.default` to fix the verify commands instead of
   discovering them, `env` prerequisites the verification plan can cite,
-  `instructions` files, `hooks` scripts run on board events, and `agent`
-  for the agent tab.
+  `instructions` files, and `hooks` scripts run on board events.
 - **`profiles.yaml`**: named profiles mapping each role to
   `{backend, model}`, and which one is the default. A running board
   picks up an edit for its next session (a session already running keeps

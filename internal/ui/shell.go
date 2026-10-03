@@ -72,67 +72,11 @@ type Shell struct {
 	rows []featureRow
 	sel  int
 	// tab picks which of gummi's top-level tabs owns the main pane
-	// (tabs.go): board, inbox, or agent. cardOpen is the board tab's own
+	// (tabs.go): board, stats, or inbox. cardOpen is the board tab's own
 	// page-within-a-tab — the selected card opened full width — and
 	// belongs to no other tab.
-	tab Tab
-	// board is the engine's workspace-scoped conversation
-	// (engine/boardsession.go) — gummi's own surface on TabAgent. nil
-	// until ensureBoardSession's spawn command lands (boardOpenedMsg), or
-	// if it failed — boardErr says why. boardOpening guards against
-	// dispatching a second spawn command while the first is still in
-	// flight: engine.OpenBoard is itself idempotent once it returns (a
-	// second call while one is live just hands back the existing
-	// session), but gotoTab can be called again — a quick tab bounce —
-	// before that first reply has landed, and nothing else remembers that
-	// a spawn is already outstanding.
-	board        *engine.BoardSession
-	boardErr     string
-	boardOpening bool
-	// boardInput is the board thread's own composer (boardthread.go),
-	// built once with the same newThreadInput(styles) the card thread
-	// uses so it is styled identically. It is deliberately NOT
-	// threadInput: that field (and threadScroll/threadOutputs below) is
-	// the CARD thread's, multiplexed across cards only via threadDrafts
-	// — there is no draft map for "the board", because there is only
-	// ever one board conversation, but sharing threadInput itself would
-	// still mean one shared draft and one shared scroll position between
-	// two different surfaces. Type on the board, press alt+1 then back,
-	// and a shared field would show the board's half-written line sitting
-	// in whichever card's composer happened to be open — the trap this
-	// split avoids. boardScroll and boardOutputs are its scroll position
-	// and its own alt+o toggle, kept apart from the card thread's for the
-	// identical reason.
-	boardInput   textarea.Model
-	boardScroll  int
-	boardOutputs bool
-	// boardHistory is every line submitted from the board composer,
-	// oldest first — messages and commands alike, because ↑ recalls what
-	// you typed and a command line is typed the same way a sentence is.
-	// boardHistoryAt is where ↑/↓ are standing in it, with
-	// len(boardHistory) meaning "not browsing — on the live draft", and
-	// boardHistoryDraft holds whatever was in the box when browsing
-	// started, so ↓ back off the newest entry returns it instead of
-	// leaving the composer holding a sentence the user never finished.
-	//
-	// It is the composer's history, not the conversation's: /clear starts a
-	// fresh session and the ring survives it, the same way a shell's
-	// history outlives `clear`. Session-scoped on purpose — nothing here is
-	// written to disk, so a line typed in one repo's board is never
-	// recalled in another's.
-	boardHistory      []string
-	boardHistoryAt    int
-	boardHistoryDraft string
-	// boardComplete is the slash-completion popup over boardInput
-	// (complete.go, boardcomplete.go), or nil when the line under it is
-	// not a command line. It is rebuilt from the composer's text after
-	// every key that can change it rather than being mutated in step
-	// with one, so there is exactly one rule for when it exists — see
-	// syncBoardCompletion — and no way for a paste, a ctrl+u or a cursor
-	// move to leave a popup standing over a line that no longer starts
-	// with "/".
-	boardComplete *completion
-	cardOpen      bool
+	tab      Tab
+	cardOpen bool
 	// threadInput is the card page's persistent message/verb box
 	// (thread.go, threadinput.go): a Shell field rather than one rebuilt
 	// per render so an unsent draft survives leaving and returning to the
@@ -619,11 +563,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		// on the page; left on the widget's own defaults it renders in raw
 		// ANSI and reads as a foreign box (threadinput.go).
 		threadInput: newThreadInput(styles),
-		// the board thread's own composer, built the same way and for the
-		// same reason — see the Shell field's doc comment on why it is
-		// not threadInput.
-		boardInput: newThreadInput(styles),
-		fresh:      newFreshness(),
+		fresh:       newFreshness(),
 	}
 	// indirected through m rather than passing m.now's current value: a
 	// test fixes m.now after this constructor returns (agentWorkspace,
@@ -1550,23 +1490,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// a goal asked to be conducted: it entered implement, took a note,
 		// was sent back or stopped
 		return tea.Batch(m.goalTickCmd(ev.Feature), m.loadRows)
-	case engine.EventBoard:
-		// The board session's state changed — engine.Event's own doc
-		// comment on Feature: EventBoard is the one kind that carries no
-		// Feature, since the board session is bound to the workspace
-		// rather than to any card. Every other case below reads
-		// ev.Feature to look a row or a card session up, so this has to
-		// be handled first, before any of them run against an empty id.
-		// There is nothing to do beyond re-rendering from
-		// BoardSession.Snapshot — Update's engineEventMsg case already
-		// re-renders on every engine event regardless of what this
-		// returns, so a plain nil is the whole handler.
-		return nil
 	case engine.EventCardCreated:
-		// a card was minted by card_new, running inside this board's own
-		// process — the only announcement it gets, since cardmint writes
-		// straight to the store with no event of its own. Reload rows the
-		// same way EventIdle does for a finished stage.
+		// a card was minted or filed onto the open board by a caller that
+		// touches no session machinery — a goal's lead — the only
+		// announcement it gets, since cardmint writes straight to the
+		// store with no event of its own. Reload rows the same way
+		// EventIdle does for a finished stage.
 		return m.loadRows
 	case engine.EventError:
 		if ev.Err != nil {
@@ -1878,40 +1807,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout = m.computeLayout()
 		return m, nil
 
-	case boardOpenedMsg:
-		// ensureBoardSession's spawn ran in a command (OpenBoard can
-		// start a real backend process — the same "can take seconds"
-		// cost attachChat's own doc comment names for a card's Attach),
-		// so this is where the result actually lands.
-		m.boardOpening = false
-		if msg.err != nil {
-			// Two different failures land here and they need two different
-			// voices. An INITIAL open failing leaves m.board nil, so the tab
-			// renders boardTabPlaceholder and boardErr is both the right
-			// place to say so and the only one that would be seen. A REOPEN
-			// failing (/profile, /model) does not: spawnBoardLocked only
-			// replaces the live session once the new one is up, so the old
-			// conversation is still installed and still rendering — which
-			// means boardErr is never drawn at all, and the user who pressed
-			// Switch would watch nothing happen and be told nothing. That
-			// one has to speak through the status bar instead.
-			if m.board != nil {
-				m.notice = noticeMsg{text: "switching the board session: " + sanitize(msg.err.Error()), isErr: true}
-				return m, nil
-			}
-			m.boardErr = sanitize(msg.err.Error())
-			return m, nil
-		}
-		m.board = msg.session
-		// A reopen (reopenBoard, for /profile and /model) can land here
-		// after an EARLIER open failed and left boardErr set — reopenBoard
-		// clears it up front for the placeholder's sake, but ensureBoardSession
-		// reads boardErr as "this tab is broken, don't retry" (its own
-		// guard), so it has to come back clean here too or a successful
-		// respawn would still be treated as a dead tab forever after.
-		m.boardErr = ""
-		return m, nil
-
 	case rowsMsg:
 		if msg.err != nil {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
@@ -2013,12 +1908,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// has been typed since — a sentence the user has moved on
 			// from must not reappear under their cursor.
 			m.threadInput.SetValue(msg.restore)
-		}
-		if msg.restoreBoard != "" && strings.TrimSpace(m.boardInput.Value()) == "" {
-			// the same rule for the agent tab's own composer, into its own
-			// field (see noticeMsg.restoreBoard on why the two are not one).
-			m.boardInput.SetValue(msg.restoreBoard)
-			m.syncBoardCompletion()
 		}
 		var reseed tea.Cmd
 		if msg.clearInbox != "" {
@@ -2741,20 +2630,8 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ctrl+c is hoisted above the overlay: it is the one key every
 		// terminal program is expected to answer, and routing it into an
 		// open dialog's text input (which is what happened) left no way
-		// out of a modal but esc.
-		//
-		// The agent tab's composer gets first refusal on it, because there
-		// the key means what it means in every coding CLI — cancel the
-		// draft, or the turn, before you cancel the program
-		// (boardCancelKey has the full contract). It takes the key only
-		// when there is something on that surface to cancel and only with
-		// no dialog up, so the hoist's own promise is untouched: quit is
-		// still what ctrl+c does everywhere else, and still what it does
-		// here once the composer is empty and nothing is running.
+		// out of a modal but esc. Quit is what it does everywhere.
 		if msg.String() == "ctrl+c" {
-			if cmd, took := m.boardCancelKey(); took {
-				return m, cmd
-			}
 			return m, m.quitCmd()
 		}
 		if consumed, cmd := m.Overlay.HandleKey(msg); consumed {
@@ -2777,23 +2654,10 @@ func (m *Shell) handlePaste(msg tea.PasteMsg) tea.Cmd {
 	// Scoped to the board tab, exactly as handleKey scopes the same
 	// surface (its boardSurfacesLive gate). Both composers can report
 	// Focused() at once — a card page stays open across a tab switch and
-	// nothing blurs its input, while gotoTab focuses the board's — so an
-	// ungated test here answered for whichever branch came first, and
-	// this one did. A paste on the agent tab then landed in the card's
-	// hidden composer: invisible, unrecoverable without going back to
-	// find it, and silent.
+	// nothing blurs its input — so an ungated test here answered for
+	// whichever branch came first, and this one did.
 	if m.boardSurfacesLive() && m.cardOpen && m.threadInput.Focused() {
 		return m.handleThreadPaste(msg)
-	}
-	if m.tab == TabAgent && m.boardInput.Focused() {
-		var cmd tea.Cmd
-		m.boardInput, cmd = m.boardInput.Update(msg)
-		// A paste changes the line as surely as a keystroke does, so the
-		// completion popup is re-derived from it too — which is also what
-		// closes one over a pasted block that merely happens to start
-		// with "/" (completeSlash refuses anything holding a newline).
-		m.syncBoardCompletion()
-		return cmd
 	}
 	if bv := m.bugIngest; bv != nil && bv.filtering {
 		bv.filter, _ = bv.filter.Update(msg)
@@ -2844,16 +2708,6 @@ func (m *Shell) quitCmd() tea.Cmd {
 	case m.ingest != nil:
 		question = fmt.Sprintf("quit with %d unsaved proposal(s)?", len(m.ingest.props))
 		detail = "they came from a paid architect pass over " + m.ingest.source + " and nothing has been created yet"
-	// A board turn is not an engine session either (Sessions() is keyed
-	// by card), so liveAutopilotSplit never saw it — but it is spending
-	// money and may be mid-way through acting on cards through its own
-	// tools. Every other in-flight thing here gets asked about; leaving
-	// this one out made the busiest surface in the program the only one
-	// you could throw away by accident.
-	case m.board != nil && m.board.Snapshot().Busy:
-		question = "quit while the board agent is working?"
-		detail = "the in-flight turn and its spend are discarded; anything it already " +
-			"did to a card is on disk and stays"
 	case m.bugIngesting:
 		question = "quit while a bug import is fetching?"
 		detail = "the fetch is in flight — quitting drops it"
@@ -2973,8 +2827,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.gotoTab(TabStats)
 	case "alt+3":
 		return m.gotoTab(TabInbox)
-	case "alt+4":
-		return m.gotoTab(TabAgent)
 	case "alt+/":
 		// the help key that is always gummi's. ? is the convenient one,
 		// but it is also ordinary punctuation, so it has to yield wherever
@@ -2987,15 +2839,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	if key == "tab" {
-		// The board thread's completion popup claims tab while it is
-		// open — that is the whole point of the key there, and this is
-		// the only tier that sees it, since tab is answered here well
-		// above the composer's own handler. The exception is as narrow as
-		// it can be: no popup, no claim, and tab goes back to cycling the
-		// tabs on the very next keystroke.
-		if m.tab == TabAgent && m.boardComplete != nil {
-			return m.handleBoardInputKey(msg)
-		}
 		return m.nextTab()
 	}
 	if key == "?" && !m.textEntry() {
@@ -3059,24 +2902,6 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return m.handleThreadInputKey(msg)
 		}
 	}
-	// The board thread's own composer (TabAgent) owns the keyboard the
-	// instant it is focused — gotoTab focuses it on arrival and nothing
-	// ever blurs it, so this is true for as long as the tab has been
-	// visited at all. It has to run here, in the same tier as the
-	// boardSurfacesLive block just above (both are "a surface with its
-	// own composer claims the keyboard before the board root's globals
-	// do"), for two reasons at once:
-	//
-	//   - before the q-quits-from-the-board-root check right below: with
-	//     no route here, typing "q" into a board message would fall
-	//     through to that check and quit gummi outright, mid-sentence.
-	//   - before boardKey below: boardKey returns nil outright for any
-	//     tab but TabBoard (its own comment), which predates this surface
-	//     and would otherwise just swallow the keystroke having done
-	//     nothing with it.
-	if m.tab == TabAgent && m.boardInput.Focused() {
-		return m.handleBoardInputKey(msg)
-	}
 	// q quits only from the board root: every surface above answers it as
 	// an alias for esc, and a q that quit gummi from inside a spec would
 	// be far worse than one that doesn't.
@@ -3125,27 +2950,13 @@ const cleanUpNudge = "clean up removes the worktree and branch"
 // shares, so alt+N and the tab cycle cannot drift apart on it.
 func (m *Shell) gotoTab(t Tab) tea.Cmd {
 	m.setTab(t)
-	if m.tab == TabAgent {
-		// The board thread's composer is focused the instant the tab is
-		// entered, the same "ready to type into" contract the card
-		// thread's own composer keeps on open (threadinput.go). There is
-		// no driven-abroad equivalent here to withhold it — a board
-		// session belongs to this process alone — so unlike
-		// focusThreadInput this never refuses.
-		m.boardInput.Focus()
-	}
 	if m.tab == TabStats {
 		// The stats tab measures on first arrival so it never opens on a
 		// page nobody has read yet, and re-arms nothing afterwards — its
 		// tick handles the refresh, and r handles the impatient.
 		return m.ensureWsStats()
 	}
-	if m.tab != TabAgent {
-		return nil
-	}
-	// Spawning is deferred to the first visit so a board that never opens
-	// the tab never pays for a backend process.
-	return m.ensureBoardSession()
+	return nil
 }
 
 // textEntry reports whether the surface holding the keyboard is taking
@@ -3155,15 +2966,6 @@ func (m *Shell) gotoTab(t Tab) tea.Cmd {
 // retry?" into a chat must get the character rather than the help
 // overlay.
 func (m *Shell) textEntry() bool {
-	// The board thread's composer (TabAgent) is checked ahead of the
-	// boardSurfacesLive gate below, which is scoped to m.tab == TabBoard
-	// on purpose (its own doc comment) and would otherwise report false
-	// here unconditionally — the same bug this whole function exists to
-	// avoid, just on the other tab: a "?" typed into a board message
-	// would open the help overlay instead of typing the character.
-	if m.tab == TabAgent && m.boardInput.Focused() {
-		return true
-	}
 	if !m.boardSurfacesLive() {
 		return false
 	}
@@ -3192,7 +2994,7 @@ func (m *Shell) textEntry() bool {
 // funnel through here, so what a surface offers and what the handler
 // does cannot drift apart.
 func (m *Shell) boardKey(key string) tea.Cmd {
-	// tab, alt+1/2/3/4 and ? never arrive here: handleKey answers them
+	// tab, alt+1/2/3 and ? never arrive here: handleKey answers them
 	// above every surface, which is what makes them global rather than
 	// "global as long as nothing is open".
 	if m.tab == TabStats {
@@ -3202,15 +3004,6 @@ func (m *Shell) boardKey(key string) tea.Cmd {
 		return m.inboxKey(key)
 	}
 	if m.tab != TabBoard {
-		// TabAgent's own composer claims the keyboard the instant it is
-		// focused (handleKey), which is true for as long as the tab has
-		// been visited at all — so this is the defensive fallback for a
-		// stray key that somehow arrives before that. gummi holds the
-		// keyboard here but has nothing to spend it on, and "nothing" is
-		// the answer: this used to fall through to the inbox's keymap, so
-		// on the agent tab x silently dismissed an inbox item, enter
-		// jumped to a card and switched tabs, and u topped up a budget —
-		// all from a tab showing none of it.
 		return nil
 	}
 	// reconcile before anything can act: m.sel is written from half a
@@ -3891,12 +3684,9 @@ func (m *Shell) View() tea.View {
 	v.AltScreen = true
 	v.BackgroundColor = m.styles.Theme.BgBase
 	v.WindowTitle = "gummi"
-	// Mouse reporting is never requested. It used to be, per-frame, while
-	// the agent tab's keyboard lock was on — the lock existed to hand a
-	// hosted pty every key and every click. That pty is gone, and asking
-	// for mouse reporting unconditionally would suppress the terminal's
-	// own click-drag selection across the whole program, which no surface
-	// here has a use for.
+	// Mouse reporting is never requested: asking for it would suppress
+	// the terminal's own click-drag selection across the whole program,
+	// which no surface here has a use for.
 
 	if m.width <= 0 || m.height <= 0 {
 		return v
@@ -3930,7 +3720,7 @@ func (m *Shell) View() tea.View {
 //
 // Carrying the fill on the cells themselves makes the background ours in
 // every terminal, whether or not OSC 11 lands. Cells that already chose a
-// background (bands, pills, the hosted agent's own paint) keep it.
+// background (bands, pills) keep it.
 func paintBase(b *uv.Buffer, bg color.Color) {
 	if b == nil || bg == nil {
 		return
@@ -3957,10 +3747,7 @@ func (m *Shell) draw(scr uv.Screen) {
 	// into a band above the status bar rather than truncated into a
 	// one-line pill ("set permiss…"); it borrows the bottom rows of the
 	// main pane. Short notices stay pills.
-	// Every surface goes through mainView below. There used to be a
-	// branch above it for the agent tab, which painted a hosted pty's
-	// cells straight into scr so its truecolor survived; the tab hosts an
-	// in-process board session now, which is an ordinary string surface.
+	// Every surface goes through mainView below.
 	band := m.noticeBand(max(l.Main.Dx()-3, 0))
 	mainH := l.Main.Dy()
 	if len(band) > 0 {
@@ -4598,18 +4385,6 @@ func (m *Shell) mainView(w, h int) string {
 		}
 	}
 	switch m.tab {
-	case TabAgent:
-		// The board's own conversation (boardthread.go) once
-		// ensureBoardSession's spawn has landed; a placeholder before
-		// then, or instead of one that failed to open. This used to be
-		// unconditionally agentTabPlaceholder, with drawAgentTab painting
-		// a live pty's cells straight over it — that branch is now dead
-		// (m.agent is never spawned, gotoTab's own comment), so this
-		// string path is the whole tab.
-		if m.board != nil {
-			return m.boardThreadView(w, h)
-		}
-		return m.boardTabPlaceholder(w, h)
 	case TabStats:
 		return m.wsStatsRender(w, h)
 	case TabInbox:
@@ -4631,11 +4406,6 @@ func (m *Shell) mainView(w, h int) string {
 }
 
 func (m *Shell) statusView(w int) string {
-	// The leading pill names the program. It used to say "⬤ locked ·
-	// ctrl+g" instead while the agent tab's keyboard lock was engaged —
-	// the lock changed what every other key did, so the row a user checks
-	// to find out what a key will do had to say so. Both the lock and the
-	// pty it fed are gone.
 	pills := []statusbar.Pill{
 		{Text: "gummi", Kind: statusbar.KindMode},
 		{Text: m.boardCounts(), Kind: statusbar.KindNeutral},

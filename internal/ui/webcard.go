@@ -518,7 +518,7 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 			list = append(list, cardAction{id: "writespec", label: "write a spec", why: specWhy})
 		}
 	} else {
-		list = append(list, m.cardProfileActions()...)
+		list = append(list, m.cardProfileActions(r.F.Stage)...)
 	}
 	if m.repoPickable(r) {
 		list = append(list, cardAction{id: "repo", key: "o", label: "repository", why: "choose the repository this card works in"})

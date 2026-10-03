@@ -410,71 +410,10 @@ type DoctorCheck struct {
 	Remediation string `json:"remediation,omitempty"`
 }
 
-// Agent is GET /api/agent: the board-level agent session (§16) the TUI
-// hosts in its agent tab.
-type Agent struct {
-	// Open reports a session exists; Opening that one is starting; Err why
-	// the last open failed.
-	Open    bool   `json:"open"`
-	Opening bool   `json:"opening,omitempty"`
-	Err     string `json:"err,omitempty"`
-	Profile string `json:"profile,omitempty"`
-	Model   string `json:"model,omitempty"`
-	Backend string `json:"backend,omitempty"`
-	// Profiles are the profiles the session may switch to; Models the
-	// models named anywhere in profiles.yaml, a memory aid and not the
-	// closed set (any model may be asked for).
-	Profiles []AgentProfile `json:"profiles"`
-	Models   []AgentModel   `json:"models"`
-	// Items is the conversation; Live the turn in flight.
-	Items []Item `json:"items"`
-	Live  *Live  `json:"live,omitempty"`
-	// Context is the context window's occupancy, when the backend reports it.
-	Context *AgentContext `json:"context,omitempty"`
-}
-
-// AgentProfile is one profile the board session can run under.
-type AgentProfile struct {
-	Name    string `json:"name"`
-	Backend string `json:"backend,omitempty"`
-	Model   string `json:"model,omitempty"`
-}
-
-// AgentModel is one model profiles.yaml names, with where.
-type AgentModel struct {
-	Model string   `json:"model"`
-	Uses  []string `json:"uses,omitempty"`
-}
-
 // AgentContext is a context window's occupancy, in tokens.
 type AgentContext struct {
 	Tokens int64 `json:"tokens"`
 	Limit  int64 `json:"limit"`
-}
-
-// AgentSendRequest is POST /api/agent/send. POST /api/agent/interrupt
-// (no body) stops the turn in flight.
-type AgentSendRequest struct {
-	Text string `json:"text"`
-}
-
-// AgentOpenRequest is POST /api/agent/open: open the session (a no-op
-// when one is open), under Profile and Model when given.
-type AgentOpenRequest struct {
-	Profile string `json:"profile,omitempty"`
-	Model   string `json:"model,omitempty"`
-}
-
-// AgentProfileRequest is POST /api/agent/profile: end the conversation and
-// start a fresh one under Profile (empty keeps the current one) and Model.
-// When there is a conversation to lose, the TUI asks first; here the
-// server answers a "confirm" question (StatusQuestion) carrying it and
-// its token, and the page asks and sends the token back in Confirm
-// (AnswerRequest.Confirm).
-type AgentProfileRequest struct {
-	Profile string `json:"profile,omitempty"`
-	Model   string `json:"model,omitempty"`
-	Confirm string `json:"confirm,omitempty"`
 }
 
 // PushKey is GET /api/push/key: the server's VAPID public key, base64url,

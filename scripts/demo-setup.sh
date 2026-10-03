@@ -63,9 +63,6 @@ cat > "$repo/.gummi/config.yaml" <<'YAML'
 permissions: allow-all
 sandbox: off
 autopilot_lanes: 2
-
-# Pre-answer the agent tab's first-run picker so the recording never sees it.
-agent: claude
 YAML
 
 cat > "$repo/.gummi/profiles.yaml" <<'YAML'

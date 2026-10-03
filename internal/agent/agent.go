@@ -23,20 +23,12 @@ const (
 	// title/summary call the CLI makes on its own model) in the per-stage
 	// breakdown, keeping it out of the working role's row.
 	RoleHelper Role = "helper"
-	// RoleBoard is the workspace-scoped agent that manages the board
-	// rather than working inside one card. It is not a stage role — no
-	// workflow stage resolves to it and no profile has to declare it —
-	// but it is a real Role because the transcript renderer labels every
-	// assistant turn with the session's role name: opened as
-	// RoleArchitect, a board conversation would print "architect" over
-	// each reply, which names a job nobody asked it to do.
-	RoleBoard Role = "board"
 	// RoleConsult is a card-scoped, read-only conversation held alongside
 	// (never instead of) a card's stage sessions — engine.ConsultSession.
-	// Like RoleBoard it is not a stage role: no workflow stage resolves to
-	// it, but the transcript renderer still needs a name to label a
-	// consult reply with instead of borrowing whatever role the card's
-	// last stage session happened to run under.
+	// It is not a stage role: no workflow stage resolves to it, but the
+	// transcript renderer still needs a name to label a consult reply
+	// with instead of borrowing whatever role the card's last stage
+	// session happened to run under.
 	RoleConsult Role = "consult"
 	// RoleLead runs a goal (domain.KindGoal): an event-driven orchestrator
 	// that wakes on what happened to the goal's cards, reads the goal doc,
@@ -197,23 +189,6 @@ type SessionOpts struct {
 	// still exists, ignore it and open fresh — a resume is an optimization
 	// and must never be a way for a session to fail to start.
 	ResumeID string
-	// Workspace marks a board-level session: one bound to the workspace
-	// rather than to any card. It changes exactly one thing for the
-	// adapters that consume it — the gummi MCP child is launched with
-	// `--workspace` instead of `--feature <id>`, reaching the engine's
-	// board-level endpoint and its seven board tools.
-	//
-	// It exists because the feature id was doing double duty. Every
-	// adapter gates its MCP wiring on a non-empty FeatureID, since that
-	// id is what the child needs to name the card it serves; a session
-	// with no card therefore got no MCP configuration at all, silently,
-	// and a board agent would have come up unable to see the board. The
-	// gate was right about "no card"; it was wrong to conclude "no
-	// tools". This flag is what separates the two.
-	//
-	// Adapters that reach gummi's tools some other way (copilot, via
-	// SessionOpts.Tools) ignore it, as do any that do not speak MCP.
-	Workspace bool
 }
 
 // Agent creates sessions and reports what its backend can do.

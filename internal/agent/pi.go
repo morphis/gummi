@@ -38,7 +38,7 @@ import (
 // generated --extension (pi_extension.go): the extension spawns `gummi
 // __mcp` and mirrors its tools/list into pi.registerTool calls. That is
 // what Capabilities().MCPTools reports, once SessionOpts.MCPSockPath is
-// bound to a feature id or the Workspace flag. pi's RPC mode has no
+// bound to a feature id. pi's RPC mode has no
 // approval gate, so guarded collapses to allow-all.
 type Pi struct {
 	bin string
@@ -100,8 +100,8 @@ func piProvider() string { return strings.TrimSpace(os.Getenv("GUMMI_PI_PROVIDER
 
 // piMaterializeExtension renders the MCP tool extension for a session and
 // writes it to a temp file pi will load with --extension. An unbound
-// session (no socket, or neither feature id nor Workspace) returns an
-// empty path and no file — the one case that must stay toolless.
+// session (no socket, or no feature id) returns an empty path and no
+// file — the one case that must stay toolless.
 func piMaterializeExtension(opts SessionOpts) (path string, err error) {
 	ext, err := buildPiExtensionArgs(opts)
 	if err != nil || ext == nil {
@@ -133,14 +133,14 @@ var piExecPath = os.Executable
 // gummi's own executable (the __mcp child must be a real gummi, not a
 // $PATH shadow) and the session's scope.
 func buildPiExtensionArgs(opts SessionOpts) ([]byte, error) {
-	if opts.MCPSockPath == "" || (opts.FeatureID == "" && !opts.Workspace) {
+	if opts.MCPSockPath == "" || opts.FeatureID == "" {
 		return nil, nil
 	}
 	exe, err := piExecPath()
 	if err != nil {
 		return nil, fmt.Errorf("pi adapter: locating own executable: %w", err)
 	}
-	return buildPiExtension(exe, opts.FeatureID, opts.MCPSockPath, opts.Workspace, piMCPToolFromDefs(opts.Tools))
+	return buildPiExtension(exe, opts.FeatureID, opts.MCPSockPath, piMCPToolFromDefs(opts.Tools))
 }
 
 // NewSession implements Agent: spawn one pi process in opts.WorkDir. The
@@ -180,8 +180,8 @@ func (p *Pi) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	// pi_extension.go) and hand it to pi explicitly — explicit --extension
 	// paths load even under --no-extensions, so a session whose worktree
 	// happens to carry project-local extensions still sees only what gummi
-	// built for it. Unbound sessions (no socket, or neither feature id nor
-	// Workspace) get no extension and no flag, exactly as before.
+	// built for it. Unbound sessions (no socket, or no feature id) get no
+	// extension and no flag, exactly as before.
 	extPath, err := piMaterializeExtension(opts)
 	if err != nil {
 		return nil, err

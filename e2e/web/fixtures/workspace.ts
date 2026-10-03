@@ -114,8 +114,6 @@ export class Workspace {
         'permissions: allow-all',
         'sandbox: off',
         'autopilot_lanes: 2',
-        '# pre-answer the agent tab first-run picker',
-        'agent: claude',
         '',
       ].join('\n'),
     );

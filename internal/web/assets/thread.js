@@ -181,7 +181,7 @@ function itemNode (it) {
   return el
 }
 
-// itemEl draws one thread item; the board agent's transcript reuses it.
+// itemEl draws one thread item.
 export function itemEl (it) {
   switch (it.t) {
     case 'message': return message(it)

@@ -341,21 +341,14 @@ type Engine struct {
 	// and a card can be re-entered.
 	oneShots map[domain.FeatureID]int
 	lanes    [numLanePools]laneState // per-pool cap/running/queue — see laneState
-	// board is the engine's single workspace-scoped agent session (see
-	// boardsession.go), or nil until OpenBoard is first called. Unlike a
-	// card's session it takes no attention slot and needs no lane
-	// bookkeeping, so it lives beside e.live rather than inside it.
-	board  *BoardSession
-	closed bool
+	closed   bool
 
-	// consult holds every card's consult session, keyed by feature —
-	// engine.ConsultSession's own map, mirroring board's single-entry
-	// field but per card: OpenConsult is idempotent per card for the
-	// engine's whole lifetime (see consultsession.go), so once a card's
-	// entry exists here it is reused, never replaced, until Close.
+	// consult holds every card's consult session, keyed by feature:
+	// OpenConsult is idempotent per card for the engine's whole lifetime
+	// (see consultsession.go), so once a card's entry exists here it is
+	// reused, never replaced, until Close.
 	consult map[domain.FeatureID]*ConsultSession
-	// consultMu serializes OpenConsult end to end, the same job boardMu
-	// does for OpenBoard and for the same reason: spawning a backend is
+	// consultMu serializes OpenConsult end to end: spawning a backend is
 	// too slow to do under e.mu, so the check-then-act around a released
 	// lock needs a lock of its own or two concurrent callers for the same
 	// card both see "not open yet" and both spawn one. Held only by
@@ -393,23 +386,6 @@ type Engine struct {
 	// spawned with no turns sent — consultIdleTimeout's twin, a field for
 	// the same test reason.
 	freeformIdleTimeout time.Duration
-
-	// boardMu serializes OpenBoard end to end. e.mu cannot do that job:
-	// opening spawns a real backend process (and possibly binds an MCP
-	// endpoint), which is far too slow to hold the engine's main lock
-	// across, so OpenBoard has to drop e.mu before the spawn — and a
-	// check-then-act around a released lock is exactly how two callers
-	// both see "no board yet" and both spawn one. The card path avoids
-	// this by taking the per-card lock before any expensive work
-	// (Attach); a board session has no card and therefore no such lock,
-	// so this stands in for it.
-	//
-	// Held by OpenBoard, ReopenBoard and Close — every path that can
-	// create or destroy the board session, which is what makes "is there
-	// a board, and is it going to still be there a moment from now" a
-	// question with one answer. Always taken BEFORE e.mu, never while
-	// e.mu is already held.
-	boardMu sync.Mutex
 
 	// wg tracks the pump and kickoff goroutines so Close can join them
 	// before returning: a barrier for any filesystem touch (git subprocess
@@ -1684,8 +1660,10 @@ func (e *Engine) runSpecChecks(s *Session) string {
 			}
 		}
 		s.appendToolDone(fmt.Sprintf("check %s: %s", r.Name, status), r.OK, r.Output)
-		recorded = append(recorded, goalCheckResult{Name: r.Name, OK: r.OK, Status: status,
-			Evidence: firstNonEmpty(experimentEvidence(r), checkFailureNote(r))})
+		recorded = append(recorded, goalCheckResult{
+			Name: r.Name, OK: r.OK, Status: status,
+			Evidence: firstNonEmpty(experimentEvidence(r), checkFailureNote(r)),
+		})
 		fmt.Fprintf(&b, "- %s: %s\n", r.Name, status)
 		if !r.OK && len(r.Output) > 0 {
 			fmt.Fprintf(&b, "%s\n", indentLines(tailLines(r.Output, 20)))
@@ -2791,22 +2769,7 @@ func (e *Engine) stageWorkCommitted(s *Session) bool {
 }
 
 // Close stops every session and closes the event stream.
-//
-// It takes boardMu first, and holds it throughout, because a board spawn
-// deliberately releases e.mu across the slow backend start (boardMu's own
-// comment on why). Without this, Close can flip closed, stop what it can
-// see and reach e.wg.Wait() while a spawn that already got past
-// replaceBoard is still on its way to the e.wg.Add(1) for its pump — an
-// Add racing a Wait, which is a WaitGroup misuse panic rather than merely
-// a goroutine left running. That was latent while a board was opened once
-// at startup and never again; ReopenBoard makes a mid-life spawn something
-// a user triggers by typing, so a quit landing on one is ordinary rather
-// than exotic. Taking it here is safe from deadlock because no goroutine
-// e.wg tracks ever reaches for boardMu — nothing inside this package calls
-// OpenBoard or ReopenBoard.
 func (e *Engine) Close() error {
-	e.boardMu.Lock()
-	defer e.boardMu.Unlock()
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
@@ -2818,8 +2781,6 @@ func (e *Engine) Close() error {
 		sessions = append(sessions, s)
 	}
 	e.live = map[domain.FeatureID]*Session{}
-	board := e.board
-	e.board = nil
 	consults := make([]*ConsultSession, 0, len(e.consult))
 	for _, c := range e.consult {
 		consults = append(consults, c)
@@ -2837,9 +2798,6 @@ func (e *Engine) Close() error {
 
 	for _, s := range sessions {
 		s.stop()
-	}
-	if board != nil {
-		board.sess.stop()
 	}
 	for _, c := range consults {
 		c.stopBackend()

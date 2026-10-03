@@ -221,15 +221,6 @@ type noticeMsg struct {
 	// line is handed off, so the one path that can fail after that hands
 	// it back here.
 	restore string
-	// restoreBoard is restore for the agent tab's composer (boardInput).
-	// It is a second field rather than a flag beside restore because the
-	// two composers are two Shell fields on purpose (see the struct's own
-	// comment): a refused board turn must not be handed back into
-	// whichever card page happens to be open, and a refused card turn must
-	// not appear on the agent tab. The sender knows which composer its
-	// line came from; nothing downstream has to guess from m.tab, which by
-	// then may have moved.
-	restoreBoard string
 	// web is the notice as the web face shows it, when text names a
 	// terminal key the page has no such key for ("x resolves one"): the
 	// same sentence with the act named instead. Empty means text reads the
@@ -249,14 +240,6 @@ func (n noticeMsg) webText() string {
 		return n.web
 	}
 	return n.text
-}
-
-// boardOpenedMsg carries the result of engine.OpenBoard — boardthread.go's
-// ensureBoardSession dispatches it in a command because spawning the
-// backend can take seconds, so it must not block Update.
-type boardOpenedMsg struct {
-	session *engine.BoardSession
-	err     error
 }
 
 // blockersMsg carries one card's recomputed gate blockers back into its
@@ -589,8 +572,10 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 				stacked = id
 			}
 		}
-		created := cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker,
-			stack: stacked, warn: strings.Join(warn, "; ")}
+		created := cardCreatedMsg{
+			f: f, start: res.Start, fromPicker: res.FromPicker,
+			stack: stacked, warn: strings.Join(warn, "; "),
+		}
 		if f.IsFreeform() {
 			created.opening = res.Desc
 		}
@@ -1240,8 +1225,10 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
-		return rebasedMsg{id: f.ID, cleared: drifted != nil,
-			notice: noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true}}
+		return rebasedMsg{
+			id: f.ID, cleared: drifted != nil,
+			notice: noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true},
+		}
 	})
 }
 

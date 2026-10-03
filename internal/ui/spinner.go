@@ -56,14 +56,6 @@ func (m *Shell) spinnerActive() bool {
 	if len(m.consultSending) > 0 {
 		return true
 	}
-	// the board session is not one of m.engine.Sessions() below — those
-	// are card-scoped, and a board session is bound to the workspace
-	// instead (engine/boardsession.go) — so its own busy turn has to be
-	// checked separately, or the shared spinner glyph in its thread would
-	// just sit frozen on one frame while it thinks.
-	if m.board != nil && m.board.Snapshot().Busy {
-		return true
-	}
 	// a foreign-driven card's busy state lives only in its row snapshot —
 	// unlike the local sources above, no live engine session covers
 	// another process's session, so this is the one place that state can

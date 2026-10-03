@@ -68,7 +68,7 @@ func (c *Codex) NewSession(_ context.Context, opts SessionOpts) (Session, error)
 	}
 	s := &codexSession{
 		c: c, workdir: opts.WorkDir, model: opts.Model, hints: opts.SystemHints,
-		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath, workspace: opts.Workspace,
+		featureID: opts.FeatureID, mcpSock: opts.MCPSockPath,
 		raw: make(chan Event, 32), events: make(chan Event), stop: make(chan struct{}),
 		// The thread the engine says this session continues. buildArgs
 		// already knows what to do with a thread id (`codex exec resume
@@ -96,8 +96,7 @@ func (c *Codex) Close() error {
 type codexSession struct {
 	c                           *Codex
 	workdir, model              string
-	featureID, mcpSock          string // opts.FeatureID, opts.MCPSockPath (feature or workspace gates the -c override)
-	workspace                   bool   // opts.Workspace: bind the -c override to --workspace instead of --feature
+	featureID, mcpSock          string // opts.FeatureID, opts.MCPSockPath (a non-empty feature id gates the -c override)
 	hints                       []string
 	raw                         chan Event
 	events                      chan Event
@@ -255,19 +254,18 @@ func (s *codexSession) buildArgs(images []Image) ([]string, error) {
 		"-s", "workspace-write", "-c", `approval_policy="never"`,
 		"--skip-git-repo-check", "--ignore-user-config",
 	}
-	// With an MCP socket and something to bind it to — a feature id (the
-	// per-card stage session) or the workspace flag (the board-level
-	// session) — register gummi's tool server via an inline TOML config
-	// override (`-c`), codex's only per-invocation MCP injection point. A
-	// socket with neither a feature id nor workspace set still gets no
-	// MCP flags at all, so a transient/unbound session starts without MCP
-	// rather than failing (mirrors claudecode/opencode).
-	if s.mcpSock != "" && (s.featureID != "" || s.workspace) {
+	// With an MCP socket and a feature id to bind it to — the per-card
+	// stage session — register gummi's tool server via an inline TOML
+	// config override (`-c`), codex's only per-invocation MCP injection
+	// point. A socket with no feature id still gets no MCP flags at all,
+	// so a transient/unbound session starts without MCP rather than
+	// failing (mirrors claudecode/opencode).
+	if s.mcpSock != "" && s.featureID != "" {
 		exe, err := codexExecPath()
 		if err != nil {
 			return nil, fmt.Errorf("codex adapter: locating own executable: %w", err)
 		}
-		override, err := buildCodexGummiOverride(exe, s.featureID, s.mcpSock, s.workspace)
+		override, err := buildCodexGummiOverride(exe, s.featureID, s.mcpSock)
 		if err != nil {
 			return nil, fmt.Errorf("codex adapter: building gummi override: %w", err)
 		}

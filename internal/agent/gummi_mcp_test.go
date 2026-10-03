@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,7 +10,7 @@ import (
 )
 
 func TestBuildGummiMCPServerConfig(t *testing.T) {
-	raw := buildGummiMCPServerConfig("/opt/gummi", "FD-012", "/tmp/mcp/FD-012.sock", false)
+	raw := buildGummiMCPServerConfig("/opt/gummi", "FD-012", "/tmp/mcp/FD-012.sock")
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
@@ -44,36 +43,15 @@ func TestBuildGummiMCPServerConfig(t *testing.T) {
 // gummi nothing. ask_user is silent for as long as a person reads, so the
 // server carries its own timeout, which is what lifts that bound.
 func TestBuildGummiMCPServerConfigOutwaitsAPerson(t *testing.T) {
-	for _, workspace := range []bool{false, true} {
-		raw := buildGummiMCPServerConfig("/opt/gummi", "FD-012", "/tmp/mcp/FD-012.sock", workspace)
-		var m map[string]any
-		if err := json.Unmarshal(raw, &m); err != nil {
-			t.Fatal(err)
-		}
-		g := m["mcpServers"].(map[string]any)["gummi"].(map[string]any)
-		ms, ok := g["timeout"].(float64)
-		if !ok || ms < float64(24*60*60*1000) {
-			t.Errorf("workspace=%v: timeout = %v ms, want at least a day", workspace, g["timeout"])
-		}
-	}
-}
-
-// TestBuildGummiMCPServerConfigWorkspace pins the workspace-scoped shape:
-// args carries --workspace and never --feature, and featureID (passed as
-// junk here) is not consulted at all.
-func TestBuildGummiMCPServerConfigWorkspace(t *testing.T) {
-	raw := buildGummiMCPServerConfig("/opt/gummi", "should-be-ignored", "/tmp/mcp/ws.sock", true)
+	raw := buildGummiMCPServerConfig("/opt/gummi", "FD-012", "/tmp/mcp/FD-012.sock")
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
+		t.Fatal(err)
 	}
 	g := m["mcpServers"].(map[string]any)["gummi"].(map[string]any)
-	if !reflect.DeepEqual(g["args"], []any{"__mcp", "--workspace"}) {
-		t.Errorf("args = %v, want [__mcp --workspace]", g["args"])
-	}
-	env := g["env"].(map[string]any)
-	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/ws.sock" {
-		t.Errorf("env.GUMMI_MCP_SOCK = %v, want /tmp/mcp/ws.sock", env["GUMMI_MCP_SOCK"])
+	ms, ok := g["timeout"].(float64)
+	if !ok || ms < float64(24*60*60*1000) {
+		t.Errorf("timeout = %v ms, want at least a day", g["timeout"])
 	}
 }
 
@@ -104,7 +82,7 @@ func parseCodexOverride(t *testing.T, line string) codexOverrideServer {
 }
 
 func TestBuildCodexGummiOverride_HappyPath(t *testing.T) {
-	line, err := buildCodexGummiOverride("/opt/gummi", "FD-013", "/tmp/mcp/FD-013.sock", false)
+	line, err := buildCodexGummiOverride("/opt/gummi", "FD-013", "/tmp/mcp/FD-013.sock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,26 +106,8 @@ func TestBuildCodexGummiOverride_HappyPath(t *testing.T) {
 	}
 }
 
-// TestBuildCodexGummiOverride_Workspace pins the workspace-scoped shape:
-// args carries --workspace and never --feature, and a featureID that would
-// fail tomlQuote (a control character) does not fail the call, because a
-// workspace override never quotes it.
-func TestBuildCodexGummiOverride_Workspace(t *testing.T) {
-	line, err := buildCodexGummiOverride("/opt/gummi", "bad\x01-but-unused", "/tmp/mcp/ws.sock", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	g := parseCodexOverride(t, line)
-	if !reflect.DeepEqual(g.Args, []string{"__mcp", "--workspace"}) {
-		t.Errorf("args = %#v, want [__mcp --workspace]", g.Args)
-	}
-	if g.Env.GUMMI_MCP_SOCK != "/tmp/mcp/ws.sock" {
-		t.Errorf("env.GUMMI_MCP_SOCK = %q, want /tmp/mcp/ws.sock", g.Env.GUMMI_MCP_SOCK)
-	}
-}
-
 func TestBuildCodexGummiOverride_EscapesSpecials(t *testing.T) {
-	line, err := buildCodexGummiOverride(`/opt/gu mmi\a"b`, "FD-013", `/tmp/mcp/x"y.sock`, false)
+	line, err := buildCodexGummiOverride(`/opt/gu mmi\a"b`, "FD-013", `/tmp/mcp/x"y.sock`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,96 +121,13 @@ func TestBuildCodexGummiOverride_EscapesSpecials(t *testing.T) {
 }
 
 func TestBuildCodexGummiOverride_RejectsControlChars(t *testing.T) {
-	if _, err := buildCodexGummiOverride("bad\x01", "FD-013", "/tmp/mcp/x.sock", false); err == nil {
+	if _, err := buildCodexGummiOverride("bad\x01", "FD-013", "/tmp/mcp/x.sock"); err == nil {
 		t.Fatal("control character in execPath accepted")
 	}
-	if _, err := buildCodexGummiOverride("/opt/gummi", "bad\x7f", "/tmp/mcp/x.sock", false); err == nil {
+	if _, err := buildCodexGummiOverride("/opt/gummi", "bad\x7f", "/tmp/mcp/x.sock"); err == nil {
 		t.Fatal("control character in featureID accepted")
 	}
-	if _, err := buildCodexGummiOverride("/opt/gummi", "FD-013", "bad\x01.sock", false); err == nil {
+	if _, err := buildCodexGummiOverride("/opt/gummi", "FD-013", "bad\x01.sock"); err == nil {
 		t.Fatal("control character in sockPath accepted")
-	}
-}
-
-func TestHostedMCPAttachClaude(t *testing.T) {
-	argv, env, cleanup, err := HostedMCPAttach("claude", "/opt/gummi", "/tmp/mcp/ws.sock")
-	if err != nil {
-		t.Fatalf("HostedMCPAttach: %v", err)
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup is nil")
-	}
-	want := []string{"--strict-mcp-config", "--mcp-config", string(buildGummiMCPServerConfig("/opt/gummi", "", "/tmp/mcp/ws.sock", true))}
-	if !reflect.DeepEqual(argv, want) {
-		t.Errorf("argv = %#v, want %#v", argv, want)
-	}
-	if env != nil {
-		t.Errorf("env = %#v, want nil", env)
-	}
-}
-
-func TestHostedMCPAttachCodex(t *testing.T) {
-	argv, env, cleanup, err := HostedMCPAttach("codex", "/opt/gummi", "/tmp/mcp/ws.sock")
-	if err != nil {
-		t.Fatalf("HostedMCPAttach: %v", err)
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup is nil")
-	}
-	override, err := buildCodexGummiOverride("/opt/gummi", "", "/tmp/mcp/ws.sock", true)
-	if err != nil {
-		t.Fatalf("buildCodexGummiOverride: %v", err)
-	}
-	want := []string{"-c", override}
-	if !reflect.DeepEqual(argv, want) {
-		t.Errorf("argv = %#v, want %#v", argv, want)
-	}
-	if env != nil {
-		t.Errorf("env = %#v, want nil", env)
-	}
-}
-
-func TestHostedMCPAttachOpencode(t *testing.T) {
-	_, env, cleanup, err := HostedMCPAttach("opencode", "/opt/gummi", "/tmp/mcp/ws.sock")
-	if err != nil {
-		t.Fatalf("HostedMCPAttach: %v", err)
-	}
-	if cleanup == nil {
-		t.Fatal("cleanup is nil")
-	}
-	defer cleanup()
-	if len(env) != 1 || !strings.HasPrefix(env[0], "OPENCODE_CONFIG=") {
-		t.Fatalf("env = %#v, want one OPENCODE_CONFIG= entry", env)
-	}
-	path := strings.TrimPrefix(env[0], "OPENCODE_CONFIG=")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading config file: %v", err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("config file not valid JSON: %v\n%s", err, raw)
-	}
-	if _, present := m["permission"]; present {
-		t.Errorf("permission key present: %v", m["permission"])
-	}
-	cleanup()
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("config file still exists after cleanup: %v", err)
-	}
-}
-
-func TestHostedMCPAttachUnknownBackend(t *testing.T) {
-	for _, backend := range []string{"copilot", "some-unknown-backend", "/usr/local/bin/mycli"} {
-		argv, env, cleanup, err := HostedMCPAttach(backend, "/opt/gummi", "/tmp/mcp/ws.sock")
-		if err != nil {
-			t.Errorf("backend %q: unexpected error: %v", backend, err)
-		}
-		if argv != nil || env != nil {
-			t.Errorf("backend %q: argv=%#v env=%#v, want nil/nil", backend, argv, env)
-		}
-		if cleanup == nil {
-			t.Errorf("backend %q: cleanup is nil", backend)
-		}
 	}
 }

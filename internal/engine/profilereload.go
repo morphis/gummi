@@ -106,7 +106,7 @@ func (e *Engine) currentProfiles() config.Profiles {
 // backend this process never started. Backends are started once, at
 // launch, from the profiles as they read then; a role pointed at another
 // one would silently fall back to the default backend (agentFor), which
-// is a model and a backend that disagree — the failure resolveBoardRole's
+// is a model and a backend that disagree — the failure resolveConsultRole's
 // comment describes. Saying so and keeping the old profiles is honest;
 // the fix is a restart.
 func (e *Engine) startedBackendsCover(p config.Profiles) error {

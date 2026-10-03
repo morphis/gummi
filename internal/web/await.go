@@ -56,8 +56,6 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 // would have shown, since the board refused it after all.
 func (s *Server) answer(w http.ResponseWriter, out ui.WebOutcome) {
 	switch {
-	case out.Busy != "":
-		writeJSON(w, http.StatusConflict, webapi.Error{Error: webapi.ConflictBusy, Text: out.Busy})
 	case out.Err:
 		writeError(w, http.StatusConflict, out.Text)
 	default:
@@ -73,7 +71,7 @@ func (s *Server) intent(w http.ResponseWriter, r *http.Request, fn func(m *ui.Sh
 		return out, false
 	}
 	s.answer(w, out)
-	return out, !out.Err && out.Busy == ""
+	return out, !out.Err
 }
 
 // readBody decodes an optional JSON body: an empty one leaves v as it

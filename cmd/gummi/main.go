@@ -382,8 +382,8 @@ func defaultBackendName() string {
 // machine without it installed had every path silently resolve to a
 // missing binary, discovered only when startAdapter tried to run it.
 // internal/agentcli's picker made that failure mode visible for the
-// hosted agent tab; this closes the same hole for the engine's own
-// backend selection by picking something that actually exists.
+// engine's own backend selection, and this closes the same hole by
+// picking something that actually exists.
 //
 // The preference order among several installed CLIs comes from
 // agentcli.Known()/Detect(), not map iteration (which Go randomizes per

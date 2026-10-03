@@ -16,8 +16,8 @@ import (
 )
 
 // testProfileEngine builds a bare engine carrying only profiles — enough
-// for BoardProfiles/CardProfiles-driven UI checks that never touch a
-// store, worktree, or live agent.
+// for CardProfiles-driven UI checks that never touch a store, worktree,
+// or live agent.
 func testProfileEngine(t *testing.T, profiles config.Profiles) *engine.Engine {
 	t.Helper()
 	e := engine.New(engine.Config{Profiles: profiles})

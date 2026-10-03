@@ -573,24 +573,10 @@ func envelopeCheck() doctorCheck {
 // `gummi web`) holds it, so a caller learns a second board would refuse
 // before opening one. Headless drives hold per-card locks (not this
 // one), so a live run does not show up here.
-//
-// A locked workspace has two very different callers, though: a genuinely
-// separate second TUI, and the agent tab's hosted CLI — a descendant of
-// the very TUI holding the lock, whose entire purpose is to drive it. The
-// two report ErrLocked identically, so hostedInThisWorkspace tells them
-// apart via GUMMI_MCP_SOCK (see its doc comment) rather than telling a
-// hosted agent to close its own host.
 func lockCheck(ws state.Workspace) doctorCheck {
 	release, err := state.AcquireLock(ws.LockFile())
 	switch {
 	case errors.Is(err, state.ErrLocked):
-		if hostedInThisWorkspace(ws) {
-			return doctorCheck{
-				Name: "lock", Status: statusOK,
-				Detail:      "running inside this board's hosted agent — the lock is held by your own host",
-				Remediation: "drive it with the workspace MCP tools instead of a second gummi process; status/spec/diff/watch/doctor take no lock and stay available either way",
-			}
-		}
 		return lockHeldCheck(ws)
 	case err != nil:
 		return doctorCheck{Name: "lock", Status: statusWarn, Detail: "could not probe the workspace lock: " + err.Error()}
@@ -631,8 +617,10 @@ func lockHeldCheck(ws state.Workspace) doctorCheck {
 				detail += " at " + h.URL
 			}
 		}
-		return doctorCheck{Name: "lock", Status: statusOK, Detail: detail + " (" + where + ")",
-			Remediation: "a second board here would be refused while this one runs; status/spec/diff/watch/doctor take no lock"}
+		return doctorCheck{
+			Name: "lock", Status: statusOK, Detail: detail + " (" + where + ")",
+			Remediation: "a second board here would be refused while this one runs; status/spec/diff/watch/doctor take no lock",
+		}
 	}
 	if h.Host == state.HostWeb {
 		detail := "workspace busy — gummi web serves this board"
@@ -653,31 +641,6 @@ func lockHeldCheck(ws state.Workspace) doctorCheck {
 func thisHost() string {
 	h, _ := os.Hostname()
 	return h
-}
-
-// hostedInThisWorkspace reports whether the calling process is the agent
-// tab's hosted CLI for ws's own TUI. ensureAgent injects GUMMI_MCP_SOCK
-// into every hosted agent's environment, and that path always lives under
-// this workspace's own StateDir()/mcp/ (workspaceMCPSockPath, bound by the
-// TUI process itself). Env vars are inherited at fork, not derived from a
-// live ppid chain, so this signal survives reparenting or double-forking
-// in a way a ppid walk would not.
-//
-// A GUMMI_MCP_SOCK pointing outside this workspace's state dir names a
-// hosted agent for a *different* board — that case must still fall
-// through to the "close the other TUI" remediation, since it names a real
-// second board relative to ws.
-func hostedInThisWorkspace(ws state.Workspace) bool {
-	sock := strings.TrimSpace(os.Getenv("GUMMI_MCP_SOCK"))
-	if sock == "" {
-		return false
-	}
-	mcpDir := filepath.Clean(filepath.Join(ws.StateDir(), "mcp"))
-	rel, err := filepath.Rel(mcpDir, filepath.Clean(sock))
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // backendInfo describes the selected agent backend without starting it — the
@@ -974,13 +937,17 @@ func judgeChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
 		// of eight harness defects in the trials made the rig look
 		// healthier than it was, and the control is the only mechanism
 		// that catches that.
-		checks = append(checks, doctorCheck{Name: "control", Status: statusWarn,
+		checks = append(checks, doctorCheck{
+			Name: "control", Status: statusWarn,
 			Detail: "no positive control, so nothing ever asks whether the rig can turn an assertion green: " +
 				strings.Join(noControl, ", "),
-			Remediation: "give each a control: command that proves the rig against its own reference on a freshly reset substrate (DESIGN §17.8)"})
+			Remediation: "give each a control: command that proves the rig against its own reference on a freshly reset substrate (DESIGN §17.8)",
+		})
 	} else if len(cfg.Experiments) > 0 {
-		checks = append(checks, doctorCheck{Name: "control", Status: statusOK,
-			Detail: fmt.Sprintf("every experiment (%d) proves the rig against its own reference first", len(cfg.Experiments))})
+		checks = append(checks, doctorCheck{
+			Name: "control", Status: statusOK,
+			Detail: fmt.Sprintf("every experiment (%d) proves the rig against its own reference first", len(cfg.Experiments)),
+		})
 	}
 	if len(repos) == 0 {
 		return checks
@@ -1035,13 +1002,17 @@ func judgeChecks(cfg config.Config, ws state.Workspace) []doctorCheck {
 		}
 	}
 	if len(bad) == 0 {
-		return append(checks, doctorCheck{Name: "judge", Status: statusOK,
-			Detail: "no experiment or substrate command lives in a managed repository"})
+		return append(checks, doctorCheck{
+			Name: "judge", Status: statusOK,
+			Detail: "no experiment or substrate command lives in a managed repository",
+		})
 	}
 	sort.Strings(bad)
-	return append(checks, doctorCheck{Name: "judge", Status: statusWarn,
+	return append(checks, doctorCheck{
+		Name: "judge", Status: statusWarn,
 		Detail:      "a command that decides whether work passes is inside a repository the work can edit — " + strings.Join(bad, "; "),
-		Remediation: "move it outside every managed repository, or land its changes yourself before they judge anything (DESIGN §17.8, §17.11)"})
+		Remediation: "move it outside every managed repository, or land its changes yourself before they judge anything (DESIGN §17.8, §17.11)",
+	})
 }
 
 // sandboxChecks emits one sandbox:<profile> check per defined profile. It

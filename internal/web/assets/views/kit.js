@@ -1,5 +1,5 @@
 // views/kit.js — the small form pieces the tool surfaces (ingest, bug
-// import, doctor, board agent, fleet) share: a labelled field, a select
+// import, doctor, fleet) share: a labelled field, a select
 // from plain strings, a segmented control, an inline confirm strip, and
 // the one way they show a server's refusal.
 
