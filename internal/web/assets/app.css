@@ -15,6 +15,7 @@
   --accent:#5B44D9; --accent-fg:#FFFFFF; --accent-soft:rgba(107,80,255,.10); --band:#E6E0FF;
   --s-todo:#8A879A; --s-plan:#D2317A; --s-impl:#A87F00; --s-verify:#23924A; --s-done:#62756B; --s-open:#1C7FC4;
   --ok:#1A6B36; --warn:#805500; --err:#B02C3F; --on-err:#FFFFFF;
+  --r0:#2D63C7; --r1:#B25A00; --r2:#8A3FCB; --r3:#3C7A1F; --r4:#B0306A; --r5:#8A7000;
   /* text in a stage's hue is darkened in the light theme, where the fills
      are too pale to read as small type (WCAG AA); the dark theme reads as is */
   --t-keep:70%;
@@ -35,6 +36,7 @@
     --accent:#9886FF; --accent-fg:#14121C; --accent-soft:rgba(140,120,255,.14); --band:#29234A;
     --s-todo:#858392; --s-plan:#FF5FA2; --s-impl:#F2D24B; --s-verify:#79E06A; --s-done:#8C9D94; --s-open:#4FB4FF;
     --ok:#79E06A; --warn:#F2C14B; --err:#FF6B7F; --on-err:#14121C;
+  --r0:#7FB2FF; --r1:#FFB15C; --r2:#C7A0FF; --r3:#9CE07A; --r4:#FF8AC0; --r5:#E8D36A;
     --t-keep:100%;
     --add-bg:rgba(121,224,106,.09); --add-fg:#8BE67E; --del-bg:rgba(255,107,127,.10); --del-fg:#FF8A99;
     --code-kw:#B9A6FF; --code-str:#F2C98B; --code-com:#9290A0; --code-fn:#7CC4FF;
@@ -49,6 +51,7 @@
   --accent:#9886FF; --accent-fg:#14121C; --accent-soft:rgba(140,120,255,.14); --band:#29234A;
   --s-todo:#858392; --s-plan:#FF5FA2; --s-impl:#F2D24B; --s-verify:#79E06A; --s-done:#8C9D94; --s-open:#4FB4FF;
   --ok:#79E06A; --warn:#F2C14B; --err:#FF6B7F; --on-err:#14121C;
+  --r0:#7FB2FF; --r1:#FFB15C; --r2:#C7A0FF; --r3:#9CE07A; --r4:#FF8AC0; --r5:#E8D36A;
   --t-keep:100%;
   --add-bg:rgba(121,224,106,.09); --add-fg:#8BE67E; --del-bg:rgba(255,107,127,.10); --del-fg:#FF8A99;
   --code-kw:#B9A6FF; --code-str:#F2C98B; --code-com:#9290A0; --code-fn:#7CC4FF;
@@ -134,6 +137,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .search input{border:0;outline:0;background:transparent;flex:1;min-width:0;font-size:13px}
 .search svg.i{width:14px;height:14px;stroke-width:1.8}
 .chips{display:flex;gap:4px;flex-wrap:wrap}
+#repos[hidden]{display:none}
 .chip{height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;font-weight:500;color:var(--fg3);border:1px solid transparent;font-family:var(--mono)}
 .chip:hover{color:var(--fg)}
 .chip.on{background:var(--panel);border-color:var(--line);color:var(--fg)}
@@ -152,6 +156,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
    stack position and a meter needs more than one line of a narrow rail */
 .row .meta{grid-column:2/4;display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;font-size:11.5px;color:var(--fg3);min-width:0}
 .row .meta > .waits{max-width:100%}
+.row .repo{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;height:17px;line-height:17px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--rc);background:color-mix(in srgb,var(--rc) 14%,transparent)}
 .row .ff{color:color-mix(in srgb,var(--s-open) var(--t-keep),#000)}
 .row .badge{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;height:17px;display:inline-block;line-height:17px;white-space:nowrap}
 .badge.needs{background:color-mix(in srgb,var(--dc) 14%,transparent);color:color-mix(in srgb,var(--dc) var(--t-keep),#000)}

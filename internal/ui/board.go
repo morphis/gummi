@@ -120,6 +120,18 @@ func (m *Shell) needsAttention(r featureRow) (icon string, ok bool) {
 	return attnIcon(m.styles, it.Kind), true
 }
 
+// spansRepos reports whether the board's cards sit in more than one
+// repository, the default ("") counting as one of them. A board that does
+// not span repos shows no repo chips: there is nothing to tell apart.
+func (m *Shell) spansRepos() bool {
+	for _, r := range m.rows {
+		if r.F.Repo != m.rows[0].F.Repo {
+			return true
+		}
+	}
+	return false
+}
+
 // cardLine renders one feature card row, truncated to w. A selected row
 // is painted as a full-width band (theme.Band) rather than marked by the
 // ▸ alone: paneFocused picks the bright band or the quiet one.
@@ -239,13 +251,6 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		}
 		badge += " " + st.Render("⛁"+stackTag(sr))
 	}
-	// a card's managed repository badge, naming the configured repo, so
-	// multi-repo boards read at a glance. Cards in the workspace default
-	// repo render no badge (the default is implicit); it is metadata only,
-	// no filtering or grouping is implied.
-	if r.F.Repo != "" {
-		badge += " " + s.RepoBadge.Render("["+r.F.Repo+"]")
-	}
 	title := s.CardTitle.Render(r.F.Title)
 	// the user's own explicit "stop for now" — independent of needsAttention
 	// and cardBusy, since a paused card can still sit on an unresolved gate
@@ -314,7 +319,14 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 	// with the card, went first. Budget instead: give the non-negotiable
 	// prefix and the title what they need, then shed the tail
 	// least-important-first until the row fits, landed surviving longest.
-	prefix := cursor + num + " " + glyph + " " + id + badge + " "
+	// a multi-repo board names each card's repository as a colored chip in
+	// a fixed column after the id, so the eye finds it in the same place on
+	// every row. The default repo is implicit and gets no chip.
+	repo := ""
+	if r.F.Repo != "" && m.spansRepos() {
+		repo = " " + s.Repo(r.F.Repo).Render(r.F.Repo)
+	}
+	prefix := cursor + num + " " + glyph + " " + id + repo + badge + " "
 	tail := func() string { return loop + paused + tag + wtMark + landed + pr + cost }
 	dropOrder := []*string{&cost, &tag, &wtMark, &pr, &landed}
 	for i := 0; i < len(dropOrder) && ansi.StringWidth(prefix+tail()) > w-8; i++ {

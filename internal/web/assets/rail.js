@@ -4,7 +4,7 @@
 // surfaces (new session, new card, board agent, fleet stats, and the More
 // menu).
 
-import { $, h, icon, clear, kindTag, needsColor, needsWord, GLYPH, STAGES, cr, isMobile, storage } from './dom.js?v=__ASSET_V__'
+import { $, h, icon, clear, kindTag, repoSlot, needsColor, needsWord, GLYPH, STAGES, cr, isMobile, storage } from './dom.js?v=__ASSET_V__'
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
 import { openView, openMenu } from './views.js?v=__ASSET_V__'
 import { openPush } from './push.js?v=__ASSET_V__'
@@ -38,8 +38,12 @@ export function initRail ({ select, unpair, newSession }) {
     const b = e.target.closest('.chip')
     if (b) set({ kind: b.dataset.k })
   })
+  $('#repos').addEventListener('click', (e) => {
+    const b = e.target.closest('.chip')
+    if (b) set({ repo: b.dataset.r })
+  })
   renderFoot(unpair, newSession)
-  on(['board', 'sel', 'filter', 'kind', 'doneAll'], renderRail)
+  on(['board', 'sel', 'filter', 'kind', 'repo', 'doneAll'], renderRail)
   on(['railManual'], applyRail)
   window.addEventListener('resize', applyRail)
   applyRail()
@@ -61,8 +65,9 @@ function applyRail () {
   t.setAttribute('aria-pressed', String(!compact))
 }
 
-function matches (r) {
+function matches (r, repo) {
   if (state.kind !== 'all' && kindTag(r) !== state.kind) return false
+  if (repo !== 'all' && (r.repo || '') !== repo) return false
   if (!state.filter) return true
   return `${r.id} ${r.title} ${r.stage} ${r.goal?.title || ''}`.toLowerCase().includes(state.filter)
 }
@@ -80,7 +85,12 @@ function renderRail () {
   for (const k of tags) {
     kinds.append(h('button', { class: ['chip', state.kind === k && 'on'], data: { k }, testid: `rail-kind-${k}`, 'aria-pressed': String(state.kind === k), type: 'button' }, k))
   }
-  const vis = all.filter(matches)
+  // the repo chips exist only where the board spans repos (the default
+  // counts as one of them); a board that does not has nothing to tell apart
+  const repos = [...new Set(all.map(r => r.repo || ''))].sort()
+  const spread = repos.length > 1
+  renderRepos(repos, spread)
+  const vis = all.filter(r => matches(r, spread ? state.repo : 'all'))
   const box = $('#cards')
   const top = box.scrollTop
   clear(box)
@@ -96,7 +106,7 @@ function renderRail () {
     if (fold) list = list.slice(0, DONE_SHOWN)
     box.append(h('section', { class: ['group', k], testid: `rail-group-${k}`, 'aria-label': label },
       h('h3', null, label, h('span', null, String(total))),
-      list.map(rowEl),
+      list.map(r => rowEl(r, spread)),
       k === 'done' && total > DONE_SHOWN && !state.filter
         ? h('button', { class: 'more-done', testid: 'rail-more-done', type: 'button' }, state.doneAll ? 'Show fewer' : `Show all ${total}`)
         : null))
@@ -108,7 +118,17 @@ function renderRail () {
   box.querySelector('.row.sel')?.scrollIntoView?.({ block: 'nearest' })
 }
 
-function rowEl (r) {
+function renderRepos (repos, spread) {
+  const box = $('#repos')
+  box.hidden = !spread
+  clear(box)
+  if (!spread) return
+  for (const k of ['all', ...repos]) {
+    box.append(h('button', { class: ['chip', state.repo === k && 'on'], data: { r: k }, testid: `rail-repo-${k || 'default'}`, 'aria-pressed': String(state.repo === k), type: 'button' }, k || 'default'))
+  }
+}
+
+function rowEl (r, spread) {
   const sel = r.id === state.sel
   const dc = needsColor(r.needs, r.stage)
   const badge = r.status === 'needs'
@@ -131,6 +151,7 @@ function rowEl (r) {
   h('span', { class: 't' }, r.title),
   h('span', { class: 'id' }, r.id),
   h('span', { class: 'meta' },
+    spread && r.repo ? h('span', { class: 'repo', style: { '--rc': `var(--r${repoSlot(r.repo)})` }, title: `repository ${r.repo}`, testid: `rail-row-repo-${r.id}` }, r.repo) : null,
     r.stage === 'open' || r.kind === 'freeform' ? h('span', { class: 'ff' }, 'session') : strip(r.stage),
     badge,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.join(', ')}`) : null,

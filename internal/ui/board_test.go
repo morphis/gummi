@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -124,10 +125,22 @@ func TestConfirmOverlay(t *testing.T) {
 	golden.RequireEqual(t, []byte(m.View().Content))
 }
 
-// TestBoardRepoBadge: a card in a non-default repo carries a repo badge on
-// its board line; a card in the default repo renders no repo badge (the
-// default is implicit).
-func TestBoardRepoBadge(t *testing.T) {
+// boardLine returns the rendered board line that carries id.
+func boardLine(t *testing.T, content, id string) string {
+	t.Helper()
+	for _, line := range strings.Split(content, "\n") {
+		if strings.Contains(line, id) {
+			return line
+		}
+	}
+	t.Fatalf("no board line carries %s:\n%s", id, content)
+	return ""
+}
+
+// TestBoardRepoChip: on a board that spans repos, a card in a named repo
+// carries a repo chip right after its id, and a default-repo card renders
+// none (the default is implicit).
+func TestBoardRepoChip(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0.1.0-test")
 	m.now = func() time.Time { return fixedTime }
 	named := row(51, "rate limits", domain.StageTodo, "thrifty", false)
@@ -136,12 +149,34 @@ func TestBoardRepoBadge(t *testing.T) {
 	m.rows = []featureRow{named, def}
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
 	m = model.(*Shell)
-	content := m.View().Content
-	if !strings.Contains(content, "[lxd]") {
-		t.Error("a named-repo card should render its repo badge")
+	content := ansi.Strip(m.View().Content)
+	chipped := boardLine(t, content, "FD-051")
+	if !strings.Contains(chipped, "FD-051 ") || !strings.Contains(chipped, " lxd ") {
+		t.Fatalf("a named-repo card should carry its repo chip after its id:\n%s", chipped)
 	}
-	if strings.Contains(content, "[default]") {
-		t.Error("a default-repo card should not render an explicit repo badge")
+	if strings.Index(chipped, " lxd ") > strings.Index(chipped, "rate limits") {
+		t.Errorf("the repo chip should sit before the title, in its fixed column:\n%s", chipped)
+	}
+	plain := boardLine(t, content, "FD-052")
+	if strings.Contains(plain, "lxd") {
+		t.Errorf("a default-repo card should carry no repo chip:\n%s", plain)
+	}
+}
+
+// TestBoardRepoChipSingleRepo: a board whose cards all share one repo (or
+// all sit in the default) has nothing to tell apart, so it shows no chip.
+func TestBoardRepoChipSingleRepo(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	m.now = func() time.Time { return fixedTime }
+	a := row(51, "rate limits", domain.StageTodo, "thrifty", false)
+	a.F.Repo = "lxd"
+	b := row(52, "retry budget", domain.StageTodo, "thrifty", false)
+	b.F.Repo = "lxd"
+	m.rows = []featureRow{a, b}
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	m = model.(*Shell)
+	if content := ansi.Strip(m.View().Content); strings.Contains(content, " lxd ") {
+		t.Errorf("a board that spans one repo should show no repo chip:\n%s", content)
 	}
 }
 

@@ -28,6 +28,7 @@ export const state = {
   mdecOpen: false,
   filter: '',
   kind: 'all',
+  repo: 'all', // the rail's repo chip: 'all', or a repo's name ('' is the default)
   doneAll: false,
   draft: '' // composer text, so decision code can read it
 }

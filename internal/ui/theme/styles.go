@@ -69,7 +69,6 @@ type Styles struct {
 	CardIDResearch lipgloss.Style // RS-### cool/info tint, distinct from CardID and Warning
 	CardTitle      lipgloss.Style
 	ProfileTag     lipgloss.Style // [thrifty]
-	RepoBadge      lipgloss.Style // [lxd] / [default] — a card's managed repository
 
 	// Severity badges (bug impact) on board cards, tinted to read
 	// by color: coral for critical, mustard, julep, oyster for low.
@@ -97,6 +96,7 @@ type Styles struct {
 
 	stagePill map[domain.Stage]lipgloss.Style
 	stageFg   map[domain.Stage]lipgloss.Style
+	repo      [RepoSlots]lipgloss.Style
 }
 
 // New derives all component styles from the theme's semantic slots.
@@ -148,7 +148,6 @@ func New(t Theme) *Styles {
 		CardIDResearch: base.Foreground(t.Info).Bold(true),
 		CardTitle:      base,
 		ProfileTag:     base.Foreground(t.FgFaint),
-		RepoBadge:      base.Foreground(t.FgSubtle),
 
 		SeverityCritical: base.Foreground(charmtone.Coral),
 		SeverityHigh:     base.Foreground(charmtone.Mustard),
@@ -181,6 +180,9 @@ func New(t Theme) *Styles {
 		accent := t.StageAccent(st)
 		s.stagePill[st] = lipgloss.NewStyle().Foreground(t.OnFill(accent)).Background(accent).Padding(0, 1)
 		s.stageFg[st] = base.Foreground(accent)
+	}
+	for i, c := range repoAccents {
+		s.repo[i] = lipgloss.NewStyle().Foreground(t.OnFill(c)).Background(c).Padding(0, 1)
 	}
 	return s
 }

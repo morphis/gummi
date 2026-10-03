@@ -91,6 +91,18 @@ export function kindTag (row) {
   return m ? m[1] : (row.kind || '').slice(0, 2).toUpperCase()
 }
 
+// REPO_SLOTS is the repo palette's size: theme.RepoSlots on the server.
+export const REPO_SLOTS = 6
+
+// repoSlot maps a repository name to its palette slot (--r0 … --r5). It is
+// theme.RepoSlot's FNV-1a hash, so the web rail and the TUI agree on a
+// repo's color.
+export function repoSlot (name) {
+  let x = 0x811c9dc5
+  for (const b of new TextEncoder().encode(name)) x = Math.imul(x ^ b, 0x01000193)
+  return (x >>> 0) % REPO_SLOTS
+}
+
 // needsColor maps a needs-you entry to the colour token it is tinted with.
 export function needsColor (needs, stage) {
   if (!needs) return 'var(--accent)'

@@ -45,6 +45,8 @@ and inside it `approval-person`, `approval-device`, `approval-source`,
 | `rail` | the rail landmark |
 | `rail-filter` | filter box |
 | `rail-kinds`, `rail-kind-<TAG>` | kind chips (`all`, `FD`, `BG`, `RS`, `FF`, `GL`) |
+| `rail-repos`, `rail-repo-<name>` | repo chips (`all`, then each repo; `default` for the default repo); hidden unless the board spans more than one repo |
+| `rail-row-repo-<ID>` | a card's repo chip; shown only when the board spans repos and the card is not in the default repo |
 | `rail-cards` | the scrolling list |
 | `rail-group-<status>` | `needs`, `running`, `paused`, `idle`, `todo`, `done` |
 | `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open |
