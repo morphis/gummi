@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -324,6 +325,59 @@ func TestWebPRUnlinkedOffersThePushCommand(t *testing.T) {
 	}
 	if want := "git push -u origin " + d.f.BranchName(); out.PushCommand != want {
 		t.Fatalf("push command = %q, want %q", out.PushCommand, want)
+	}
+}
+
+// The PR tab's push command follows the branch: none for a card whose
+// branch is not cut yet, a plain push for one the remote can fast-forward,
+// and the log tab's force push once a rewrite has left the remote with
+// commits the branch no longer has.
+func TestWebPRPushCommandFollowsTheBranch(t *testing.T) {
+	d, m, root := docsWorkspace(t)
+	ctx := context.Background()
+	branch := d.f.BranchName()
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("config", "branch."+branch+".remote", "origin")
+	git("config", "branch."+branch+".merge", "refs/heads/"+branch)
+	tip := git("rev-parse", branch)
+	// the remote has what the branch has: a plain push
+	git("update-ref", "refs/remotes/origin/"+branch, tip)
+	if got, want := d.PR(ctx).PushCommand, "git push origin "+branch; got != want {
+		t.Fatalf("in step: push = %q, want %q", got, want)
+	}
+	// the remote is only ahead (someone else pushed): never a force push
+	ahead := git("commit-tree", tip+"^{tree}", "-p", tip, "-m", "theirs")
+	git("update-ref", "refs/remotes/origin/"+branch, ahead)
+	if got := d.PR(ctx).PushCommand; strings.Contains(got, "force") {
+		t.Fatalf("remote ahead: push = %q, must not force", got)
+	}
+	// the branch's last commit was reworded after it was pushed: the two
+	// have diverged, and only a force push publishes it
+	old := git("commit-tree", tip+"^{tree}", "-p", tip+"^", "-m", "before the reword")
+	git("update-ref", "refs/remotes/origin/"+branch, old)
+	if got, want := d.PR(ctx).PushCommand, engine.PushCommandTo("origin", branch, branch); got != want {
+		t.Fatalf("rewritten: push = %q, want %q", got, want)
+	}
+
+	// a backlog card has a branch name and no branch: nothing to push
+	f := domain.Feature{ID: "FD-002", Num: 2, Title: "Later", Slug: "later", Stage: domain.StageTodo, CreatedAt: fixedTime, UpdatedAt: fixedTime}
+	if err := m.store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	todo, err := m.WebDocs("FD-002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := todo.PR(ctx).PushCommand; got != "" {
+		t.Fatalf("a card with no branch: push = %q, want none", got)
 	}
 }
 

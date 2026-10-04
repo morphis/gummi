@@ -1932,6 +1932,30 @@ func (m *Manager) Upstream(ctx context.Context, f *domain.Feature) (remote, bran
 	return remote, strings.TrimPrefix(merge, "refs/heads/"), true
 }
 
+// UpstreamRewritten reports that the card's branch and the remote branch
+// it tracks have each got commits the other lacks — what a history
+// rewrite of pushed commits leaves behind, and what a plain push is
+// refused for. A remote that is only ahead (someone else pushed) is not
+// this: a force push would throw their commits away. False for a branch
+// tracking nothing or whose remote-tracking ref is gone.
+func (m *Manager) UpstreamRewritten(ctx context.Context, f *domain.Feature) bool {
+	remote, rb, ok := m.Upstream(ctx, f)
+	if !ok {
+		return false
+	}
+	theirs, mine := "refs/remotes/"+remote+"/"+rb, "refs/heads/"+f.BranchName()
+	for _, ref := range []string{theirs, mine} {
+		if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+			return false
+		}
+	}
+	if in, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", theirs, mine); err != nil || in {
+		return false
+	}
+	behind, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", mine, theirs)
+	return err == nil && !behind
+}
+
 // Remotes are the repository's configured remotes, in git's order; none
 // for a repository nothing was ever pushed from.
 func (m *Manager) Remotes(ctx context.Context) []string {

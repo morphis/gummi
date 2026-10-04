@@ -811,7 +811,16 @@ func (d *WebDocs) pushCommand(ctx context.Context, f domain.Feature) string {
 	if branch == "" {
 		return ""
 	}
+	// a card that has not started has a branch name and no branch yet
+	if ok, err := d.pool.BranchExists(ctx, &f); err == nil && !ok {
+		return ""
+	}
 	if remote, rb, ok := d.pool.Upstream(ctx, &f); ok {
+		// rewritten after it was pushed (the log tab's reword or squash):
+		// a plain push is refused, and the log tab offers the same command
+		if d.pool.UpstreamRewritten(ctx, &f) {
+			return engine.PushCommandTo(remote, branch, rb)
+		}
 		if rb == branch {
 			return "git push " + remote + " " + branch
 		}

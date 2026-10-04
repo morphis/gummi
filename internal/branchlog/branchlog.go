@@ -86,7 +86,10 @@ type State struct {
 // worktree's own preconditions (clean, no rebase in flight) underneath.
 func Refusal(f domain.Feature, s State) string {
 	switch {
-	case f.Kind == domain.KindResearch || f.Stage == domain.StageTodo:
+	case f.Kind == domain.KindResearch:
+		// not "yet": a research card never gets one
+		return string(f.ID) + " is a research card: it works in a scratch tree and never gets a branch"
+	case f.Stage == domain.StageTodo:
 		return string(f.ID) + " has no branch yet"
 	case f.Kind == domain.KindGoal:
 		return string(f.ID) + " is a goal: its branch is built from its cards' landings, not from commits to rewrite"

@@ -1,6 +1,7 @@
 package branchlog
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -53,6 +54,10 @@ func TestRefusal(t *testing.T) {
 		if Refusal(tc.f, tc.s) == "" {
 			t.Errorf("%s: want a refusal", name)
 		}
+	}
+	// a research card never gets a branch: not "yet"
+	if why := Refusal(domain.Feature{ID: "RS-001", Kind: domain.KindResearch, Stage: domain.StagePlan}, State{}); strings.Contains(why, "yet") || !strings.Contains(why, "never") {
+		t.Errorf("research refusal = %q", why)
 	}
 }
 

@@ -408,6 +408,14 @@ func (p *Pool) Upstream(ctx context.Context, f *domain.Feature) (remote, branch 
 	return wt.Upstream(ctx, f)
 }
 
+func (p *Pool) UpstreamRewritten(ctx context.Context, f *domain.Feature) bool {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return false
+	}
+	return wt.UpstreamRewritten(ctx, f)
+}
+
 func (p *Pool) CommitAll(ctx context.Context, f *domain.Feature, message string) (bool, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {
