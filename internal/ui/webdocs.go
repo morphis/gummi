@@ -360,6 +360,9 @@ func (d *WebDocs) lastChecks(ctx context.Context) map[string]webapi.CheckOutcome
 // comment dialog does (writeSpecNote), with the person's name in the
 // marker's stamp. It writes only to a document that exists.
 func (d *WebDocs) AddSpecNote(ctx context.Context, line int, text, person string, attachments []string) (webapi.Spec, error) {
+	if err := closedToReview(d.f, "its spec takes no new notes"); err != nil {
+		return webapi.Spec{}, err
+	}
 	path := d.artifact()
 	if path == "" {
 		return webapi.Spec{}, ErrNoCard
@@ -633,6 +636,9 @@ func prCommentAuthor(body string) string {
 //
 // person is who wrote it, recorded with it and shown beside it.
 func (d *WebDocs) AddAnnotation(ctx context.Context, idx int, comment, text, person string) (webapi.Diff, error) {
+	if err := closedToReview(d.f, "its diff takes no new comments"); err != nil {
+		return webapi.Diff{}, err
+	}
 	comment = strings.TrimSpace(comment)
 	if comment == "" {
 		return webapi.Diff{}, invalid("a comment needs some text")
@@ -829,6 +835,20 @@ func (m *Shell) WebPullPR(id string) (tea.Cmd, error) {
 	return m.pullPRReview(r.F), nil
 }
 
+// closedToReview refuses review input on a card that is done: a note or
+// a comment there would say it "goes with your next answer", and a done
+// card asks nothing again. why is what the refusal says follows.
+func closedToReview(f domain.Feature, why string) error {
+	if f.Stage != domain.StageDone {
+		return nil
+	}
+	how := "is closed"
+	if f.Ending(false) == domain.EndingLanded {
+		how = "has landed"
+	}
+	return &conflictError{msg: fmt.Sprintf("%s %s — %s", f.ID, how, why)}
+}
+
 // WebRequestSpecChanges is the spec surface's R: the card's open spec
 // comments go to its writer, the way the terminal sends them
 // (specChanges). POST /api/cards/{id}/spec/changes.
@@ -836,6 +856,9 @@ func (m *Shell) WebRequestSpecChanges(id, person, confirm string) (tea.Cmd, erro
 	r, err := m.webRowFor(id)
 	if err != nil {
 		return nil, err
+	}
+	if err := closedToReview(r.F, "there is no stage left to send changes to"); err != nil {
+		return nil, webErr(WebConflict, "%s", err.Error())
 	}
 	f := r.F
 	path := ""
@@ -863,6 +886,9 @@ func (m *Shell) WebRequestDiffChanges(id, person, confirm string) (tea.Cmd, erro
 	r, err := m.webRowFor(id)
 	if err != nil {
 		return nil, err
+	}
+	if err := closedToReview(r.F, "there is no stage left to send changes to"); err != nil {
+		return nil, webErr(WebConflict, "%s", err.Error())
 	}
 	anns, err := m.store.ListDiffAnnotations(context.Background(), r.F.ID)
 	if err != nil {

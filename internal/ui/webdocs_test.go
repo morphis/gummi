@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/pr"
@@ -451,5 +453,35 @@ func TestWebThreadFoldsTheLogAndServesOnlyWhatIsNew(t *testing.T) {
 	}
 	if again.LastSeq != th.LastSeq {
 		t.Fatalf("LastSeq moved from %d to %d with nothing new", th.LastSeq, again.LastSeq)
+	}
+}
+
+// A done card takes no new review input: a note or a diff comment there
+// would say it "goes with your next answer", and a closed card asks
+// nothing again. The refusal says why, in the card's own ending.
+func TestReviewInputOnADoneCardIsRefused(t *testing.T) {
+	ctx := context.Background()
+	landed := domain.Feature{ID: "FD-005", Num: 5, Title: "landed", Slug: "landed", Stage: domain.StageDone, LandedSHA: "abc123"}
+	d := &WebDocs{f: landed}
+	if _, err := d.AddSpecNote(ctx, 1, "one more thing", "Simon", nil); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "FD-005 has landed") {
+		t.Errorf("a spec note on a landed card = %v, want a conflict saying it landed", err)
+	}
+	if _, err := d.AddAnnotation(ctx, 0, "nit", "", "Simon"); !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "no new comments") {
+		t.Errorf("a diff comment on a landed card = %v, want a conflict", err)
+	}
+
+	m := NewShell(theme.GummiDark(), "v0-test")
+	handed := domain.Feature{ID: "FD-006", Num: 6, Title: "handed", Slug: "handed", Stage: domain.StageDone}
+	m.rows = []featureRow{{F: landed}, {F: handed}}
+	for _, id := range []string{"FD-005", "FD-006"} {
+		for name, send := range map[string]func(string, string, string) (tea.Cmd, error){
+			"spec": m.WebRequestSpecChanges, "diff": m.WebRequestDiffChanges,
+		} {
+			_, err := send(id, "Simon", "")
+			we, ok := IsWebError(err)
+			if !ok || we.Code != WebConflict || !strings.Contains(we.Text, "no stage left") {
+				t.Errorf("%s changes on %s = %v, want a conflict saying there is no stage left", name, id, err)
+			}
+		}
 	}
 }
