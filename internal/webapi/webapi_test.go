@@ -170,6 +170,23 @@ func TestChangeKey(t *testing.T) {
 	}
 }
 
+// TestWritespecShapes pins what the writespec flow puts on the wire: the
+// request field the edited brief rides in (it has one of its own — Message
+// carries the title, and a multi-paragraph brief is not an input any other
+// action takes), and the draft the dialog fetches once at open, labeled by
+// where it came from.
+func TestWritespecShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Request ActionRequest
+		Live    WritespecDraft
+		Cold    WritespecDraft
+	}{
+		Request: ActionRequest{Message: "Configurable sync retries", Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice", Number: &[]int{300}[0]},
+		Live:    WritespecDraft{Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice\n\ndone\n- the loop retries twice\n\nremaining\n- make the count configurable", Source: "live"},
+		Cold:    WritespecDraft{Brief: "asked:\n- rewrite the retry loop", Source: "assembled"},
+	}))
+}
+
 // TestMemoryShape pins the fields the page reads for a freeform card's
 // project memory: the three documents, each a path and its content, and
 // the none-answer a workflow card gets.

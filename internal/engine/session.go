@@ -244,21 +244,25 @@ type Snapshot struct {
 	AgentName   string // backend running this session ("copilot", "opencode", …)
 	// AgentSessionID is the backend's own session id (agent.Identified),
 	// pointing at its on-disk log; empty for backends without one.
-	AgentSessionID     string
-	Model              string // model resolved at spawn (Spend.Model is the reported one)
-	Transcript         []Message
-	Activity           []string // recent tool-call lines
-	Spend              agent.Usage
-	SpentCredits       float64       // Spend as a credit-equivalent at the provider's rate
-	Context            agent.Context // latest context-window occupancy
-	Tasks              []agent.Task  // the agent's checklist, as it last stated it
-	Queued             []string      // a freeform card's lines waiting for the turn in flight
-	Watches            []string      // a freeform card's running gummi watches, "w1 · command"
-	Busy               bool          // agent is mid-turn
-	PendingAsk         *Ask          // the agent's open ask_user question, if any
-	Verdict            string        // review verdict via submit_verdict, if submitted
-	VerdictFloor       string        // deterministic ceiling applied before returning the stage verdict
-	VerdictFloorReason string        // human-readable reason for the floor, if any
+	AgentSessionID string
+	Model          string // model resolved at spawn (Spend.Model is the reported one)
+	Transcript     []Message
+	Activity       []string // recent tool-call lines
+	Spend          agent.Usage
+	SpentCredits   float64       // Spend as a credit-equivalent at the provider's rate
+	Context        agent.Context // latest context-window occupancy
+	Tasks          []agent.Task  // the agent's checklist, as it last stated it
+	Queued         []string      // a freeform card's lines waiting for the turn in flight
+	Watches        []string      // a freeform card's running gummi watches, "w1 · command"
+	Busy           bool          // agent is mid-turn
+	// Briefing is true while gummi's own handoff-brief turn is in flight
+	// on a freeform card (freeformhandoff.go): the busy word names what is
+	// happening rather than the bare "working".
+	Briefing           bool
+	PendingAsk         *Ask   // the agent's open ask_user question, if any
+	Verdict            string // review verdict via submit_verdict, if submitted
+	VerdictFloor       string // deterministic ceiling applied before returning the stage verdict
+	VerdictFloorReason string // human-readable reason for the floor, if any
 	// VerdictFloorKind names which floor holds the slot (FloorPromise,
 	// FloorOmission, …). It is what lets a reader tell a floor it can
 	// re-derive from the one it read at the idle the stage ended: a

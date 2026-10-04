@@ -186,34 +186,21 @@ type sessionSwitchedMsg struct {
 	text string
 }
 
-// specBriefMax bounds how much of a session's conversation rides into the
-// spec card's brief: the architect needs what was asked, not a transcript,
-// and the branch it continues carries what was done.
-const specBriefMax = 6000
-
 // specFromSession ends a session and continues its work as a feature card
 // (DESIGN §19.8, "write a spec"). The session is handed off — its last
-// turn committed, its branch kept — and a feature is minted with the
-// session's own words as its brief; its branch is cut from the session's
-// tip, so the plan stage starts from the work rather than from main, and
-// its plan stage runs at once.
+// turn committed, its branch kept — and a feature is minted with the brief
+// the writespec dialog handed in: the person's edited text, fetched once
+// when the dialog opened (the session's own words, or the assembled draft
+// when no live session could answer), never re-derived here at mint. The
+// branch is cut from the session's tip, so the plan stage starts from the
+// work rather than from main, and its plan stage runs at once.
 //
 // The feature does not adopt the session's branch. That would make one
 // branch two cards', and deleting the closed session would take the
 // spec's work with it; a branch of its own is gummi's to rebase, land and
 // clean exactly like any feature's.
-func (m *Shell) specFromSession(f domain.Feature, title, profile string, envelope int) tea.Cmd {
+func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, envelope int) tea.Cmd {
 	eng, pool, actor := m.engine, m.wt, m.humanActor()
-	var asked []string
-	if ff := eng.Freeform(f.ID); ff != nil {
-		for _, msg := range ff.Snapshot().Transcript {
-			if msg.Author == engine.AuthorUser {
-				if t := strings.TrimSpace(msg.Content); t != "" {
-					asked = append(asked, t)
-				}
-			}
-		}
-	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		if _, diffOpen, _, err := eng.GateBlockers(ctx, f.ID); err != nil {
@@ -247,7 +234,7 @@ func (m *Shell) specFromSession(f domain.Feature, title, profile string, envelop
 			return noticeMsg{text: string(f.ID) + " was handed off, but its branch could not be read: " + sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		spec, err := cardmint.Mint(ctx, m.store, m.ws, cardmint.Input{
-			Kind: domain.KindFeature, Description: specBrief(f, title, head, asked),
+			Kind: domain.KindFeature, Description: specBrief(f, title, head, brief),
 			Profile: profile, Envelope: envelope, Repo: f.Repo, RequireRepo: m.requireRepo, Base: f.Base,
 			Source: "manual",
 		})
@@ -274,9 +261,9 @@ func (m *Shell) specFromSession(f domain.Feature, title, profile string, envelop
 }
 
 // specBrief is the spec card's description: its title, where its work came
-// from, and what the person asked of the session, newest last, bounded by
-// specBriefMax from the oldest end.
-func specBrief(f domain.Feature, title, head string, asked []string) string {
+// from, and the handoff brief the writespec dialog handed in — the brief
+// the session wrote, or the assembled draft, as the person edited it.
+func specBrief(f domain.Feature, title, head, brief string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = f.Title
@@ -296,23 +283,8 @@ func specBrief(f domain.Feature, title, head string, asked []string) string {
 	} else {
 		b.WriteString("\n\nContinued from the session " + string(f.ID) + " (" + f.Title + "). Its work so far is already on this card's branch, cut from " + f.BranchName() + " at " + short + ": read the diff before designing, and plan what remains rather than what is done.")
 	}
-	if len(asked) == 0 {
-		return b.String()
+	if strings.TrimSpace(brief) != "" {
+		b.WriteString("\n\n" + strings.TrimSpace(brief))
 	}
-	var kept []string
-	size := 0
-	for i := len(asked) - 1; i >= 0; i-- {
-		line := "- " + strings.ReplaceAll(asked[i], "\n", "\n  ")
-		if size+len(line) > specBriefMax && len(kept) > 0 {
-			break
-		}
-		kept = append([]string{line}, kept...)
-		size += len(line)
-	}
-	b.WriteString("\n\nWhat was asked in the session:\n")
-	if len(kept) < len(asked) {
-		b.WriteString("- (earlier requests left out)\n")
-	}
-	b.WriteString(strings.Join(kept, "\n"))
 	return b.String()
 }

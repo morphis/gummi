@@ -488,6 +488,22 @@ conversation, and from there it walks the whole workflow. Profiles only
 ever choose the models for a spec's stages
 ([DESIGN §19.8](docs/DESIGN.md#198-sessions-the-model-is-the-sessions-own)).
 
+The spec starts from a **handoff brief**, not a list of your lines. When
+the dialog opens, gummi asks the session itself to write what the next
+card's architect will read — what was asked, what was decided (including
+every question it asked you and the answer you gave), what was done on
+the branch, and what remains — and you edit that draft before anything
+mints. On the web the dialog opens at once and the brief lands in it a
+moment later; in the terminal the same dialog opens under `w` on a
+freeform card, from its menu, or by typing `/writespec`. While the brief
+is being written the thread says so ("drafting the handoff brief…"),
+because the turn is gummi's, and it stays in the conversation afterwards
+as the record of the hand. When no live session can answer — after a
+restart, say — the dialog labels the draft it assembles from the
+conversation instead, so a degraded brief is never mistaken for the
+session's own words. A plain hand off (the `h` ending) still closes the
+card with no brief turn; only write a spec asks the session to write.
+
 Once one browser is paired, a new one paired with a `gummi web pair` code
 (or one a browser asked for) only waits: every page at the board shows the
 request — name, browser, address, how it paired — with **Approve** and

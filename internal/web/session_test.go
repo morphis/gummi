@@ -183,12 +183,21 @@ func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
 }
 
 // Writing a spec from a session ends the session with its branch kept and
-// continues its work as a feature: the session's own words are the brief,
-// the feature's branch is cut from the session's tip (so what the session
-// wrote is already on it), and its plan stage runs at once.
+// continues its work as a feature: the draft is fetched once when the
+// dialog opens — the session writing its own brief, asked by a
+// gummi-authored line that stays in the conversation — the person edits it
+// before anything mints, and the edited text is the brief the minted card
+// carries. The feature's branch is cut from the session's tip (so what the
+// session wrote is already on it), and its plan stage runs at once.
 func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	fake := agent.NewFake("done")
 	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "handoff brief") {
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "asked\n- find why the retry test flakes\n\ndecided\n- keep the fix small\n\ndone\n- wrote clock.go on the branch\n\nremaining\n- the flake's cause is still unknown"},
+				{Kind: agent.EventIdle},
+			}
+		}
 		if strings.Contains(msg, "flake") {
 			if err := os.WriteFile(filepath.Join(opts.WorkDir, "clock.go"), []byte("package sync\n"), 0o600); err != nil {
 				t.Error(err)
@@ -206,11 +215,42 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	}
 	session := h.feature(s.ID)
 
-	if !slices.ContainsFunc(h.card(s.ID).Actions, func(a webapi.Action) bool { return a.ID == "writespec" && a.Needs == webapi.ActionNeedsSpec }) {
-		t.Fatalf("a session's menu offers no way to write a spec: %+v", h.card(s.ID).Actions)
+	// the menu offers write a spec exactly once: cardActionsFor's row is
+	// the one inventory both faces read, and the web menu appends no
+	// second row of its own
+	specRows := 0
+	for _, a := range h.card(s.ID).Actions {
+		if a.ID == "writespec" && a.Needs == webapi.ActionNeedsSpec {
+			specRows++
+		}
 	}
+	if specRows != 1 {
+		t.Fatalf("the session's menu offers %d write-a-spec rows, want one: %+v", specRows, h.card(s.ID).Actions)
+	}
+	// the draft is fetched once, at dialog open — its own read, never a
+	// side effect of reading the card: a second GET returns the brief
+	// again only because the dialog was opened again
+	var draft webapi.WritespecDraft
+	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &draft); st != http.StatusOK {
+		t.Fatalf("writespec-draft = %d", st)
+	}
+	if draft.Source != "live" {
+		t.Errorf("the draft's source = %q, want live — the session answered", draft.Source)
+	}
+	if !strings.Contains(draft.Brief, "the flake's cause is still unknown") {
+		t.Errorf("the draft is not the session's own brief:\n%s", draft.Brief)
+	}
+	for _, a := range h.card(s.ID).Actions {
+		if a.ID == "writespec" && a.Default != "" {
+			t.Error("the writespec action still defaults from the card read; the draft is the dialog's own fetch")
+		}
+	}
+
+	// the person edits the draft before anything mints; the edited text is
+	// what the minted card carries
+	edited := "asked\n- find why the retry test flakes\n\ndecided\n- keep the fix small\n\ndone\n- clock.go, edited by hand\n\nremaining\n- make the retry count configurable"
 	budget := 300
-	spec := h.action(s.ID, "writespec", webapi.ActionRequest{Message: "Configurable sync retries", Number: &budget})
+	spec := h.action(s.ID, "writespec", webapi.ActionRequest{Message: "Configurable sync retries", Brief: edited, Number: &budget})
 	if spec.Kind != string(domain.KindFeature) || spec.Title != "Configurable sync retries" || spec.ID == s.ID {
 		t.Fatalf("the action answered %s %q (%s), want the new feature", spec.ID, spec.Title, spec.Kind)
 	}
@@ -225,12 +265,10 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	if closed.Stage != domain.StageDone || closed.HandedOffAt.IsZero() {
 		t.Errorf("the session is at %s (handed off %v), want closed by hand-off", closed.Stage, closed.HandedOffAt)
 	}
-	git := func(a ...string) string {
-		out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", h.root}, a...)...).CombinedOutput()
-		if err != nil {
+	git := func(a ...string) {
+		if out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", h.root}, a...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", a, err, out)
 		}
-		return strings.TrimSpace(string(out))
 	}
 	// the session keeps its branch; the spec has one of its own, cut from it
 	f := h.feature(spec.ID)
@@ -240,23 +278,27 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 		t.Error("the spec shares the session's branch; it must have its own")
 	}
 	h.waitCard(spec.ID, "the plan stage", func(c webapi.Card) bool { return c.Stage == string(domain.StagePlan) })
-	// the architect's brief is the session's: where its work came from and
-	// what the person asked of it
+	// the architect's brief is the person's edited text, over where the
+	// session's work came from
 	doc, err := os.ReadFile(filepath.Join(h.root, f.ArtifactPath()))
 	if err != nil {
 		doc, err = os.ReadFile(filepath.Join(h.ws.DraftsDir(), filepath.Base(f.ArtifactPath())))
 	}
-	if err != nil || !strings.Contains(string(doc), "Continued from the session "+s.ID) || !strings.Contains(string(doc), "Find why the retry test flakes") {
-		t.Errorf("the spec does not carry the session's brief (%v):\n%s", err, doc)
+	if err != nil || !strings.Contains(string(doc), "Continued from the session "+s.ID) || !strings.Contains(string(doc), "edited by hand") {
+		t.Errorf("the spec does not carry the edited brief (%v):\n%s", err, doc)
 	}
-	// and the closed session still shows its conversation, with where it went
+	// and the closed session still shows its conversation: the brief
+	// exchange asked and answered, then where it went
 	snap, ok := h.eng.FreeformHistory(domain.FeatureID(s.ID))
 	var said strings.Builder
 	for _, m := range snap.Transcript {
-		said.WriteString(m.Content + "\n")
+		said.WriteString(string(m.Author) + ": " + m.Content + "\n")
 	}
 	if !ok || !strings.Contains(said.String(), "Continued as the spec "+spec.ID) {
 		t.Errorf("the closed session does not say where its work went:\n%s", said.String())
+	}
+	if !strings.Contains(said.String(), "handoff brief") || !strings.Contains(said.String(), "the flake's cause is still unknown") {
+		t.Errorf("the closed session does not keep the brief exchange:\n%s", said.String())
 	}
 }
 

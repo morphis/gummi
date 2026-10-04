@@ -1,0 +1,15 @@
+{
+  "Request": {
+    "message": "Configurable sync retries",
+    "number": 300,
+    "brief": "asked\n- why the retry test flakes\n\ndecided\n- retry twice"
+  },
+  "Live": {
+    "brief": "asked\n- why the retry test flakes\n\ndecided\n- retry twice\n\ndone\n- the loop retries twice\n\nremaining\n- make the count configurable",
+    "source": "live"
+  },
+  "Cold": {
+    "brief": "asked:\n- rewrite the retry loop",
+    "source": "assembled"
+  }
+}

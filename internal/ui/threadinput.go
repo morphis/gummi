@@ -817,7 +817,11 @@ var verbActionIDs = map[string]string{
 	// one where the row is on screen, so "/handoff" fires from the same
 	// place the reader is already looking rather than degrading to a menu
 	// for a row two lines above the composer.
-	"handoff":   "handoff",
+	"handoff": "handoff",
+	// writespec is the freeform card's third ending, in the answer set
+	// wherever it is legal, so the word fires the same dialog the row and
+	// its key open.
+	"writespec": "writespec",
 	"changes":   "changes",
 	"bounce":    "bounce",
 	"park":      "pause",
@@ -957,15 +961,16 @@ func (m *Shell) routeVerb(f domain.Feature, verb, remainder string) tea.Cmd {
 // "park" below to reach exactly that action and nothing else (parkVerb,
 // shell.go), rather than routing through the ambiguous key.
 var verbKeys = map[string]string{
-	"approve": "g",
-	"diff":    "d",
-	"spec":    "s",
-	"verify":  "v",
-	"land":    "m",
-	"handoff": "h",
-	"rebase":  "r",
-	"clean":   "c",
-	"squash":  "z",
+	"approve":   "g",
+	"diff":      "d",
+	"spec":      "s",
+	"verify":    "v",
+	"land":      "m",
+	"handoff":   "h",
+	"writespec": "w",
+	"rebase":    "r",
+	"clean":     "c",
+	"squash":    "z",
 }
 
 // fireVerb performs a parsed verb's action: routes to the same key

@@ -186,8 +186,10 @@ func (od *webOpenDecision) optionLabel(id string) string {
 // its stage, such as "stop here").
 func (b *Bridge) answeredOrMoved(ctx context.Context, id, ref, against string, cur webapi.Card) error {
 	if rec, ok := b.answeredBy(id, ref, against); ok {
-		return &WebError{Code: WebConflict, Reason: webapi.ConflictAnswered,
-			Text: "answered by " + rec.by + " — " + rec.label, By: rec.by, Receipt: rec.by + " chose “" + rec.label + "”"}
+		return &WebError{
+			Code: WebConflict, Reason: webapi.ConflictAnswered,
+			Text: "answered by " + rec.by + " — " + rec.label, By: rec.by, Receipt: rec.by + " chose “" + rec.label + "”",
+		}
 	}
 	still := cur.Decision != nil && cur.Decision.Ref == ref
 	// a stop is answered by moving the card off its stage; one that only
@@ -236,8 +238,10 @@ func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRe
 					q += "\n" + detail
 				}
 				if m.intent == nil || !m.intent.in.takeConfirm(webConfirmToken("chip-go", r.F.ID, q)) {
-					return nil, &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(webapi.ActionNeedsConfirm),
-						Text: q, Confirm: webConfirmToken("chip-go", r.F.ID, q)}
+					return nil, &WebError{
+						Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(webapi.ActionNeedsConfirm),
+						Text: q, Confirm: webConfirmToken("chip-go", r.F.ID, q),
+					}
 				}
 			}
 			return m.takeReading(r), nil
@@ -292,8 +296,10 @@ func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRe
 		// a row that IS the composer's words (a send-back with no key of
 		// its own, "open a bug from this"): picked bare, the TUI says what
 		// it wants rather than doing anything, and so does this
-		return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
-			Text: "say what is wrong — your words go with “" + a.label + "”"}
+		return nil, &WebError{
+			Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
+			Text: "say what is wrong — your words go with “" + a.label + "”",
+		}
 	}
 	m.clearTransientNotice()
 	m.endChat(r.F.ID) // a row picked is the way out of a conversation
@@ -531,8 +537,10 @@ func needsAgainst(action string, d *webapi.Decision) bool {
 // the card pins a decision it has to be read against: the page has not
 // shown it (or shows an older card), so it reads the card again first.
 func unseenDecision(id string, d *webapi.Decision) error {
-	return &WebError{Code: WebConflict, Reason: webapi.ConflictMoved,
-		Text: "the card moved since you read it — now " + d.Against.Label + " (" + id + " has a decision waiting; read it before acting)"}
+	return &WebError{
+		Code: WebConflict, Reason: webapi.ConflictMoved,
+		Text: "the card moved since you read it — now " + d.Against.Label + " (" + id + " has a decision waiting; read it before acting)",
+	}
 }
 
 // checkAgainst refuses a write sent against a pinned decision the card
@@ -621,7 +629,9 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; write the spec once this turn ends"}
 		}
-		return m.specFromSession(r.F, msg, profile, envelope), nil
+		// the brief rides the request: the person's edited text, prefilled
+		// by the draft the dialog fetched when it opened
+		return m.specFromSession(r.F, msg, req.Brief, profile, envelope), nil
 	case "model":
 		if m.engine == nil {
 			return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
@@ -638,8 +648,10 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		return m.switchSessionModel(r.F.ID, req.Backend, strings.TrimSpace(req.Model)), nil
 	case "commit":
 		if msg == "" {
-			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
-				Text: "say what the commit is — your words are its message"}
+			return nil, &WebError{
+				Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
+				Text: "say what the commit is — your words are its message",
+			}
 		}
 		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; commit once this turn ends"}
@@ -667,8 +679,10 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		}
 	case "changes", "newbug":
 		if msg == "" {
-			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
-				Text: "say what is wrong — your words go with it"}
+			return nil, &WebError{
+				Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
+				Text: "say what is wrong — your words go with it",
+			}
 		}
 		return m.fixedSendBack(r, id, msg), nil
 	case "merge", "squash":

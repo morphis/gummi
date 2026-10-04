@@ -1,0 +1,12 @@
+asked:
+- rewrite the retry loop in the config sync
+- also update the docs page for the retry flag
+
+decided:
+- Retry twice or three times? — answered: yes, retry twice
+
+done:
+Done — the loop retries twice now, and the sync test covers it.
+
+remaining:
+- (this draft is assembled from the conversation alone — the branch's diff shows how far the work got)

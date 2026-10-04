@@ -6,16 +6,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // freeformRow builds a freeform card's row, at the one stage such a card
@@ -94,7 +98,7 @@ func TestAStartedFreeformCardPointsAtItsDiff(t *testing.T) {
 
 // TestAFreeformCardOffersNoWorkflowActions: "not shown" and "not
 // available" must not diverge, so every workflow-shaped row is withheld
-// from a card that has no workflow — and the two endings it does have are
+// from a card that has no workflow — and the endings it does have are
 // offered.
 func TestAFreeformCardOffersNoWorkflowActions(t *testing.T) {
 	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true}
@@ -115,11 +119,39 @@ func TestAFreeformCardOffersNoWorkflowActions(t *testing.T) {
 			t.Errorf("a freeform card does not offer %q", want)
 		}
 	}
+	// write a spec needs an engine to run the handoff brief's turn: a
+	// detached board offers no row that only refuses
+	if ids["writespec"] {
+		t.Error("a detached board offers write a spec")
+	}
+	in.agentWired = true
+	ids = map[string]bool{}
+	for _, a := range cardActionsFor(in, r) {
+		ids[a.id] = true
+	}
+	if !ids["writespec"] {
+		t.Error("a wired board does not offer write a spec on an open session")
+	}
+	if a := writespecRowOf(cardActionsFor(in, r)); a == nil {
+		t.Error("the writespec row vanished from the wired list")
+	} else if a.key != "w" {
+		t.Errorf("write a spec wears key %q, want w", a.key)
+	}
+}
+
+// writespecRowOf finds the write-a-spec row in an action list.
+func writespecRowOf(acts []cardAction) *cardAction {
+	for i := range acts {
+		if acts[i].id == "writespec" {
+			return &acts[i]
+		}
+	}
+	return nil
 }
 
 // TestAFreeformCardsNextStepsAreItsReviewLoop: it has no gate to teach a
 // reader what comes next, so the answer set has to say it — read the
-// diff, land it, or keep the branch and close.
+// diff, land it, keep the branch and close, or continue it as a spec.
 func TestAFreeformCardsNextStepsAreItsReviewLoop(t *testing.T) {
 	in := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true}
 	var ids []string
@@ -129,6 +161,18 @@ func TestAFreeformCardsNextStepsAreItsReviewLoop(t *testing.T) {
 	want := []string{"diff", "merge", "handoff"}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Errorf("next steps = %v, want %v", ids, want)
+	}
+
+	// With an engine to run the handoff brief's turn, the answer set gains
+	// the third ending — after the two the branch already has.
+	in.agentWired = true
+	ids = nil
+	for _, a := range nextActions(in) {
+		ids = append(ids, a.id)
+	}
+	want = []string{"diff", "merge", "handoff", "writespec"}
+	if strings.Join(ids, ",") != strings.Join(want, ",") {
+		t.Errorf("next steps with an engine = %v, want %v", ids, want)
 	}
 
 	// Before anything has run there is nothing to read and nothing to
@@ -444,4 +488,234 @@ func TestDeletingAFreeformCardLeavesTheWorkspaceStanding(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".gummi", "worktrees", string(f.ID))); !os.IsNotExist(err) {
 		t.Errorf("the card's own worktree survived the delete (stat err = %v)", err)
 	}
+}
+
+// freeformAgentWorkspace is newWorkspace with a fake-backed engine
+// attached, for the surfaces a freeform card's own session drives.
+func freeformAgentWorkspace(t *testing.T, ag agent.Agent) (*Shell, *engine.Engine, string) {
+	t.Helper()
+	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(context.Background(), "git",
+			append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "t")
+	git("config", "user.email", "t@e.invalid")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "init")
+
+	ws, err := state.Init(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := state.OpenStore(ws.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	wt, err := worktree.NewManager(context.Background(), root, root, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := engine.New(engine.Config{
+		Agents: singleAgent(ag), Store: store, Pool: worktree.WrapSingle(wt),
+		Workspace: ws, Model: "fake-model",
+	})
+	t.Cleanup(func() { eng.Close() })
+
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.now = func() time.Time { return fixedTime }
+	m.Attach(store, worktree.WrapSingle(wt), ws)
+	m.AttachEngine(eng)
+	m.SetCopilotHint(false)
+	m = pump(t, m, m.Init())
+	return m, eng, root
+}
+
+// TestFreeformWritespec drives the third ending end to end: the dialog
+// opens on its drafting state while the fetch — the brief turn — runs, the
+// thread says gummi is drafting rather than working, the brief arrives as
+// an editable field, and confirming mints the spec with the edited text
+// and advances it into plan.
+func TestFreeformWritespec(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	once := &sync.Once{}
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "handoff brief") {
+			once.Do(func() { close(started) })
+			<-release
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "asked\n- drop the leaked pty fd\n\ndecided\n- keep the fix in the adapter\n\ndone\n- sketched the fix on the branch\n\nremaining\n- write the test"},
+				{Kind: agent.EventIdle},
+			}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	m, eng, root := freeformAgentWorkspace(t, ag)
+	ctx := context.Background()
+
+	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m = typeString(t, m, "Drop the leaked pty fd")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	fs, err := m.store.ListFeatures(ctx)
+	if err != nil || len(fs) != 1 {
+		t.Fatalf("features = %v, err = %v", fs, err)
+	}
+	f := fs[0]
+	ff, err := eng.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "drop the leaked pty fd"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, eng, f.ID)
+
+	// back to the board, where the card's keys are its own
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.sel = 0
+
+	// w opens the dialog on its drafting state and starts the fetch; the
+	// fetch is driven by hand so the in-flight moment can be looked at
+	model, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
+	m = model.(*Shell)
+	d, ok := m.Overlay.Top().(*freeformSpecDialog)
+	if !ok || !d.drafting {
+		t.Fatalf("w did not open the writespec dialog on its drafting state (top %T)", m.Overlay.Top())
+	}
+	fetchDone := make(chan tea.Msg, 1)
+	go func() { fetchDone <- cmd() }()
+	<-started
+
+	// while the turn runs, the thread names the drafting, not "working"
+	m.cardOpen = true
+	out := ansi.Strip(m.threadView(120, 34))
+	if !strings.Contains(out, "drafting the handoff brief") {
+		t.Errorf("the thread does not name the drafting while the brief turn runs:\n%s", lastLines(out, 6))
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "working…") {
+			t.Errorf("the brief turn still reads as the bare working word: %q", l)
+		}
+	}
+	// the tab cycle skips the brief field while it is not rendered: tab
+	// from the title lands on the profile, and typing into the dialog
+	// cannot reach a textarea that is not on it yet
+	model, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = model.(*Shell)
+	if d, ok := m.Overlay.Top().(*freeformSpecDialog); !ok || d.focus != specFieldProfile {
+		t.Fatalf("tab while drafting landed on field %d, want the profile (the brief is not rendered yet)", d.focus)
+	}
+	close(release)
+	msg := <-fetchDone
+	model, cmd = m.Update(msg)
+	m = model.(*Shell)
+	m = pump(t, m, cmd)
+
+	d, ok = m.Overlay.Top().(*freeformSpecDialog)
+	if !ok || d.drafting {
+		t.Fatalf("the fetched draft never landed in the dialog (top %T)", m.Overlay.Top())
+	}
+	if !strings.Contains(d.brief.Value(), "write the test") {
+		t.Errorf("the dialog does not hold the session's brief:\n%s", d.brief.Value())
+	}
+
+	// with the draft landed, the brief field is back in the cycle: tab
+	// back from the profile reaches it
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	d, ok = m.Overlay.Top().(*freeformSpecDialog)
+	if !ok || d.focus != specFieldBrief {
+		t.Fatalf("shift+tab after the draft landed went to field %d, want the brief", d.focus)
+	}
+
+	// the person edits the brief before anything mints
+	d.brief.SetValue(strings.Replace(d.brief.Value(), "write the test", "write the test, edited by hand", 1))
+
+	// confirm: ctrl+s from any field starts the spec
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+
+	// the spec exists, at plan, on a branch of its own cut from the
+	// session's tip; the session is closed and keeps its branch
+	deadline := time.Now().Add(testWaitTimeout)
+	var spec domain.Feature
+	for {
+		rows, err := m.store.ListFeatures(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			if r.ID != f.ID && r.Kind == domain.KindFeature {
+				spec = r
+			}
+		}
+		if spec.ID != "" && spec.Stage == domain.StagePlan {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the spec never reached plan: %+v (rows %v)", spec, rows)
+		}
+		time.Sleep(20 * time.Millisecond)
+		m = pump(t, m, m.loadRows)
+	}
+	if got := spec.BranchName(); got == f.BranchName() {
+		t.Errorf("the spec shares the session's branch %q", got)
+	}
+	if _, err := exec.CommandContext(context.Background(), "git", "-C", root,
+		"rev-parse", "--verify", f.BranchName()).CombinedOutput(); err != nil {
+		t.Errorf("the session's branch did not survive the handoff: %v", err)
+	}
+	closed, err := m.store.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Stage != domain.StageDone {
+		t.Errorf("the session is at %s, want done", closed.Stage)
+	}
+	doc, err := os.ReadFile(filepath.Join(root, spec.ArtifactPath()))
+	if err != nil {
+		doc, err = os.ReadFile(filepath.Join(root, ".gummi", "state", "drafts", filepath.Base(spec.ArtifactPath())))
+	}
+	if err != nil || !strings.Contains(string(doc), "Continued from the session "+string(f.ID)) ||
+		!strings.Contains(string(doc), "edited by hand") {
+		t.Errorf("the spec does not carry the edited brief (%v):\n%s", err, doc)
+	}
+}
+
+// waitFreeformIdle is the engine package's poll, for the ui tests that
+// drive a freeform card's own session.
+func waitFreeformIdle(t *testing.T, eng *engine.Engine, id domain.FeatureID) {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for {
+		if ff := eng.Freeform(id); ff != nil && !ff.Busy() && !ff.Briefing() {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the freeform session never went idle")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// lastLines is the last n lines of a block of text, for error output.
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }

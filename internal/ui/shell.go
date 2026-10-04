@@ -2082,6 +2082,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleSessionModelsMsg(msg)
 		return m, nil
 
+	case writespecDraftMsg:
+		// the dialog asked for the handoff brief; a late reply after it
+		// was dismissed is dropped (the card check inside answers for it)
+		m.handleWritespecDraftMsg(msg)
+		return m, nil
+
 	case prPullDoneMsg:
 		m.notice = msg.notice
 		cmds := []tea.Cmd{m.loadRows}
@@ -3384,6 +3390,28 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			return m.rebaseFeature(r.F)
+		}
+	case "w":
+		if r, ok := m.selected(); ok {
+			// the freeform card's third ending: continue its work as a
+			// feature. The key is filtered off every other card's table
+			// (keymap.go), so the handler answers it only where the row is
+			// offered — and names the card that has no use for it
+			// elsewhere, the way every other withheld key here does.
+			if !r.F.IsFreeform() {
+				m.notice = noticeMsg{text: string(r.F.ID) + ": only a session continues as a spec — this card runs through its stages", isErr: true, id: r.F.ID}
+				return nil
+			}
+			if r.F.Stage != domain.StageOpen {
+				m.notice = noticeMsg{text: string(r.F.ID) + " is closed: a session continues as a spec only while it is open", isErr: true, id: r.F.ID}
+				return nil
+			}
+			if m.engine == nil {
+				m.notice = noticeMsg{text: m.noAgent(" (writing a spec asks the session for a handoff brief)"), isErr: true, id: r.F.ID}
+				return nil
+			}
+			m.clearTransientNotice()
+			return m.openWritespec(r.F)
 		}
 	case "h":
 		if r, ok := m.selected(); ok {

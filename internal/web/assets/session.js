@@ -410,11 +410,19 @@ export function writeSpecButton (card) {
   return h('button', { class: 'btn hide-s', type: 'button', testid: 'write-spec', title: a.detail, onclick: () => openWriteSpec(card, a) }, 'Write a spec')
 }
 
-// openWriteSpec asks for the spec's title, profile and budget, then runs
-// the session's "writespec" action and moves the page onto the new card.
+// openWriteSpec opens the dialog at once and fetches the handoff brief
+// once, while it is up — on a live session the fetch IS the brief turn,
+// gummi asking the session to write what the next card's architect will
+// read, and the thread's busy marker names it while it runs. The brief is
+// an editable field pre-filled with the draft, labeled by where it came
+// from; the field stays locked until the draft lands, so nothing typed
+// into it early is clobbered by the fill. Nothing mints before the draft
+// has landed and the person confirms.
 export async function openWriteSpec (card, a) {
   if (!form) await loadForm(card.repo || '')
-  const title = h('input', { value: a.default || card.title, testid: 'spec-title', autocomplete: 'off' })
+  const title = h('input', { value: card.title, testid: 'spec-title', autocomplete: 'off' })
+  const brief = h('textarea', { rows: 10, testid: 'spec-brief', disabled: true })
+  const note = h('span', { class: 'fh', testid: 'spec-brief-note' }, 'drafting the handoff brief…')
   const profile = h('select', { testid: 'spec-profile' },
     (a.choices || []).map((c, i) => h('option', { value: c.value, selected: i === 0 }, c.detail ? `${c.label} — ${c.detail}` : c.label)))
   const budget = h('input', { type: 'number', min: '0', step: '10', value: String(form?.envelope || 0), testid: 'spec-budget' })
@@ -422,9 +430,29 @@ export async function openWriteSpec (card, a) {
   const body = h('div', { class: 'mbody spec-body' },
     h('p', { class: 'spec-about' }, `${card.id} ends here and keeps its branch. A feature continues its work on a branch cut from it: the profile’s architect plans it from this conversation and what the branch already holds, and it lands only once its critique and checks pass.`),
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Title'), title),
+    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Brief'), brief, note),
     (a.choices || []).length ? h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Profile'), profile, h('span', { class: 'fh' }, 'Every stage takes its agent and model from the profile.')) : null,
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Credits for the whole spec, apart from what the session spent. 0 is uncapped.')),
     err)
+  let draft = null
+  const draftReady = (async () => {
+    try {
+      draft = await get(cardPath(card.id, 'writespec-draft'))
+    } catch (e) {
+      note.textContent = e.data?.text || e.data?.error || e.message
+      return
+    }
+    // the field was locked while the fetch ran, so nothing typed early is
+    // clobbered; unlocked only now that the draft has landed
+    brief.value = draft.brief || ''
+    brief.disabled = false
+    // the draft's own label: the session's words, or what the conversation
+    // alone could lay out — a degraded brief is never mistaken for the
+    // session's own words
+    note.textContent = draft.source === 'assembled'
+      ? 'assembled from the conversation — no live session could answer it'
+      : 'the session’s own words — edit what the next card’s architect will read'
+  })()
   openModal({
     title: 'Write a spec',
     testid: 'write-spec-dialog',
@@ -438,7 +466,16 @@ export async function openWriteSpec (card, a) {
         testid: 'spec-start',
         onClick: async () => {
           err.hidden = true
-          const req = { message: title.value.trim(), number: Math.max(0, parseInt(budget.value, 10) || 0) }
+          if (!draft) {
+            // the brief turn is still running: wait for it rather than
+            // making the person click again
+            err.textContent = 'still drafting the handoff brief…'
+            err.hidden = false
+            await draftReady
+            if (!draft) return false // the fetch failed; its error is on the note
+            err.hidden = true
+          }
+          const req = { message: title.value.trim(), brief: brief.value, number: Math.max(0, parseInt(budget.value, 10) || 0) }
           if (profile.value) req.profile = profile.value
           if (state.card?.decision?.against?.token) req.against = state.card.decision.against.token
           try {

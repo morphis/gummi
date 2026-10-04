@@ -823,6 +823,15 @@ func appendLinkPRSuggestion(acts []nextAction, in nextInput) []nextAction {
 		"land it on GitHub instead — gummi follows the PR and waits for "+in.landBase()))
 }
 
+// writespecStep is the freeform card's "write a spec" answer: the ending
+// that continues the work as a feature instead of landing or closing it.
+// It is gated on the board being able to run the handoff brief's turn at
+// all, so a detached board offers no row that only refuses.
+func writespecStep() nextAction {
+	return nextStep("writespec", "w", "write a spec",
+		"continue this work as a feature — the profile's architect plans it from this conversation and the branch, and it lands on a verified branch")
+}
+
 // hasAction reports whether an answer set contains the row with this id.
 func hasAction(acts []nextAction, id string) bool {
 	for _, a := range acts {
@@ -1058,22 +1067,32 @@ func stageAnswers(in nextInput) []nextAction {
 		// there is no branch to squash. Offering one would be offering the
 		// refusal the floor answers with.
 		if in.mainCheckout {
-			return []nextAction{
+			acts := []nextAction{
 				nextStep("diff", "d", "read the diff", "what the session has left loose in the main checkout"),
 				nextStep("handoff", "h", "hand off",
 					"close the card — its work stays loose in the main checkout, yours to commit"),
 			}
+			if in.agentWired {
+				acts = append(acts, writespecStep())
+			}
+			return acts
 		}
 		if !in.hasWorktree {
 			return nil
 		}
-		return []nextAction{
+		acts := []nextAction{
 			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
 			nextStep("merge", "m", "land it on "+in.landBase(),
 				"squash-merge the branch — you review and approve the message"),
 			nextStep("handoff", "h", "hand off",
 				"close the card and keep the branch exactly as it is"),
 		}
+		if in.agentWired {
+			// the third ending, beside the two the branch already has: the
+			// work continues as a feature, planned from this conversation
+			acts = append(acts, writespecStep())
+		}
+		return acts
 
 	case domain.StageTodo:
 		// "the plan stage", the strip's own word for where this goes —

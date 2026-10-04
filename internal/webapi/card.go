@@ -161,8 +161,10 @@ const (
 	// and ActionRequest.Model), picked from Form.Sessions or typed.
 	ActionNeedsModel ActionNeeds = "model"
 	// ActionNeedsSpec: writing a spec from a session asks for the spec's
-	// title (ActionRequest.Message), its profile (ActionRequest.Profile,
-	// from Choices) and its budget (ActionRequest.Number).
+	// title (ActionRequest.Message), the brief the session's conversation
+	// distilled into (ActionRequest.Brief, prefilled by
+	// GET /api/cards/{id}/writespec-draft), its profile (ActionRequest.
+	// Profile, from Choices) and its budget (ActionRequest.Number).
 	ActionNeedsSpec ActionNeeds = "spec"
 )
 
@@ -353,6 +355,11 @@ type ActionRequest struct {
 	// a session runs on from its next turn.
 	Backend string `json:"backend,omitempty"`
 	Model   string `json:"model,omitempty"`
+	// Brief is the writespec request's handoff brief: the person's edited
+	// text, prefilled from GET /api/cards/{id}/writespec-draft. It has a
+	// field of its own because Message carries the spec's title, and a
+	// multi-paragraph brief is not an input any other action takes.
+	Brief string `json:"brief,omitempty"`
 	// Against is the pinned decision's Against.Token as the page showed
 	// it: an action is refused with 409 "moved" if the card moved since.
 	// On a card that pins a decision it is required, except for the
@@ -376,4 +383,19 @@ type ActionRequest struct {
 var DecisionIndependentActions = []string{
 	"deps", "profile", "envelope", "repo", "prlink", "prunlink", "prpull",
 	"duplicate", "delete", "clean", "model", "commit",
+}
+
+// WritespecDraft is GET /api/cards/{id}/writespec-draft: the handoff brief
+// a writespec dialog opens on, fetched once when the dialog opens. It is
+// its own read because filling it is an agent turn — envelope spend,
+// seconds, an appended transcript exchange — never a side effect of
+// reading the card.
+type WritespecDraft struct {
+	// Brief is the draft itself: the session's own four-section answer
+	// (asked · decided · done · remaining) when a live session could
+	// answer, else the conversation laid out from the persisted transcript.
+	Brief string `json:"brief"`
+	// Source says which kind of draft this is — "live" or "assembled" —
+	// so a degraded draft is never mistaken for the session's own words.
+	Source string `json:"source"`
 }

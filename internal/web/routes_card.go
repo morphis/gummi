@@ -9,6 +9,7 @@ import (
 
 func (s *Server) cardRoutes() {
 	s.api("GET /api/cards/{id}", s.handleCard)
+	s.api("GET /api/cards/{id}/writespec-draft", s.handleWritespecDraft)
 	s.api("POST /api/cards/{id}/composer", s.handleComposer)
 	s.api("POST /api/cards/{id}/answer", s.handleAnswer)
 	s.api("POST /api/cards/{id}/send", s.handleSend)
@@ -35,6 +36,20 @@ func (s *Server) handleCard(w http.ResponseWriter, r *http.Request) {
 		c.Files.URL = s.filesURL(c.ID)
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// handleWritespecDraft is GET /api/cards/{id}/writespec-draft: the
+// handoff brief the writespec dialog opens on, fetched once at open. It
+// changes nothing but the conversation: on a live session the fetch IS the
+// brief turn, so it is a deliberate act of the dialog opening, never a
+// side effect of reading the card.
+func (s *Server) handleWritespecDraft(w http.ResponseWriter, r *http.Request) {
+	draft, err := s.opt.Board.WritespecDraft(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, draft)
 }
 
 // handleComposer is POST /api/cards/{id}/composer: what sending text

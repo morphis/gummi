@@ -71,6 +71,11 @@ type FreeformSession struct {
 
 	mu   sync.Mutex
 	sess *Session
+	// briefing is true while gummi's own handoff-brief turn is in flight
+	// on this card (freeformhandoff.go) — the one flag both faces' busy
+	// word reads, since the card's own session is not the session running
+	// that turn.
+	briefing bool
 	// workDir is the card's worktree, known once a backend has spawned;
 	// Commands reads the project's command files from it.
 	workDir string
@@ -870,11 +875,13 @@ func (ff *FreeformSession) CardSpent() float64 {
 func (ff *FreeformSession) Snapshot() Snapshot {
 	ff.mu.Lock()
 	sess := ff.sess
+	briefing := ff.briefing
 	ff.mu.Unlock()
 	if sess == nil {
-		return Snapshot{}
+		return Snapshot{Briefing: briefing}
 	}
 	snap := sess.Snapshot()
+	snap.Briefing = briefing
 	snap.Queued = ff.Queued()
 	for _, w := range ff.Watches() {
 		snap.Watches = append(snap.Watches, w.ID+" · "+w.Command)

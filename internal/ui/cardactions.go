@@ -286,6 +286,15 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		bounceWhy = "send it back to " + string(domain.StagePlan) + " — the plan was wrong"
 	}
 
+	// the writespec row's why: one wording for both faces (webActions
+	// appends no row of its own), saying what the session's branch is
+	// where the session has one — a main-checkout session's work is loose
+	// in the checkout, and the branch it continues on is cut from that.
+	specWhy := "continue this work as a feature — the profile's architect plans it from this conversation and the branch, and it lands on a verified branch"
+	if r.F.MainCheckout {
+		specWhy = "continue this work as a feature — the profile's architect plans it from this conversation, on a branch cut from the checkout as it stands, and it lands on a verified branch"
+	}
+
 	specs := []actionSpec{
 		{
 			"run", "enter", runLabel, runWhy, false,
@@ -459,6 +468,14 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		{
 			"squash", "z", "squash", "collapse the branch to one commit in place (review & approve the drafted message)", false,
 			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy,
+		},
+		{
+			// a freeform card's third ending: its work continues as a
+			// feature card, planned from the conversation and the branch it
+			// leaves behind. One inventory for both faces — the web menu
+			// lists this row, not a second one of its own.
+			"writespec", "w", "write a spec", specWhy, false,
+			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
 			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,

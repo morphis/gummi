@@ -169,22 +169,23 @@ func (m *Shell) globalCommands() []command {
 // command answers to in the command menu's own vocabulary, and a card's
 // actions must not shadow one of the board-root globals by word.
 var cardCommandNames = map[string]string{
-	"advance": "approve land",
-	"bounce":  "bounce",
-	"changes": "changes",
-	"pause":   "park pause",
-	"verify":  "verify",
-	"rebase":  "rebase",
-	"handoff": "handoff keep hand off",
-	"merge":   "land merge",
-	"squash":  "squash",
-	"clean":   "clean",
-	"newbug":  "bug followup",
-	"adopt":   "adopt take back",
-	"gate":    "autopilot",
-	"spec":    "spec",
-	"diff":    "diff",
-	"ask":     "ask",
+	"advance":   "approve land",
+	"bounce":    "bounce",
+	"changes":   "changes",
+	"pause":     "park pause",
+	"verify":    "verify",
+	"rebase":    "rebase",
+	"handoff":   "handoff keep hand off",
+	"writespec": "writespec write a spec",
+	"merge":     "land merge",
+	"squash":    "squash",
+	"clean":     "clean",
+	"newbug":    "bug followup",
+	"adopt":     "adopt take back",
+	"gate":      "autopilot",
+	"spec":      "spec",
+	"diff":      "diff",
+	"ask":       "ask",
 }
 
 func (m *Shell) cardCommands(existing []command) []command {
@@ -440,6 +441,15 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		// the freeform card's model row (cardactions.go): the two-tier
 		// picker, the same offer the web face's picker makes
 		return m.openCardModelPicker()
+	case "writespec":
+		// the freeform card's third ending (cardactions.go): the writespec
+		// dialog, the same offer the web face's menu row makes. Keyless
+		// here only because this switch is the keyless path; the row
+		// itself wears `w` and routes through boardVerb.
+		if r, ok := m.selected(); ok {
+			return m.openWritespec(r.F)
+		}
+		return nil
 	case "ask":
 		// arms the same channel typing `ask` on the composer does
 		// (threadinput.go's routeVerb) — this is just the inventory's own

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -13,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -364,6 +366,72 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	return c, nil
 }
 
+// writespecDraftable is the guard the writespec-draft fetch and the
+// writespec action share: the card is a session this board can drive, at
+// the one stage such a card ever holds, on a board that could run the
+// handoff brief's turn at all — the same gate the writespec menu row
+// applies. It returns the sentence each refusal says.
+func writespecDraftable(f domain.Feature, agentWired bool) string {
+	switch {
+	case !f.IsFreeform():
+		return string(f.ID) + " is a " + string(f.Kind) + " card: it runs through its stages"
+	case f.Stage != domain.StageOpen:
+		return string(f.ID) + " is closed"
+	case !agentWired:
+		return string(f.ID) + " cannot continue as a spec: this board has no agent to run the handoff brief's turn"
+	}
+	return ""
+}
+
+// WritespecDraft is GET /api/cards/{id}/writespec-draft: the handoff brief
+// the writespec dialog opens on, fetched once at open. The loop's part is
+// only the guard — the draft itself is an agent turn (envelope spend,
+// seconds, an appended transcript exchange), so it runs off the loop, and
+// it is never filled into an action's Default: webActionDefaults runs on
+// every card read, and a brief turn fired as a side effect of GET
+// /api/cards/{id} would spend the session's envelope every time a page
+// refetched it. The refusals any send rides (mid-turn, an unanswered
+// question) come back from the engine and map to the busy conflict the
+// writespec action has always answered with.
+func (b *Bridge) WritespecDraft(ctx context.Context, id string) (webapi.WritespecDraft, error) {
+	var (
+		f      domain.Feature
+		reason string
+		ok     bool
+		m      *Shell
+	)
+	if err := b.Do(ctx, func(s *Shell) tea.Cmd {
+		r, found := s.rowByID(webID(id))
+		if !found {
+			return nil
+		}
+		if reason = writespecDraftable(r.F, s.engine != nil); reason != "" {
+			return nil
+		}
+		f, ok, m = r.F, true, s
+		return nil
+	}); err != nil {
+		return webapi.WritespecDraft{}, err
+	}
+	if !ok {
+		if reason != "" {
+			return webapi.WritespecDraft{}, refuse(WebBadRequest, reason)
+		}
+		return webapi.WritespecDraft{}, refuse(WebNotFound, "no card "+id+" on this board")
+	}
+	brief, source, err := m.engine.SessionHandoffBrief(ctx, f.ID)
+	if err != nil {
+		if errors.Is(err, agent.ErrBusy) {
+			return webapi.WritespecDraft{}, &WebError{
+				Code: WebConflict, Reason: webapi.ConflictBusy,
+				Text: sanitize(err.Error()),
+			}
+		}
+		return webapi.WritespecDraft{}, err
+	}
+	return webapi.WritespecDraft{Brief: brief, Source: string(source)}, nil
+}
+
 // webDropCleanCommit leaves a session's "commit" out of its menu while the
 // worktree holds nothing to commit. Asking git is IO, so it is decided here,
 // off the loop, rather than when the menu is built.
@@ -503,25 +571,18 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 	in := m.nextInputFor(r)
 	list := cardActionsFor(in, r)
 	if r.F.IsFreeform() {
-		// a session's "model" row is cardActionsFor's own (one inventory
-		// for both faces); the two web-only endings are listed here, the
-		// commit only while the worktree holds something to commit, which
-		// Bridge.Card drops off the loop when it does not
+		// the writespec row is cardActionsFor's own (one inventory for
+		// both faces, the model switch included); the commit is the one
+		// web-only append here, listed only while the worktree holds
+		// something to commit, which Bridge.Card drops off the loop when
+		// it does not. A main-checkout session has no branch to commit
+		// to, and sweeping the checkout's loose work into one is not
+		// this card's to do.
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
 			if !r.F.MainCheckout {
-				// listed only while the worktree holds something to commit:
-				// Bridge.Card drops it off the loop when it does not. A
-				// main-checkout session has no branch to commit to, and
-				// sweeping the checkout's loose work into one is not this
-				// card's to do.
 				list = append(list,
 					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — gummi never commits a session's work on its own"})
 			}
-			specWhy := "continue this work as a feature: the profile's architect plans it from this conversation and the branch so far, and it lands on a verified branch"
-			if r.F.MainCheckout {
-				specWhy = "continue this work as a feature: the profile's architect plans it from this conversation, on a branch cut from the checkout as it stands, and it lands on a verified branch"
-			}
-			list = append(list, cardAction{id: "writespec", label: "write a spec", why: specWhy})
 		}
 	} else {
 		list = append(list, m.cardProfileActions(r.F.Stage)...)
@@ -589,7 +650,10 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		}
 	case "writespec":
 		a.Needs = webapi.ActionNeedsSpec
-		a.Default = r.F.Title
+		// the title's suggestion is the page's to fall back on (session.js
+		// prefills card.title); the brief is not an input Default can
+		// carry — it is multiline, and it is fetched per dialog open from
+		// the writespec-draft route, never derived here
 		if m.engine != nil {
 			// named by what runs first: the spec's plan stage, whose
 			// architect reads the session's conversation

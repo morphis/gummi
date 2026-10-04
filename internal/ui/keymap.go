@@ -380,6 +380,17 @@ func (m *Shell) boardBindings() []binding {
 			}
 			filtered = append(filtered, b)
 		}
+		// w is the freeform card's own third ending: continue the work as
+		// a feature, planned from the conversation and the branch. It has
+		// no meaning on any other card, so it is only ever offered here —
+		// and only while the board could run the handoff brief's turn at
+		// all.
+		if r.F.Stage == domain.StageOpen && m.engine != nil {
+			filtered = append(filtered, binding{
+				key: "w", label: "write a spec",
+				help: "continue this work as a feature — its architect plans from this conversation and the branch",
+			})
+		}
 		bs = filtered
 	}
 	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch {
