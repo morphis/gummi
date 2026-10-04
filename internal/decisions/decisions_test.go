@@ -55,6 +55,20 @@ func TestAttentionLanes(t *testing.T) {
 	}
 }
 
+// A question restored after its run ended offers only the chat row — its
+// options died with the process — and the row says so, rather than
+// reading as all the agent ever offered.
+func TestARestoredAskSaysWhyOnlyTheChatRowIsLeft(t *testing.T) {
+	got := AskOptions(&engine.Ask{Question: "Flag or config file?", Restored: true})
+	if len(got) != 1 || !got[0].Chat || got[0].Detail != ChatDetailRestored {
+		t.Errorf("restored ask offers %+v, want the chat row naming the lost options", got)
+	}
+	live := AskOptions(&engine.Ask{Question: "Flag or config file?"})
+	if live[0].Detail != ChatDetail {
+		t.Errorf("a live ask with no options reads %q, want the ordinary chat row", live[0].Detail)
+	}
+}
+
 func TestAskOptionsEndInTheChatRow(t *testing.T) {
 	ask := &engine.Ask{Question: "Persist where?", Options: []engine.AskOption{
 		{Label: "per-device", Detail: "local only"}, {Label: "synced"},

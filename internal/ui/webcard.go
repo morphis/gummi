@@ -99,7 +99,9 @@ func (m *Shell) webAskDecision(r featureRow, d *threadDecision) *webOpenDecision
 		index: map[string]int{},
 		api: webapi.Decision{
 			Ref: ref, Kind: webapi.DecisionAsk, Question: ask.Question, Anchor: anchor,
-			Against: webapi.Against{Token: ref, Label: "question " + webHash(id)},
+			// the label is what a "moved" refusal names the stop by: a
+			// sentence a person recognises, not the decision's hash
+			Against: webapi.Against{Token: ref, Label: "the agent's question"},
 			Options: []webapi.Option{},
 			Multi:   ask.MultiPick,
 		},

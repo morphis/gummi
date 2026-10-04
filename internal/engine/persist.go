@@ -485,6 +485,7 @@ func (e *Engine) openAskFor(ctx context.Context, id domain.FeatureID, stage doma
 			Question:   d.Question,
 			SpecAnchor: d.Anchor,
 			DecisionID: d.ID,
+			Restored:   true,
 		}
 	}
 	return nil

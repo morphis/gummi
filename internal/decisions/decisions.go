@@ -150,8 +150,19 @@ func AskOptions(ask *engine.Ask) []Option {
 	for _, option := range ask.Options {
 		options = append(options, Option{Label: option.Label, Detail: option.Detail})
 	}
-	return append(options, Option{Label: ChatLabel, Detail: ChatDetail, Chat: true})
+	detail := ChatDetail
+	if ask.Restored && len(ask.Options) == 0 {
+		// a question re-armed after the process that asked it ended: the
+		// agent's options ended with it (decision rows never store them),
+		// and a bare chat row would read as all it ever offered
+		detail = ChatDetailRestored
+	}
+	return append(options, Option{Label: ChatLabel, Detail: detail, Chat: true})
 }
+
+// ChatDetailRestored is the chat row's detail on a question restored
+// without its options (engine.Ask.Restored).
+const ChatDetailRestored = "the options the agent offered did not survive the restart of the run that asked — answer in your own words"
 
 // GateAnswerCrosses reports whether answering ask with this text is the
 // gate crossing itself, rather than an ordinary answer the stage then

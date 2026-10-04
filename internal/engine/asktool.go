@@ -77,6 +77,12 @@ type Ask struct {
 	// that are not the approve option deny: the held call takes a ruling,
 	// and the only one typed words can be is no.
 	Permission bool `json:"-"`
+	// Restored marks a question re-armed from its durable decision after
+	// the process that asked it died (Engine.openAskFor). Its options died
+	// with that process — a decision row never stores them (DESIGN §10
+	// D18) — so it carries none, and the surfaces that offer it say why
+	// rather than presenting a bare chat row as all the agent offered.
+	Restored bool `json:"-"`
 }
 
 // AskOption is one selectable answer.
