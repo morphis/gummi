@@ -259,7 +259,9 @@ func TestThreadAttachRespectsStage(t *testing.T) {
 	}
 	m = toKeys(t, m)
 
-	// advance plan → implement while the composer is blurred
+	// advance plan → implement while the composer is blurred, once the
+	// kickoff turn has ended (g refuses while the agent is mid-turn)
+	settleChat(t, eng)
 	m = pressAdvance(t, m)
 	if m.rows[0].F.Stage != domain.StageImplement {
 		t.Fatalf("stage = %s, want implement", m.rows[0].F.Stage)

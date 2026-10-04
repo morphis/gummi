@@ -309,6 +309,14 @@ func (in nextInput) closed() bool {
 	return in.landed || in.stage == domain.StageDone
 }
 
+// agentAtWork reports a stage agent that has the card right now: running,
+// or mid-turn in a conversation. Moving the card to its next
+// stage under it would drop the work it is in the middle of, so neither
+// the menu nor g offers that until it stops (advanceStageAs).
+func (in nextInput) agentAtWork() bool {
+	return in.sess == engine.StateRunning || in.busy
+}
+
 // keptBranch names the branch a hand-off keeps, falling back to the
 // generic noun rather than emitting a sentence with a hole in it — the
 // same contract landBase() has for the trunk's name.

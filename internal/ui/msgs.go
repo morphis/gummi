@@ -787,6 +787,13 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 			return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
 		}
 	}
+	// A person's crossing while the stage's agent still has the card would
+	// drop the run it is in the middle of. The menu does not offer it
+	// (cardActionsFor), and g says why rather than doing it.
+	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot && !r.F.IsFreeform() && m.nextInputFor(r).agentAtWork() {
+		why := string(id) + ": its " + string(r.F.Stage) + " agent is still at work — let it finish, or pause it, before moving the card on"
+		return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
+	}
 	return func() tea.Msg {
 		return m.withEngine(func(eng *engine.Engine) tea.Msg {
 			res, err := eng.Advance(context.Background(), id, actor)

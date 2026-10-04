@@ -61,13 +61,14 @@ func writeWorktreeChecks(t *testing.T, m *Shell, id domain.FeatureID, checks []d
 
 func TestVerifyNoChecksNotice(t *testing.T) {
 	m, _ := chatWorkspace(t, agent.NewFake("x"))
-	// no worktree yet: checks live in the spec, which lands at approval
+	// still at plan: nothing is built, and the checks land at approval —
+	// v says so rather than measuring the branch it forked from
 	m = press(t, m, tea.KeyPressMsg{Code: 'v', Text: "v"})
 	if m.Overlay.HasDialogs() {
-		t.Fatal("verify opened a dialog with no checks discovered")
+		t.Fatal("verify opened a dialog with nothing built to check")
 	}
-	if !strings.Contains(m.notice.text, "no checks yet") {
-		t.Errorf("notice = %q, want no-checks message", m.notice.text)
+	if !strings.Contains(m.notice.text, "nothing has been built to verify yet") {
+		t.Errorf("notice = %q, want the at-plan refusal", m.notice.text)
 	}
 }
 

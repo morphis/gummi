@@ -3174,11 +3174,19 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
 				return m.pauseRun(r.F)
 			}
+			if n := closedRefusal(r, "there is nothing left for it to wait on"); n != nil {
+				m.notice = *n
+				return nil
+			}
 			m.clearTransientNotice()
 			return m.openDeps(r.F)
 		}
 	case "v":
 		if r, ok := m.selected(); ok {
+			if n := verifyRefusal(r); n != nil {
+				m.notice = *n
+				return nil
+			}
 			return m.runChecks(r.F)
 		}
 	case "P":
@@ -3364,6 +3372,10 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "u":
 		if r, ok := m.selected(); ok {
+			if n := envelopeRefusal(r); n != nil {
+				m.notice = *n
+				return nil
+			}
 			m.Overlay.Push(newEnvelopeDialog(r.F, func(to int) tea.Cmd {
 				return m.setEnvelope(r.F.ID, to)
 			}, func() tea.Cmd {
@@ -3394,6 +3406,10 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "r":
 		if r, ok := m.selected(); ok {
 			if n := branchVerbRefusal(r, "rebase"); n != nil {
+				m.notice = *n
+				return nil
+			}
+			if n := rebaseRefusal(r); n != nil {
 				m.notice = *n
 				return nil
 			}

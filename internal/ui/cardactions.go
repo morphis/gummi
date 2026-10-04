@@ -276,7 +276,16 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		advanceOffered = false
 	case in.stage == domain.StagePlan && len(in.depBlockers) > 0 && in.kind != domain.KindGoal:
 		advanceOffered = false
+	case in.agentAtWork():
+		// the stage's agent is still on it; g refuses the same
+		advanceOffered = false
 	}
+	// A closed card — done, or its branch already on its base — has no
+	// work left for the verbs that steer work: no dependency to wait on,
+	// no budget to spend (but a done research card's decompose re-run),
+	// no gate for autopilot to answer. Each one's key refuses the same way
+	// (closedRefusal).
+	closed := in.closed()
 
 	bounceWhy := "send it back to " + string(work) + " for rework"
 	if in.stage == domain.StagePlan {
@@ -327,7 +336,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"deps", "p", "dependencies", "open the dependency picker for this card", false,
-			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy,
+			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy && !closed,
 		},
 		// The same picker while a stage session exists, where p pauses: a
 		// card at its design gate still holds its finished session, and
@@ -336,7 +345,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// (and the menu built from it) is the way in.
 		{
 			"deps", "", "dependencies", "open the dependency picker for this card", false,
-			in.sess != "" && in.sess != engine.StateInteractive && !in.freeformBusy && !doneStage,
+			in.sess != "" && in.sess != engine.StateInteractive && !in.freeformBusy && !closed,
 		},
 		{
 			// the label is the interface, so it takes the card's own noun
@@ -368,8 +377,10 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 				(in.stage == domain.StagePlan && in.escalated),
 		},
 		{
+			// only where there is code to check and the check can still
+			// matter (verifyRefusal, which v answers with)
 			"verify", "v", "verify", "run verify checks", false,
-			(research || needsWT) && !freeform,
+			(research || needsWT) && !freeform && verifyRefusal(r) == nil,
 		},
 		{
 			// a session runs on the agent and model its person picked, not
@@ -386,15 +397,15 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// name internally; the label and why are the only parts a reader
 			// sees, so those are what §5 renames to "budget".
 			"envelope", "u", "budget", "set the card's budget (credits; 0 = uncapped)", false,
-			true,
+			envelopeRefusal(r) == nil,
 		},
 		// no accelerator, for the same reason duplicate has none: this is a
 		// rare, deliberate setting change, not something to fat-finger from
-		// the board. Always valid — the mode is a property of the card, not
-		// of its stage or kind.
+		// the board. The mode is a property of the card, not of its stage
+		// or kind — but a closed card has no gate left for it to govern.
 		{
 			"gate", "", gateLabel, gateWhy, false,
-			!freeform,
+			!freeform && !closed,
 		},
 		// no accelerator: `ask` is a word you type on the composer, the
 		// same way `park`'s own accelerator collision is avoided (see
@@ -437,7 +448,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts go to an agent)", false,
-			needsWT && !r.F.MainCheckout,
+			needsWT && !r.F.MainCheckout && rebaseRefusal(r) == nil,
 		},
 		// The third ending, offered only at verify like merge: hand-off
 		// CLOSES the card. There is nothing to close before the work is finished —
@@ -617,6 +628,63 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		return out
 	}
 	return append(head, tail...)
+}
+
+// closedRefusal is the answer a verb that steers work gets on a card whose
+// work is over — at done, or with its branch already on its base — or nil
+// on any other card. what says what that leaves for the verb to do. The
+// menu withholds the same verbs on the same test (cardActionsFor's
+// closed), so a row that is not listed is a key that says why.
+func closedRefusal(r featureRow, what string) *noticeMsg {
+	if r.F.Stage != domain.StageDone && !r.Landed {
+		return nil
+	}
+	how := "is done"
+	if r.Landed {
+		how = "has landed on " + r.baseBranch()
+	}
+	return &noticeMsg{text: string(r.F.ID) + " " + how + " — " + what, isErr: true, id: r.F.ID}
+}
+
+// verifyRefusal says why the checks cannot usefully run on r, or nil when
+// they can: from implement, when there is work to check, until the card
+// closes. A freeform card answers for itself (runChecks), and a plan-stage
+// card has nothing built yet — the checks would only measure the branch
+// it forked from, which the approval baseline already did.
+func verifyRefusal(r featureRow) *noticeMsg {
+	if r.F.IsFreeform() {
+		return nil
+	}
+	if n := closedRefusal(r, "there is nothing left to verify"); n != nil {
+		return n
+	}
+	switch r.F.Stage {
+	case domain.StageImplement, domain.StageVerify:
+		return nil
+	}
+	return &noticeMsg{
+		text:  string(r.F.ID) + " is at " + string(r.F.Stage) + " — nothing has been built to verify yet; the checks run from " + string(domain.StageImplement) + " on",
+		isErr: true, id: r.F.ID,
+	}
+}
+
+// envelopeRefusal is closedRefusal for the budget: a closed card spends
+// nothing more, except a done research card, whose g re-runs decompose.
+func envelopeRefusal(r featureRow) *noticeMsg {
+	if r.F.Kind == domain.KindResearch && r.F.Stage == domain.StageDone {
+		return nil
+	}
+	return closedRefusal(r, "nothing is left for a budget to pay for")
+}
+
+// rebaseRefusal is closedRefusal for the rebase, which a handed-off card
+// still has a use for: its branch can be landed after all, and landing it
+// may want it on the base's tip first.
+func rebaseRefusal(r featureRow) *noticeMsg {
+	if r.F.HandedOff() && !r.Landed {
+		return nil
+	}
+	return closedRefusal(r, "there is nothing left to rebase")
 }
 
 // runLabelWhy derives the enter action's label and fallback why — the

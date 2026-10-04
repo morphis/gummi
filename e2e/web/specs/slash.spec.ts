@@ -21,8 +21,8 @@ test('a slash command completes and runs', async ({ pairedPage: page, server, ap
   await input.fill('/');
   await expect(offer).toBeVisible();
   await expect(offer.getByRole('option').first()).toContainText('/');
-  await input.fill('/ver');
-  await expect(offer.getByRole('option')).toHaveText([/\/verify\s*run verify checks/]);
+  await input.fill('/env');
+  await expect(offer.getByRole('option')).toHaveText([/\/envelope\s*set the card's budget/]);
   // a slash draft never reads as the pinned decision's answer — not while
   // the server is still classifying it, and not after
   await expect(page.getByTestId('composer-says')).not.toContainText('start the architect');
@@ -30,25 +30,22 @@ test('a slash command completes and runs', async ({ pairedPage: page, server, ap
   // tab takes it, ready for arguments, and the says line tells what enter
   // will do with it
   await page.keyboard.press('Tab');
-  await expect(input).toHaveValue('/verify ');
+  await expect(input).toHaveValue('/envelope ');
   await expect(input).toBeFocused();
   await expect(offer).toBeHidden();
   await expect(page.getByTestId('composer-says')).toContainText('menu');
 
   // a menu-only command hands the line to the menu: the composer lets it
   // go, the menu opens on the entry the line named, and enter runs it
-  const posts: string[] = [];
-  page.on('request', (r) => { if (r.method() === 'POST' && /\/actions\/verify$/.test(r.url())) posts.push(r.url()) });
   await page.keyboard.press('Enter');
   const menu = page.getByTestId('card-actions-menu');
   await expect(menu).toBeVisible();
   await expect(input).toHaveValue('');
-  await expect(menu.locator('button').first()).toContainText('verify');
+  await expect(menu.locator('button').first()).toContainText('budget');
   await page.keyboard.press('Enter');
-  await expect.poll(() => posts).toHaveLength(1);
   await expect(menu).toBeHidden();
-  // the action ran gummi's own path, which asks before it runs the
-  // checks — the question the TUI's v key asks too
+  // the action asks for what its dialog would — the TUI's u key asks the
+  // same number
   await expect(page.getByTestId('action-dialog')).toBeVisible();
   await page.getByTestId('action-cancel').click();
   await expect(page.getByTestId('action-dialog')).toBeHidden();
