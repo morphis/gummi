@@ -271,7 +271,6 @@ type opencodeSession struct {
 	// announced holds the tool calls announced while running, so their
 	// finished part reports only the outcome.
 	announced map[string]bool
-	primed    bool           // system hints injected on the first turn
 	// permOwner remembers, per permission request id, the server session
 	// that raised it. It is usually this session's own, but a task tool's
 	// child session asks under its own id — and the respond endpoint is
@@ -585,26 +584,22 @@ func (s *opencodeSession) resumable() bool {
 
 // dropResume drops a handed-in session id so the retry runs on a fresh
 // conversation: nothing of the failed attempt survived to be repeated —
-// no events reached the caller — and the stage hints have never been seen
-// by the fresh session.
+// no events reached the caller — and the stage hints ride every turn's
+// system field, so the fresh session has them too.
 func (s *opencodeSession) dropResume() {
 	s.mu.Lock()
-	s.resumed, s.sessionID, s.primed = false, "", false
+	s.resumed, s.sessionID = false, ""
 	s.mu.Unlock()
 }
 
-// promptBody builds the message POST's payload: the model, then the
-// turn's parts — images as file parts, then the text. On the first turn,
-// the stage system hints ride in front of the prompt so opencode's agent
-// has gummi's stage instructions.
+// promptBody builds the message POST's payload: the model, the stage
+// system hints, then the turn's parts — images as file parts, then the
+// text. The hints ride in the message's own system field on every turn:
+// opencode adds the latest user message's system to the prompt it builds,
+// so the stage instructions hold after a compaction has summarized the
+// first message away, and a resumed conversation is not handed them a
+// second time as a prompt of their own.
 func (s *opencodeSession) promptBody(msg string, imgs []Image) map[string]any {
-	s.mu.Lock()
-	prompt := msg
-	if !s.primed && len(s.hints) > 0 {
-		prompt = strings.Join(s.hints, "\n\n") + "\n\n" + msg
-		s.primed = true
-	}
-	s.mu.Unlock()
 	provider, model, _ := strings.Cut(s.model, "/")
 	parts := make([]map[string]any, 0, len(imgs)+1)
 	for _, img := range imgs {
@@ -612,11 +607,15 @@ func (s *opencodeSession) promptBody(msg string, imgs []Image) map[string]any {
 			parts = append(parts, part)
 		}
 	}
-	parts = append(parts, map[string]any{"type": "text", "text": prompt})
-	return map[string]any{
+	parts = append(parts, map[string]any{"type": "text", "text": msg})
+	body := map[string]any{
 		"model": map[string]string{"providerID": provider, "modelID": model},
 		"parts": parts,
 	}
+	if len(s.hints) > 0 {
+		body["system"] = strings.Join(s.hints, "\n\n")
+	}
+	return body
 }
 
 // filePart turns an attachment into the message part opencode's prompt

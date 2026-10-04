@@ -439,7 +439,7 @@ func TestOpencodeCloseKillsServer(t *testing.T) {
 // TestOpencodeServerTurnRoundTrip: one turn is one message POST; the
 // server session's id is read from the create response; the bus's parts
 // map through the same grammar the CLI lines did — text, tool, usage,
-// idle — and the first turn alone carries the stage hints.
+// idle — and every turn carries the stage hints in its system field.
 func TestOpencodeServerTurnRoundTrip(t *testing.T) {
 	f, _ := stubServeOpencode(t)
 	sess := ocSession(t, SessionOpts{
@@ -501,12 +501,15 @@ func TestOpencodeServerTurnRoundTrip(t *testing.T) {
 		t.Fatalf("parts = %v", msg.Body["parts"])
 	}
 	text, _ := parts[0].(map[string]any)
-	if !strings.Contains(fmt.Sprint(text["text"]), "STAGE-HINTS") ||
-		!strings.HasSuffix(fmt.Sprint(text["text"]), "review the staged diff") {
-		t.Errorf("first turn's prompt = %q, want the hints prepended", text["text"])
+	if text["text"] != "review the staged diff" {
+		t.Errorf("first turn's prompt = %q, want the message alone", text["text"])
+	}
+	if msg.Body["system"] != "STAGE-HINTS" {
+		t.Errorf("first turn's system = %v, want the stage hints", msg.Body["system"])
 	}
 
-	// a second turn carries the plain message alone and continues the
+	// a second turn carries the plain message and the hints again — in
+	// the system field, which outlives a compaction — and continues the
 	// same server session
 	f.holdTurns()
 	if err := sess.Send(ctx, "go on"); err != nil {
@@ -521,8 +524,11 @@ func TestOpencodeServerTurnRoundTrip(t *testing.T) {
 	f.mu.Unlock()
 	parts2, _ := msg2.Body["parts"].([]any)
 	text2, _ := parts2[0].(map[string]any)
-	if strings.Contains(fmt.Sprint(text2["text"]), "STAGE-HINTS") {
-		t.Errorf("second turn's prompt = %q, want no hints", text2["text"])
+	if text2["text"] != "go on" {
+		t.Errorf("second turn's prompt = %q, want the message alone", text2["text"])
+	}
+	if msg2.Body["system"] != "STAGE-HINTS" {
+		t.Errorf("second turn's system = %v, want the stage hints on every turn", msg2.Body["system"])
 	}
 	if msg2.SessionID != sess.sessionIDValue() {
 		t.Errorf("second turn addressed %q, want the session's own id", msg2.SessionID)
@@ -1024,15 +1030,11 @@ func TestOpencodeServerResumeFallback(t *testing.T) {
 	if id := sess.SessionID(); id != created[0] {
 		t.Errorf("SessionID = %q, want the fresh conversation's id", id)
 	}
-	first, _ := msgs[0].Body["parts"].([]any)
-	second, _ := msgs[1].Body["parts"].([]any)
-	fst, _ := first[0].(map[string]any)
-	snd, _ := second[0].(map[string]any)
-	if !strings.Contains(fmt.Sprint(fst["text"]), "STAGE-HINTS") {
-		t.Errorf("the resumed attempt carried no hints: %v", fst["text"])
+	if msgs[0].Body["system"] != "STAGE-HINTS" {
+		t.Errorf("the resumed attempt carried no hints: %v", msgs[0].Body["system"])
 	}
-	if !strings.Contains(fmt.Sprint(snd["text"]), "STAGE-HINTS") {
-		t.Errorf("the fresh retry carried no hints: %v", snd["text"])
+	if msgs[1].Body["system"] != "STAGE-HINTS" {
+		t.Errorf("the fresh retry carried no hints: %v", msgs[1].Body["system"])
 	}
 }
 
