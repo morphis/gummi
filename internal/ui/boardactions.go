@@ -387,9 +387,13 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	case "wait":
 		// the row a held gate leads with (nextsteps.go's waitOnDeps, the
 		// stack's "lands after"): nothing to do but wait, and it says what
-		// for rather than answering with silence
+		// for rather than answering with silence. A message rather than a
+		// write to m.notice: the web face hears a notice only as one
+		// (bridge.go's emitChanges), and from the page this row is an
+		// answer that would otherwise read as having done something.
 		if r, ok := m.selected(); ok {
-			m.notice = noticeMsg{text: string(r.F.ID) + ": " + a.label + " — " + a.why, id: r.F.ID}
+			n := noticeMsg{text: string(r.F.ID) + ": " + a.label + " — " + a.why, id: r.F.ID}
+			return func() tea.Msg { return n }
 		}
 		return nil
 	case "settle":

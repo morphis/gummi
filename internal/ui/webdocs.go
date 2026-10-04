@@ -77,6 +77,10 @@ type WebDocs struct {
 	// attachments is the workspace's image store, for resolving a spec
 	// note's attachment ids into links; nil on a board with no engine.
 	attachments *attachment.Store
+	// manual is the card's last verify run from the menu (the Shell's
+	// checksFor), which writes nothing to the log the thread folds; the
+	// spec's checks read it beside the log's rows.
+	manual stagedChecks
 }
 
 // WebDocs captures card id's documents for reading off the loop. It
@@ -94,6 +98,9 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 		f: r.F, base: m.baseBranch(r.F), store: m.store, pool: m.wt, ws: m.ws,
 		now: m.now, threads: m.fetchPRReviewThreads,
 		locks: m.locks, busy: m.webCardBusy(r.F.ID) || m.cardBusy(r),
+	}
+	if res := m.checksFor(r.F); len(res) > 0 {
+		d.manual = m.checks[r.F.ID]
 	}
 	if m.engine != nil {
 		d.attachments = m.engine.Attachments()
@@ -340,17 +347,21 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 	return out, nil
 }
 
-// lastChecks is each check's newest result in the card's log: the verify
-// rows the thread draws.
+// lastChecks is each check's newest result: the verify rows the thread
+// draws from the card's log, or the menu's last verify run where that is
+// newer.
 func (d *WebDocs) lastChecks(ctx context.Context) map[string]webapi.CheckOutcome {
 	out := map[string]webapi.CheckOutcome{}
-	evs, err := d.store.Events(ctx, d.f.ID)
-	if err != nil {
-		return out
+	if evs, err := d.store.Events(ctx, d.f.ID); err == nil {
+		for _, it := range threadfold.Items(evs, threadfold.Options{}) {
+			for _, c := range it.Checks {
+				out[c.Name] = webapi.CheckOutcome{OK: c.OK, At: it.At}
+			}
+		}
 	}
-	for _, it := range threadfold.Items(evs, threadfold.Options{}) {
-		for _, c := range it.Checks {
-			out[c.Name] = webapi.CheckOutcome{OK: c.OK, At: it.At}
+	for _, r := range d.manual.results {
+		if o, ok := out[r.Name]; !ok || d.manual.at.After(o.At) {
+			out[r.Name] = webapi.CheckOutcome{OK: r.OK, At: d.manual.at}
 		}
 	}
 	return out

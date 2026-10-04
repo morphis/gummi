@@ -2455,11 +2455,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.refreshBlockers(msg.f.ID)
 
 	case verifyResultMsg:
+		// aside: the run happened whatever it found, so a web intent that
+		// sees a failing result passes it on rather than reading the verify
+		// as refused (the bridge toasts it, emitChanges)
 		if msg.err != nil {
-			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true, id: msg.feature, aside: true}
 			return m, nil
 		}
-		m.checks[msg.feature] = stagedChecks{stage: msg.stage, results: msg.results}
+		m.checks[msg.feature] = stagedChecks{stage: msg.stage, results: msg.results, at: m.now()}
 		passed := 0
 		for _, r := range msg.results {
 			if r.OK {
@@ -2469,6 +2472,8 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = noticeMsg{
 			text:  string(msg.feature) + " verify: " + strconv.Itoa(passed) + "/" + strconv.Itoa(len(msg.results)) + " passed",
 			isErr: passed != len(msg.results),
+			id:    msg.feature,
+			aside: true,
 		}
 		return m, nil
 

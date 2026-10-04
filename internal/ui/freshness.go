@@ -260,9 +260,14 @@ func (m *Shell) syncWebLive() {
 // answered already, so its outcome can no longer carry the sentence (a
 // read that took longer than the request waited, ending in "can't go on
 // yet — …"). A notice message reports itself (emitChanges); this is for
-// the notice a handler set in passing.
+// the notice a handler set in passing. A verify result reports itself the
+// same way (emitChanges), whoever ran it.
 func (m *Shell) toastDetached(inner tea.Msg, before noticeMsg) {
-	if _, ok := inner.(noticeMsg); ok || m.notice == before || m.notice.text == "" {
+	switch inner.(type) {
+	case noticeMsg, verifyResultMsg:
+		return
+	}
+	if m.notice == before || m.notice.text == "" {
 		return
 	}
 	m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(m.notice.id), Text: m.notice.text, Err: m.notice.isErr})

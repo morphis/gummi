@@ -564,7 +564,9 @@ async function send (id, body, label, tookWords, danger) {
     if (tookWords) ctx.clearComposer()
     const next = rows().find(r => r.status === 'needs' && r.id !== id)
     if (state.sel === id) set({ card: card && card.id ? card : state.card, hi: 0, picked: [], mdecOpen: false, showNext: next ? next.id : null })
-    toast(`Answered: ${label}`)
+    // "waits on …" answers nothing: the board says what the card waits
+    // for in a toast of its own, and "Answered" would claim it moved
+    if (body.option !== 'wait') toast(`Answered: ${label}`)
     ctx.refresh(id)
   } catch (err) {
     refused(id, err, body, label, tookWords, danger)

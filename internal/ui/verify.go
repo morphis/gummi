@@ -32,6 +32,10 @@ type verifyResultMsg struct {
 type stagedChecks struct {
 	stage   domain.Stage
 	results []verify.Result
+	// at is when the run finished: the web spec's checks table reads it
+	// beside the log's own verify rows, and the newer of the two is the
+	// result it shows (WebDocs.lastChecks).
+	at time.Time
 }
 
 // checksFor returns the last manual verify results for f, or nil if there

@@ -1463,20 +1463,12 @@ func waitOnDeps(in nextInput) nextAction {
 		names = append(names, string(id))
 	}
 	list := joinList(names)
-	verb := "has"
+	verb, until := "has", "it does"
 	if len(names) > 1 {
-		verb = "have"
+		verb, until = "have", "they do"
 	}
 	return nextStep("wait", "", "waits on "+list,
-		list+" "+verb+" not landed yet — approving is refused until "+pronounFor(len(names))+" do; the gate opens then")
-}
-
-// pronounFor is "it" for one, "they" for more.
-func pronounFor(n int) string {
-	if n == 1 {
-		return "it"
-	}
-	return "they"
+		list+" "+verb+" not landed yet — approving is refused until "+until+"; the gate opens then")
 }
 
 // rebaseToLand is the row a verify gate leads with once a landing hit
