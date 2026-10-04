@@ -239,18 +239,25 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 	cmd.WaitDelay = 2 * time.Second
 	stderr := &capWriter{max: 8 << 10}
 	cmd.Stderr = stderr
+	// A failure from here to Start leaves no child, but the home already
+	// carries this session's MCP entry (and a temp home exists): teardown
+	// releases both, or every later spawn on the card would list a dead
+	// endpoint.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		s.teardown()
 		return nil, fmt.Errorf("antigravity stdin: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
+		s.teardown()
 		return nil, fmt.Errorf("antigravity stdout: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		cancel()
+		s.teardown()
 		return nil, fmt.Errorf("starting agy: %w", err)
 	}
 	s.cmd, s.cancel, s.stdin, s.stderr = cmd, cancel, stdin, stderr
