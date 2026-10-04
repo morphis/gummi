@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/morphis/gummi/internal/agentplugins"
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/state"
@@ -164,6 +165,21 @@ func runWeb(fl cliFlags, args []string) error {
 	}
 	hostname, _ := os.Hostname()
 	cwd, _ := os.Getwd()
+	_, defaultRepo, namedRepos, err := resolveAllRoots(cwd)
+	if err != nil {
+		return err
+	}
+	pluginRepos := make([]agentplugins.Repo, 0, len(namedRepos)+1)
+	if defaultRepo != "" {
+		pluginRepos = append(pluginRepos, agentplugins.Repo{Name: "default", Root: defaultRepo})
+	}
+	for _, repo := range namedRepos {
+		pluginRepos = append(pluginRepos, agentplugins.Repo{Name: repo.Name, Root: repo.Root})
+	}
+	pluginStore, err := agentplugins.New(h.ws.Root, pluginRepos)
+	if err != nil {
+		return fmt.Errorf("preparing agent plugin manager: %w", err)
+	}
 
 	// Web Push: the VAPID key and the subscriptions live beside the
 	// paired devices; a card that starts needing someone is a
@@ -193,6 +209,7 @@ func runWeb(fl cliFlags, args []string) error {
 		Host:       hostname,
 		Version:    version(),
 		WebDir:     h.ws.WebDir(),
+		Plugins:    pluginStore,
 		OpenAccess: noPairing,
 		Hosts:      hosts,
 		Secure:     secure,

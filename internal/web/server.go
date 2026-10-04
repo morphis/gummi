@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morphis/gummi/internal/agentplugins"
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -62,6 +63,9 @@ type Options struct {
 	// WebDir is the workspace's .gummi/state/web, for state a route keeps
 	// on disk (push subscriptions, the VAPID key).
 	WebDir string
+	// Plugins manages workspace-local agent and skill definitions under
+	// .gummi/agent-plugins.
+	Plugins *agentplugins.Store
 	// OpenAccess serves the board without pairing. Only ever set for a
 	// loopback-only listener; the caller enforces that.
 	OpenAccess bool

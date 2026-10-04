@@ -103,6 +103,15 @@ Scaffolded on first run. Every key is optional.
 | `skills.forward` | workspace skills to forward into card sessions, as bare names (resolved against `.claude/skills`, `.agents/skills`, `.github/skills` at the workspace root, in that order) or absolute paths. A card runs in a worktree under `.gummi/worktrees/`, a sibling of the repository, so a skill kept beside `.gummi` is outside every backend's project scope and reaches nothing without this; a skill the repository itself ships is already in the worktree and needs no forwarding. Honored by the `opencode`, `copilot` and `claude` backends (`agent.Capabilities.SkillDirs`); on a backend that cannot load skills from outside the worktree gummi says so on the card's activity feed rather than dropping them silently. gummi's own skill is refused — a card must never drive a second gummi |
 | `agent` | which installed CLI (`copilot`, `claude`, `codex`, `opencode`, `pi`) hosts the board's **agent tab**. It has nothing to do with the engine's per-role backends. The first-run picker writes this key without disturbing the rest of the file |
 
+The browser's **More → Agent Plugins** view keeps additional definitions in
+`.gummi/agent-plugins/`, outside the managed repositories. Skills can be
+enabled globally or for selected repositories and are forwarded to new
+card/freeform sessions on backends that accept skill directories; this is
+independent of `skills.forward`. Imported skills are linked to their source
+until edited, when they become a private workspace copy. Imported agent
+Markdown is copied as a single file. Agent definitions can be managed and
+exported there, but are not currently loaded into stage sessions.
+
 ## `.gummi/profiles.yaml`
 
 A `default:` name plus a `profiles:` map. Each profile maps roles

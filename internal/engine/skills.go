@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agentplugins"
 )
 
 // Workspace skills, forwarded into the sessions that run inside a card's
@@ -126,8 +127,16 @@ func skillRootList() string {
 // the backend cannot honor it. The warning is the point: silence here
 // would look exactly like a skill whose instructions the model chose to
 // ignore.
-func (e *Engine) skillDirsFor(ag skillCapable, backend string) []string {
+func (e *Engine) skillDirsFor(ag skillCapable, backend, repo string) []string {
 	dirs := e.forwardedSkillDirs()
+	if e.cfg.Workspace.Root != "" {
+		managed, err := agentplugins.SkillDirs(e.cfg.Workspace.Root, repo)
+		if err != nil {
+			e.warn(fmt.Sprintf("agent plugin skills: %v", err))
+		} else {
+			dirs = append(dirs, managed...)
+		}
+	}
 	if len(dirs) == 0 {
 		return nil
 	}
@@ -135,7 +144,19 @@ func (e *Engine) skillDirsFor(ag skillCapable, backend string) []string {
 		e.warnSkillBackendOnce(backend)
 		return nil
 	}
-	return dirs
+	return uniqueDirs(dirs)
+}
+
+func uniqueDirs(dirs []string) []string {
+	seen := make(map[string]bool, len(dirs))
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if !seen[dir] {
+			seen[dir] = true
+			out = append(out, dir)
+		}
+	}
+	return out
 }
 
 // warnSkillBackendOnce emits the "this backend cannot take forwarded

@@ -21,6 +21,7 @@ let current = null // { scrim, close }
 export const VIEW_LABELS = {
   newcard: 'New card',
   agent: 'Board agent',
+  agentplugins: 'Agent Plugins',
   fleet: 'Fleet stats',
   goals: 'Goals',
   goal: 'Goal',

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agentplugins"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -31,11 +32,12 @@ import (
 // real agent anywhere.
 type boardHarness struct {
 	*harness
-	root  string
-	store *state.Store
-	eng   *engine.Engine
-	ag    *agent.Fake
-	c     *http.Client
+	root    string
+	store   *state.Store
+	eng     *engine.Engine
+	ag      *agent.Fake
+	plugins *agentplugins.Store
+	c       *http.Client
 }
 
 // proposalJSON is the decomposition the fake architect hands back to an
@@ -121,9 +123,14 @@ func newBoardHarness(t *testing.T) *boardHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	plugins, err := agentplugins.New(root, []agentplugins.Repo{{Name: "default", Root: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := &harness{t: t, bridge: bridge, pairing: NewPairing(nil), devices: devices}
 	srv, err := New(Options{
 		Board: bridge, Devices: devices, Pairing: h.pairing, Repo: "demo", Host: "box", Version: "v0-test",
+		Plugins:  plugins,
 		Coalesce: 5 * time.Millisecond, Log: func(string, ...any) {},
 		Doctor: func(r *http.Request) webapi.Doctor {
 			return webapi.Doctor{Ready: r.URL.Query().Get("deep") != "1", Checks: []webapi.DoctorCheck{{Name: "repo", Status: "ok", Detail: "git repository"}}}
@@ -135,7 +142,7 @@ func newBoardHarness(t *testing.T) *boardHarness {
 	shell.SetChangeHook(srv.Publish)
 	h.srv = srv
 	h.http = httptestServer(t, srv)
-	b := &boardHarness{harness: h, root: root, store: store, eng: eng, ag: ag}
+	b := &boardHarness{harness: h, root: root, store: store, eng: eng, ag: ag, plugins: plugins}
 	b.c = h.client()
 	h.pair(b.c, "Simon")
 	return b
