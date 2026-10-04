@@ -21,6 +21,13 @@
 <!-- pairing: shown when this browser has no device cookie -->
 <main class="pairing" id="pair" data-testid="pair" hidden></main>
 
+<!-- devices asking to join: over the board, on every page at it, until
+     answered — first in the tab order, and above any dialog (views.js
+     leaves it out of what a dialog makes inert); its live line says a new
+     request aloud once, not on every countdown redraw -->
+<div class="approvals-slot" id="approvals" data-testid="approvals-slot" hidden></div>
+<div class="sr-only" id="approvals-live" data-testid="approvals-live" role="status" aria-live="assertive"></div>
+
 <!-- the board -->
 <div class="app" id="app" data-view="cards" data-testid="app" hidden>
   <a class="skip" href="#composer-input">Skip to the composer</a>
@@ -102,8 +109,6 @@
   <div class="mdec" id="mdec" data-testid="mobile-decision" hidden></div>
 </div>
 
-<!-- devices asking to join: over the board, on every page at it, until answered -->
-<div class="approvals-slot" id="approvals" data-testid="approvals-slot" hidden></div>
 
 <div class="toasts" id="toasts" data-testid="toasts" role="status" aria-live="polite"></div>
 

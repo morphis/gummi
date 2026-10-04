@@ -77,6 +77,8 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .skip{position:absolute;left:8px;top:-40px;z-index:100;background:var(--panel);padding:6px 10px;border-radius:6px;border:1px solid var(--line2)}
 .skip:focus{top:8px}
+/* the board itself takes focus on load only to start a keyboard at its top */
+.app:focus{outline:none}
 
 /* ---------- shell ---------- */
 .app{height:var(--app-h,100%);transform:translateY(var(--app-top,0px));display:grid;grid-template-rows:44px auto minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
@@ -860,6 +862,13 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .indent{margin-left:0}
   .scrim{padding:8vh 10px 10px}
   .modal,.modal.wide{max-height:100%}
+  /* a finger needs 24px at the least: the rail's chips, the stage strip,
+     the thread's fold lines and the inline links (padding widens what an
+     inline link takes a tap on without moving the line it sits in) */
+  #kinds .chip,#repos .chip{height:30px;padding:0 10px}
+  .stages button{min-height:28px}
+  .tools summary,.sg > summary{min-height:32px}
+  .center .link,.dock .link,.mdec .link,.mcard .link{border-bottom:0;text-decoration:underline dotted;text-underline-offset:3px;padding:5px 0}
 }
 /* typing on a phone: the keyboard has half the screen, so everything but
    the conversation and the line being written steps aside or shrinks */

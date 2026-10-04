@@ -87,3 +87,26 @@ test('a rejected browser is back at the pairing form, and told why', async ({ pa
     await other.close();
   }
 });
+
+// A request can lapse while a dialog is up: the banner over the dialog is
+// still live (not made inert with the page behind the dialog), and it is
+// said aloud once when it arrives.
+test('a request is answerable while a dialog is open, and announced', async ({ pairedPage: page, server, browser }, info) => {
+  test.skip(info.project.name !== 'desktop', 'one viewport is enough');
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  await page.getByTestId('rail-fleet').click();
+  await expect(page.getByTestId('view-fleet')).toBeVisible();
+  const other = await secondBrowser(browser, info);
+  const page2 = await other.newPage();
+  try {
+    const id = await pairWaiting(page2, server, 'Ana');
+    await expect(page.getByTestId('approvals-live')).toContainText('Ana');
+    await page.getByTestId(`approval-${id}`).getByTestId('approval-approve').click();
+    await expect(page.getByTestId('approvals-slot')).toBeHidden();
+    await expect(page2.getByTestId('app')).toBeVisible();
+    // the dialog is still the one open, and still holds the page
+    await expect(page.getByTestId('view-fleet')).toBeVisible();
+  } finally {
+    await other.close();
+  }
+});

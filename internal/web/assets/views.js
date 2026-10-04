@@ -86,7 +86,8 @@ export function openView (name, params = {}) {
 // element: the control that opens the overlay) when that is on screen.
 function openerFor (returnTo) {
   const a = document.activeElement
-  if (a && a !== document.body) return a
+  // the board's own root holds focus only as a keyboard's start (app.js)
+  if (a && a !== document.body && a.id !== 'app') return a
   return shown(returnTo)
 }
 
@@ -180,7 +181,7 @@ function layer (box, { onClose, returnTo }) {
   })
   scrim.addEventListener('focusin', (e) => { lastTid = e.target?.dataset?.testid || null })
   for (const el of document.body.children) {
-    if (el.id === 'toasts' || el.tagName === 'SCRIPT' || el.inert) continue
+    if (OVER.has(el.id) || el.tagName === 'SCRIPT' || el.inert) continue
     el.inert = true
     behind.push(el)
   }
@@ -191,11 +192,16 @@ function layer (box, { onClose, returnTo }) {
   return close
 }
 
+// OVER are the page's parts that stand above any overlay and stay live
+// under it: the notices, and a device asking to join — a request that may
+// lapse while a dialog is up must still be answerable.
+const OVER = new Set(['toasts', 'approvals', 'approvals-live'])
+
 // holdsFocus: focus is inside the overlay, or on something that sits over
-// it (a menu it opened, a notice).
+// it (a menu it opened, a notice, a device asking to join).
 function holdsFocus (scrim) {
   const a = document.activeElement
-  return !!a && a !== document.body && (scrim.contains(a) || !!a.closest?.('.menu, #toasts'))
+  return !!a && a !== document.body && (scrim.contains(a) || !!a.closest?.('.menu, #toasts, #approvals'))
 }
 
 // wrapTab keeps Tab inside the box: past the last control to the first,
@@ -220,9 +226,18 @@ function wrapTab (e, box) {
 // the focused control away): the scrim's own listener hears only keys
 // that start inside it. A menu over the overlay goes first.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !current || e.defaultPrevented) return
+  if (e.key !== 'Escape' || e.defaultPrevented) return
+  // a menu closes on escape wherever focus went (a click on the page
+  // behind it, a redraw) — not only while focus is on one of its items
+  if (menuOpen) {
+    e.preventDefault()
+    const { anchor } = menuOpen
+    closeMenu()
+    if (document.contains(anchor)) anchor.focus()
+    return
+  }
+  if (!current) return
   e.preventDefault()
-  if (menuOpen) { closeMenu(); return }
   current.close()
 })
 
@@ -265,6 +280,10 @@ export function openMenu (anchor, items, { up = false, testid = 'menu' } = {}) {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); anchor.focus() }
     if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length]?.focus() }
     if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length]?.focus() }
+    // Tab stays in the menu while it is open, as the arrows do: focus that
+    // left it for the page behind would leave the menu standing with
+    // nothing to close it from
+    if (e.key === 'Tab') { e.preventDefault(); btns[(i + (e.shiftKey ? -1 : 1) + btns.length) % btns.length]?.focus() }
   }
   setTimeout(() => { if (menuOpen?.menu === menu) document.addEventListener('mousedown', outside) }, 0)
   // a menu placed against its anchor is wrong after a real resize (a

@@ -73,3 +73,39 @@ test('a view that redraws keeps focus, and escape closes it from anywhere', asyn
   await expect(page.getByTestId('view-doctor')).toHaveCount(0);
   await expect(page.getByTestId('app')).toHaveJSProperty('inert', false);
 });
+
+test('the first Tab reaches the skip link, then the top bar', async ({ pairedPage: page, server }) => {
+  await open(page, server);
+  await page.keyboard.press('Tab');
+  await expect(page.locator('a.skip')).toBeFocused();
+  await page.keyboard.press('Tab');
+  expect(await inside(page, 'topbar')).toBe(true);
+});
+
+test('a rail row activated from the keyboard keeps focus', async ({ pairedPage: page, server }) => {
+  await open(page, server);
+  const row = page.getByTestId(`rail-row-${id}`);
+  await row.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  await expect(row).toBeFocused();
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(300);
+  await expect(row).toBeFocused();
+});
+
+test('a menu keeps Tab inside it, and escape closes it from anywhere', async ({ pairedPage: page, server }) => {
+  await open(page, server);
+  await page.getByTestId('rail-more').click();
+  const menu = page.getByTestId('rail-more-menu');
+  await expect(menu).toBeVisible();
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press('Tab');
+    expect(await inside(page, 'rail-more-menu'), `Tab ${i + 1} stays in the menu`).toBe(true);
+  }
+  // focus dropped on nothing: escape still closes the menu
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId('rail-more')).toBeFocused();
+});

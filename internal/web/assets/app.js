@@ -178,7 +178,7 @@ async function startBoard () {
     if (id !== state.sel || (tab && tab !== state.tab) || opens) select(id, { tab })
   }, () => ({ id: state.sel, tab: state.tab }))
   await loadBoard()
-  if (routed && state.sel) return connectEvents()
+  if (routed && state.sel) { startFocus(); return connectEvents() }
   const route = parse()
   if (route.tab) set({ tab: route.tab })
   const first = (route.id && rows().some(r => r.id === route.id) && route.id) ||
@@ -196,8 +196,21 @@ async function startBoard () {
   // meanwhile is never mistaken for the address already showing
   if (isMobile() && !view) clearHash()
   await picking
+  startFocus()
 
   connectEvents()
+}
+
+// startFocus puts a keyboard's start at the top of the board: with nothing
+// focused, the first Tab would start from wherever the first draw left the
+// browser's starting point (the rail, past the selected card) and skip the
+// skip link and the top bar.
+function startFocus () {
+  const a = document.activeElement
+  if (a && a !== document.body) return
+  const app = $('#app')
+  app.tabIndex = -1
+  app.focus({ preventScroll: true })
 }
 
 function connectEvents () {

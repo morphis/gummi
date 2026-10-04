@@ -92,6 +92,11 @@ function renderRail () {
   const vis = all.filter(r => matches(r, spread ? state.repo : 'all'))
   const box = $('#cards')
   const top = box.scrollTop
+  // the rows are drawn anew on every change, the one a keyboard just
+  // activated included: focus goes back to that row (or the fold button),
+  // not to <body> and the top of the page
+  const a = document.activeElement
+  const had = box.contains(a) ? (a.classList.contains('more-done') ? { more: true } : { id: a.dataset?.id }) : null
   clear(box)
   if (!state.board) {
     box.append(h('div', { class: 'empty' }, h('span', { class: 'spinner' })))
@@ -115,6 +120,10 @@ function renderRail () {
   }
   box.scrollTop = top
   box.querySelector('.row.sel')?.scrollIntoView?.({ block: 'nearest' })
+  if (had) {
+    const back = had.more ? box.querySelector('.more-done') : had.id && box.querySelector(`.row[data-id="${CSS.escape(had.id)}"]`)
+    back?.focus({ preventScroll: true })
+  }
 }
 
 function renderRepos (repos, spread) {

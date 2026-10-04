@@ -35,7 +35,22 @@ async function load () {
   if (mine !== seq) return // a later load already answered
   list = next
   fetchedAt = Date.now()
+  announce()
   render()
+}
+
+// announce says a request aloud the first time this page sees it: the
+// banner itself redraws with every countdown tick, and a live region
+// there would read the whole thing out again each time.
+const announced = new Set()
+function announce () {
+  const fresh = list.filter(d => !announced.has(d.id) && left(d) > 0)
+  for (const d of list) announced.add(d.id)
+  const el = $('#approvals-live')
+  if (!el || !fresh.length) return
+  el.textContent = fresh.length === 1
+    ? `${fresh[0].person} on ${fresh[0].device} asks to join this board. Approve or reject it at the top of the page.`
+    : `${fresh.length} new devices ask to join this board. Approve or reject them at the top of the page.`
 }
 
 // left is how many seconds a request has before it lapses.

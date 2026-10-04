@@ -76,6 +76,12 @@ function render () {
   if (shownFor !== state.sel) {
     clear(box); nodes.clear(); groups.clear()
     shownFor = state.sel
+    // the log falls quiet while another card's whole thread fills it (not
+    // news to announce), and speaks again once that fill has landed
+    box.setAttribute('aria-live', 'off')
+  } else if (state.thread && box.getAttribute('aria-live') === 'off') {
+    const filled = shownFor
+    setTimeout(() => { if (shownFor === filled && state.thread) box.setAttribute('aria-live', 'polite') }, 300)
   }
   const t = state.thread
   if (!state.sel && state.sessionDraft) { placeholder(box, draftHero()); return }

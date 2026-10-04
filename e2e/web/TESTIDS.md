@@ -36,7 +36,8 @@ On a page at the board: `approvals-slot` (always present, hidden when nobody
 waits), `approvals` (the request banner), `approval-<deviceId>` (one request),
 and inside it `approval-person`, `approval-device`, `approval-source`,
 `approval-via`, `approval-time`, `approval-ua`, `approval-approve`,
-`approval-reject`.
+`approval-reject`; `approvals-live` (screen-reader line that says a new
+request once).
 
 ## Rail
 
