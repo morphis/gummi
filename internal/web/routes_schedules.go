@@ -64,7 +64,7 @@ func (s *Server) handleSchedules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req webapi.ScheduleRequest
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, bodyError(err, "bad request body: "+err.Error()))
 		return
 	}
 	sc, err := s.opt.Board.CreateSchedule(r.Context(), req)
@@ -80,7 +80,7 @@ func (s *Server) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req webapi.ScheduleRequest
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, bodyError(err, "bad request body: "+err.Error()))
 		return
 	}
 	sc, err := s.opt.Board.UpdateSchedule(r.Context(), r.PathValue("id"), req)

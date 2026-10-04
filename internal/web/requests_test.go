@@ -27,6 +27,16 @@ func TestRequestsAreCheckedBeforeTheBoardSeesThem(t *testing.T) {
 		{"bugs, negative limit", http.MethodGet, "/api/bugs?limit=-1", nil, "limit is a number"},
 		{"import, negative limit", http.MethodPost, "/api/bugs", webapi.BugsRequest{Limit: -1}, "limit is a number"},
 		{"resume, wrong shape", http.MethodPost, "/api/board/resume", map[string]any{"cards": "FD-001"}, "expected"},
+		// a budget is whole credits: a fraction, or a number past an int,
+		// is the person's typing and is answered in the field's words
+		{"new card, fractional budget", http.MethodPost, "/api/cards", map[string]any{"kind": "feature", "title": "x", "envelope": 2.5}, "Budget must be a whole, non-negative number of credits"},
+		{"new card, huge budget", http.MethodPost, "/api/cards", map[string]any{"kind": "feature", "title": "x", "envelope": 1e20}, "Budget must be a whole, non-negative number of credits"},
+		{"budget action, fractional", http.MethodPost, "/api/cards/FD-001/actions/envelope", map[string]any{"number": 1.5}, "Budget must be a whole, non-negative number of credits"},
+		{"goal, fractional budget", http.MethodPost, "/api/goals", map[string]any{"description": "x", "envelope": 1.5}, "Budget must be a whole, non-negative number of credits"},
+		{"goal action, fractional budget", http.MethodPost, "/api/goals/GL-001/actions/budget", map[string]any{"envelope": 1.5}, "Budget must be a whole, non-negative number of credits"},
+		// refused before the pass runs, not at approve after the review
+		{"ingest, negative envelope", http.MethodPost, "/api/ingest", map[string]any{"markdown": "# x\n\n## one\n", "envelope": -50}, "whole, non-negative number of credits"},
+		{"ingest, fractional envelope", http.MethodPost, "/api/ingest", map[string]any{"markdown": "# x\n\n## one\n", "envelope": 1.5}, "Budget must be a whole"},
 	} {
 		var e webapi.Error
 		if got := b.call(c.method, c.path, c.body, &e); got != http.StatusBadRequest {
@@ -82,7 +92,7 @@ func (b *boardHarness) upload(fields map[string]string, file, content string) (i
 func TestIngestAcceptsAnUploadedFile(t *testing.T) {
 	b := newBoardHarness(t)
 	if got, e := b.upload(map[string]string{"envelope": "many"}, "", ""); got != http.StatusBadRequest ||
-		!strings.Contains(e.Error, "envelope is a number of credits") {
+		!strings.Contains(e.Error, "envelope per card must be a whole, non-negative number") {
 		t.Fatalf("a non-numeric envelope = %d %q", got, e.Error)
 	}
 	if got, _ := b.upload(map[string]string{"envelope": "-5"}, "", ""); got != http.StatusBadRequest {

@@ -28,7 +28,7 @@ func (s *Server) handleForm(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateCard(w http.ResponseWriter, r *http.Request) {
 	var body webapi.CreateCardRequest
 	if err := readJSON(w, r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "expected the new-card form as JSON")
+		writeError(w, http.StatusBadRequest, bodyError(err, "expected the new-card form as JSON"))
 		return
 	}
 	c, err := s.opt.Board.CreateCard(r.Context(), body, person(r))

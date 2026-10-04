@@ -122,3 +122,20 @@ test('merge, one-liner, undrop and discard', async ({ pairedPage: page, api }) =
   const run = await api('GET', '/api/ingest');
   expect(run.json.state).toBe('discarded');
 });
+
+// A per-card envelope that minting would refuse is refused before the
+// pass runs — on the page, and by the server for a client that skips it —
+// not at approve, after the review's edits.
+test('a negative envelope is refused before anything decomposes', async ({ pairedPage: page, api }) => {
+  await openIngest(page);
+  await page.getByTestId('ingest-source-paste').click();
+  await page.getByTestId('ingest-markdown').fill(DOC);
+  await page.getByTestId('ingest-envelope').fill('-50');
+  await page.getByTestId('ingest-start').click();
+  await expect(page.getByTestId('toast').filter({ hasText: 'whole, non-negative number of credits' })).toHaveCount(1);
+  await expect(page.getByTestId('ingest-form')).toBeVisible();
+  const refused = await api('POST', '/api/ingest', { markdown: DOC, envelope: -50 });
+  expect(refused.status).toBe(400);
+  const none = await api('GET', '/api/ingest');
+  expect(none.json?.state ?? 'none').not.toBe('running');
+});

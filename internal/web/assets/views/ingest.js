@@ -125,7 +125,12 @@ registerView('ingest', {
       const profiles = v.choices?.profiles || []
       if (draft.profile || profiles[0]) req.profile = draft.profile || profiles[0]
       if (draft.repo) req.repo = draft.repo
-      if (String(draft.envelope).trim() !== '') req.envelope = Number(draft.envelope)
+      if (String(draft.envelope).trim() !== '') {
+        // refused here, not at approve after the review's edits
+        const n = Number(draft.envelope)
+        if (!Number.isSafeInteger(n) || n < 0) return ctx.toast('The envelope per card must be a whole, non-negative number of credits', { err: true })
+        req.envelope = n
+      }
       btn.disabled = true
       try {
         v.run = await ctx.api.post('/api/ingest', req)

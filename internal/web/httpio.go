@@ -52,6 +52,32 @@ func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) e
 	return nil
 }
 
+// bodyError is what a 400 for an undecodable body says: fallback, unless
+// the body is JSON whose only fault is a number that is not a whole one (a
+// budget of 1.5, or 1e20). That is a person's typing, not a page and a
+// server that disagree, so it is answered in the words of the field.
+func bodyError(err error, fallback string) string {
+	var te *json.UnmarshalTypeError
+	if !errors.As(err, &te) || !strings.HasPrefix(te.Value, "number") {
+		return fallback
+	}
+	field := te.Field
+	if i := strings.LastIndexByte(field, '.'); i >= 0 {
+		field = field[i+1:]
+	}
+	switch field {
+	case "envelope", "number":
+		return "Budget must be a whole, non-negative number of credits"
+	case "runs":
+		return "Runs must be a whole, non-negative number"
+	case "minutes":
+		return "Minutes must be a whole, non-negative number"
+	case "":
+		return fallback
+	}
+	return field + " must be a whole number"
+}
+
 // notYet answers a route of the contract nobody has built yet.
 func notYet(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotImplemented, "not built yet: "+r.Method+" "+r.URL.Path)

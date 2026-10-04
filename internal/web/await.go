@@ -81,7 +81,7 @@ func readBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		return true
 	}
 	if err := readJSON(w, r, v); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, bodyError(err, "bad request body: "+err.Error()))
 		return false
 	}
 	return true

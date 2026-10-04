@@ -41,7 +41,7 @@ func (s *Server) handleStartIngest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if err := readIngestJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, bodyError(err, "bad request body: "+err.Error()))
 		return
 	}
 	run, err := s.opt.Board.StartIngest(r.Context(), req)
@@ -78,7 +78,7 @@ func readIngestUpload(w http.ResponseWriter, r *http.Request, req *webapi.Ingest
 	if v := strings.TrimSpace(r.FormValue("envelope")); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			writeError(w, http.StatusBadRequest, "envelope is a number of credits")
+			writeError(w, http.StatusBadRequest, "the envelope per card must be a whole, non-negative number of credits (0 is uncapped)")
 			return false
 		}
 		req.Envelope = &n

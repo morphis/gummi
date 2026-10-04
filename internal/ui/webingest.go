@@ -199,6 +199,12 @@ func (b *Bridge) StartIngest(ctx context.Context, req webapi.IngestRequest) (web
 		}
 		envelope = m.envelope
 		if req.Envelope != nil {
+			// refused before the pass runs: minting would refuse it only at
+			// approve, after the review's edits
+			if *req.Envelope < 0 {
+				perr = webErr(WebBadRequest, "the envelope per card must be a whole, non-negative number of credits (0 is uncapped)")
+				return nil
+			}
 			envelope = *req.Envelope
 		}
 		return nil

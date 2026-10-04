@@ -49,7 +49,7 @@ func (s *Server) handleGoal(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 	var req webapi.GoalCreateRequest
 	if err := readJSON(w, r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		writeError(w, http.StatusBadRequest, bodyError(err, "bad request body: "+err.Error()))
 		return
 	}
 	out, err := s.opt.Board.CreateGoal(r.Context(), req)

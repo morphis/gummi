@@ -136,7 +136,7 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	var body webapi.ActionRequest
 	if r.ContentLength != 0 {
 		if err := readJSON(w, r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "expected the action's input as JSON")
+			writeError(w, http.StatusBadRequest, bodyError(err, "expected the action's input as JSON"))
 			return
 		}
 	}
