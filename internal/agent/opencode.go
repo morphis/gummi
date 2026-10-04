@@ -264,6 +264,13 @@ type opencodeSession struct {
 	upDone    chan struct{}
 	turn      *ocTurn
 	partLen   map[string]int // per text-part emitted length, for deltas
+	// partKind names each open text or reasoning part ("text" |
+	// "reasoning") by id, so a message.part.delta — which carries only the
+	// part id — knows what it streams. Dropped when the part finishes.
+	partKind map[string]string
+	// announced holds the tool calls announced while running, so their
+	// finished part reports only the outcome.
+	announced map[string]bool
 	primed    bool           // system hints injected on the first turn
 	// permOwner remembers, per permission request id, the server session
 	// that raised it. It is usually this session's own, but a task tool's
@@ -977,6 +984,9 @@ func (s *opencodeSession) dispatch(data []byte) {
 	switch ev.Type {
 	case "message.part.updated":
 		s.relayPart(ev.Properties.Part)
+	case "message.part.delta":
+		pr := ev.Properties
+		s.relayDelta(pr.SessionID, pr.PartID, pr.Field, pr.Delta)
 	case "session.error":
 		if ev.Properties.Error == nil || ev.Properties.SessionID != s.sessionIDValue() {
 			return // another session's error, or an unshaped one
@@ -1052,8 +1062,11 @@ func (s *opencodeSession) dispatch(data []byte) {
 // relayPart maps one message-part event through the CLI-line grammar when
 // the part is one the CLI would have printed, and relays the result. A
 // part from another session on this server (a task child's) is not ours
-// to surface; a part that is still streaming (no end time yet) is not
-// final, and the CLI printed text and reasoning only once finished.
+// to surface. A text or reasoning part that is still open (no end time
+// yet) only announces its kind: its text streams as message.part.delta
+// events (relayDelta), and the finished part relays whatever the deltas
+// did not. A tool part is announced when it starts running and resolved
+// when it completes or errors.
 func (s *opencodeSession) relayPart(p ocPart) {
 	if p.SessionID == "" || p.SessionID != s.sessionIDValue() {
 		return
@@ -1064,21 +1077,29 @@ func (s *opencodeSession) relayPart(p ocPart) {
 		kind = "step_start"
 	case "step-finish":
 		kind = "step_finish"
-	case "text":
+	case "text", "reasoning":
 		if p.Time.End == 0 {
+			s.mu.Lock()
+			if s.partKind == nil {
+				s.partKind = map[string]string{}
+			}
+			s.partKind[p.ID] = p.Type
+			s.mu.Unlock()
 			return
 		}
-		kind = "text"
-	case "reasoning":
-		if p.Time.End == 0 {
-			return
-		}
-		kind = "reasoning"
+		s.mu.Lock()
+		delete(s.partKind, p.ID)
+		s.mu.Unlock()
+		kind = p.Type
 	case "tool":
-		if p.State.Status != "completed" && p.State.Status != "error" {
-			return
+		switch p.State.Status {
+		case "running":
+			kind = "tool_running"
+		case "completed", "error":
+			kind = "tool_use"
+		default:
+			return // pending: the arguments are not in yet
 		}
-		kind = "tool_use"
 	default:
 		return
 	}
@@ -1089,15 +1110,53 @@ func (s *opencodeSession) relayPart(p ocPart) {
 	if finishing {
 		return
 	}
-	// Mapped events emit unconditionally once the dispatch began inside
-	// the turn: an event that arrived before the turn's end belongs to it,
-	// and one the end raced past still reaches the caller as its own
-	// delta rather than vanishing with the turn's final flush.
-	evs := s.mapOcEvent(&ocEvent{Type: kind, SessionID: p.SessionID, Part: p}, &t.msg)
+	s.relayEvents(t, s.mapOcEvent(&ocEvent{Type: kind, SessionID: p.SessionID, Part: p}, &t.msg))
+}
+
+// relayDelta streams one message.part.delta into the turn: a slice of an
+// open text or reasoning part's text. The part's relayed length grows by
+// it, so the finished part's own event relays only what no delta carried.
+func (s *opencodeSession) relayDelta(sessionID, partID, field, delta string) {
+	if field != "text" || delta == "" || sessionID == "" || sessionID != s.sessionIDValue() {
+		return
+	}
+	s.mu.Lock()
+	kind := s.partKind[partID] // empty for a part never announced open (the prompt's own)
+	t := s.turn
+	finishing := t == nil || t.finishing
+	if kind != "" && !finishing {
+		s.partLen[partID] += len(delta)
+	}
+	s.mu.Unlock()
+	if kind == "" || finishing {
+		return
+	}
+	s.relayEvents(t, textEvents(kind, delta, &t.msg))
+}
+
+// relayEvents relays one mapping's events inside turn t. They emit
+// unconditionally once the dispatch began inside the turn: an event that
+// arrived before the turn's end belongs to it, and one the end raced past
+// still reaches the caller as its own delta rather than vanishing with
+// the turn's final flush.
+func (s *opencodeSession) relayEvents(t *ocTurn, evs []Event) {
 	t.msg.mark(len(evs) > 0)
 	for _, ev := range evs {
 		s.emit(ev)
 	}
+}
+
+// textEvents is the event one slice of streamed text or reasoning maps
+// to; text also accumulates into msg for the turn's final message.
+func textEvents(kind, delta string, msg ocMsgText) []Event {
+	if delta == "" {
+		return nil
+	}
+	if kind == "reasoning" {
+		return []Event{{Kind: EventReasoningDelta, Text: delta}}
+	}
+	_, _ = msg.WriteString(delta)
+	return []Event{{Kind: EventTextDelta, Text: delta}}
 }
 
 // ocPart is one message part, as the event bus and the CLI's JSON lines
@@ -1155,6 +1214,10 @@ type ocBusEvent struct {
 		Patterns   []string `json:"patterns"`
 		ID         string   `json:"id"`
 		Part       ocPart   `json:"part"`
+		// message.part.delta: a slice of an open part's field
+		PartID string `json:"partID"`
+		Field  string `json:"field"`
+		Delta  string `json:"delta"`
 		Error      *struct {
 			Name string `json:"name"`
 			Data struct {
@@ -1188,58 +1251,25 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 // Events, accumulating assistant text into msg for a final EventMessage.
 func (s *opencodeSession) mapOcEvent(e *ocEvent, msg ocMsgText) []Event {
 	switch e.Type {
-	case "text":
-		delta := s.partDelta(e.Part.ID, e.Part.Text)
-		if delta == "" {
+	case "text", "reasoning":
+		return textEvents(e.Type, s.partDelta(e.Part.ID, e.Part.Text), msg)
+	case "tool_running":
+		// the call has its arguments and is running: announce it now, so a
+		// long command shows as activity while it runs, not only once it
+		// has finished. opencode repeats the running state as the call's
+		// metadata moves; the call is announced once.
+		if e.Part.Tool == "" || e.Part.CallID == "" || !s.announceCall(e.Part.CallID) {
 			return nil
 		}
-		_, _ = msg.WriteString(delta)
-		return []Event{{Kind: EventTextDelta, Text: delta}}
-	case "reasoning":
-		if delta := s.partDelta(e.Part.ID, e.Part.Text); delta != "" {
-			return []Event{{Kind: EventReasoningDelta, Text: delta}}
-		}
-		return nil
+		return s.toolCallEvents(e, msg)
 	case "tool", "tool_use":
 		if e.Part.Tool == "" {
 			return nil
 		}
-		// Flush the prose accumulated so far as a finalized message BEFORE
-		// the tool line, then reset. Otherwise the whole turn's text (across
-		// every tool call) would be emitted as one final EventMessage and the
-		// engine would write it into the last streamed bubble, duplicating
-		// every pre-tool segment. Each segment now maps to its own bubble.
-		var out []Event
-		if text := strings.TrimSpace(msg.String()); text != "" {
-			out = append(out, Event{Kind: EventMessage, Text: text})
+		if s.calledBefore(e.Part.CallID) {
+			return toolResultEvents(e)
 		}
-		msg.Reset()
-		// the salient argument from the part's input, falling back to
-		// opencode's own rendered title when the args carry nothing.
-		detail := toolDetail(s.workdir, e.Part.State.Input)
-		if detail == "" {
-			detail = collapseDetail(s.workdir, e.Part.State.Title)
-		}
-		out = append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail, CallID: e.Part.CallID})
-		out = append(out, tasksEvent(e.Part.Tool, e.Part.State.Input)...)
-		// opencode reports a tool part once the call has finished, completed
-		// or errored, so its outcome is already on it. It is reported
-		// because a refused call is otherwise invisible: a permission
-		// denial is an "error" part, and a model that retries one is a
-		// stage that loops until something outside it gives up.
-		switch e.Part.State.Status {
-		case "completed":
-			out = append(out, Event{
-				Kind: EventToolResult, Tool: e.Part.Tool, CallID: e.Part.CallID,
-				Result: &ToolResult{OK: true, Output: boundTail(e.Part.State.Output, true)},
-			})
-		case "error":
-			out = append(out, Event{
-				Kind: EventToolResult, Tool: e.Part.Tool, CallID: e.Part.CallID,
-				Result: &ToolResult{OK: false, Output: boundTail(e.Part.State.Error, false)},
-			})
-		}
-		return out
+		return append(s.toolCallEvents(e, msg), toolResultEvents(e)...)
 	case "step_finish":
 		tok := e.Part.Tokens
 		// Usage's convention: InputTokens is fresh input plus cache writes,
@@ -1289,6 +1319,77 @@ func (s *opencodeSession) mapOcEvent(e *ocEvent, msg ocMsgText) []Event {
 	default:
 		return nil // step_start and other lifecycle events aren't surfaced
 	}
+}
+
+// toolCallEvents announces a tool call. The prose accumulated so far is
+// flushed as a finalized message BEFORE the tool line, then reset.
+// Otherwise the whole turn's text (across every tool call) would be
+// emitted as one final EventMessage and the engine would write it into
+// the last streamed bubble, duplicating every pre-tool segment. Each
+// segment maps to its own bubble.
+func (s *opencodeSession) toolCallEvents(e *ocEvent, msg ocMsgText) []Event {
+	var out []Event
+	if text := strings.TrimSpace(msg.String()); text != "" {
+		out = append(out, Event{Kind: EventMessage, Text: text})
+	}
+	msg.Reset()
+	// the salient argument from the part's input, falling back to
+	// opencode's own rendered title when the args carry nothing.
+	detail := toolDetail(s.workdir, e.Part.State.Input)
+	if detail == "" {
+		detail = collapseDetail(s.workdir, e.Part.State.Title)
+	}
+	out = append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail, CallID: e.Part.CallID})
+	return append(out, tasksEvent(e.Part.Tool, e.Part.State.Input)...)
+}
+
+// toolResultEvents is a finished tool part's outcome. It is reported
+// because a refused call is otherwise invisible: a permission denial is
+// an "error" part, and a model that retries one is a stage that loops
+// until something outside it gives up.
+func toolResultEvents(e *ocEvent) []Event {
+	switch e.Part.State.Status {
+	case "completed":
+		return []Event{{
+			Kind: EventToolResult, Tool: e.Part.Tool, CallID: e.Part.CallID,
+			Result: &ToolResult{OK: true, Output: boundTail(e.Part.State.Output, true)},
+		}}
+	case "error":
+		return []Event{{
+			Kind: EventToolResult, Tool: e.Part.Tool, CallID: e.Part.CallID,
+			Result: &ToolResult{OK: false, Output: boundTail(e.Part.State.Error, false)},
+		}}
+	}
+	return nil
+}
+
+// announceCall records that callID's tool call was announced while
+// running, reporting false when it already was.
+func (s *opencodeSession) announceCall(callID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.announced[callID] {
+		return false
+	}
+	if s.announced == nil {
+		s.announced = map[string]bool{}
+	}
+	s.announced[callID] = true
+	return true
+}
+
+// calledBefore reports, once, whether callID's tool call was already
+// announced while running — its finished part then carries only the
+// outcome.
+func (s *opencodeSession) calledBefore(callID string) bool {
+	if callID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	was := s.announced[callID]
+	delete(s.announced, callID)
+	return was
 }
 
 // partDelta returns only the new suffix of a streamed part, robust

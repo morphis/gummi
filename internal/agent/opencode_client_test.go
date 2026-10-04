@@ -837,6 +837,109 @@ func TestOpencodeServerPermissionFromChildSession(t *testing.T) {
 	waitTurnEnd(t, sess)
 }
 
+// TestOpencodeServerStreamsPartDeltas: opencode 1.2.16 streams a part's
+// text as message.part.delta events between the part's opening and its
+// finish, so text and reasoning reach the caller as they are written. The
+// finished part then relays nothing the deltas already did, and the
+// turn's message is the whole text once. The shapes are 1.2.16's.
+func TestOpencodeServerStreamsPartDeltas(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	sid := f.lastSession()
+	open := func(id, typ string) string {
+		return fmt.Sprintf(`{"type":"message.part.updated","properties":{"sessionID":%q,"part":{"id":%q,"sessionID":%q,"messageID":"msg_x","type":%q,"text":"","time":{"start":1}}}}`, sid, id, sid, typ)
+	}
+	delta := func(id, d string) string {
+		return fmt.Sprintf(`{"type":"message.part.delta","properties":{"sessionID":%q,"messageID":"msg_x","partID":%q,"field":"text","delta":%q}}`, sid, id, d)
+	}
+	f.push(open("r1", "reasoning"))
+	f.push(delta("r1", "Look at "))
+	f.push(delta("r1", "main.go"))
+	f.push(f.partEvent("reasoning", "r1", "Look at main.go"))
+	f.push(open("p1", "text"))
+	f.push(delta("p1", "Ah"))
+	f.push(delta("p1", "oy"))
+	// a delta for a part never opened as text (the prompt's own) is not ours
+	f.push(delta("prompt", "go"))
+	f.push(f.partEvent("text", "p1", "Ahoy!"))
+	f.releaseTurn()
+	var reasoning, text []string
+	var final string
+	for _, e := range waitTurnEnd(t, sess) {
+		switch e.Kind {
+		case EventReasoningDelta:
+			reasoning = append(reasoning, e.Text)
+		case EventTextDelta:
+			text = append(text, e.Text)
+		case EventMessage:
+			final = e.Text
+		}
+	}
+	if strings.Join(reasoning, "|") != "Look at |main.go" {
+		t.Errorf("reasoning deltas = %q, want streamed as written and not repeated at the finish", reasoning)
+	}
+	if strings.Join(text, "|") != "Ah|oy|!" {
+		t.Errorf("text deltas = %q, want the two deltas and then only the finish's remainder", text)
+	}
+	if final != "Ahoy!" {
+		t.Errorf("final message = %q, want the whole text once", final)
+	}
+}
+
+// TestOpencodeServerAnnouncesARunningToolCall: a tool call shows as
+// activity once it is running — opencode repeats the running state as
+// the call's metadata moves, and it is announced once — and its finished
+// part then reports only the outcome.
+func TestOpencodeServerAnnouncesARunningToolCall(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	f.push(f.partEvent("tool", "t1", `{"status":"pending","input":{}}`))
+	running := f.partEvent("tool", "t1", `{"status":"running","input":{"command":"make test"}}`)
+	f.push(running)
+	var call Event
+	deadline := time.After(5 * time.Second)
+	for call.Kind != EventToolCall {
+		select {
+		case e := <-sess.Events():
+			call = e
+		case <-deadline:
+			t.Fatal("the running call was not announced before it finished")
+		}
+	}
+	if call.Tool != "bash" || call.Detail != "make test" || call.CallID != "c1" {
+		t.Errorf("tool call = %+v, want bash/make test/c1", call)
+	}
+	f.push(running)
+	f.push(f.partEvent("tool", "t1", `{"status":"completed","input":{"command":"make test"},"output":"PASS"}`))
+	f.push(f.partEvent("text", "p", "tests pass"))
+	f.releaseTurn()
+	var calls, results int
+	for _, e := range waitTurnEnd(t, sess) {
+		switch e.Kind {
+		case EventToolCall:
+			calls++
+		case EventToolResult:
+			results++
+			if e.CallID != "c1" || e.Result == nil || !e.Result.OK || e.Result.Output != "PASS" {
+				t.Errorf("result = %+v, want c1 passing with its output", e)
+			}
+		}
+	}
+	if calls != 0 || results != 1 {
+		t.Errorf("after the announcement: %d calls, %d results; want 0 and 1", calls, results)
+	}
+}
+
 // TestOpencodeServerRejectsTheQuestionTool: a question opencode's own
 // question tool raises is refused at once, so the turn carries on instead
 // of holding on an answer gummi never gives.
