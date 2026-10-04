@@ -1606,6 +1606,23 @@ func (e *Engine) trackAgentPID(id domain.FeatureID, sess agent.Session) {
 	}
 }
 
+// scratchFilesDirFor returns the card's scratch-files directory, created
+// best-effort — the shared derivation every session kind that stamps one
+// uses (stage sessions, and the consult and freeform conversations a
+// backend with a redirected-home requirement anchors there). Empty when
+// the workspace has no root or creation fails: callers treat "" as "no
+// anchor", never as an error.
+func (e *Engine) scratchFilesDirFor(id domain.FeatureID) string {
+	dir := e.cfg.Workspace.ScratchFilesDir(id)
+	if dir == "" || e.cfg.Workspace.Root == "" {
+		return ""
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	return dir
+}
+
 // newAgentSession builds an agent session for a feature's stage, with
 // the backend/model chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
@@ -1663,12 +1680,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// A real, per-card place for throwaway files, named in the boundary
 	// hint. Best-effort: a directory that cannot be created leaves the
 	// hint saying `mktemp -d`, as it always did.
-	scratch := ""
-	if dir := e.cfg.Workspace.ScratchFilesDir(f.ID); dir != "" && e.cfg.Workspace.Root != "" {
-		if err := os.MkdirAll(dir, 0o700); err == nil {
-			scratch = dir
-		}
-	}
+	scratch := e.scratchFilesDirFor(f.ID)
 	hints := stageHints(f, specPath, scratch, flavor)
 	if nb := e.notebookHint(f); nb != "" {
 		// what the goal knows that this card does not own: a line per

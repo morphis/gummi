@@ -716,8 +716,16 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 			}
 		}
 	}
-	d.out.emit(cleanedEvent{Event: "cleaned", ID: string(id), Branch: f.BranchName(),
-		Cards: idStrings(swept.Took), Kept: idStrings(swept.Left), BranchKept: keptBranch})
+	// The card's scratch-files dir goes with the card too — a backend
+	// that keeps a per-card config home (antigravity) derives it from
+	// here, and its conversations are no use once the card is gone.
+	if err := os.RemoveAll(d.ws.ScratchFilesDir(id)); err != nil {
+		return d.fail(ctx, string(id), fmt.Errorf("removing scratch files %s: %w", d.ws.ScratchFilesDir(id), err))
+	}
+	d.out.emit(cleanedEvent{
+		Event: "cleaned", ID: string(id), Branch: f.BranchName(),
+		Cards: idStrings(swept.Took), Kept: idStrings(swept.Left), BranchKept: keptBranch,
+	})
 	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 
@@ -1412,8 +1420,10 @@ func (d *Driver) judgeCritique(ctx context.Context, f domain.Feature, snap engin
 		// is a terminal the caller reports.
 		if names := d.eng.UndraftedBlocking(f); len(names) > 0 {
 			d.recordBlocked(f, fmt.Sprintf("undrafted %s blocks %s.", strings.Join(names, ", "), f.Stage))
-			d.out.emit(blockedEvent{Event: "blocked", ID: string(f.ID), Gate: string(f.Stage),
-				Undrafted: names, Resume: string(f.ID)})
+			d.out.emit(blockedEvent{
+				Event: "blocked", ID: string(f.ID), Gate: string(f.Stage),
+				Undrafted: names, Resume: string(f.ID),
+			})
 			return Outcome{Status: StatusBlocked, ID: string(f.ID)}, nil
 		}
 		if err := rounds.Reset(ctx, d.roundStore, f.ID, kind); err != nil {

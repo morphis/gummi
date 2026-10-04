@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morphis/gummi/internal/agentcli"
 )
 
 func TestLoadProfilesMissingIsEmpty(t *testing.T) {
@@ -80,6 +82,30 @@ func TestLoadProfilesAcceptsCodex(t *testing.T) {
 	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: codex, model: gpt-5 }\n")
 	if got := p.Profiles["x"]["implementer"].Backend; got != "codex" {
 		t.Fatalf("backend = %q", got)
+	}
+}
+
+// TestLoadProfilesAcceptsAntigravity: the antigravity backend is a valid
+// profile target — the exact failure a `backend: antigravity` role once
+// hit (rejected at parse, so no profile could route any role at it).
+func TestLoadProfilesAcceptsAntigravity(t *testing.T) {
+	p := writeProfiles(t, "profiles:\n  x:\n    implementer: { backend: antigravity, model: gemini-3.1-pro-high }\n")
+	if got := p.Profiles["x"]["implementer"].Backend; got != "antigravity" {
+		t.Fatalf("backend = %q", got)
+	}
+}
+
+// TestKnownBackendsCoverThePicker is the drift guard for the backend
+// validation map: every backend the picker/detect layer names must be one
+// a profile role may route at. A backend the adapters serve but
+// knownBackends rejects is unselectable through profiles.yaml — the
+// primary way roles choose backends — while doctor and the board already
+// say it exists.
+func TestKnownBackendsCoverThePicker(t *testing.T) {
+	for _, cli := range agentcli.Known() {
+		if _, ok := knownBackends[cli.Name]; !ok {
+			t.Errorf("backend %q is known to the picker but rejected by profiles.yaml validation", cli.Name)
+		}
 	}
 }
 

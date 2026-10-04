@@ -362,6 +362,11 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
 		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
+		// The card's scratch-files anchor: a backend that anchors its
+		// config in a per-card home (antigravity) derives it from here,
+		// so the session's home — and the conversations it keeps there —
+		// survive a restart, which ResumeID below depends on.
+		ScratchDir: e.scratchFilesDirFor(ff.id),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives

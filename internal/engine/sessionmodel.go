@@ -27,7 +27,7 @@ import (
 // the adapters startAdapter in cmd/gummi knows how to build; whether one is
 // installed on this host is a separate question (agentcli.Detect) that the
 // board asks when it offers the list.
-var SessionBackends = []string{"claude", "codex", "copilot", "opencode", "pi", "headless"}
+var SessionBackends = []string{"claude", "codex", "copilot", "opencode", "pi", "antigravity", "headless"}
 
 // ErrSessionBusy refuses a model switch while the session is mid-turn:
 // the turn in flight belongs to the model that started it, and stopping
@@ -313,6 +313,10 @@ func SessionModelRule(backend string) (needsModel bool, hint, pattern string) {
 			alts = append(alts, regexp.QuoteMeta(p))
 		}
 		return false, "versions with dashes, e.g. claude-haiku-4-5; empty is the CLI's default", `^(?!(` + strings.Join(alts, "|") + `))(?!\S*\d\.\d)`
+	case "antigravity":
+		// agy's ids carry the effort dial (gemini-3.1-pro-high) and pass
+		// through verbatim to --model; empty runs the CLI's own default.
+		return false, "ids like gemini-3.1-pro-high; empty is agy's default", ""
 	}
 	return false, "", ""
 }
@@ -382,9 +386,10 @@ func (e *Engine) SessionModelCatalog(ctx context.Context, backend string) ([]str
 }
 
 // probeModelCatalog asks backend itself, un-cached: the adapter it holds
-// when the adapter can enumerate, else the one probe that needs no
-// adapter (opencode's CLI answers without a started backend — no
-// authentication involved, just its own catalog).
+// when the adapter can enumerate, else the probes that need no adapter
+// (opencode's CLI answers without a started backend — no authentication
+// involved, just its own catalog; antigravity's `agy models` likewise,
+// under its own seeded temp home).
 func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]string, bool) {
 	if a := e.knownAgent(backend); a != nil {
 		cl, ok := a.(agent.ModelCataloger)
@@ -400,6 +405,14 @@ func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]strin
 	if backend == "opencode" {
 		bin, _ := agentcli.Binary("opencode")
 		ids, err := agent.OpencodeModelCatalog(ctx, bin)
+		if err != nil || len(ids) == 0 {
+			return nil, false
+		}
+		return ids, true
+	}
+	if backend == "antigravity" {
+		bin, _ := agentcli.Binary("antigravity")
+		ids, err := agent.AntigravityModelCatalog(ctx, bin)
 		if err != nil || len(ids) == 0 {
 			return nil, false
 		}

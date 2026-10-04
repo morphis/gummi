@@ -109,6 +109,34 @@ func TestDefaultBackendPi(t *testing.T) {
 	}
 }
 
+func TestDefaultBackendAntigravity(t *testing.T) {
+	t.Setenv("GUMMI_AGENT", "antigravity")
+	t.Setenv("GUMMI_AGENT_CMD", "")
+	if got := defaultBackendName(); got != "antigravity" {
+		t.Fatalf("default backend = %q", got)
+	}
+}
+
+// TestStartAdapterAntigravity: GUMMI_AGENT=antigravity builds the
+// adapter through the same startAdapter seam the board uses, and the
+// adapter it builds is the antigravity one — a fake agy via
+// GUMMI_ANTIGRAVITY_BIN keeps the case hermetic.
+func TestStartAdapterAntigravity(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "agy")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GUMMI_ANTIGRAVITY_BIN", bin)
+	ag, err := startAdapter("antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ag.Close() })
+	if ag.Name() != "antigravity" {
+		t.Fatalf("startAdapter(antigravity) = %T (%q), want the antigravity adapter", ag, ag.Name())
+	}
+}
+
 // writeFakeAgentBin drops an executable file named name into dir, so
 // agentcli.Detect's exec.LookPath finds it on a fake PATH without
 // needing the real CLI installed in this environment.

@@ -69,6 +69,27 @@ review.
   calls, so ask_user and friends block exactly as on the MCP-native
   backends. RPC mode has no approval gate, so guarded collapses to
   allow-all.
+- **antigravity**: Google's Antigravity CLI (binary `agy`;
+  `GUMMI_ANTIGRAVITY_BIN` overrides it) in its bidirectional stream-json
+  mode: one `agy` child per session, turns framed on stdin, events
+  streamed off stdout. agy has no config-dir flag, so the adapter spawns
+  every child with `HOME` redirected to a per-card directory under the
+  workspace state area — the card's config tree (OAuth token copy,
+  `mcp_config.json`, conversations) lives there and nowhere in the
+  operator's own config; the card home is seeded from the operator's
+  login (re-run `agy` in your real home to refresh it) and removed with
+  the card's cleanup. gummi's tools reach the child through the card
+  home's `mcp_config.json`, and forwarded skills are symlinked into the
+  card home's skill root (`~/.gemini/config/skills` under the card home).
+  Usage is metered as per-turn deltas from agy's cumulative token totals;
+  `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` prices them into credits, or the
+  engine's default token pricing applies. Requires `permissions:
+  allow-all` (agy's print mode has no approval surface, so guarded is
+  refused); read-only research sessions are refused too (no structural
+  write-stripping); a turn cannot be interrupted mid-flight (the stream
+  protocol has no cancel event) — the board's stop control waits for the
+  turn to end; images are not carried. The model id carries the effort
+  dial (`gemini-3.1-pro-high`); an empty model runs agy's own default.
 - **headless**: a generic subprocess adapter for any agent binary speaking
   a small stdio JSON protocol. `GUMMI_AGENT_CMD` is its command line. The
   child inherits gummi's environment and reads its own provider config from
@@ -99,7 +120,7 @@ Scaffolded on first run. Every key is optional.
 | `substrates` | the external environments work is proved on — a test cluster, a device farm — each `{describe, probe, provision, reset, ttl, timeout}`; only `probe` is required. A plan cites one exactly as it cites an env prerequisite (`[env: <name>]`), so a name may not be both. Unlike one, a substrate can be brought up (`provision`) and put back to a known state (`reset`), it expires (`ttl`, a Go duration), and **one job holds it at a time** across every gummi process on the workspace. `timeout` bounds one provision or reset (default 45m, at most 6h). `gummi doctor` reports each one's state and holder. See DESIGN §17.7 |
 | `experiments` | the orchestrated live runs that prove work on a substrate, each `{describe, substrate, inputs, control, deploy, settle, run, collect, timeout}`; `substrate` and `run` are required. A goal's done-when item names one as its means of proof (`experiment: <name>`, optionally `assertions: [ids]`). Every command runs in the workspace root with `GUMMI_EVIDENCE` (a directory to write into — `results.ndjson` there, one `{"id","ok","detail"}` per line, is how a run reports its assertions), `GUMMI_TREE_<REPO>` and `GUMMI_HEAD_<REPO>` for each input (the unnamed default repo is `HOME`), `GUMMI_SUBSTRATE`, `GUMMI_EXPERIMENT`, `GUMMI_RUN`, `GUMMI_PURPOSE` and `GUMMI_ATTEMPT`. Exit 75 from any phase means *this run could not be judged*. `timeout` bounds each phase (default 30m). Operator configuration on purpose: a goal may change the rig it is tested on, and must not thereby change what counts as passing. See DESIGN §17.8 |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
-| `skills.forward` | workspace skills to forward into card sessions, as bare names (resolved against `.claude/skills`, `.agents/skills`, `.github/skills` at the workspace root, in that order) or absolute paths. A card runs in a worktree under `.gummi/worktrees/`, a sibling of the repository, so a skill kept beside `.gummi` is outside every backend's project scope and reaches nothing without this; a skill the repository itself ships is already in the worktree and needs no forwarding. Honored by the `opencode`, `copilot` and `claude` backends (`agent.Capabilities.SkillDirs`); on a backend that cannot load skills from outside the worktree gummi says so on the card's activity feed rather than dropping them silently. gummi's own skill is refused — a card must never drive a second gummi |
+| `skills.forward` | workspace skills to forward into card sessions, as bare names (resolved against `.claude/skills`, `.agents/skills`, `.github/skills` at the workspace root, in that order) or absolute paths. A card runs in a worktree under `.gummi/worktrees/`, a sibling of the repository, so a skill kept beside `.gummi` is outside every backend's project scope and reaches nothing without this; a skill the repository itself ships is already in the worktree and needs no forwarding. Honored by the `opencode`, `copilot`, `claude` and `antigravity` backends (`agent.Capabilities.SkillDirs`); on a backend that cannot load skills from outside the worktree gummi says so on the card's activity feed rather than dropping them silently. gummi's own skill is refused — a card must never drive a second gummi |
 
 ## `.gummi/profiles.yaml`
 
@@ -114,6 +135,11 @@ profiles:
     implementer: { backend: copilot, model: gpt-5 }
     reviewer:    { backend: claude,  model: claude-sonnet-5 }
     scribe:      { backend: headless, model: qwen2.5-coder-32b }
+  gemini: # everything on Antigravity
+    architect:   { backend: antigravity, model: gemini-3.1-pro-high }
+    implementer: { backend: antigravity, model: gemini-3.1-pro-high }
+    reviewer:    { backend: antigravity, model: gemini-3.1-pro-high }
+    scribe:      { backend: antigravity, model: gemini-3.1-pro-low }
 ```
 
 A fifth role, `lead`, runs a goal's judgment (see the README's goals
@@ -237,11 +263,12 @@ re-raised decision that deduped to a no-op raises nothing).
 
 | variable | effect |
 |---|---|
-| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `pi`, `headless` |
+| `GUMMI_AGENT` | default backend: `copilot` (default), `claude`, `codex`, `opencode`, `pi`, `antigravity`, `headless` |
 | `GUMMI_AGENT_CMD` | the headless adapter's command line |
-| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN`, `GUMMI_PI_BIN` | a backend's binary, when it is not the default name on PATH |
+| `GUMMI_CLAUDE_BIN`, `GUMMI_CODEX_BIN`, `GUMMI_OPENCODE_BIN`, `GUMMI_PI_BIN`, `GUMMI_ANTIGRAVITY_BIN` | a backend's binary, when it is not the default name on PATH |
 | `GUMMI_PI_PROVIDER` | the provider pi routes a session to when its model id does not name one |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
+| `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` | token→credit rate for antigravity sessions (agy reports token counts only); 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
 | `GUMMI_ENVELOPE` | default credit envelope for new cards, and a floor under the estimated one. Unset, the board prefills 2000 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |

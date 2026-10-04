@@ -4,18 +4,19 @@ package agent
 // permissions: guarded. Doctor and startup config validation use
 // GuardedSupport to answer "will this backend actually enforce guarded?"
 // without constructing a session. The map mirrors exactly what each
-// adapter's NewSession does when handed PermissionGuarded — claude
-// rejects it outright (TestClaudeCodeRejectsGuarded), while copilot,
-// opencode, pi, and codex accept it. headless is deliberately
-// absent: it wraps an arbitrary operator command that never inspects
-// Permission, so gummi has no way to know whether the wrapped tool honors
-// guarded, and it must never be flagged either way.
+// adapter's NewSession does when handed PermissionGuarded — claude and
+// antigravity reject it outright (TestClaudeCodeRejectsGuarded,
+// TestAntigravityRefusesGuarded), while copilot, opencode, pi, and codex
+// accept it. headless is deliberately absent: it wraps an arbitrary operator
+// command that never inspects Permission, so gummi has no way to know whether
+// the wrapped tool honors guarded, and it must never be flagged either way.
 var guardedBase = map[string]bool{
-	"claude":   false,
-	"copilot":  true,
-	"opencode": true,
-	"pi":       true,
-	"codex":    true,
+	"claude":      false,
+	"antigravity": false,
+	"copilot":     true,
+	"opencode":    true,
+	"pi":          true,
+	"codex":       true,
 }
 
 // GuardedSupport reports whether the named backend honors permissions:

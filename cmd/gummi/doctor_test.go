@@ -1000,6 +1000,25 @@ func TestProbeModelUnknownOnMissingBackend(t *testing.T) {
 	}
 }
 
+// TestBackendInfoForAntigravity: doctor knows the backend's binary
+// (honoring GUMMI_ANTIGRAVITY_BIN) and names the re-login path — the
+// hint an operator with a dead token is shown.
+func TestBackendInfoForAntigravity(t *testing.T) {
+	clearDoctorEnv(t)
+	bi := backendInfoFor("antigravity")
+	if bi.name != "antigravity" || bi.bin != "agy" {
+		t.Fatalf("backendInfoFor(antigravity) = %+v, want bin agy", bi)
+	}
+	if !strings.Contains(bi.login, "agy") {
+		t.Errorf("login hint = %q, want it to name the agy re-login path", bi.login)
+	}
+	t.Setenv("GUMMI_ANTIGRAVITY_BIN", "/opt/agy")
+	bi = backendInfoFor("antigravity")
+	if bi.bin != "/opt/agy" {
+		t.Errorf("bin with override = %q, want the override", bi.bin)
+	}
+}
+
 // A fresh TTL cache entry is reused verbatim: the live probe is never
 // called and the cached servable result is reported.
 func TestProbeCacheFreshHit(t *testing.T) {

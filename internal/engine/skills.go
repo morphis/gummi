@@ -154,7 +154,7 @@ func (e *Engine) warnSkillBackendOnce(backend string) {
 		return
 	}
 	e.warn(fmt.Sprintf("skills.forward is configured, but the %s backend cannot load skills from outside the worktree; "+
-		"those skills will not reach its sessions (point the role at claude, opencode or copilot, or state the "+
+		"those skills will not reach its sessions (point the role at claude, opencode, copilot or antigravity, or state the "+
 		"rules in .gummi/environment.md, which every backend receives)", backend))
 }
 

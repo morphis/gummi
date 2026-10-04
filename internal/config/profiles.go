@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,12 +14,24 @@ import (
 // buildAgents — anything else in a profile is a typo, so parsing fails
 // fast rather than silently falling through to the default backend.
 var knownBackends = map[string]struct{}{
-	"copilot":  {},
-	"claude":   {},
-	"opencode": {},
-	"codex":    {},
-	"headless": {},
-	"pi":       {},
+	"copilot":     {},
+	"claude":      {},
+	"opencode":    {},
+	"codex":       {},
+	"antigravity": {},
+	"headless":    {},
+	"pi":          {},
+}
+
+// knownBackendNames lists knownBackends sorted, so the rejection message
+// always enumerates exactly the set it validates against.
+func knownBackendNames() []string {
+	names := make([]string, 0, len(knownBackends))
+	for n := range knownBackends {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // RoleConfig maps one role to a concrete backend+model. Backend is optional;
@@ -165,8 +178,8 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 			}
 			if rc.Backend != "" {
 				if _, ok := knownBackends[rc.Backend]; !ok {
-					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of copilot|claude|codex|opencode|headless",
-						path, name, role, rc.Backend)
+					return Profiles{}, fmt.Errorf("%s: profile %q role %q backend %q is not one of %s",
+						path, name, role, rc.Backend, strings.Join(knownBackendNames(), "|"))
 				}
 			}
 			if rc.OutputTokenMax < 0 {
@@ -183,7 +196,7 @@ const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. 
 # so the same process can run cheap or premium, or mix providers. See
 # docs/DESIGN.md §5.
 #
-# backend: (optional) copilot | claude | codex | opencode | pi | headless. Omit to use
+# backend: (optional) copilot | claude | codex | opencode | pi | antigravity | headless. Omit to use
 # the engine's default (whatever GUMMI_AGENT selects; copilot otherwise).
 # The backend owns provider config natively — Claude Code login, Codex login, opencode
 # auth, pi auth (GUMMI_PI_PROVIDER for model ids that don't name a provider), GUMMI_AGENT_CMD

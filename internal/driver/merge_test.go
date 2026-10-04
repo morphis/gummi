@@ -259,6 +259,35 @@ func TestCleanRemovesTranscripts(t *testing.T) {
 	}
 }
 
+// Clean removes the card's scratch-files dir — where a backend that keeps
+// a per-card config home (antigravity) derives it — but leaves a
+// co-resident card's scratch files alone.
+func TestCleanRemovesScratchFiles(t *testing.T) {
+	h, d, id := driveVerified(t)
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	home := filepath.Join(h.ws.ScratchFilesDir(id), "agy-home")
+	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(h.ws.ScratchFilesDir("FD-999"), "agy-home", ".gemini")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := d.Clean(context.Background(), id); err != nil {
+		t.Fatalf("Clean: %v", err)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("cleaned card's card home still present: stat err = %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("co-resident card's scratch files removed: %v", err)
+	}
+}
+
 // Clean refuses a card that has not actually landed — nothing is removed.
 func TestCleanRefusesUnlanded(t *testing.T) {
 	h := newHarness(t, true, nil)

@@ -155,7 +155,7 @@ func quitOnHangup(p *tea.Program) func() {
 // Env config (M1 stand-in for profiles):
 //
 //	GUMMI_MODEL             model id (default "gpt-5")
-//	GUMMI_AGENT             default backend (copilot|claude|codex|opencode|pi|headless)
+//	GUMMI_AGENT             default backend (copilot|claude|codex|opencode|pi|antigravity|headless)
 //	GUMMI_HEADLESS_CREDITS_PER_1K
 //	                        headless adapter's token→credit rate, for a
 //	                        local endpoint (llama.cpp) that the engine
@@ -341,6 +341,8 @@ func defaultBackendName() string {
 		return "headless"
 	case "pi":
 		return "pi"
+	case "antigravity":
+		return "antigravity"
 	}
 	if strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")) != "" {
 		return "headless"
@@ -391,6 +393,8 @@ func startAdapter(name string) (agent.Agent, error) {
 		return agent.NewCopilot(context.Background(), agent.CopilotOptions{LogLevel: "error"})
 	case "pi":
 		return agent.NewPi(os.Getenv("GUMMI_PI_BIN"))
+	case "antigravity":
+		return agent.NewAntigravity(os.Getenv("GUMMI_ANTIGRAVITY_BIN"))
 	}
 	return nil, fmt.Errorf("unknown backend %q", name)
 }

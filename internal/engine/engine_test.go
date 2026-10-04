@@ -653,3 +653,35 @@ func TestNestedArtifactJoinsResolveUnderWorkspace(t *testing.T) {
 		t.Errorf("artifact join %q resolves under the repo root; it must use the workspace root", got)
 	}
 }
+
+// TestConsultAndFreeformSessionsCarryTheCardScratchDir: every long-lived
+// session kind stamps the card's scratch-files dir on SessionOpts — the
+// anchor a backend that derives a per-card config home needs — matching
+// what the stage sessions have always stamped. The one-shot kinds
+// deliberately carry none (they never resume; their fallback is a temp
+// home).
+func TestConsultAndFreeformSessionsCarryTheCardScratchDir(t *testing.T) {
+	ctx := context.Background()
+
+	r := recordingAgent()
+	e := newEngine(t, r)
+	f := feature(3, "scratch anchor", domain.StageImplement)
+	createFeature(t, e.cfg.Store, f)
+	if _, err := e.OpenConsult(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if want := e.cfg.Workspace.ScratchFilesDir(f.ID); r.opts().ScratchDir != want {
+		t.Fatalf("consult ScratchDir = %q, want the card's scratch dir %q", r.opts().ScratchDir, want)
+	}
+
+	r2 := recordingAgent()
+	e2 := newEngine(t, r2)
+	f2 := freeformCard(4, "freeform scratch anchor")
+	createFeature(t, e2.cfg.Store, f2)
+	if _, err := e2.OpenFreeform(ctx, f2); err != nil {
+		t.Fatal(err)
+	}
+	if want := e2.cfg.Workspace.ScratchFilesDir(f2.ID); r2.opts().ScratchDir != want {
+		t.Fatalf("freeform ScratchDir = %q, want the card's scratch dir %q", r2.opts().ScratchDir, want)
+	}
+}

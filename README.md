@@ -528,7 +528,7 @@ rather than just naming a file.
 
 ## Backends and configuration
 
-Stages run on one of six backends. `GUMMI_AGENT` picks the default, and a
+Stages run on one of seven backends. `GUMMI_AGENT` picks the default, and a
 role's `backend:` in `profiles.yaml` overrides it, so one profile can mix
 them.
 
@@ -540,6 +540,11 @@ them.
   mode surfacing each held tool call for approval. The CLI is still what
   `gummi doctor` probes and what auth runs through.
 - **pi**: the pi coding agent, in its RPC mode.
+- **antigravity**: Google's Antigravity CLI (`agy`), in its stream-json
+  mode. Needs `permissions: allow-all`; every card runs agy under a
+  redirected per-card home, so its config — login copy, MCP wiring,
+  conversations — never touches your own. Turns cannot be interrupted
+  mid-flight; a stop waits for the turn to end.
 - **headless**: any binary speaking a small stdio JSON protocol.
 
 Each backend owns its own login and provider config. gummi never copies
@@ -572,6 +577,8 @@ The environment variables you meet first:
 | `GUMMI_ENVELOPE` | default credit envelope for new cards |
 | `GUMMI_THEME` | `dark`, `light`, `neon` |
 | `GUMMI_NOTIFY` | `bell`, `desktop`, `off` |
+| `GUMMI_ANTIGRAVITY_BIN` | the antigravity backend's binary, when `agy` is not on PATH |
+| `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` | token→credit rate for antigravity sessions; 0 uses the engine default |
 
 Every backend's specifics, every config key and the full environment
 table are in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).

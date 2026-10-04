@@ -169,3 +169,35 @@ func TestDeletingACardWhoseRepoIsNoLongerConfigured(t *testing.T) {
 		t.Errorf("%s still has a record", f.ID)
 	}
 }
+
+// TestDeletingACardRemovesItsScratchFiles: a card's scratch-files dir —
+// where a backend that keeps a per-card config home (antigravity) derives
+// it — goes with the card, while a co-resident card's is untouched.
+func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
+	m := repoWorkspace(t)
+	ctx := context.Background()
+	f, err := m.store.GetFeature(ctx, m.rows[0].F.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home := filepath.Join(m.ws.ScratchFilesDir(f.ID), "agy-home")
+	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(m.ws.ScratchFilesDir("FD-999"), "agy-home", ".gemini")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, ok := m.deleteFeature(f.ID)().(noticeMsg)
+	if !ok || msg.isErr {
+		t.Fatalf("delete refused: %#v", msg)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("deleted card's card home still present: stat err = %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("co-resident card's scratch files removed: %v", err)
+	}
+}

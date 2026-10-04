@@ -399,3 +399,35 @@ func TestSessionModelCatalogAsksOpencodeWithoutStartingIt(t *testing.T) {
 		t.Errorf("the probe started a backend to ask it")
 	}
 }
+
+// TestSessionModelCatalogAsksAntigravityWithoutStartingIt: antigravity's
+// `agy models` probe answers through the same no-adapter seam, and an
+// empty model id is a legal antigravity pair (agy's own default) — the
+// pair rules a session's picker must agree with.
+func TestSessionModelCatalogAsksAntigravityWithoutStartingIt(t *testing.T) {
+	e := New(Config{Agents: map[string]agent.Agent{}, Model: "fallback"})
+	t.Cleanup(func() { e.Close() })
+	old := agent.AntigravityModelCatalog
+	t.Cleanup(func() { agent.AntigravityModelCatalog = old })
+	agent.AntigravityModelCatalog = func(context.Context, string) ([]string, error) {
+		return []string{"gemini-3.1-pro-high", "gemini-3.1-pro-low"}, nil
+	}
+
+	ids, ok := e.SessionModelCatalog(context.Background(), "antigravity")
+	if !ok || !slices.Equal(ids, []string{"gemini-3.1-pro-high", "gemini-3.1-pro-low"}) {
+		t.Fatalf("antigravity catalog = %v (ok=%v), want the probe's own ids", ids, ok)
+	}
+	if err := CheckSessionModel("antigravity", ""); err != nil {
+		t.Errorf("empty model refused: %v", err)
+	}
+	if err := CheckSessionModel("antigravity", "gemini-3.1-pro-high"); err != nil {
+		t.Errorf("an agy id refused: %v", err)
+	}
+	needsModel, hint, pattern := SessionModelRule("antigravity")
+	if needsModel {
+		t.Error("antigravity must not need a model")
+	}
+	if !strings.Contains(hint, "gemini-3.1-pro-high") || pattern != "" {
+		t.Errorf("rule = (%v, %q, %q), want the effort-in-id hint and no pattern", needsModel, hint, pattern)
+	}
+}
