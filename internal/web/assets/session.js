@@ -22,6 +22,7 @@ import { openModal } from './views.js?v=__ASSET_V__'
 
 let ctx = {}
 let form = null // webapi.Form: the draft's choices and the picker's catalog
+let formLoad = null // the /api/form fetch in flight, for a send that cannot wait on nothing
 let pop = null // the open popover: { el, close }
 
 const BUDGETS = [50, 150, 500, 0]
@@ -36,12 +37,32 @@ export function initSession (c) {
 }
 
 async function loadForm (repo = '') {
-  try {
-    form = await get('/api/form' + (repo ? `?repo=${encodeURIComponent(repo)}` : ''))
-  } catch (err) {
-    toast(`The model list did not load: ${err.message}`, { err: true })
-  }
-  return form
+  const mine = (formLoad = (async () => {
+    try {
+      form = await get('/api/form' + (repo ? `?repo=${encodeURIComponent(repo)}` : ''))
+    } catch (err) {
+      toast(`The model list did not load: ${err.message}`, { err: true })
+    }
+    return form
+  })())
+  try { return await mine } finally { if (formLoad === mine) formLoad = null }
+}
+
+// budgetOf reads a budget typed by a person: a whole number of credits, 0
+// for uncapped. Anything else — empty, negative, a fraction — is refused
+// with a sentence, never quietly read as 0 (which would be no cap at all).
+export function budgetOf (raw) {
+  const v = String(raw ?? '').trim()
+  if (v === '') return { err: 'Say a budget in whole credits — 0 is uncapped.' }
+  if (!/^\d+$/.test(v)) return { err: 'A budget is a whole number of credits, 0 or more.' }
+  return { n: parseInt(v, 10) }
+}
+
+// budgetWord is how a draft says its budget: none picked yet and the
+// board's default still on its way says so, rather than "uncapped".
+function budgetWord (env) {
+  if (env == null) return 'the board default'
+  return env ? `${env} cr` : 'uncapped'
 }
 
 // newSession opens an empty draft in the conversation column. cameFrom
@@ -53,9 +74,11 @@ export async function newSession () {
   // the draft opens at once, on what the page already knows; the form's
   // defaults fill it when they arrive, without touching what was typed
   const known = form
+  // envelope null is "the board's default, not here yet": never 0, which
+  // would start the session uncapped
   const draftOf = (f) => {
     const d = f?.sessions?.default || {}
-    return { repo: f?.repos?.[0] || '', base: '', envelope: f?.envelope || 0, backend: d.backend || '', model: d.model || '', mainCheckout: false }
+    return { repo: f?.repos?.[0] || '', base: '', envelope: f ? (f.envelope || 0) : null, backend: d.backend || '', model: d.model || '', mainCheckout: false }
   }
   set({
     sel: null,
@@ -77,7 +100,7 @@ export async function newSession () {
 function pickedOnly (d) {
   const out = {}
   for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
-  if (d.envelope) out.envelope = d.envelope
+  if (d.envelope != null) out.envelope = d.envelope
   if (d.mainCheckout) out.mainCheckout = true
   return out
 }
@@ -89,7 +112,15 @@ function pickedOnly (d) {
 // they ride the description the card is seeded with, and its first turn
 // carries them natively when the agent it starts on can take images.
 export async function startSession (text, atts = []) {
-  const d = state.sessionDraft
+  let d = state.sessionDraft
+  if (d.envelope == null) {
+    // sent before the form came: its default budget is what the session
+    // starts on, so wait for it — and refuse rather than start uncapped
+    await (formLoad || loadForm(d.repo || ''))
+    d = state.sessionDraft || d
+    if (d.envelope == null && form) d = { ...d, envelope: form.envelope || 0 }
+    if (d.envelope == null) throw new Error('The board’s default budget did not load. Set a budget beside the composer, then send again.')
+  }
   const req = { kind: 'freeform', description: text, backend: d.backend, model: d.model, envelope: d.envelope }
   if (d.repo) req.repo = d.repo
   if (d.mainCheckout) req.mainCheckout = true
@@ -118,7 +149,7 @@ export function draftHead () {
         h('button', { class: 'btn', type: 'button', testid: 'draft-cancel', onclick: cancelDraft }, 'Cancel'))),
     h('div', { class: 'subline' },
       h('span', null, d.repo || state.board?.repo || 'this repository', d.mainCheckout ? ' · the main checkout' : (d.base ? [' · from ', h('span', { class: 'mono' }, d.base)] : ' · a new worktree')),
-      h('span', null, `budget ${d.envelope || '∞'} cr`))
+      h('span', null, `budget ${budgetWord(d.envelope)}`))
   ]
 }
 
@@ -202,6 +233,8 @@ function render () {
   row.append(h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-main',
     title: d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
+    // the base stays picked across the toggle: the main checkout only sets
+    // it aside (startSession sends no base with it), and coming back finds it
     onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout } })
   }, d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
   if (!d.mainCheckout) {
@@ -215,7 +248,7 @@ function render () {
   const bud = h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-budget', 'aria-haspopup': 'dialog',
     onclick: () => (pop?.kind === 'budget' ? closePop() : openBudget(bud))
-  }, 'budget ', h('b', null, d.envelope ? `${d.envelope} cr` : 'uncapped'))
+  }, 'budget ', h('b', null, budgetWord(d.envelope)))
   row.append(bud)
 }
 
@@ -232,6 +265,11 @@ function closePop () {
 // to the anchor's (left, for one opened from the left of the composer).
 function openPop (kind, anchor, el, { alignLeft = false } = {}) {
   closePop()
+  // the composer redraws its buttons on every card and connection change:
+  // one replaced while the form loaded is gone from the page, and a
+  // popover placed against it would hang off the top of the window
+  if (!anchor.isConnected && anchor.dataset.testid) anchor = document.querySelector(`[data-testid="${anchor.dataset.testid}"]`)
+  if (!anchor) return
   document.body.append(el)
   const r = anchor.getBoundingClientRect()
   // pinned above the anchor, and kept inside the window whichever edge it
@@ -255,7 +293,10 @@ function openPop (kind, anchor, el, { alignLeft = false } = {}) {
   // popover's own search/budget input grabbing focus below — not the page
   // moving out from under it, so it must not close what focus just opened
   const moved = () => { if (!el.contains(document.activeElement)) closePop() }
-  setTimeout(() => document.addEventListener('mousedown', outside), 0)
+  // added a tick later, so the click that opened it does not close it —
+  // and only if it is still open then: a popover closed within that tick
+  // would leave the listener behind, closing every later one on mousedown
+  setTimeout(() => { if (pop?.el === el) document.addEventListener('mousedown', outside) }, 0)
   el.addEventListener('keydown', keys)
   window.addEventListener('resize', moved)
   pop = {
@@ -272,15 +313,23 @@ function openPop (kind, anchor, el, { alignLeft = false } = {}) {
 
 function openBudget (anchor) {
   const d = state.sessionDraft
-  const input = h('input', { class: 'inp', type: 'number', min: '0', step: '10', value: String(d.envelope || 0), testid: 'draft-budget-input', 'aria-label': 'Budget in credits' })
-  const apply = (v) => { set({ sessionDraft: { ...state.sessionDraft, envelope: Math.max(0, parseInt(v, 10) || 0) } }); closePop() }
+  const input = h('input', { class: 'inp', type: 'number', min: '0', step: '10', value: String(d.envelope ?? form?.envelope ?? 0), testid: 'draft-budget-input', 'aria-label': 'Budget in credits', 'aria-describedby': 'draft-budget-err' })
+  const err = h('p', { class: 'ferr', id: 'draft-budget-err', testid: 'draft-budget-error', role: 'alert', hidden: true })
+  const apply = (v) => {
+    const b = budgetOf(v)
+    if (b.err) { err.textContent = b.err; err.hidden = false; input.focus(); return }
+    set({ sessionDraft: { ...state.sessionDraft, envelope: b.n } })
+    closePop()
+  }
+  input.addEventListener('input', () => { err.hidden = true })
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(input.value) } })
   const el = h('div', { class: 'spop', role: 'dialog', 'aria-label': 'Budget for the new session', testid: 'draft-budget-pop' },
     h('div', { class: 'fl' }, 'Budget for the new session'),
     h('div', { class: 'presets' }, BUDGETS.map(v => h('button', {
-      class: ['btn', v === (d.envelope || 0) && 'pri'], type: 'button', testid: `draft-budget-${v}`, onclick: () => apply(v)
+      class: ['btn', v === d.envelope && 'pri'], type: 'button', testid: `draft-budget-${v}`, onclick: () => apply(v)
     }, v ? `${v} cr` : 'uncapped'))),
-    h('div', { class: 'row' }, input, h('button', { class: 'btn', type: 'button', onclick: () => apply(input.value) }, 'Set')),
+    h('div', { class: 'row' }, input, h('button', { class: 'btn', type: 'button', testid: 'draft-budget-set', onclick: () => apply(input.value) }, 'Set')),
+    err,
     h('p', { class: 'fh' }, 'When it runs out the session stops and asks. Raise it from the session’s head and the same conversation carries on.'))
   openPop('budget', anchor, el, { alignLeft: true })
   input.focus()
@@ -315,10 +364,20 @@ async function openPicker (anchor) {
   const pick = (backend, model) => choose(backend, model)
   const rowEl = (backend, model, sub, testid) => h('button', {
     class: ['mrow', backend === cur.backend && model === cur.model && 'on'],
-    type: 'button', role: 'option', testid,
+    type: 'button', role: 'option', testid, data: { model },
     'aria-selected': String(backend === cur.backend && model === cur.model),
     onclick: () => pick(backend, model)
   }, h('span', { class: 'mono m' }, model || 'default model'), h('span', { class: 'sub' }, sub))
+
+  // enter takes what was typed at its word: the row that is exactly that
+  // id, else the typed id itself — a suggestion that merely contains it
+  // (claude-sonnet-4-6 for "sonnet-4") only once nothing else is left
+  const enterRow = () => {
+    const q = search.value.trim()
+    const rows = [...list.querySelectorAll('.mrow')]
+    if (!q) return rows[0]
+    return rows.find(r => r.dataset.model === q) || list.querySelector('[data-testid^="model-typed-"]') || rows[0]
+  }
 
   const draw = () => {
     const q = search.value.trim()
@@ -364,7 +423,7 @@ async function openPicker (anchor) {
   search.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      list.querySelector('.mrow')?.click()
+      enterRow()?.click()
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()
       list.querySelector('.mrow')?.focus()
@@ -428,7 +487,7 @@ export async function openWriteSpec (card, a) {
   const note = h('span', { class: 'fh', testid: 'spec-brief-note' }, 'drafting the handoff brief…')
   const profile = h('select', { testid: 'spec-profile' },
     (a.choices || []).map((c, i) => h('option', { value: c.value, selected: i === 0 }, c.detail ? `${c.label} — ${c.detail}` : c.label)))
-  const budget = h('input', { type: 'number', min: '0', step: '10', value: String(form?.envelope || 0), testid: 'spec-budget' })
+  const budget = h('input', { type: 'number', min: '0', step: '10', value: form ? String(form.envelope || 0) : '', testid: 'spec-budget' })
   const err = h('p', { class: 'spec-err', role: 'alert', testid: 'spec-error', hidden: true })
   const body = h('div', { class: 'mbody spec-body' },
     h('p', { class: 'spec-about' }, `${card.id} ends here and keeps its branch. A feature continues its work on a branch cut from it: the profile’s architect plans it from this conversation and what the branch already holds, and it lands only once its critique and checks pass.`),
@@ -478,7 +537,9 @@ export async function openWriteSpec (card, a) {
             if (!draft) return false // the fetch failed; its error is on the note
             err.hidden = true
           }
-          const req = { message: title.value.trim(), brief: brief.value, number: Math.max(0, parseInt(budget.value, 10) || 0) }
+          const b = budgetOf(budget.value)
+          if (b.err) { err.textContent = b.err; err.hidden = false; budget.focus(); return false }
+          const req = { message: title.value.trim(), brief: brief.value, number: b.n }
           if (profile.value) req.profile = profile.value
           if (state.card?.decision?.against?.token) req.against = state.card.decision.against.token
           try {

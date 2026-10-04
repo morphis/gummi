@@ -133,6 +133,11 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
   await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
   await page.getByTestId('spec-title').fill('Sum before rounding');
   await page.getByTestId('spec-profile').selectOption('e2e-alt');
+  // a negative budget is refused in words, not started uncapped
+  await page.getByTestId('spec-budget').fill('-5');
+  await page.getByTestId('spec-start').click();
+  await expect(page.getByTestId('spec-error')).toContainText('whole number');
+  await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
   await page.getByTestId('spec-budget').fill('600');
   await shot(page, info, 'session-write-spec');
   await page.getByTestId('spec-start').click();
@@ -172,4 +177,47 @@ test('the session stats tab draws its spend, bars and envelope', async ({ paired
   await expect(page.getByTestId('stats-clock')).toHaveCount(0);
   await expect(page.getByTestId('stats-redo')).toHaveCount(0);
   await shot(page, info, 'session-stats');
+});
+
+// A draft's budget is never quietly uncapped: one sent before the board's
+// form arrived waits for its default, and a budget typed wrong is refused
+// in words rather than read as 0. Popovers opened and closed in a hurry
+// leave nothing behind that would swallow the next one's choice, and a
+// model id typed in full is taken as typed.
+test('a draft keeps its budget honest, and its popovers keep working', async ({ pairedPage: page, api }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the draft’s rules are the same at every width');
+  test.setTimeout(90_000);
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  await page.route('**/api/form*', async (r) => { await new Promise((ok) => setTimeout(ok, 1500)); await r.continue(); });
+  await page.getByTestId('rail-new-session').click();
+  await expect(page.getByTestId('draft-budget')).toContainText('the board default');
+  const input = page.getByTestId('composer-input');
+  await input.fill('Count the helpers.');
+  await input.press('Enter');
+  await expect(page.getByTestId('card-id')).toHaveText(/^FF-/, { timeout: 20_000 });
+  const id = (await page.getByTestId('card-id').textContent())!;
+  expect((await api('GET', `/api/cards/${id}`)).json.envelope).toBe(2000);
+  await page.unroute('**/api/form*');
+
+  await page.getByTestId('rail-new-session').click();
+  await expect(page.getByTestId('draft-budget')).toContainText('2000 cr');
+  // the picker opened and closed within one task leaves no listener behind
+  await page.evaluate(() => { const b = document.querySelector<HTMLElement>('[data-testid=model-picker-btn]')!; b.click(); b.click(); });
+  await page.waitForTimeout(200);
+  await page.getByTestId('draft-budget').click();
+  await page.getByTestId('draft-budget-input').fill('-30');
+  await page.getByTestId('draft-budget-set').click();
+  await expect(page.getByTestId('draft-budget-error')).toContainText('whole number');
+  await page.getByTestId('draft-budget-input').fill('');
+  await page.getByTestId('draft-budget-set').click();
+  await expect(page.getByTestId('draft-budget-error')).toContainText('0 is uncapped');
+  await page.getByTestId('draft-budget-500').click();
+  await expect(page.getByTestId('draft-budget')).toContainText('500 cr');
+
+  // enter takes the id typed, not the first suggestion containing it
+  await page.getByTestId('model-picker-btn').click();
+  await page.getByTestId('model-search').fill('e2e-alt');
+  await page.getByTestId('model-search').press('Enter');
+  await expect(page.getByTestId('model-picker')).toHaveCount(0);
+  await expect(page.getByTestId('model-picker-btn').locator('.m')).toHaveText('e2e-alt');
 });

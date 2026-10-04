@@ -138,3 +138,28 @@ test('a title in any script makes a card', async ({ pairedPage: page, api }, inf
     if (phone(info)) await page.getByTestId('card-back').click();
   }
 });
+
+// Adopting: the branch the card would land on is listed only to say why it
+// cannot be picked, a refusal sits under the adopt field (said once, not
+// again as a toast over the form), and a stacked card's base steps aside.
+test('adopt refusals sit under their field, and a stack sets the base', async ({ pairedPage: page, api }, info) => {
+  test.skip(phone(info), 'the form’s wiring is the same at every width');
+  await openForm(page);
+  const head = (await api('GET', '/api/board')).json.head;
+  await expect(page.getByTestId('newcard-adopt').locator(`option[value="${head}"]`)).toHaveAttribute('disabled', '');
+
+  await page.getByTestId('newcard-stack').selectOption(gate);
+  await expect(page.getByTestId('newcard-base')).toBeDisabled();
+  await expect(page.getByTestId('newcard-base-hint')).toContainText(gate);
+  await page.getByTestId('newcard-stack').selectOption('');
+  await expect(page.getByTestId('newcard-base')).toBeEnabled();
+
+  const branch = (await api('GET', `/api/cards/${gate}`)).json.branch;
+  await page.getByTestId('newcard-title').fill('Take over the wave');
+  await page.getByTestId('newcard-adopt').selectOption(branch);
+  await page.getByTestId('newcard-create').click();
+  await expect(page.getByTestId('newcard-error-adopt')).toContainText(branch);
+  await expect(page.getByTestId('newcard-error-base')).toBeHidden();
+  await page.waitForTimeout(800);
+  await expect(page.getByTestId('toast').filter({ hasText: branch })).toHaveCount(0);
+});
