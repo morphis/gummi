@@ -33,6 +33,22 @@ type prLinkProbeMsg struct {
 // ambiguous multi-match).
 const noPRFoundMarker = "found no open PR"
 
+// webPRResolveText is a failed PR lookup in the web face's words: no
+// `--auto` the page never typed, and gh's own error (a GraphQL message,
+// most often) cut to its first line, after what it means.
+func webPRResolveText(id domain.FeatureID, spec string, err error) string {
+	if strings.Contains(err.Error(), noPRFoundMarker) {
+		return string(id) + ": no open pull request has this card's branch as its head — give the PR's URL or number instead"
+	}
+	why, _, _ := strings.Cut(err.Error(), "\n")
+	why = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(why), "GraphQL:"))
+	what := "the pull request for this card's branch"
+	if spec != "" {
+		what = "pull request " + spec
+	}
+	return sanitize(string(id) + ": could not link " + what + " — GitHub answered: " + why)
+}
+
 // openPRLinkDialog runs the pre-fill probe off the render loop (the shape
 // prepareMerge/prepareSquash use) before the dialog opens, so a branch with
 // exactly one open PR needs only an enter to confirm it.
@@ -210,12 +226,16 @@ func (m *Shell) submitPRLink(f domain.Feature, spec string) tea.Cmd {
 		}
 		ref, err := m.resolvePR(ctx, spec, mgr.RepoRoot(), f.BranchName())
 		if err != nil {
-			return noticeMsg{text: sanitize(string(f.ID) + ": resolving PR: " + err.Error()), isErr: true}
+			return noticeMsg{
+				text: sanitize(string(f.ID) + ": resolving PR: " + err.Error()), isErr: true,
+				web: webPRResolveText(f.ID, spec, err),
+			}
 		}
 		if err := m.store.SetPullRequest(ctx, f.ID, ref); err != nil {
 			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true}
 		}
 		text := fmt.Sprintf("%s linked to %s#%d", f.ID, ref.Repo, ref.Number)
+		web := text
 		if m.prSquashMergeAllowed != nil {
 			// non-blocking caution, the same repo-can't-squash-merge warning
 			// `gummi pr link` prints (efd73cd) — best-effort like
@@ -223,8 +243,9 @@ func (m *Shell) submitPRLink(f domain.Feature, spec string) tea.Cmd {
 			// means the caution is skipped, not that linking failed.
 			if allowed, err := m.prSquashMergeAllowed(ctx, ref.Repo); err == nil && !allowed {
 				text += "\nwarning: " + ref.Repo + " does not allow squash-merge on GitHub; run `z` to collapse the branch to one commit before merging so main stays clean"
+				web += "\nwarning: " + ref.Repo + " does not allow squash-merge on GitHub; squash the branch to one commit from the card's menu before merging so main stays clean"
 			}
 		}
-		return noticeMsg{text: text, reload: true}
+		return noticeMsg{text: text, web: web, reload: true}
 	}
 }

@@ -803,6 +803,11 @@ func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Rou
 			return webapi.RouteVerb, "sends it back with your words"
 		}
 		if m.verbDegrades(r, parsed.Verb) {
+			if c.d == nil || len(c.d.actions) == 0 {
+				// no decision is pinned: there are no answers above to
+				// set it apart from
+				return webapi.RouteMenu, "opens the card's menu at “" + parsed.Verb + "”"
+			}
 			return webapi.RouteMenu, "“" + parsed.Verb + "” is in the card's menu, not one of the answers above"
 		}
 		return webapi.RouteVerb, "runs " + parsed.Verb

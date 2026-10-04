@@ -96,7 +96,11 @@ func (d *confirmDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		return webAnswer{dismiss: true}
 	}
 	q := d.question
-	if detail := strings.TrimSpace(d.detail); detail != "" {
+	detail := d.detail
+	if d.webDetail != "" {
+		detail = d.webDetail
+	}
+	if detail = strings.TrimSpace(detail); detail != "" {
 		q += "\n" + detail
 	}
 	if !in.takeConfirm(webConfirmToken(d.id, in.card, q)) {

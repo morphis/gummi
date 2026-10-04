@@ -1990,6 +1990,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.mergePrep, msg.f.ID)
 		if msg.err != nil {
 			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
+			if msg.webErr != "" {
+				m.notice.web = sanitize(msg.webErr)
+			}
 			return m, nil
 		}
 		m.notice = noticeMsg{}

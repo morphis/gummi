@@ -26,6 +26,7 @@ func (m *Shell) confirmPRUnlink(f domain.Feature) tea.Cmd {
 		confirmLabel: "Unlink",
 		question:     "unlink " + string(f.ID) + " from " + ref.Repo + "#" + itoa(ref.Number) + "?",
 		detail:       "the card becomes locally landable again — m stops refusing it. Diff comments already pulled from the PR stay put.",
+		webDetail:    "the card becomes locally landable again — landing it on main is no longer refused. Diff comments already pulled from the PR stay put.",
 		onConfirm:    func() tea.Cmd { return m.unlinkPR(f.ID) },
 	})
 	return nil

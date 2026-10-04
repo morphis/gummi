@@ -121,7 +121,7 @@ func (b *Bridge) deliver(msg tea.Msg) {
 func outcomeOf(msg tea.Msg) WebOutcome {
 	switch msg := msg.(type) {
 	case noticeMsg:
-		return WebOutcome{Text: msg.text, Err: msg.isErr}
+		return WebOutcome{Text: msg.webText(), Err: msg.isErr}
 	}
 	return WebOutcome{}
 }

@@ -2218,7 +2218,7 @@ func (d *Driver) resumeCmd(id string, args ...string) string {
 // board showed as needs-you. A goal's own card is the exception, as it is
 // in the TUI: its stops are its goal's to handle, never queued for you.
 func (d *Driver) stopped(f domain.Feature) Outcome {
-	question := "stopped early at --until " + string(f.Stage) + ", as requested."
+	question := "stopped early at " + string(f.Stage) + ", where the run was asked to stop."
 	d.logPark(f, state.ParkReasonNeedsYou, question)
 	if !f.InGoal() {
 		d.openDecisionOnce(context.Background(), f, state.DecisionKindGate, question)

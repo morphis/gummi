@@ -252,3 +252,18 @@ func TestPRLinkSubmitRefusesWhenAlreadyLinked(t *testing.T) {
 		t.Errorf("PullRequest = %+v, the concurrent link should survive untouched", f.PullRequest)
 	}
 }
+
+// A failed lookup reads on the web face without the CLI's --auto it
+// never typed, and with gh's GraphQL error cut to what it says; the
+// terminal's words stay as they were.
+func TestPRLinkFailureReadsInThePagesWords(t *testing.T) {
+	none := errors.New(`--auto found no open PR with head branch "gummi/FD-001-x"`)
+	if got := webPRResolveText("FD-001", "", none); strings.Contains(got, "--auto") || !strings.Contains(got, "URL or number") {
+		t.Errorf("no PR found reads %q", got)
+	}
+	gql := errors.New("GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)\nexit status 1")
+	got := webPRResolveText("FD-001", "999", gql)
+	if strings.Contains(got, "GraphQL:") || strings.Contains(got, "exit status") || !strings.Contains(got, "could not link pull request 999") {
+		t.Errorf("a gh failure reads %q", got)
+	}
+}

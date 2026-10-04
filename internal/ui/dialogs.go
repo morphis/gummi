@@ -121,6 +121,10 @@ type confirmDialog struct {
 	question  string
 	detail    string
 	onConfirm func() tea.Cmd
+	// webDetail is detail as the web face asks it, when detail names a
+	// terminal key the page has no such key for. Empty means detail reads
+	// the same on both faces.
+	webDetail string
 
 	// confirmLabel/cancelLabel override the button row's legends; a caller
 	// naming the verb ("Delete", "Quit") gets that instead of a bare
