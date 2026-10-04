@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -188,15 +189,25 @@ func SplitOpencodeModel(model string) (provider, id string, err error) {
 	return provider, id, nil
 }
 
-// Close implements Agent.
+// Close implements Agent. The sessions close outside the agent's lock:
+// each one takes it on its way out to drop itself from the list.
 func (o *Opencode) Close() error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	o.closed = true
-	for _, s := range o.sessions {
+	sessions := slices.Clone(o.sessions)
+	o.mu.Unlock()
+	for _, s := range sessions {
 		_ = s.Close()
 	}
 	return nil
+}
+
+// forget drops a closed session from the agent's list, so a long-lived
+// board does not hold every session it ever opened.
+func (o *Opencode) forget(s *opencodeSession) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sessions = slices.DeleteFunc(o.sessions, func(x *opencodeSession) bool { return x == s })
 }
 
 // childEnvFor is the environment an opencode process runs with: its own,
@@ -425,7 +436,7 @@ func (s *opencodeSession) ensureUp(ctx context.Context, within time.Duration) er
 	s.upOnce.Do(func() {
 		go func() {
 			defer close(s.upDone)
-			if err := s.srv.waitReady(s.sctx, within); err != nil {
+			if err := s.srv.waitReady(s.sctx, within, s.proc.exited); err != nil {
 				s.mu.Lock()
 				s.upErr = err
 				s.mu.Unlock()
@@ -865,12 +876,13 @@ func (s *opencodeSession) Close() error {
 		close(s.stop) // forward drains raw, then closes events
 		if s.proc != nil {
 			s.proc.cancel()
-			if s.proc.cmd != nil && s.proc.cmd.Process != nil {
-				_ = s.proc.cmd.Wait()
-			}
+			s.proc.wait()
 		}
 		if s.configPath != "" {
 			_ = os.Remove(s.configPath)
+		}
+		if s.o != nil {
+			s.o.forget(s)
 		}
 	})
 	return nil

@@ -75,11 +75,19 @@ func (o opencodeServer) do(ctx context.Context, method, path string, body any) (
 // waitReady polls until the server answers at all, or within is spent.
 // A request that reaches `opencode serve` while it is still starting can
 // be held unanswered; each poll runs on its own short clock so one can
-// give up and ask again rather than wait on it for good.
-func (o opencodeServer) waitReady(ctx context.Context, within time.Duration) error {
+// give up and ask again rather than wait on it for good. exited closes
+// when the server process is gone (nil when there is no process to
+// watch): a server that died starting — lost the race for its port, a
+// broken install — fails the wait at once instead of after within.
+func (o opencodeServer) waitReady(ctx context.Context, within time.Duration, exited <-chan struct{}) error {
 	deadline := time.Now().Add(within)
 	var last error
 	for {
+		select {
+		case <-exited:
+			return errors.New("opencode serve exited before it answered")
+		default:
+		}
 		pctx, pcancel := context.WithTimeout(ctx, 2*time.Second)
 		resp, err := o.do(pctx, http.MethodGet, "/config", nil)
 		pcancel()
@@ -101,6 +109,7 @@ func (o opencodeServer) waitReady(ctx context.Context, within time.Duration) err
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-exited:
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
@@ -313,6 +322,20 @@ type opencodeProc struct {
 	// stderr is the process's bounded stderr capture, for diagnostics when
 	// the server never comes up.
 	stderr fmt.Stringer
+	// exited closes once the process has been reaped — the one Wait the
+	// spawn runs for it. nil for a stand-in with no process behind it.
+	exited <-chan struct{}
+}
+
+// wait blocks until the process has been reaped.
+func (p *opencodeProc) wait() {
+	if p.exited != nil {
+		<-p.exited
+		return
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Wait()
+	}
 }
 
 // serveOpencode starts one `opencode serve` bound to port in dir, running
@@ -332,8 +355,13 @@ var serveOpencode = func(ctx context.Context, bin string, port int, dir string, 
 		cancel()
 		return nil, err
 	}
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
 	return &opencodeProc{
-		cmd: cmd, cancel: cancel, stderr: stderr,
+		cmd: cmd, cancel: cancel, stderr: stderr, exited: exited,
 		url: "http://127.0.0.1:" + strconv.Itoa(port),
 	}, nil
 }

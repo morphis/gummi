@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1180,7 +1181,54 @@ func TestOpencodeServerWaitReadyOutlivesAHeldRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 	o := opencodeServer{base: srv.URL, password: "pw"}
-	if err := o.waitReady(context.Background(), 10*time.Second); err != nil {
+	if err := o.waitReady(context.Background(), 10*time.Second, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A server process that exits while starting fails the readiness wait at
+// once — not after the full window, which a dead server can never meet.
+func TestOpencodeServerWaitReadyFailsFastWhenTheServerExits(t *testing.T) {
+	port, err := freeLoopbackPort() // nothing listens on it: every poll is refused
+	if err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	close(exited)
+	start := time.Now()
+	err = opencodeServer{base: fmt.Sprintf("http://127.0.0.1:%d", port)}.waitReady(context.Background(), 30*time.Second, exited)
+	if err == nil || !strings.Contains(err.Error(), "exited") {
+		t.Fatalf("waitReady = %v, want the server's exit", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("waitReady took %s on a dead server, want an immediate failure", d)
+	}
+}
+
+// A closed session leaves the agent's list, so a long-lived board does
+// not hold every session it ever opened.
+func TestOpencodeForgetsClosedSessions(t *testing.T) {
+	stubServeOpencode(t)
+	o := &Opencode{bin: "opencode"}
+	a, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = a.Close()
+	o.mu.Lock()
+	left := slices.Clone(o.sessions)
+	o.mu.Unlock()
+	if len(left) != 1 || left[0] != b {
+		t.Errorf("sessions after one close = %v, want only the open one", left)
+	}
+	if err := o.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.sessions) != 0 {
+		t.Errorf("sessions after the agent closed = %d, want none", len(o.sessions))
 	}
 }

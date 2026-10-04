@@ -82,12 +82,10 @@ func opencodeModelCatalog(ctx context.Context, bin string) ([]string, error) {
 	}
 	defer func() {
 		proc.cancel()
-		if proc.cmd != nil && proc.cmd.Process != nil {
-			_ = proc.cmd.Wait()
-		}
+		proc.wait()
 	}()
 	srv := opencodeServer{base: proc.url, password: password}
-	if err := srv.waitReady(ctx, opencodeModelsTimeout); err != nil {
+	if err := srv.waitReady(ctx, opencodeModelsTimeout, proc.exited); err != nil {
 		return nil, fmt.Errorf("opencode catalog: %w", err)
 	}
 	ids, err := srv.providers(ctx)
