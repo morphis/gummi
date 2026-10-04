@@ -103,11 +103,14 @@ func (iv *ingestView) mergeIntoPrev() bool {
 // mergeAt folds proposal i into the one above it: their refs,
 // dependencies, open questions, and section content combine, and i is
 // removed. The previous proposal's title and one-liner win (it is the
-// survivor). False at the top of the list or past its end.
+// survivor). The survivor is kept if either was: merging a kept proposal
+// into a dropped one keeps what was merged rather than dropping it with
+// it. False at the top of the list or past its end.
 func (iv *ingestView) mergeAt(i int) bool {
 	if i <= 0 || i >= len(iv.props) {
 		return false
 	}
+	iv.props[i-1].dropped = iv.props[i-1].dropped && iv.props[i].dropped
 	prev := &iv.props[i-1].p
 	cur := iv.props[i].p
 	prev.SourceRefs = dedupStrings(append(prev.SourceRefs, cur.SourceRefs...))

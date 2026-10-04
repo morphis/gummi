@@ -115,6 +115,13 @@ test('merge, one-liner, undrop and discard', async ({ pairedPage: page, api }) =
   await page.getByTestId('ingest-undrop-0').click();
   await expect(page.getByTestId('ingest-proposal-0')).toHaveAttribute('data-dropped', 'false');
 
+  // merging a kept proposal into a dropped one keeps the survivor, rather
+  // than dropping what was merged with it
+  await page.getByTestId('ingest-drop-0').click();
+  await page.getByTestId('ingest-merge-1').click();
+  await expect(page.getByTestId('ingest-proposals').locator('> li')).toHaveCount(1);
+  await expect(page.getByTestId('ingest-proposal-0')).toHaveAttribute('data-dropped', 'false');
+
   await page.getByTestId('ingest-discard').click();
   await page.getByTestId('ingest-discard-confirm-yes').click();
   // the pass is gone and the form is back for the next one

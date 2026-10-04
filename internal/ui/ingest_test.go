@@ -272,6 +272,29 @@ func TestIngestViewMerge(t *testing.T) {
 	}
 }
 
+// Merging a kept proposal into a dropped one keeps the survivor: the merge
+// is what the reviewer chose to keep, and dropping it would lose both.
+func TestIngestMergeIntoDroppedKeepsTheSurvivor(t *testing.T) {
+	iv := newIngestView(domain.IngestResult{Proposals: []domain.FeatureProposal{
+		{Title: "A"}, {Title: "B"}, {Title: "C"},
+	}}, "premium", 0, "")
+	iv.setDropped(0, true)
+	if !iv.mergeAt(1) {
+		t.Fatal("merge should succeed for the second proposal")
+	}
+	if iv.props[0].dropped || iv.keptCount() != 2 {
+		t.Fatalf("after merging kept B into dropped A: dropped=%v kept=%d, want kept survivor and 2 kept",
+			iv.props[0].dropped, iv.keptCount())
+	}
+	// two dropped proposals merged stay dropped
+	iv.setDropped(0, true)
+	iv.setDropped(1, true)
+	iv.mergeAt(1)
+	if !iv.props[0].dropped {
+		t.Error("merging two dropped proposals should stay dropped")
+	}
+}
+
 func TestIngestFormRejectsMissingFile(t *testing.T) {
 	var called bool
 	f := newIngestForm([]string{"premium"}, nil, false, func(string, string, string) tea.Cmd { called = true; return nil })
