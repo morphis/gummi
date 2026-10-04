@@ -69,3 +69,37 @@ test('an indented block follows CommonMark’s edges', async ({ pairedPage: page
   expect(kids[0].text).toBe('  x  y');
   expect(kids[1].text).toBe('```\nz');
 });
+
+test('a bullet run and a numbered run are two lists, with task items', async ({ pairedPage: page }) => {
+  const kids = await render(page, '- one\n- two\n1. first\n2. second');
+  expect(kids.map((k) => k.tag)).toEqual(['ul', 'ol']);
+  const tasks = await page.evaluate(async () => {
+    const { markdown } = await import('/assets/markdown.js');
+    const el = markdown('- [ ] open\n- [x] done\n- plain');
+    return [...el.querySelectorAll('li')].map((li) => {
+      const box = li.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      return { text: li.textContent?.trim(), box: box ? box.checked : null, disabled: box?.disabled ?? null };
+    });
+  });
+  expect(tasks).toEqual([{ text: 'open', box: false, disabled: true }, { text: 'done', box: true, disabled: true }, { text: 'plain', box: null, disabled: null }]);
+});
+
+test('strikethrough, long words and a refused link read right', async ({ pairedPage: page }) => {
+  const got = await page.evaluate(async () => {
+    const { markdown } = await import('/assets/markdown.js');
+    const strike = markdown('was ~~old~~ now').querySelector('del')?.textContent;
+    const js = markdown('[x](javascript:alert(1)) after');
+    const box = document.createElement('div');
+    box.style.width = '200px';
+    box.append(markdown('a ' + 'w'.repeat(200) + ' https://example.com/' + 'a'.repeat(200)));
+    document.body.append(box);
+    const wide = box.scrollWidth <= 200;
+    box.remove();
+    return { strike, js: js.textContent, link: js.querySelectorAll('a').length, wide };
+  });
+  expect(got.strike).toBe('old');
+  // the refused link is its text, with no stray ")" left behind
+  expect(got.js).toBe('x after');
+  expect(got.link).toBe(0);
+  expect(got.wide).toBe(true);
+});

@@ -2,7 +2,9 @@
 // It builds DOM nodes, never HTML strings, so nothing in the source can
 // become markup: raw HTML shows as text. Supported: paragraphs, headings,
 // fenced code (with a hook for custom fences such as gummi-checks),
-// indented code, code spans (both keep their spaces as written), bold, italic, lists (nested by indent), block quotes, rules, pipe
+// indented code, code spans (both keep their spaces as written), bold, italic,
+// ~~strikethrough~~, lists (nested by indent; a bullet run and a numbered run
+// are two lists) with `- [ ]` / `- [x]` task items, block quotes, rules, pipe
 // tables and links (http and https only, opened with rel=noopener).
 // With opts.files (a card's webapi.Files) a path under the card's worktree,
 // as an agent names a file it wrote, links to the server's copy of it.
@@ -111,7 +113,7 @@ function blocks (lines, opts) {
         }
         break
       }
-      out.push(list(body, opts))
+      out.push(...list(body, opts))
       continue
     }
     if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
@@ -136,9 +138,29 @@ function cells (line) {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim())
 }
 
-// list renders a run of list lines: items at the smallest indent, and each
-// item's deeper lines as its own blocks (which may hold a nested list).
+// list renders a run of list lines as lists: a new one starts where the
+// items change kind (bullets, then numbers), as CommonMark has it.
 function list (lines, opts) {
+  const base = ITEM.exec(lines[0])[1].length
+  const runs = []
+  let run = null
+  for (const l of lines) {
+    const m = ITEM.exec(l)
+    if (m && m[1].length <= base + 1) {
+      const ordered = /\d/.test(m[2])
+      if (!run || run.ordered !== ordered) runs.push(run = { ordered, lines: [] })
+    }
+    run.lines.push(l)
+  }
+  return runs.map(r => oneList(r.lines, opts))
+}
+
+// TASK is a task item's box: `[ ]` open, `[x]` done.
+const TASK = /^\[([ xX])\]\s+/
+
+// oneList renders one list: items at the smallest indent, and each item's
+// deeper lines as its own blocks (which may hold a nested list).
+function oneList (lines, opts) {
   const first = ITEM.exec(lines[0])
   const base = first[1].length
   const ordered = /\d/.test(first[2])
@@ -151,8 +173,9 @@ function list (lines, opts) {
   for (const l of lines) {
     const m = ITEM.exec(l)
     if (m && m[1].length <= base + 1) {
-      cur = { text: [m[3]], sub: [] }
-      el.append(cur.li = h('li'))
+      const task = TASK.exec(m[3])
+      cur = { text: [task ? m[3].slice(task[0].length) : m[3]], sub: [], task: task ? task[1] !== ' ' : null }
+      el.append(cur.li = h('li', { class: task && 'task' }))
       cur.li._md = cur
       continue
     }
@@ -163,6 +186,7 @@ function list (lines, opts) {
   }
   for (const li of el.children) {
     const it = li._md
+    if (it.task !== null) li.append(h('input', { type: 'checkbox', disabled: true, checked: it.task, 'aria-label': it.task ? 'done' : 'not done' }), ' ')
     li.append(...inline(it.text.join('\n')))
     const sub = it.sub.filter((l, idx, a) => l.trim() || idx < a.length - 1)
     if (sub.some(l => l.trim())) li.append(...blocks(sub, opts))
@@ -171,13 +195,16 @@ function list (lines, opts) {
   return el
 }
 
+// A link's destination may hold one level of balanced parentheses, so a
+// `[x](javascript:alert(1))` is read whole (and refused whole) instead of
+// leaving its last ")" behind as text.
 // The image alternative matches only the spec-anchored attachment link
 // grammar (internal/attachment.Link): !\[name\](.gummi/attachments/<id>.<ext>).
 // Any other `![alt](url)` falls through — the `!` renders as text and the
 // `[alt](url)` after it as an ordinary link — so markdown from a spec, a
 // note or an agent's own words can never make the browser fetch an
 // arbitrary third-party URL as an image.
-const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\s](?:[^*]*?[^*\s])?)\*|(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[([^\]\n]*)\]\(\.gummi\/attachments\/([0-9a-f]{64})\.[A-Za-z0-9]+\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g
+const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\s](?:[^*]*?[^*\s])?)\*|(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)|!\[([^\]\n]*)\]\(\.gummi\/attachments\/([0-9a-f]{64})\.[A-Za-z0-9]+\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|~~(?=\S)([\s\S]*?\S)~~/g
 
 export function inline (text) {
   const out = []
@@ -200,6 +227,7 @@ export function inline (text) {
     else if (m[8] !== undefined) out.push(link(m[9], inline(m[8])))
     else if (m[11] !== undefined) out.push(attachmentImage(m[11], m[10]))
     else if (m[12] !== undefined) out.push(link(m[12], [m[12]]))
+    else if (m[13] !== undefined) out.push(h('del', null, inline(m[13])))
     last = re.lastIndex
   }
   if (last < text.length) out.push(...paths(text.slice(last)))
