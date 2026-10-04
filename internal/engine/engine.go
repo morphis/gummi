@@ -799,6 +799,16 @@ func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files [
 	if err != nil {
 		return err
 	}
+	// A stage session live until this dispatch can dirty the worktree
+	// after the board checked it (mid-turn edits) — and the plain
+	// rebase refuses to start on dirt. Carry it the way the drift path
+	// does: autostash it across, and say whose it is so it comes back
+	// out instead of being read as fallout.
+	carried := false
+	if dirty, err := wt.Dirty(ctx, &f); err == nil && dirty {
+		cmd += " --autostash"
+		carried = true
+	}
 	base := wt.BaseRevFor(ctx, &f)
 	if base == "HEAD" {
 		base = wt.BaseBranch(ctx)
@@ -809,6 +819,9 @@ func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files [
 		note += "\nThe board's own run of it stopped: " + reason + "."
 	case len(files) > 0:
 		note += "\nExpect conflicts in: " + strings.Join(files, ", ") + "."
+	}
+	if carried {
+		note += "\nThe worktree carries uncommitted work; it is this card's own. The --autostash in the command carries it across the rebase and puts it back — if applying the autostash conflicts at the end, resolve and keep it as the contract below says; never discard it."
 	}
 	return e.run(f, note, flavorRebase)
 }
@@ -871,13 +884,24 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		return errors.New("engine is closed")
 	}
 	old := e.live[f.ID]
+	// replacedRunning: the dispatch below interrupts a stage session
+	// that was still mid-turn. Only the rebase hand-off does that — it
+	// is an explicit ask for a different pass on a card whose session is
+	// running, the steady state on autopilot, and absorbing it here
+	// reported the agent dispatched while doing nothing. A stage re-run
+	// or critique over a running session keeps the no-op this guard was
+	// written for.
+	replacedRunning := false
 	if old != nil {
 		// State() takes old.mu (state is written under it from pump
 		// goroutines); the engine's lock order is e.mu → s.mu, so taking it
 		// here while holding e.mu is safe.
 		if st := old.State(); st == StateRunning {
-			e.mu.Unlock()
-			return nil // already running
+			if flavor != flavorRebase {
+				e.mu.Unlock()
+				return nil // already running
+			}
+			replacedRunning = true
 		}
 	}
 	unlock, err := e.lockCard(f.ID)
@@ -893,13 +917,23 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), state: StateRunning, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
+	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReplacedRunning: replacedRunning, ReadOnly: researchReadOnly(f), state: StateRunning, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}
 	e.stampSpawnInfo(s)
 	e.dropLocked(f.ID)
 	e.live[f.ID] = s
 	e.mu.Unlock()
 
 	if old != nil {
+		if replacedRunning {
+			// The interrupted session's pump must read the teardown as
+			// benign, not as a backend death: mark it terminal before
+			// the stop closes its agent, the way Pause marks paused
+			// first. Nothing reads the state afterwards — the session is
+			// out of the live map and never persisted — and a final idle
+			// that still lands must not advance the stage, which a
+			// non-running state also guarantees (finishRunning refuses).
+			old.setState(StateDone)
+		}
 		old.stop() // a replaced done/paused session; free its goroutine
 	}
 	// after the replaced session's writer is closed, never before: two

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -36,10 +37,14 @@ type rebaseConflictMsg struct {
 // rebaseSettledMsg carries the judged outcome of a finished
 // rebase-resolve session: ok when the branch is rebased and the
 // worktree clean; otherwise problem says what the git state shows.
+// settled is the judged session's construction time, so the settlement
+// can tell a dispatch that took the card over since from the session
+// this judgment is about.
 type rebaseSettledMsg struct {
 	f       domain.Feature
 	ok      bool
 	problem string
+	settled time.Time
 }
 
 // offerAgentRebase pushes the hand-off confirm for a conflicted rebase.
@@ -78,7 +83,16 @@ func (m *Shell) agentRebase(msg rebaseConflictMsg) tea.Cmd {
 	if m.rebaseDirty == nil {
 		m.rebaseDirty = map[domain.FeatureID]bool{}
 	}
-	m.rebaseDirty[f.ID] = msg.dirty
+	// The stage session this hand-off interrupts is still writing: it can
+	// dirty the worktree between the press that offered this confirm and
+	// the confirm itself. Re-check here, so the judge's tolerance matches
+	// what actually went in — the engine re-checks at dispatch and tells
+	// the agent to autostash.
+	dirty := msg.dirty
+	if d, err := m.wt.Dirty(context.Background(), &f); err == nil && d {
+		dirty = true
+	}
+	m.rebaseDirty[f.ID] = dirty
 	if it, ok := m.inbox.get(f.ID); ok {
 		if m.rebaseHeld == nil {
 			m.rebaseHeld = map[domain.FeatureID]attnItem{}
@@ -104,6 +118,16 @@ func (m *Shell) agentRebase(msg rebaseConflictMsg) tea.Cmd {
 // resolution left half done.
 func (m *Shell) judgeRebase(id domain.FeatureID) tea.Cmd {
 	wasDirty := m.rebaseDirty[id]
+	// the judged session's construction time: the settlement re-runs an
+	// interrupted stage only when this same session is still the live
+	// one — a dispatch that took the card over since decides through
+	// its own settlement instead.
+	var settled time.Time
+	if m.engine != nil {
+		if s := m.engine.Get(id); s != nil {
+			settled = s.Snapshot().StartedAt
+		}
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
@@ -113,26 +137,27 @@ func (m *Shell) judgeRebase(id domain.FeatureID) tea.Cmd {
 		if left, err := m.wt.Unmerged(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if len(left) > 0 {
-			return rebaseSettledMsg{f: f, problem: "unmerged paths were left behind (" + strings.Join(left, ", ") + ")"}
+			return rebaseSettledMsg{f: f, problem: "unmerged paths were left behind (" + strings.Join(left, ", ") + ")", settled: settled}
 		}
 		if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if dirty && !wasDirty {
-			return rebaseSettledMsg{f: f, problem: "the worktree was left dirty"}
+			return rebaseSettledMsg{f: f, problem: "the worktree was left dirty", settled: settled}
 		}
 		if rebased, err := m.wt.RebasedOnBase(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if !rebased {
-			return rebaseSettledMsg{f: f, problem: "the branch is still not rebased"}
+			return rebaseSettledMsg{f: f, problem: "the branch is still not rebased", settled: settled}
 		}
-		return rebaseSettledMsg{f: f, ok: true}
+		return rebaseSettledMsg{f: f, ok: true, settled: settled}
 	}
 }
 
 // rebaseSettled folds the judged outcome into the board: a failed agent
 // rebase escalates to the human; a successful one at Verify re-runs the
-// stage (the resolution is unreviewed agent work), and elsewhere the
-// workflow's remaining stages already cover it.
+// stage (the resolution is unreviewed agent work), one that interrupted a
+// mid-turn stage session re-runs that stage where it stopped, and
+// elsewhere the workflow's remaining stages already cover it.
 func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	id := msg.f.ID
 	held, wasHeld := m.rebaseHeld[id]
@@ -180,7 +205,27 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
 	}
-	if f.Stage != domain.StageVerify && wasHeld {
+	// The hand-off this settlement closes may have interrupted a stage
+	// session that was mid-turn (the engine marks the rebase session it
+	// swapped in when it does). Nothing else re-runs the stage that
+	// interrupt stopped — no stage crossing opened an idle decision, the
+	// finished rebase session's idle is judged here from git state, and
+	// the interrupted session's stop reaches no loop — so the success
+	// arm re-runs the stage itself, and skips the held-stop restore: any
+	// item the interrupt held belonged to the interrupted run, and a
+	// fresh run that still needs to stop will stop again. The settled
+	// session must still be the live one; a dispatch that took the card
+	// over since settles itself. Verify needs none of this — its arm
+	// re-runs on any success.
+	interrupted := false
+	if m.engine != nil && f.Stage != domain.StageVerify {
+		if s := m.engine.Get(id); s != nil {
+			snap := s.Snapshot()
+			interrupted = snap.Rebase && snap.ReplacedRunning &&
+				!msg.settled.IsZero() && snap.StartedAt.Equal(msg.settled)
+		}
+	}
+	if f.Stage != domain.StageVerify && wasHeld && !interrupted {
 		// The stop the card was waiting at still stands — a failed stage
 		// has still not run, a gate is still unanswered — and the resolve
 		// session, which carries no verdict, must not read as the stage
@@ -192,6 +237,15 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		m.driftCleared(id)
 	}
 	if f.Stage != domain.StageVerify {
+		if interrupted {
+			return func() tea.Msg {
+				m.dropSession(f.ID) // the finished rebase session is stale
+				if err := m.engine.Run(f); err != nil {
+					return noticeMsg{text: sanitize(err.Error()), isErr: true}
+				}
+				return noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f) + " → re-running " + string(f.Stage), reload: true}
+			}
+		}
 		m.notice = noticeMsg{text: string(id) + " rebased onto " + m.baseBranch(f)}
 		// the base moved: re-measure what its baseline excused (at
 		// verify, the re-run below does it as the stage starts)

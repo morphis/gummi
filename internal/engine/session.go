@@ -240,8 +240,12 @@ type Snapshot struct {
 	Interactive bool
 	Critique    bool // this is a plan-critique pass, not the plan writer
 	Rebase      bool // this is a rebase-resolve pass, not the stage's work
-	State       SessionState
-	AgentName   string // backend running this session ("copilot", "opencode", …)
+	// ReplacedRunning: this rebase pass replaced a stage session that
+	// was still mid-turn — the hand-off interrupted it. False on every
+	// other session, including a rebase dispatched over a parked card.
+	ReplacedRunning bool
+	State           SessionState
+	AgentName       string // backend running this session ("copilot", "opencode", …)
 	// AgentSessionID is the backend's own session id (agent.Identified),
 	// pointing at its on-disk log; empty for backends without one.
 	AgentSessionID string
@@ -297,6 +301,13 @@ type Session struct {
 	// the current stage without doing its work. Set at construction,
 	// immutable.
 	Rebase bool
+	// ReplacedRunning marks a rebase pass that was dispatched over a
+	// stage session still mid-turn: the hand-off interrupted that run
+	// (Engine.run's replacement path) rather than waiting for it to
+	// drain. Set at construction, immutable. Settlement reads it to
+	// re-run the stage the interrupt stopped — a rebase dispatched on a
+	// parked card leaves nothing to re-run.
+	ReplacedRunning bool
 	// ReadOnly marks an autonomous research pass (investigate,
 	// review-of-research) that must never mutate the main checkout. Set at
 	// construction from researchReadOnly, immutable. The engine uses it to
@@ -510,6 +521,7 @@ func (s *Session) snapshotLocked() Snapshot {
 		Interactive:        s.Interactive,
 		Critique:           s.Critique,
 		Rebase:             s.Rebase,
+		ReplacedRunning:    s.ReplacedRunning,
 		State:              s.state,
 		AgentName:          s.agentName,
 		AgentSessionID:     s.agentSessionID,
