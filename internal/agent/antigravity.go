@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -168,12 +169,16 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 		args = append(args, "--conversation", opts.ResumeID)
 	}
 
+	hints := opts.SystemHints
+	if opts.MCPSockPath != "" {
+		hints = append(slices.Clip(hints), antigravityMCPHint(opts.MCPSockPath))
+	}
 	s := &antigravitySession{
 		a:         a,
 		home:      home,
 		workdir:   opts.WorkDir,
 		model:     opts.Model,
-		hints:     opts.SystemHints,
+		hints:     hints,
 		sock:      opts.MCPSockPath,
 		raw:       make(chan Event, 64),
 		events:    make(chan Event),
@@ -310,6 +315,16 @@ func (a *Antigravity) homeFor(opts SessionOpts) (*antigravityHome, error) {
 	}
 	a.homes[dir] = h
 	return h, nil
+}
+
+// antigravityMCPHint tells the session where its gummi tools are. agy
+// reaches every MCP tool through its own call_mcp_tool, and a session
+// told only the tool names spent its first turns listing and reading its
+// home's MCP cache to learn the server's name.
+func antigravityMCPHint(sockPath string) string {
+	return "Your gummi tools are served by the MCP server `" + gummiMCPEntryName(sockPath) +
+		"`. Call them with call_mcp_tool, ServerName set to that server; " +
+		"there is no need to look them up on disk first."
 }
 
 // envWithAntigravityHome returns env with HOME redirected — the one
