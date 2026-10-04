@@ -45,3 +45,21 @@ test('the live turn is spaced and aligned as the thread is', async ({ pairedPage
   expect(Math.abs(geo.wordsLeft - geo.bodyLeft)).toBeLessThanOrEqual(1.5);
   await shot(page, info, 'thread-live');
 });
+
+// A pause stops the turn mid-message: what was streaming is said to be
+// cut off rather than still coming, and the head offers no "park" button
+// for the settled session — it would change nothing on screen.
+test('a paused turn reads as interrupted, and the head drops its pause', async ({ pairedPage: page, server, api }, info) => {
+  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[slow] Add a halting helper' })).json;
+  const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+  await page.goto(`${server.url}/#${c.id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(c.id);
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
+  await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token });
+  await expect(page.getByTestId('live-streaming')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('action-btn-pause').click();
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.status, { timeout: 30_000 }).toBe('paused');
+  await expect(page.getByTestId('live-streaming').getByText('writing', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('action-btn-pause')).toHaveCount(0);
+  await shot(page, info, 'thread-interrupted');
+});

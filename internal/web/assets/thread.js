@@ -120,12 +120,20 @@ function render () {
   // (a stop's log id is its ref and the moment it was raised,
   // "gate:FD-001:plan:<ns>", and its log line — "stopped early at …" — is
   // not the pinned question, so the ref is matched as a prefix)
+  //
+  // The log's open decision is the stop the card waits on now (threadfold
+  // places only that one), so one raised at the card's current stage is
+  // the pinned stop even when the log words it differently ("reached the
+  // landing gate" under "verification passed"). A chip pinned over a stop
+  // is a question of its own, and leaves the stop's raising where it is.
   const pinned = state.card?.decision
   if (pinned) {
     const same = (id) => !!id && (id === pinned.ref || id.startsWith(pinned.ref + ':'))
+    const stop = pinned.kind !== 'confirm' && pinned.kind !== 'ask'
     for (const grp of gs) {
       grp.items = grp.items.filter(it => !(it.t === 'decision' && !it.decision?.answer &&
-        (same(it.decision?.id) || it.decision?.question === pinned.question)))
+        (same(it.decision?.id) || it.decision?.question === pinned.question ||
+          (stop && it.decision?.kind !== 'ask' && it.stage === state.card.stage))))
     }
   }
 
@@ -344,8 +352,13 @@ export function activity (items, fold) {
 function receipt (it) {
   const r = it.receipt || { ok: true, text: it.text }
   const by = r.by || it.by
+  // a park stopped the card where it was: it was neither done nor sent
+  // back, and says so with a mark of its own
+  const park = r.kind === 'park'
   return h('div', { class: 'receipt', testid: 'receipt' },
-    h('span', { class: r.ok ? 'ok' : 'bad', 'aria-label': r.ok ? 'done' : 'sent back' }, r.ok ? '✓' : '↺'),
+    park
+      ? h('span', { class: 'park', 'aria-label': 'parked' }, '‖')
+      : h('span', { class: r.ok ? 'ok' : 'bad', 'aria-label': r.ok ? 'done' : 'sent back' }, r.ok ? '✓' : '↺'),
     h('span', null, r.text, by && !String(r.text || '').includes(by) ? ` · ${by}` : ''),
     h('span', { class: 'when' }, clock(it.time)))
 }
@@ -405,10 +418,10 @@ function renderLive () {
     const stage = l?.stage || r.stage
     if (l?.elsewhere) {
       const e = l.elsewhere
-      parts.push(h('div', { class: 'live', testid: 'live-elsewhere' }, h('span', { class: ['spinner', !e.busy && 'still'] }),
+      parts.push(h('div', { class: 'live', testid: 'live-elsewhere' }, e.busy ? h('span', { class: 'spinner' }) : idleMark(),
         h('span', null, e.note || `Another gummi (pid ${e.pid}) is running ${[e.stage, e.role].filter(Boolean).join(' · ')}; this board watches it.`)))
     } else if (!l && r.elsewhere) {
-      parts.push(h('div', { class: 'live', testid: 'live-elsewhere' }, h('span', { class: 'spinner still' }), h('span', null, 'Another gummi is driving this card; this board watches it.')))
+      parts.push(h('div', { class: 'live', testid: 'live-elsewhere' }, idleMark(), h('span', null, 'Another gummi is driving this card; this board watches it.')))
     }
     if (l) {
       parts.push(...conversation('stage', l, role, stage))
@@ -419,7 +432,9 @@ function renderLive () {
           h('span', { class: 'shimmer' }, words + (pausing ? ' · pauses after this turn' : '')),
           l.spent ? h('span', { class: 'spent' }, `${cr(l.spent)} cr`) : null))
       }
-      if (l.err) parts.push(h('div', { class: 'live badc', testid: 'live-error' }, l.err))
+      // a failure the pinned decision already states (a failed stage's
+      // stop quotes it) is not said a second time under the thread
+      if (l.err && !String(state.card?.decision?.question || '').includes(l.err.trim())) parts.push(h('div', { class: 'live badc', testid: 'live-error' }, l.err))
       for (const k of ['consult', 'freeform']) {
         const c = l[k]
         if (!c || !(c.turns?.length || c.streaming || c.busy || c.sending || c.err)) continue
@@ -453,6 +468,13 @@ function renderLive () {
   const stick = atBottom(sc)
   box.replaceChildren(...parts)
   if (stick) requestAnimationFrame(() => { sc.scrollTop = sc.scrollHeight })
+}
+
+// idleMark stands where a spinner would for a watched run with nothing in
+// flight (a parked or waiting card another gummi drives): a still ring
+// reads as a spinner that froze.
+function idleMark () {
+  return h('span', { class: 'idle', 'aria-hidden': 'true' }, '◦')
 }
 
 // rewind takes a freeform conversation back to before one of the person's
@@ -554,7 +576,11 @@ function conversation (kind, c, role, stage) {
   if (c.streaming) {
     out.push(h('div', { class: ['msg live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),
-      h('div', null, h('div', { class: 'who' }, h('b', null, role), h('span', { class: 'mono' }, 'writing')), h('div', { class: 'body' }, md(c.streaming)))))
+      // a message left half-written when its session stopped (paused,
+      // parked, failed) says it was cut off, not that it is still coming
+      h('div', null, h('div', { class: 'who' }, h('b', null, role), c.busy
+        ? h('span', { class: 'mono' }, 'writing')
+        : h('span', { class: 'mono badc', testid: 'live-interrupted' }, 'interrupted')), h('div', { class: 'body' }, md(c.streaming)))))
   }
   return out
 }
