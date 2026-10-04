@@ -30,3 +30,36 @@ func ClaudeModelIDHint(model string) (suggest string, bad bool) {
 	}
 	return m[1] + m[2] + "-" + m[3] + m[4], true
 }
+
+// claudeDateSuffix is the release date the API appends to a model id.
+var claudeDateSuffix = regexp.MustCompile(`-\d{8}$`)
+
+// claudeModelKey is the one name a claude session meters a model under.
+// The CLI names a model two ways in one turn: message_start carries the
+// API's dated id (claude-haiku-4-5-20251001) while init and modelUsage
+// echo the id it was given (claude-haiku-4-5). Keying the mid-turn
+// estimates by one and the settle by the other left the engine holding
+// estimates no settle ever retired — every such turn was booked twice —
+// and kept the context gauge at zero. The date carries nothing metering
+// needs, so both sides drop it.
+func claudeModelKey(model string) string {
+	return claudeDateSuffix.ReplaceAllString(model, "")
+}
+
+// claudeUsageByKey folds a result's modelUsage onto claudeModelKey,
+// summing any entries the CLI reported under both spellings.
+func claudeUsageByKey(in map[string]ccModelUsage) map[string]ccModelUsage {
+	out := make(map[string]ccModelUsage, len(in))
+	for m, mu := range in {
+		k := claudeModelKey(m)
+		acc := out[k]
+		acc.InputTokens += mu.InputTokens
+		acc.OutputTokens += mu.OutputTokens
+		acc.CacheReadInputTokens += mu.CacheReadInputTokens
+		acc.CacheCreationInputTokens += mu.CacheCreationInputTokens
+		acc.CostUSD += mu.CostUSD
+		acc.ContextWindow = max(acc.ContextWindow, mu.ContextWindow)
+		out[k] = acc
+	}
+	return out
+}

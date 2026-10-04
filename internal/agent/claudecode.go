@@ -246,7 +246,8 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// than opening one that has never seen the question it is answering.
 	// Guarded by a liveness check — see claudeResumable — because an id
 	// the CLI cannot find is not a slow start, it is a dead turn.
-	if opts.ResumeID != "" && claudeResumable(opts.WorkDir, opts.ResumeID) {
+	resumed := opts.ResumeID != "" && claudeResumable(opts.WorkDir, opts.ResumeID)
+	if resumed {
 		args = append(args, "--resume", opts.ResumeID)
 	}
 	if len(opts.SystemHints) > 0 {
@@ -365,6 +366,8 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		readDone:    make(chan struct{}),
 		prevCostUSD: map[string]float64{},
 		estimated:   map[string]float64{},
+		turnTokens:  map[string]int64{},
+		resumeBase:  resumed,
 	}
 	started = true
 	go s.forward()
@@ -459,8 +462,14 @@ type claudeSession struct {
 	prevCostUSD map[string]float64 // per-model cumulative costUSD at the last result
 	estimated   map[string]float64 // per-model credits estimated mid-turn, un-settled
 	ctxTokens   int64              // main model's last request: input+cache tokens
+	turnTokens  map[string]int64   // per-model tokens this turn's requests reported (message_delta)
 	toolNames   map[string]string  // tool_use id → tool name, until its tool_result arrives
 	watching    map[string]string  // a started watch's tool_use id → its tool name, until its task_notification
+	// resumeBase is set on a process started with --resume until its
+	// first result: the CLI reports modelUsage cumulative over the whole
+	// saved conversation, not this process, so that first result carries
+	// spend the earlier process already settled (baselineResumed).
+	resumeBase bool
 	// hadIdle marks that some prior turn on this session reached a clean
 	// idle — RunFailure.FirstTurn on a later failure reads the negation
 	// of this.
@@ -754,7 +763,7 @@ func (s *claudeSession) mapLine(line []byte) []Event {
 				s.mu.Unlock()
 			}
 			if s.mainModel == "" {
-				s.mainModel = l.Model
+				s.mainModel = claudeModelKey(l.Model)
 			}
 			// an init with no Send unanswered is a turn the CLI started by
 			// itself: a Monitor event woke the agent after its last result.
@@ -823,7 +832,7 @@ func (s *claudeSession) mapStreamEvent(raw json.RawMessage) []Event {
 		}
 		return nil // input_json_delta, signature_delta
 	case "message_start":
-		s.reqModel = e.Message.Model
+		s.reqModel = claudeModelKey(e.Message.Model)
 		return nil
 	case "message_delta":
 		if e.Usage == nil {
@@ -835,6 +844,10 @@ func (s *claudeSession) mapStreamEvent(raw json.RawMessage) []Event {
 			return nil
 		}
 		model := cmpOr(s.reqModel, s.mainModel)
+		if s.turnTokens == nil {
+			s.turnTokens = map[string]int64{}
+		}
+		s.turnTokens[model] += total
 		// The request's input side approximates the context window right
 		// now; keep the main model's latest for EventContext at result
 		// (side-model requests would understate it).
@@ -973,14 +986,18 @@ func toolResultText(raw json.RawMessage) string {
 func (s *claudeSession) mapResult(l *ccLine) []Event {
 	var out []Event
 	if len(l.ModelUsage) > 0 {
-		models := make([]string, 0, len(l.ModelUsage))
-		for m := range l.ModelUsage {
+		usage := claudeUsageByKey(l.ModelUsage)
+		if s.resumeBase {
+			s.baselineResumed(usage)
+		}
+		models := make([]string, 0, len(usage))
+		for m := range usage {
 			if m != s.mainModel {
 				models = append(models, m)
 			}
 		}
 		sort.Strings(models)
-		if mu, ok := l.ModelUsage[s.mainModel]; ok {
+		if mu, ok := usage[s.mainModel]; ok {
 			models = append(models, s.mainModel)
 			// context: the main model's last request vs its window
 			out = append(out, Event{Kind: EventContext, Context: Context{Tokens: s.ctxTokens, Limit: mu.ContextWindow}})
@@ -988,7 +1005,7 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 		var cumUSD float64
 		var cumTokens int64
 		for _, m := range models {
-			mu := l.ModelUsage[m]
+			mu := usage[m]
 			cumUSD += mu.CostUSD
 			cumTokens += mu.InputTokens + mu.OutputTokens + mu.CacheReadInputTokens + mu.CacheCreationInputTokens
 			delta := (mu.CostUSD-s.prevCostUSD[m])*100 - s.estimated[m]
@@ -1006,6 +1023,7 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 			}
 		}
 		s.estimated = map[string]float64{}
+		s.turnTokens = map[string]int64{}
 		// realized USD-per-token rate for next turn's mid-turn estimates
 		if cumTokens > 0 {
 			s.rate = cumUSD / float64(cumTokens)
@@ -1037,6 +1055,26 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 	}
 	s.markHadIdle()
 	return append(out, Event{Kind: EventIdle})
+}
+
+// baselineResumed seeds prevCostUSD on a resumed process's first result.
+// That result's modelUsage covers the saved conversation's earlier
+// processes too, and settling it against an empty snapshot re-booked all
+// of their spend. The CLI does not split the figure, so this process's
+// share is priced from the tokens its own requests reported this turn at
+// the model's blended cumulative rate, and the rest becomes the snapshot
+// the settle deltas against. A model this process never called (a prior
+// process's helper) is baselined whole.
+func (s *claudeSession) baselineResumed(usage map[string]ccModelUsage) {
+	for m, mu := range usage {
+		prior := mu.CostUSD
+		if all := mu.InputTokens + mu.OutputTokens + mu.CacheReadInputTokens + mu.CacheCreationInputTokens; all > 0 {
+			mine := min(s.turnTokens[m], all)
+			prior -= mu.CostUSD * float64(mine) / float64(all)
+		}
+		s.prevCostUSD[m] = prior
+	}
+	s.resumeBase = false
 }
 
 func (s *claudeSession) write(v any) error {
