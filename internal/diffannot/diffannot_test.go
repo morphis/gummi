@@ -98,6 +98,36 @@ func TestFileAt(t *testing.T) {
 	}
 }
 
+// A comment on a deleted file anchors to the file's own path, the one the
+// diff surface folds it under — never to the "/dev/null" its +++ side
+// names, which no file in the diff carries.
+func TestFileAtDeletedFileKeepsItsPath(t *testing.T) {
+	ls := []string{
+		"diff --git a/gone.go b/gone.go",
+		"deleted file mode 100644",
+		"index 1111111..0000000",
+		"--- a/gone.go",
+		"+++ /dev/null",
+		"@@ -1,2 +0,0 @@",
+		"-package gone",
+		"-func Gone() {}",
+		`diff --git "a/sp ace.go" "b/sp ace.go"`,
+		"--- \"a/sp ace.go\"",
+		"+++ \"b/sp ace.go\"",
+		"@@ -1 +1 @@",
+		"+package space",
+	}
+	if f := FileAt(ls, 6); f != "gone.go" {
+		t.Errorf("FileAt(deleted line) = %q, want gone.go", f)
+	}
+	if got := Parse(ls); len(got) == 0 || got[0].Path != FileAt(ls, 6) {
+		t.Errorf("FileAt and Parse disagree on the deleted file's path: %+v vs %q", got, FileAt(ls, 6))
+	}
+	if f := FileAt(ls, 12); f != "sp ace.go" {
+		t.Errorf("FileAt(quoted path) = %q, want the unquoted path", f)
+	}
+}
+
 func TestLocateAllMatchesLocate(t *testing.T) {
 	ls := lines()
 	// anchors for the target lines, plus a couple of orphaned/blank wants.
