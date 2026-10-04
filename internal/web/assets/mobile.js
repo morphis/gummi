@@ -8,6 +8,7 @@
 import { $, h, clear, icon, isMobile } from './dom.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { pushLayer } from './back.js?v=__ASSET_V__'
+import { write as writeHash } from './router.js?v=__ASSET_V__'
 
 export function initMobile () {
   const bar = $('#mcard')
@@ -15,6 +16,7 @@ export function initMobile () {
     icon('back'), h('span', { class: 'dotn', id: 'm-needs', testid: 'card-back-needs', 'aria-hidden': 'true' })))
   on(['view'], apply)
   on(['view'], layer)
+  on(['view'], address)
   on(['board'], count)
   window.addEventListener('resize', () => { place(); apply(); layer() })
   place()
@@ -52,6 +54,15 @@ function layer () {
     viewDone = null
     done()
   }
+}
+
+// address keeps the hash on what a card's screen shows: its thread is the
+// card alone (#FD-001), a document names its tab (#FD-001/diff) — so a
+// reload on the thread opens the thread, not the document seen before it.
+function address () {
+  if (!isMobile() || !state.sel) return
+  if (state.view === 'thread') writeHash(state.sel, null)
+  else if (state.view === 'panel') writeHash(state.sel, state.tab)
 }
 
 function apply () {

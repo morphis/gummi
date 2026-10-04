@@ -7,7 +7,7 @@ import { $, isMobile } from './dom.js?v=__ASSET_V__'
 import { get, post, setUnauthorizedHandler, setReadHandlers } from './api.js?v=__ASSET_V__'
 import { set, state, rows, on } from './store.js?v=__ASSET_V__'
 import { connect, close as closeEvents } from './events.js?v=__ASSET_V__'
-import { parse, onRoute } from './router.js?v=__ASSET_V__'
+import { parse, onRoute, restore as restoreHash, clear as clearHash } from './router.js?v=__ASSET_V__'
 import { initTheme } from './theme.js?v=__ASSET_V__'
 import { initViewport } from './viewport.js?v=__ASSET_V__'
 import { initBack } from './back.js?v=__ASSET_V__'
@@ -158,9 +158,24 @@ async function startBoard () {
   })
 
   let routed = false
-  onRoute(({ id, tab }) => {
+  onRoute(async ({ id, tab }) => {
     routed = true
-    if (id && (id !== state.sel || (tab && tab !== state.tab))) select(id, { tab })
+    if (!id) return
+    // a hash naming a card the board does not hold (once asked again: a
+    // card made a moment ago may not have reached this page yet) says so,
+    // as a fresh load does, and leaves the open card open
+    if (state.board && !rows().some(r => r.id === id)) {
+      await loadBoard()
+      if (!rows().some(r => r.id === id)) {
+        toast(`${id} is not on this board`)
+        restoreHash()
+        return
+      }
+    }
+    // on a phone's cards a link to the card already picked (a boot's
+    // pick, kept out of the address) still opens its screen
+    const opens = isMobile() && state.view === 'cards'
+    if (id !== state.sel || (tab && tab !== state.tab) || opens) select(id, { tab })
   }, () => ({ id: state.sel, tab: state.tab }))
   await loadBoard()
   if (routed && state.sel) return connectEvents()
@@ -174,7 +189,13 @@ async function startBoard () {
   // shown (a deep link) moves to its screen — a plain open, and a deep
   // link naming an id that is not on this board, stay there
   const view = !!(route.id && first === route.id)
-  if (first) await select(first, { tab, view })
+  const picking = first ? select(first, { tab, view }) : null
+  // the card a phone's plain open picked is not in the address: written
+  // there, a reload of the cards would read it as a deep link and open it.
+  // Taken off in the same task select wrote it in, so a link arriving
+  // meanwhile is never mistaken for the address already showing
+  if (isMobile() && !view) clearHash()
+  await picking
 
   connectEvents()
 }

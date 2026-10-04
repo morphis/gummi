@@ -75,3 +75,20 @@ test('a card dialog closes when another card is opened', async ({ pairedPage: pa
   await expect(page.getByTestId('card-id')).toHaveText(doomed);
   await expect(page.getByTestId('action-dialog')).toHaveCount(0);
 });
+
+// A hash naming no card on this board is said to be so, as a fresh load
+// says it, and the card that was open stays open — not opened as an empty
+// card whose thread "is not available yet". An id typed in lower case
+// still names its card.
+test('a hash naming no card keeps the open card and says so', async ({ pairedPage: page, server }) => {
+  await page.goto(`${server.url}/#${verified}`);
+  await expect(page.getByTestId('card-id')).toHaveText(verified);
+  await page.evaluate(() => { location.hash = '#nope'; });
+  await expect(page.getByTestId('toast').filter({ hasText: 'nope is not on this board' })).toBeVisible();
+  await expect(page.getByTestId('card-id')).toHaveText(verified);
+  await expect(page.getByTestId('thread-unavailable')).toHaveCount(0);
+  expect(page.url()).toContain(`#${verified}`);
+  await page.evaluate((id) => { location.hash = '#' + id.toLowerCase(); }, doomed);
+  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  await expect(page).toHaveURL(new RegExp(`#${doomed}`));
+});

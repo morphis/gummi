@@ -90,4 +90,59 @@ test.describe('back', () => {
     expect(await page.goBack()).toBeNull();
     await page.close();
   });
+
+  test('after a reload back still closes what opened since', async ({ pairedPage: page, server }, info) => {
+    test.skip(info.project.name === 'phone', 'the desktop’s overlays');
+    await page.goto(`${server.url}/#${a}`);
+    await page.getByTestId('rail-fleet').click();
+    await expect(page.getByTestId('view-fleet')).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await page.getByTestId('rail-fleet').click();
+    await expect(page.getByTestId('view-fleet')).toBeVisible();
+    await page.goBack();
+    await expect(page.getByTestId('view-fleet')).toHaveCount(0);
+    await expect(page.getByTestId('card-id')).toHaveText(a);
+  });
+
+  test('a card picked in the palette does not keep the old card’s tab in the address', async ({ pairedPage: page, server }, info) => {
+    test.skip(info.project.name === 'phone', 'the desktop’s palette');
+    await page.goto(`${server.url}/#${a}/log`);
+    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await page.getByTestId('btn-palette').click();
+    await page.getByTestId(`palette-row-${b}`).click();
+    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await page.waitForTimeout(800);
+    expect(page.url()).toContain(`#${b}`);
+    expect(page.url()).not.toContain('/log');
+  });
+
+  test('on a phone a reload keeps the screen it was on, and back still works', async ({ pairedPage: page, server }, info) => {
+    test.skip(info.project.name !== 'phone', 'the phone’s views');
+    // the cards list, reloaded, is still the cards list
+    await page.goto(server.url);
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
+    // once the board is up, the card it picked is not in the address
+    await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+    await expect(page).not.toHaveURL(/#/);
+    await page.reload();
+    await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+    await expect(page.getByTestId('rail')).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
+
+    // a card's thread follows its tab into the address, so a reload opens
+    // what was showing
+    await page.getByTestId(`rail-row-${a}`).click();
+    await page.getByTestId('tab-diff').click();
+    await expect(page).toHaveURL(new RegExp(`#${a}/diff$`));
+    await page.getByTestId('tab-thread').click();
+    await expect(page).toHaveURL(new RegExp(`#${a}$`));
+    await page.reload();
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'thread');
+    await expect(page.getByTestId('card-id')).toHaveText(a);
+    // back from the reloaded card is the cards, at the first press
+    await page.goBack();
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
+  });
 });

@@ -32,10 +32,19 @@ function watchErrors(page: Page): string[] {
 test('the rail shows the seeded cards and a card opens with its head', async ({ pairedPage: page }, info) => {
   const errors = watchErrors(page);
   // boot names the auto-picked card in the address bar; from there the
-  // reload reopens it (the hash persists)
-  await expect(page).toHaveURL(/#/);
-  await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
+  // reload reopens it (the hash persists). A phone opens on the cards,
+  // which name no card: a reload stays on them.
+  if (info.project.name === 'phone') {
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
+    await expect(page).not.toHaveURL(/#/);
+    await page.reload();
+    await expect(page.getByTestId('rail')).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
+  } else {
+    await expect(page).toHaveURL(/#/);
+    await page.reload();
+  }
   for (const id of [ids.gate, ...ids.backlog, ids.bug]) {
     await expect(page.getByTestId(`rail-row-${id}`)).toBeVisible();
   }

@@ -13,7 +13,11 @@
 // is a navigation, not a step.
 
 const stack = [] // open layers, oldest first: [{ seq, close, dead, pushed }]
-let seq = 0
+// Numbers start from the clock, not from 0: a reload keeps the history,
+// stamps and all, and a layer opened after it must still number above
+// every entry an earlier load of the page left there — or back, arriving
+// at one of those, would find nothing newer than it to close.
+let seq = Date.now()
 let ours = 0 // history.back() calls we made, whose popstate is ours to swallow
 // the address a step back arrived at, for a moment: the hash change it
 // raises is the tail of that step, not a navigation — and only that one
@@ -36,12 +40,22 @@ function push (l) {
 export function pushLayer (close) {
   mark()
   const l = { seq: ++seq, close, dead: false, pushed: false }
+  // a reload made on a layer stands on that layer's old entry, with nothing
+  // open over it: the first layer opened takes the entry over rather than
+  // pushing another on top, or back would step through a dead one first
+  if (!stack.length && !ours && history.state?.gummiLayer) {
+    l.seq = history.state.gummiSeq
+    l.pushed = true
+    stack.push(l)
+    return done
+  }
   stack.push(l)
   // a layer closed a moment ago may still be stepping its entry back out
   // (history.back is asynchronous): this one's entry waits for that, or
   // the step back would take this one's instead
   if (!ours) push(l)
-  return function done () {
+  return done
+  function done () {
     const i = stack.indexOf(l)
     if (i < 0) return // back closed it
     if (!l.pushed) { stack.splice(i, 1); return }

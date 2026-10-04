@@ -21,8 +21,16 @@ export class ApiError extends Error {
     this.data = data || {}
   }
 
-  // notBuilt is a route this server does not answer yet (501), or at all.
-  get notBuilt () { return this.status === 501 || this.status === 404 || this.status === 405 }
+  // notBuilt is a route this server does not answer yet (501), or at all:
+  // a 404 only when nothing answered it — the server's own "no such card"
+  // is a 404 too, but it carries its sentence (webapi.Error), and a card
+  // that is not on the board is not a route that is missing.
+  get notBuilt () {
+    return this.status === 501 || this.status === 405 || (this.status === 404 && !this.data.error)
+  }
+
+  // notFound is the server saying what was asked for is not there.
+  get notFound () { return this.status === 404 && !!this.data.error }
 }
 
 let onUnauthorized = null
