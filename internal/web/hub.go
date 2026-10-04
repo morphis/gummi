@@ -49,13 +49,15 @@ const (
 )
 
 // sseEvent is one event as sent: its id, its name, and its JSON data.
-// about is the change's ID, for the one filter the stream applies (a
-// device waiting to be let in hears only about itself).
+// about is the change's ID, for the filter the stream applies (a device
+// waiting to be let in hears only about itself); except, the one device
+// the change is not for.
 type sseEvent struct {
-	id    uint64
-	name  string
-	data  []byte
-	about string
+	id     uint64
+	name   string
+	data   []byte
+	about  string
+	except string
 }
 
 // client is one connected page.
@@ -146,7 +148,7 @@ func (h *hub) emitLocked(c webapi.Change) {
 		return
 	}
 	h.next++
-	ev := sseEvent{id: h.next, name: string(c.Kind), data: data, about: c.ID}
+	ev := sseEvent{id: h.next, name: string(c.Kind), data: data, about: c.ID, except: c.Except}
 	h.ring = append(h.ring, ev)
 	if len(h.ring) > ringSize {
 		h.ring = append(h.ring[:0:0], h.ring[len(h.ring)-ringSize:]...)
@@ -316,6 +318,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// the pairing events about itself, which tell its page to look again.
 	send := func(ev sseEvent) bool {
 		if who.Pending && (ev.name != string(webapi.ChangePairing) || ev.about != who.DeviceID) {
+			return true
+		}
+		if ev.except != "" && ev.except == who.DeviceID {
 			return true
 		}
 		return write("id: %d\nevent: %s\ndata: %s\n\n", ev.id, ev.name, ev.data)

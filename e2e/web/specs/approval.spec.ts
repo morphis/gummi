@@ -51,7 +51,7 @@ test('a second browser waits until a paired page approves it', async ({ pairedPa
     const req = page.getByTestId(`approval-${id}`);
     await expect(page.getByTestId('approvals')).toBeVisible();
     await expect(req.getByTestId('approval-person')).toHaveText('Ana');
-    await expect(req.getByTestId('approval-via')).toContainText('gummi web pair');
+    await expect(req.getByTestId('approval-via')).toContainText('minted on the machine hosting the board');
     await expect(req.getByTestId('approval-source')).toHaveText('127.0.0.1');
     await expect(req.getByTestId('approval-ua')).toContainText('Mozilla');
     await expect(req.getByTestId('approval-time')).toContainText('lapses in');

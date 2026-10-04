@@ -44,7 +44,7 @@ func (s *Server) handlePendingDevices(w http.ResponseWriter, r *http.Request) {
 			UserAgent:     d.UserAgent,
 			Source:        d.Source,
 			Code:          d.Via,
-			Via:           CodeOrigin(d.Via).Via(),
+			Via:           CodeOrigin(d.Via).ViaPage(),
 			Origin:        d.Origin,
 			RequestedAt:   d.PairedAt,
 			ExpiresInSecs: max(0, int(d.PairedAt.Add(pendingTTL).Sub(now).Seconds())),
@@ -64,7 +64,10 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	line := who.Person + " approved " + dev.Person + " on " + dev.Name
 	s.opt.Log("web: %s on %s (%s) approved %s on %s (%s) from %s %s",
 		who.Person, who.Device, who.DeviceID, dev.Person, dev.Name, dev.ID, dev.Source, CodeOrigin(dev.Via).Via())
-	s.hub.publish(webapi.Change{Kind: webapi.ChangeToast, Text: line + " — `gummi web unpair " + dev.ID + "` if that was a mistake"})
+	s.hub.publish(webapi.Change{
+		Kind: webapi.ChangeToast, Except: dev.ID,
+		Text: line + ". If that was a mistake, unpair it on the machine hosting the board: gummi web unpair " + dev.ID,
+	})
 	s.notifyDecision("New device approved", line, dev.ID)
 	writeJSON(w, http.StatusOK, webapi.OK{OK: true})
 }
@@ -126,7 +129,7 @@ func (s *Server) announceRequest(dev Device) {
 	if s.opt.Push != nil && !s.opt.OpenAccess {
 		s.opt.Push.Notifier.Post(push.Message{
 			Title: "Approve a new device?",
-			Body:  dev.Person + " on " + dev.Name + " from " + dev.Source + " paired " + via + ". Open the board to approve or reject it.",
+			Body:  dev.Person + " on " + dev.Name + " from " + dev.Source + " paired " + CodeOrigin(dev.Via).ViaPage() + ". Open the board to approve or reject it.",
 			URL:   "/",
 			Tag:   "pairing-" + dev.ID,
 		})

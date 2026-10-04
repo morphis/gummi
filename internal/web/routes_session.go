@@ -218,9 +218,13 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 // pairing waits to be let in and is announced as a request instead
 // (announceRequest).
 func (s *Server) announcePairing(dev Device, origin CodeOrigin, from string) {
-	line := "new device paired: " + dev.Person + " on " + dev.Name + " " + origin.Via()
+	line := "new device paired: " + dev.Person + " on " + dev.Name + " " + origin.ViaPage()
 	s.opt.Log("web: paired %s on %s (%s) from %s %s", dev.Person, dev.Name, dev.ID, from, origin.Via())
-	s.hub.publish(webapi.Change{Kind: webapi.ChangeToast, Text: line + " — `gummi web unpair " + dev.ID + "` if that was not you"})
+	// the device that just paired is the one place the warning is not for
+	s.hub.publish(webapi.Change{
+		Kind: webapi.ChangeToast, Except: dev.ID,
+		Text: line + ". If that was not you, unpair it on the machine hosting the board: gummi web unpair " + dev.ID,
+	})
 	if s.opt.Push != nil && !s.opt.OpenAccess {
 		s.opt.Push.Notifier.Post(push.Message{Title: "New device paired", Body: line, URL: "/", Tag: "paired-" + dev.ID})
 	}
@@ -249,7 +253,7 @@ func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.mints.allow(clientIP(r)) {
-		writeError(w, http.StatusTooManyRequests, "a code was just printed; check the terminal running `gummi web`")
+		writeError(w, http.StatusTooManyRequests, "a code was just printed; check the terminal running gummi web")
 		return
 	}
 	code, expires, err := s.opt.Pairing.RequestFrom(sourceKey(clientIP(r)))
@@ -359,7 +363,7 @@ func (s *Server) handleAdminPair(w http.ResponseWriter, r *http.Request) {
 		who = person
 	}
 	s.opt.Log("web: `gummi web pair` asked for a pairing code for %s", who)
-	s.hub.publish(webapi.Change{Kind: webapi.ChangeToast, Text: "`gummi web pair` minted a pairing code for " + who + " on the machine hosting the board"})
+	s.hub.publish(webapi.Change{Kind: webapi.ChangeToast, Text: "a pairing code was minted for " + who + " on the machine hosting the board"})
 	writeJSON(w, http.StatusOK, webapi.AdminPairResponse{
 		Code:          code,
 		ExpiresInSecs: int(expires.Sub(s.now()).Seconds()),

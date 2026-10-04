@@ -80,6 +80,10 @@ type Change struct {
 	Err  bool   `json:"err,omitempty"`
 	// Viewers is the whole presence list, on a viewers change.
 	Viewers []Viewer `json:"viewers,omitempty"`
+	// Except is a device the change is not sent to: the one a toast is
+	// about, when what it says is addressed to everyone else. Never on
+	// the wire.
+	Except string `json:"-"`
 }
 
 // Key is the change's coalescing identity: two changes with the same key

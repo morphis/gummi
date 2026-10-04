@@ -109,13 +109,25 @@ func (o CodeOrigin) Via() string {
 	return "with the code printed when `gummi web` started"
 }
 
+// ViaPage is Via in a page's words: no command a page cannot run, and no
+// backticks a page would print as they are.
+func (o CodeOrigin) ViaPage() string {
+	switch o {
+	case OriginCLI:
+		return "with a code minted on the machine hosting the board"
+	case OriginBrowser:
+		return "with a code a browser asked for"
+	}
+	return "with the code printed when the board's web server started"
+}
+
 // Pairing errors the HTTP layer turns into status codes. Redeeming
 // reports which of them happened so the page can say something true —
 // "two tries left" and "that code expired" are different problems.
 var (
 	// ErrNoCode is returned when no code has been minted (or the last one
 	// was already redeemed).
-	ErrNoCode = errors.New("no pairing code is live; run `gummi web pair`")
+	ErrNoCode = errors.New("no pairing code is live; ask for one below, or run gummi web pair on the machine hosting the board")
 	// ErrCodeExpired is returned for a code past its three minutes.
 	ErrCodeExpired = errors.New("that pairing code expired")
 	// ErrCodeBurned is returned once the guess budget is spent.
@@ -123,7 +135,7 @@ var (
 	// ErrCodeLive is returned by Request while a code is live: it is
 	// already in the terminal, and minting another would only reset its
 	// guesses.
-	ErrCodeLive = errors.New("a pairing code is already showing in the terminal running `gummi web`; use that one")
+	ErrCodeLive = errors.New("a pairing code is already showing in the terminal running gummi web; use that one")
 )
 
 // LockedError is pairing refusing a browser's code after too many wrong
@@ -138,9 +150,9 @@ type LockedError struct {
 
 func (e *LockedError) Error() string {
 	if e.Source {
-		return "this address is locked out of pairing after too many wrong guesses; try again later, or run `gummi web pair` on the machine hosting the board"
+		return "this address is locked out of pairing after too many wrong guesses; try again later, or run gummi web pair on the machine hosting the board"
 	}
-	return "pairing is locked after too many wrong guesses; try again later, or run `gummi web pair` on the machine hosting the board"
+	return "pairing is locked after too many wrong guesses; try again later, or run gummi web pair on the machine hosting the board"
 }
 
 // Redeemed is what a correct guess redeemed: the person the code was

@@ -885,3 +885,30 @@ func testSubscription(t *testing.T, device string) push.Subscription {
 		Device:   device,
 	}
 }
+
+// The "new device paired" notice is for everyone else at the board: the
+// device that just paired is the one place its "if that was not you" is
+// never shown — not live, and not in the backlog a reconnect resumes.
+func TestTheNewDeviceNoticeSkipsTheDeviceItIsAbout(t *testing.T) {
+	h := newHarness(t)
+	c, other := h.client(), h.client()
+	h.pair(c, "Simon")
+	mine := h.events(c, "")
+	since := mine.until(string(webapi.ChangeViewers))
+
+	h.pair(other, "Ana")
+	toast := mine.until(string(webapi.ChangeToast))
+	if !strings.Contains(toast.data, "new device paired: Ana") || strings.Contains(toast.data, "`") {
+		t.Fatalf("the notice others see = %s", toast.data)
+	}
+	theirs := h.events(other, since.id)
+	for {
+		m := theirs.next()
+		if m.event == string(webapi.ChangeToast) {
+			t.Fatalf("the device that just paired was told: %s", m.data)
+		}
+		if m.event == string(webapi.ChangeViewers) {
+			break
+		}
+	}
+}

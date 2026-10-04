@@ -111,7 +111,7 @@ func TestApprovingLetsTheDeviceIn(t *testing.T) {
 	var list []webapi.PendingDevice
 	_ = json.Unmarshal(b, &list)
 	if len(list) != 1 || list[0].ID != id || list[0].Person != "Ana" || list[0].Code != string(OriginCLI) ||
-		!strings.Contains(list[0].Via, "gummi web pair") || list[0].Source == "" || !strings.Contains(list[0].UserAgent, "iPhone") ||
+		!strings.Contains(list[0].Via, "minted on the machine hosting the board") || list[0].Source == "" || !strings.Contains(list[0].UserAgent, "iPhone") ||
 		list[0].Device != "iPhone · Safari" || list[0].RequestedAt.IsZero() || list[0].ExpiresInSecs <= 0 {
 		t.Fatalf("pending devices = %+v", list)
 	}
