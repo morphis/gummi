@@ -498,6 +498,9 @@ type formResult struct {
 	// draft sets them today.
 	SessionBackend string
 	SessionModel   string
+	// Skills are the library skills picked for the card (item ids); empty
+	// forwards the whole library. Only the web face sets them today.
+	Skills []string
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
@@ -560,6 +563,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
+			Skills: res.Skills,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}

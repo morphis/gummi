@@ -501,6 +501,15 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 // reaching fireVerb/engine.Send against a lock this process does not
 // hold.
 func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
+	// a "/skill" line is a message, rewritten before anything reads it
+	if out, _, ok, problem := m.expandSkill(text); ok {
+		if problem != "" {
+			m.notice = noticeMsg{text: problem, isErr: true, id: r.F.ID}
+			return nil
+		}
+		text = out
+		m.threadInput.SetValue(out)
+	}
 	return m.routeThreadLine(r, text, func() *threadDecision { return m.visibleDecision(r) })
 }
 

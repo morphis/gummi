@@ -80,6 +80,9 @@ type Input struct {
 	// profile.
 	SessionBackend string
 	SessionModel   string
+	// Skills are the library skills (item ids) picked for the card; empty
+	// forwards the whole library to its sessions.
+	Skills []string
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
 	Repo string
@@ -364,6 +367,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		Slug: slug, Stage: workflow.InitialFor(in.Kind),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		SessionBackend: in.SessionBackend, SessionModel: in.SessionModel,
+		Skills:       append([]string(nil), in.Skills...),
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
 		Base: in.Base,

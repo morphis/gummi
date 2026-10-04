@@ -144,7 +144,7 @@ func TestForwardingToAnIncapableBackendWarns(t *testing.T) {
 	writeSkill(t, ws, filepath.Join(".agents", "skills"), "container-env")
 	e, notices := newSkillsEngine(t, ws, "container-env")
 
-	got := e.skillDirsFor(stubSkillAgent{}, "codex")
+	got := e.skillDirsFor(stubSkillAgent{}, "codex", nil)
 	if len(got) != 0 {
 		t.Fatalf("skillDirsFor handed dirs to a backend that cannot use them: %v", got)
 	}
@@ -154,7 +154,7 @@ func TestForwardingToAnIncapableBackendWarns(t *testing.T) {
 
 	// Once per backend, not once per card: a board runs many cards on the
 	// same backend and must not repeat itself for each of them.
-	e.skillDirsFor(stubSkillAgent{}, "codex")
+	e.skillDirsFor(stubSkillAgent{}, "codex", nil)
 	if len(*notices) != 1 {
 		t.Errorf("the notice repeated: %v", *notices)
 	}
@@ -166,7 +166,7 @@ func TestForwardingToACapableBackendPasses(t *testing.T) {
 	want := writeSkill(t, ws, filepath.Join(".agents", "skills"), "container-env")
 	e, notices := newSkillsEngine(t, ws, "container-env")
 
-	got := e.skillDirsFor(stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}, "opencode")
+	got := e.skillDirsFor(stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}, "opencode", nil)
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("skillDirsFor() = %v, want [%s]", got, want)
 	}
@@ -179,7 +179,7 @@ func TestForwardingToACapableBackendPasses(t *testing.T) {
 // ordinary board must be untouched by this feature.
 func TestNoForwardingIsSilent(t *testing.T) {
 	e, notices := newSkillsEngine(t, t.TempDir())
-	if got := e.skillDirsFor(stubSkillAgent{}, "codex"); got != nil {
+	if got := e.skillDirsFor(stubSkillAgent{}, "codex", nil); got != nil {
 		t.Errorf("skillDirsFor() = %v, want nil", got)
 	}
 	if len(*notices) != 0 {
@@ -209,10 +209,61 @@ func TestManagedSkillsAreGloballyAvailable(t *testing.T) {
 	e, notices := newSkillsEngine(t, ws)
 	capable := stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}
 	want := filepath.Join(ws, ".gummi", "agent-plugins", "items", "skill-griffin")
-	if got := e.skillDirsFor(capable, "copilot"); len(got) != 1 || got[0] != want {
+	if got := e.skillDirsFor(capable, "copilot", nil); len(got) != 1 || got[0] != want {
 		t.Fatalf("griffin skills = %v, want [%s]", got, want)
 	}
 	if len(*notices) != 0 {
 		t.Errorf("notices = %v, want none", *notices)
+	}
+}
+
+// A card created with picked skills gets only those from the library —
+// the rest stay out of its sessions — and is told by name to use them.
+func TestPickedSkillsNarrowTheLibraryAndAreNamed(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, ".gummi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := agentplugins.New(ws, []agentplugins.Repo{{Name: "default", Root: ws}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := store.Create(agentplugins.KindSkill, "Review rules", "# Review\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(agentplugins.KindSkill, "Deploy", "# Deploy\n"); err != nil {
+		t.Fatal(err)
+	}
+	e, notices := newSkillsEngine(t, ws)
+	capable := stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}
+
+	picked := []string{review.ID, "skill-removed"}
+	dirs := e.skillDirsFor(capable, "copilot", picked)
+	want := agentplugins.ItemDir(ws, review.ID)
+	if len(dirs) != 1 || dirs[0] != want {
+		t.Fatalf("skillDirsFor(picked) = %v, want [%s]", dirs, want)
+	}
+	if len(*notices) != 1 || !strings.Contains((*notices)[0], "skill-removed") {
+		t.Errorf("notices = %v, want one naming the removed skill", *notices)
+	}
+
+	hint := e.pickedSkillsHint(picked, dirs)
+	for _, part := range []string{`"Review rules"`, review.ID, filepath.Join(want, "SKILL.md")} {
+		if !strings.Contains(hint, part) {
+			t.Errorf("hint missing %q:\n%s", part, hint)
+		}
+	}
+	if strings.Contains(hint, "skill-removed") || strings.Contains(hint, "Deploy") {
+		t.Errorf("hint names a skill the session did not get:\n%s", hint)
+	}
+	if h := e.pickedSkillsHint(nil, dirs); h != "" {
+		t.Errorf("hint with nothing picked = %q, want none", h)
+	}
+	if h := e.pickedSkillsHint(picked, nil); h != "" {
+		t.Errorf("hint with no skills reaching the session = %q, want none", h)
+	}
+	if all := e.skillDirsFor(capable, "copilot", nil); len(all) != 2 {
+		t.Errorf("skillDirsFor(nil) = %v, want the whole library", all)
 	}
 }

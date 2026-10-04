@@ -15,7 +15,7 @@
 // the session's first message, and sending it creates the session.
 
 import { h, $, clear } from './dom.js?v=__ASSET_V__'
-import { post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
+import { get, post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick } from './decision.js?v=__ASSET_V__'
@@ -37,6 +37,7 @@ let attachments = []
 export function initComposer (ctx) {
   ctxRef = ctx
   const input = $('#composer-input')
+  initSkillComplete(input)
   input.addEventListener('input', () => {
     autosize()
     set({ draft: input.value })
@@ -98,6 +99,100 @@ export function initComposer (ctx) {
   ctx.submitLine = () => submit({ asLine: true })
   renderSays()
   renderAttachButton()
+}
+
+// ---- "/skill <name> [message]" completion ----
+//
+// The server rewrites a "/skill" line into a message asking the agent to
+// use that library skill; this is the popup that finishes the name. It
+// shows while the line is "/skill" and a name being typed, lists the
+// library's skills that name starts, and tab or enter puts the name in.
+// It never takes a line away from the composer: once the name is
+// followed by a space the popup is gone and enter sends as it always does.
+
+const SKILL_LINE = /^\/skill(?:\s+(\S*))?$/i
+let skillLib = null // [{id, name, description}] — the library's skills
+let skillLibAt = 0
+let skillPop = null // { rows, cursor, el }
+
+async function loadSkillLib () {
+  if (skillLib && Date.now() - skillLibAt < 30000) return skillLib
+  try {
+    const r = await get('/api/plugins')
+    skillLib = (r?.items || []).filter(i => i.kind === 'skill')
+    skillLibAt = Date.now()
+  } catch {
+    skillLib = skillLib || []
+  }
+  return skillLib
+}
+
+function initSkillComplete (input) {
+  const box = h('div', { class: 'skillcomplete', id: 'composer-skills', testid: 'composer-skills', role: 'listbox', 'aria-label': 'Skills', hidden: true })
+  $('#composer').prepend(box)
+  const refresh = async () => {
+    const m = SKILL_LINE.exec(input.value)
+    if (!m) { closeSkillPop(); return }
+    const lib = await loadSkillLib()
+    if (!SKILL_LINE.test(input.value)) { closeSkillPop(); return }
+    const prefix = (SKILL_LINE.exec(input.value)[1] || '').toLowerCase()
+    const rows = lib.filter(s => s.id.toLowerCase().startsWith(prefix) || s.name.toLowerCase().startsWith(prefix))
+    const keep = skillPop?.rows[skillPop.cursor]?.id
+    skillPop = { rows, cursor: Math.max(0, rows.findIndex(r => r.id === keep)) }
+    renderSkillPop(box, input, lib.length === 0)
+  }
+  input.addEventListener('input', refresh)
+  input.addEventListener('focus', refresh)
+  input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) closeSkillPop() }, 120))
+  // registered before the composer's own keys, so enter on an open popup
+  // completes the name instead of sending the line
+  input.addEventListener('keydown', (e) => {
+    if (!skillPop || box.hidden || e.isComposing) return
+    const n = skillPop.rows.length
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); closeSkillPop(); return }
+    if (!n) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      skillPop.cursor = (skillPop.cursor + (e.key === 'ArrowDown' ? 1 : -1) + n) % n
+      renderSkillPop(box, input, false)
+    } else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      acceptSkill(input, skillPop.rows[skillPop.cursor])
+    }
+  })
+}
+
+function acceptSkill (input, row) {
+  if (!row) return
+  input.value = `/skill ${row.id} `
+  closeSkillPop()
+  input.focus()
+  input.setSelectionRange(input.value.length, input.value.length)
+  input.dispatchEvent(new Event('input'))
+}
+
+function renderSkillPop (box, input, empty) {
+  clear(box)
+  const { rows, cursor } = skillPop
+  if (!rows.length) {
+    box.append(h('div', { class: 'sc-empty' }, empty ? 'The agent plugins library has no skills yet.' : 'No library skill starts with that.'))
+  }
+  rows.forEach((s, i) => box.append(h('button', {
+    class: ['sc-row', i === cursor && 'on'], type: 'button', role: 'option', 'aria-selected': String(i === cursor),
+    testid: `composer-skill-${s.id}`,
+    onmousedown: (e) => e.preventDefault(),
+    onclick: () => acceptSkill(input, s)
+  }, h('span', { class: 'mono n' }, s.id), s.description ? h('span', { class: 'd' }, s.description) : null)))
+  box.append(h('div', { class: 'sc-foot' }, h('kbd', null, 'tab'), ' completes · then type what to do with it'))
+  box.hidden = false
+}
+
+function closeSkillPop () {
+  skillPop = null
+  const box = $('#composer-skills')
+  if (box) { box.hidden = true; clear(box) }
 }
 
 export function clearComposer () {

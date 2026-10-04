@@ -256,6 +256,10 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	e.seedCardSpend(sess)
 
 	hints := e.freeformHints(ctx, f, workDir, budget, ag)
+	skillDirs := e.skillDirsFor(ag, backendLabel(backend), f.Skills)
+	if h := e.pickedSkillsHint(f.Skills, skillDirs); h != "" {
+		hints = append(hints, h)
+	}
 	// The context a person comes back to. Two ways, and which one applies
 	// is the backend's to decide, not ours to guess:
 	//
@@ -308,7 +312,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
-		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
+		SkillDirs:      skillDirs,
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives

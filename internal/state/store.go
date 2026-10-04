@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS features (
 	stack_id        TEXT NOT NULL DEFAULT '',
 	stack_pos       INTEGER NOT NULL DEFAULT 0,
 	session_backend TEXT NOT NULL DEFAULT '',
-	session_model   TEXT NOT NULL DEFAULT ''
+	session_model   TEXT NOT NULL DEFAULT '',
+	skills          TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 -- features_stack is created by the column migrations, not here: this
@@ -765,6 +766,10 @@ var migrations = []string{
 	// was sent on. Empty decodes to no images — every row written before
 	// attachments existed, and every turn that never carried one.
 	`ALTER TABLE session_messages ADD COLUMN images TEXT NOT NULL DEFAULT ''`,
+	// The library skills a card was created with (newline-separated item
+	// ids). Empty forwards the whole library, which is what every row
+	// written before the column existed did.
+	`ALTER TABLE features ADD COLUMN skills TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -802,8 +807,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
-			session_backend, session_model)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			session_backend, session_model, skills)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -817,7 +822,7 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
-		f.SessionBackend, f.SessionModel)
+		f.SessionBackend, f.SessionModel, joinSkills(f.Skills))
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -843,7 +848,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
-	session_backend, session_model`
+	session_backend, session_model, skills`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -863,11 +868,29 @@ func writtenFeatureColumns() map[string]bool {
 
 type rowScanner interface{ Scan(dest ...any) error }
 
+// joinSkills and splitSkills store a card's picked skills as one
+// newline-separated column. Skill ids are slugs, so neither a newline
+// nor an empty entry can be part of one.
+func joinSkills(ids []string) string { return strings.Join(ids, "\n") }
+
+func splitSkills(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, id := range strings.Split(s, "\n") {
+		if id = strings.TrimSpace(id); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
 	var goalID, goalDropped, foundBy, goalWrapUp, mode string
-	var stackID string
+	var stackID, skills string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -884,10 +907,11 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
-		&f.SessionBackend, &f.SessionModel)
+		&f.SessionBackend, &f.SessionModel, &skills)
 	if err != nil {
 		return f, err
 	}
+	f.Skills = splitSkills(skills)
 	f.StackID = domain.StackID(stackID)
 	f.Mode = domain.ResearchMode(mode)
 	f.GoalID = domain.FeatureID(goalID)

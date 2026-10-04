@@ -366,6 +366,16 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .nextup .go{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--accent);font-weight:500;white-space:nowrap}
 .composer{border:1px solid var(--line2);border-radius:12px;background:var(--panel)}
 .composer:focus-within{border-color:var(--accent)}
+.composer{position:relative}
+.skillcomplete{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:30;max-height:260px;overflow:auto;padding:4px;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow)}
+.skillcomplete[hidden]{display:none}
+.skillcomplete .sc-row{display:flex;align-items:baseline;gap:10px;width:100%;padding:6px 8px;border-radius:7px;text-align:left;font-size:13px;color:var(--fg2)}
+.skillcomplete .sc-row:hover{background:var(--sunk)}
+.skillcomplete .sc-row.on{background:var(--band);color:var(--fg)}
+.skillcomplete .sc-row .n{flex:none;color:var(--fg)}
+.skillcomplete .sc-row .d{min-width:0;font-size:12px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.skillcomplete .sc-empty{padding:8px;font-size:12.5px;color:var(--fg3)}
+.skillcomplete .sc-foot{padding:4px 8px 2px;font-size:11.5px;color:var(--fg4)}
 .composer textarea{display:block;width:100%;border:0;outline:0;background:transparent;resize:none;padding:10px 14px 4px;min-height:44px;max-height:min(160px,22vh);font-size:14px;line-height:1.5}
 .composer .bar{display:flex;align-items:center;gap:10px;padding:4px 8px 6px 14px;font-size:12px;color:var(--fg3)}
 .composer .enter{display:flex;align-items:center;gap:6px;min-width:0}
@@ -407,6 +417,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .spop .presets{display:flex;flex-wrap:wrap;gap:6px}
 .spop .row{display:flex;gap:6px}
 .spop .fh{margin:0;font-size:12px;color:var(--fg3)}
+.spop.skillpop{width:min(340px,calc(100vw - 16px))}
 /* on a phone the model beats the enter hint for the bar's width */
 @media (max-width:760px){.composer .bar:has(.mbtn) .enter{display:none}.mbtn{max-width:none;flex:1;justify-content:flex-start}}
 .link-spend{border-radius:6px;padding:2px 6px;margin:-2px -6px}
@@ -642,6 +653,9 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .cpicks{display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:var(--bg);padding:4px}
 .cpick{display:grid;grid-template-columns:auto 64px minmax(0,1fr) auto;gap:8px;align-items:center;padding:5px 8px;border-radius:6px;font-size:13px;color:var(--fg);cursor:pointer}
 .cpick:hover{background:var(--sunk)}
+.cpick.skill{grid-template-columns:auto minmax(0,1fr);row-gap:0}
+.cpick.skill .t{font-weight:500}
+.cpick.skill .s{grid-column:2;font-size:12px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cpick .id{font-family:var(--mono);font-size:12px;color:var(--fg3)}
 .cpick .t{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .cpick .s{font-size:11.5px;color:var(--fg3)}

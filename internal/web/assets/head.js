@@ -53,6 +53,7 @@ function render () {
       c.base && c.branch ? h('span', null, 'onto ', h('span', { class: 'mono' }, c.base)) : null,
       c.scratch ? h('span', { testid: 'card-scratch' }, 'scratch tree · no branch') : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,
+      c.skills?.length ? h('span', { testid: 'card-skills', title: 'The library skills this card’s agents get' }, c.skills.length === 1 ? 'skill ' : 'skills ', c.skills.map((s, i) => [i ? ', ' : '', h('span', { class: 'mono' }, s)])) : null,
       c.waits?.length ? h('span', null, 'waits on ', c.waits.map((w, i) => [i ? ', ' : '', h('button', { class: 'link', type: 'button', onclick: () => ctx.select(w) }, w)])) : null,
       c.kind === 'goal' ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: 'Open the goal page: its budget, done-when, cards and log', onclick: () => openView('goal', { id: c.id }) }, 'goal page') : null,
       c.goal ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: c.goal.title ? `Open the goal: ${c.goal.title}` : 'Open the goal', onclick: () => openView('goal', { id: c.goal.id }) }, 'goal ', h('span', { class: 'mono' }, c.goal.id)) : null,

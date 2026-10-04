@@ -168,3 +168,54 @@ func TestDiscoverMarksAlreadyImportedCandidates(t *testing.T) {
 		}
 	}
 }
+
+func TestPickedSkillDirsNarrowsTheLibrary(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".gummi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(root, []Repo{{Name: "default", Root: root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := store.Create(KindSkill, "Review", "# Review\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(KindSkill, "Deploy", "# Deploy\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(KindAgent, "Helper", "# Helper\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	all, missing, err := PickedSkillDirs(root, nil)
+	if err != nil || len(all) != 2 || len(missing) != 0 {
+		t.Fatalf("PickedSkillDirs(nil) = %v, %v, %v; want both skills", all, missing, err)
+	}
+	dirs, missing, err := PickedSkillDirs(root, []string{review.ID, "skill-gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != ItemDir(root, review.ID) {
+		t.Fatalf("dirs = %v, want only %s", dirs, ItemDir(root, review.ID))
+	}
+	if len(missing) != 1 || missing[0] != "skill-gone" {
+		t.Fatalf("missing = %v, want [skill-gone]", missing)
+	}
+
+	skills, err := Skills(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 2 || skills[0].Name != "Deploy" || skills[1].Name != "Review" {
+		t.Fatalf("Skills = %+v, want Deploy and Review only, by name", skills)
+	}
+}
+
+func TestPickedSkillDirsWithoutWorkspaceReportsPicksMissing(t *testing.T) {
+	dirs, missing, err := PickedSkillDirs(t.TempDir(), []string{"skill-a"})
+	if err != nil || len(dirs) != 0 || len(missing) != 1 {
+		t.Fatalf("got %v, %v, %v; want no dirs and skill-a missing", dirs, missing, err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/agentplugins"
 	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -62,6 +63,10 @@ func (m *Shell) WebForm(repo string) (webapi.Form, error) {
 		Dependable: []webapi.CardRef{},
 		Envelope:   m.envelopePrefill(),
 		Sessions:   m.webSessionModels(),
+		Skills:     []webapi.Choice{},
+	}
+	for _, s := range m.librarySkills() {
+		f.Skills = append(f.Skills, webapi.Choice{Value: s.ID, Label: s.Name, Detail: s.Description})
 	}
 	for _, ct := range domain.CardTypes {
 		f.Kinds = append(f.Kinds, webapi.Choice{Value: webKindValue(ct), Label: ct.Name(), Detail: firstLineOf(cardPlaceholderFor(ct))})
@@ -118,6 +123,32 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 			return problem
 		}
 		d.sessionBackend, d.sessionModel = req.Backend, strings.TrimSpace(req.Model)
+	}
+	// a session's first message may be a "/skill" line, as any later one
+	// may; a skill it names is forwarded even when others were picked
+	if out, id, ok, problem := m.expandSkill(req.Description); ok {
+		if problem != "" {
+			return problem
+		}
+		req.Description = out
+		if len(req.Skills) > 0 && !slices.Contains(req.Skills, id) {
+			req.Skills = append(req.Skills, id)
+		}
+	}
+	if len(req.Skills) > 0 {
+		if d.ct.Kind == domain.KindGoal {
+			return "a goal's lead picks no skills — pick them on the cards it creates"
+		}
+		lib := m.librarySkills()
+		for _, id := range req.Skills {
+			id = strings.TrimSpace(id)
+			if !slices.ContainsFunc(lib, func(s agentplugins.Item) bool { return s.ID == id }) {
+				return "skill " + strconv.Quote(id) + " is not in the agent plugins library"
+			}
+			if !slices.Contains(d.skills, id) {
+				d.skills = append(d.skills, id)
+			}
+		}
 	}
 	text := strings.TrimSpace(req.Title)
 	var body []string
@@ -268,4 +299,18 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 		return webapi.Card{}, refuse(WebConflict, "the card was not created")
 	}
 	return b.Card(ctx, string(out.created))
+}
+
+// librarySkills lists the agent-plugins library's skills, the ones a card
+// can be created with. A library that cannot be read offers none: the
+// form still opens, and the card's sessions get what the engine finds.
+func (m *Shell) librarySkills() []agentplugins.Item {
+	if m.ws.Root == "" {
+		return nil
+	}
+	items, err := agentplugins.Skills(m.ws.Root)
+	if err != nil {
+		return nil
+	}
+	return items
 }
