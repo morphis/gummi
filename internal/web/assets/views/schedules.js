@@ -81,12 +81,22 @@ function statusClass (status) {
   return 'mute'
 }
 
+// STATUS is a fire outcome in words: the server's slugs are for code
+const STATUS = {
+  ok: 'fired',
+  'skipped-busy': 'skipped, session busy',
+  'paused-exhausted': 'paused, envelope spent',
+  'disabled-target-closed': 'off, session closed',
+  failed: 'failed'
+}
+function statusWords (status) { return STATUS[status] || String(status).replace(/-/g, ' ') }
+
 function fireText (fire) {
   if (fire.status === 'ok') {
     return fire.kind === 'mint' ? `minted ${fire.card}` : 'sent its turn'
   }
   if (fire.status === 'skipped-busy') return 'skipped — the session is mid-turn'
-  return `${fire.status}${fire.detail ? ' — ' + fire.detail : ''}`
+  return `${statusWords(fire.status)}${fire.detail ? ' — ' + fire.detail : ''}`
 }
 
 registerView('schedules', {
@@ -197,7 +207,7 @@ registerView('schedules', {
 
 function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
   const status = sc.lastStatus
-    ? h('span', { class: ['sch-status', statusClass(sc.lastStatus)], testid: `schedule-${sc.id}-status` }, sc.lastStatus)
+    ? h('span', { class: ['sch-status', statusClass(sc.lastStatus)], testid: `schedule-${sc.id}-status`, data: { status: sc.lastStatus } }, statusWords(sc.lastStatus))
     : h('span', { class: 'sch-status mute', testid: `schedule-${sc.id}-status` }, 'never fired')
   const next = sc.enabled && sc.nextRun
     ? h('span', { class: 'sch-next', testid: `schedule-${sc.id}-next` }, `next ${when(sc.nextRun)}`)
@@ -246,7 +256,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
       try {
         if (what === 'enable') {
           const armed = await act(`/api/schedules/${encodeURIComponent(sc.id)}/enable`, 'POST', {})
-          results.set(sc.id, { status: 'ok', text: `enabled — next fire ${when(armed.nextRun) || 'soon'}` })
+          results.set(sc.id, { status: 'ok', enabled: true, text: `enabled — next fire ${when(armed.nextRun) || 'soon'}` })
         } else if (what === 'run') {
           const fire = await act(`/api/schedules/${encodeURIComponent(sc.id)}/run`, 'POST', {})
           results.set(sc.id, { status: fire.status, text: fireText(fire) })
@@ -277,6 +287,9 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
     }))
   }
 
+  // an "enabled" line outlives nothing that turned the row off since —
+  // here, on another device, or by an edit
+  if (results.get(sc.id)?.enabled && !sc.enabled) results.delete(sc.id)
   const res = results.get(sc.id)
   if (res) {
     row.append(h('div', { class: ['sch-result', statusClass(res.status)], testid: `schedule-${sc.id}-result` }, res.text))
@@ -287,6 +300,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
 async function toggleOff (ctx, sc, reload) {
   try {
     await ctx.api.post(`/api/schedules/${encodeURIComponent(sc.id)}/disable`, {})
+    results.delete(sc.id)
   } catch (err) {
     // the row shows the refusal on the next draw
   }
@@ -435,6 +449,8 @@ function scheduleForm (ctx, { row, catalog, done }) {
       try {
         if (editing) {
           await ctx.api.api('PATCH', `/api/schedules/${encodeURIComponent(row.id)}`, body)
+          // an edit turns the row off: its last result no longer applies
+          results.delete(row.id)
         } else {
           await ctx.api.post('/api/schedules', body)
         }

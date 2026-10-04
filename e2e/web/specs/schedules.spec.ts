@@ -68,12 +68,16 @@ test('a schedule is defined, enabled through its confirm, fired and deleted', as
   await row.getByTestId('schedule-keep-tidy-toggle').click();
   await expect(page.getByTestId('schedule-keep-tidy-state')).toHaveText('off');
   await expect(page.getByTestId('schedule-keep-tidy-confirm')).toHaveCount(0);
+  // and the "enabled — next fire" line goes with it
+  await expect(page.getByTestId('schedule-keep-tidy-result')).toHaveCount(0);
 
   // a run-now answers with the outcome: the turn went to the session
   await row.getByTestId('schedule-keep-tidy-run').click();
   await expect(page.getByTestId('schedule-keep-tidy-confirm')).toBeVisible();
   await page.getByTestId('schedule-keep-tidy-confirm-yes').click();
   await expect(page.getByTestId('schedule-keep-tidy-result')).toContainText('sent its turn');
+  // the status reads in words, never the server's slug
+  await expect(page.getByTestId('schedule-keep-tidy-status')).toHaveText('fired');
 
   // delete removes the row; the session it heartbeat stays on the board
   await row.getByTestId('schedule-keep-tidy-rm').click();
@@ -90,6 +94,16 @@ test('a schedule is defined, enabled through its confirm, fired and deleted', as
   await page.getByTestId('schedule-form-submit').click();
   await expect(page.getByTestId('schedule-form-error')).toContainText(/not configured/i);
   await expect(page.getByTestId('schedule-bad-repo')).toHaveCount(0);
+
+  // a heartbeat on a session that is not on the board is refused at the
+  // form, not turned off by its first fire
+  await page.getByTestId('schedule-form-name').fill('ghost');
+  await page.getByTestId('schedule-form-kind-heartbeat').click();
+  await page.getByTestId('schedule-form-target').fill('FF-999');
+  await page.getByTestId('schedule-form-every').fill('15m');
+  await page.getByTestId('schedule-form-submit').click();
+  await expect(page.getByTestId('schedule-form-error')).toContainText('FF-999 is not a card on this board');
+  await expect(page.getByTestId('schedule-ghost')).toHaveCount(0);
 
   await shot(page, info, 'schedules');
 });

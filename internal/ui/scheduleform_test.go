@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -83,7 +85,46 @@ func scheduleFormBoard(t *testing.T) *Shell {
 	m.AttachEngine(eng)
 	m.SetProfileNames([]string{"alpha"})
 	model, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
-	return model.(*Shell)
+	m = model.(*Shell)
+	// the open sessions a heartbeat may target; the dialog refuses one
+	// that is not on the board, or closed
+	for n := 1; n <= 4; n++ {
+		f := freeformRow(n, fmt.Sprintf("session %d", n), true).F
+		if err := store.CreateFeature(context.Background(), &f); err != nil {
+			t.Fatal(err)
+		}
+		m.rows = append(m.rows, featureRow{F: f, HasWorktree: true})
+	}
+	return m
+}
+
+// TestTheScheduleDialogRefusesAHeartbeatOnAGoneOrClosedTarget: the fire
+// turns a heartbeat off when its target is gone or closed, so the door
+// refuses both before anything is stored — the same as a target that is
+// not a freeform card.
+func TestTheScheduleDialogRefusesAHeartbeatOnAGoneOrClosedTarget(t *testing.T) {
+	m := scheduleFormBoard(t)
+	closed := freeformRow(5, "closed session", true)
+	closed.F.Stage = domain.StageDone
+	m.rows = append(m.rows, closed)
+	for target, want := range map[string]string{
+		"FF-999": "not a card on this board",
+		"FF-005": "is closed",
+		"FD-001": "not a freeform card",
+	} {
+		_, err := m.scheduleFromForm(webapi.ScheduleRequest{
+			Name: "beat " + target, Kind: string(domain.ScheduleHeartbeat), Target: target,
+			Every: "1h", Prompt: "p",
+		})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("a heartbeat on %s = %v, want a refusal naming %q", target, err, want)
+		}
+	}
+	if _, err := m.scheduleFromForm(webapi.ScheduleRequest{
+		Name: "beat", Kind: string(domain.ScheduleHeartbeat), Target: "ff-002", Every: "1h", Prompt: "p",
+	}); err != nil {
+		t.Errorf("a heartbeat on an open session was refused: %v", err)
+	}
 }
 
 // openScheduleFormOn pushes the dialog the way the schedules view does

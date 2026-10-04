@@ -147,6 +147,18 @@ func (m *Shell) scheduleFromForm(req webapi.ScheduleRequest) (*domain.Schedule, 
 		return nil, webErr(WebConflict, "%s", err)
 	}
 	if sc.Kind == domain.ScheduleHeartbeat {
+		// the fire's own refusals (fireHeartbeat), run at the door: a
+		// target that is gone or closed would only turn the schedule off
+		// the first time it fired
+		target, ok := m.heartbeatTarget(sc.Target)
+		switch {
+		case !ok:
+			return nil, webErr(WebConflict, "%s is not a card on this board — a heartbeat needs an open session to send to", sc.Target)
+		case !target.IsFreeform():
+			return nil, webErr(WebConflict, "heartbeat target %s is not a freeform card", sc.Target)
+		case target.Stage == domain.StageDone:
+			return nil, webErr(WebConflict, "%s is closed — a heartbeat needs an open session to send to", sc.Target)
+		}
 		return sc, nil
 	}
 	if problem := m.checkSessionPick(sc.Backend, sc.Model); problem != "" {
@@ -156,6 +168,19 @@ func (m *Shell) scheduleFromForm(req webapi.ScheduleRequest) (*domain.Schedule, 
 		return nil, webErr(WebConflict, "%s", sanitize(err.Error()))
 	}
 	return sc, nil
+}
+
+// heartbeatTarget finds the card a heartbeat names: the board's row, or
+// — for a card minted since the rows were last read — the store's.
+func (m *Shell) heartbeatTarget(id domain.FeatureID) (domain.Feature, bool) {
+	if row, ok := m.rowByID(id); ok {
+		return row.F, true
+	}
+	if m.store == nil {
+		return domain.Feature{}, false
+	}
+	f, err := m.store.GetFeature(context.Background(), id)
+	return f, err == nil
 }
 
 // scheduleHandles grabs, on the loop, what a schedule write needs off it:
@@ -187,6 +212,11 @@ func (b *Bridge) CreateSchedule(ctx context.Context, req webapi.ScheduleRequest)
 	}
 	if store == nil {
 		return webapi.Schedule{}, webErr(WebUnavailable, "this board has no store to keep schedules in")
+	}
+	if _, err := store.Schedule(ctx, sc.ID); err == nil {
+		// the store's own refusal names the CLI's rm; the page has a
+		// Delete button and a name field instead
+		return webapi.Schedule{}, webErr(WebConflict, "a schedule named %q already exists — delete it first, or choose another name", sc.Name)
 	}
 	sc.CreatedAt = now
 	if err := store.CreateSchedule(ctx, sc); err != nil {
