@@ -361,7 +361,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
-		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
+		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend), f.Repo),
 		// The session lives past its turns, so the backend's own watch
 		// and backgrounded commands have somewhere to report back to.
 		Watch: true,

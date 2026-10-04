@@ -13,6 +13,7 @@ package web
 //	routes_goals.go    goals and stacks
 //	routes_schedules.go  schedules and heartbeats
 //	routes_ingest.go   spec ingest and bug import
+//	routes_agentplugins.go  workspace-local agent and skill definitions
 //	routes_system.go   doctor and the fleet's stats
 //	routes_push.go     Web Push subscriptions
 //	routes_attachments.go  image upload and serve
@@ -31,6 +32,7 @@ func (s *Server) routes() {
 	s.goalRoutes()
 	s.scheduleRoutes()
 	s.ingestRoutes()
+	s.agentPluginRoutes()
 	s.systemRoutes()
 	s.pushRoutes()
 	s.attachmentRoutes()

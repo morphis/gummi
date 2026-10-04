@@ -449,6 +449,15 @@ open card's conversation, and its spec, diff, log, pull request and stats
 beside it. It is a board host like the TUI — it builds the board the same
 way and runs the TUI's own model without a screen — so one board has one
 host at a time, and whichever starts second names the first and exits.
+The **Agent Plugins** view in the More menu manages workspace-local agent
+definitions and skills: create or import them, enable them globally or for
+selected repositories, and export them to keep a copy. Managed skills are
+forwarded to new card and freeform sessions on backends that support skill
+directories; the view shows that support per backend. Custom agent
+definitions are stored and exportable, but are not yet loaded into stage
+sessions. The library lives under `.gummi/agent-plugins/` and is not added
+to a product repository. Imported skills link to their source directory
+until edited; imported agent Markdown is copied as a single file.
 
 ```sh
 gummi web                  # 127.0.0.1:7878 (or GUMMI_WEB_ADDR); prints a pairing code

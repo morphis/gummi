@@ -208,6 +208,7 @@ function renderFoot (unpair, newSession) {
       item('schedules', 'Schedules', 'clock'),
       item('ingest', 'Import spec', 'import'),
       item('bugs', 'Import bugs', 'bug'),
+      item('agentplugins', 'Agent Plugins', 'agent'),
       item('doctor', 'Doctor', 'doctor')
     ]
     items.push('sep', { label: 'Notifications on this device', icon: 'bell', testid: 'menu-push', onClick: openPush })
