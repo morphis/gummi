@@ -8,6 +8,7 @@
 import { $, h, clear, icon, isMobile, storage } from './dom.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
+import { rememberTab } from './selection.js?v=__ASSET_V__'
 import { memoryTab } from './memory.js?v=__ASSET_V__'
 import { specTab } from './spec.js?v=__ASSET_V__'
 import { diffTab } from './diff.js?v=__ASSET_V__'
@@ -66,6 +67,7 @@ export function setTab (t) {
   if (isMobile()) set({ view: 'panel' })
   set({ tab: t })
   writeHash(state.sel, t)
+  rememberTab(state.sel, t)
 }
 
 export function togglePanel () {

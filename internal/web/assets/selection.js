@@ -32,10 +32,17 @@ function rowMoved (r, c) {
     JSON.stringify(r.stack || null) !== JSON.stringify(c.stack || null)
 }
 
-// select opens a card. tab, when given, wins; otherwise the panel follows
-// the card's pinned decision (the spec for a design gate, the diff for a
-// failed verify), and stays where it was when there is none.
+// select opens a card. tab, when given, wins; then the tab a person last
+// picked on this card, on this page; otherwise the panel follows the
+// card's pinned decision (the spec for a design gate, the diff for a
+// failed verify), and stays where it was when there is none. Whichever
+// it lands on is written into the address, so a reload opens the same.
 let picks = 0
+const picked = new Map() // card id -> the tab a person chose on it
+
+// rememberTab records a person's own choice of a tab on a card (the
+// panel's setTab), which a later visit to the card returns to.
+export function rememberTab (id, tab) { if (id && tab) picked.set(id, tab) }
 
 export async function select (id, { tab = null, view = true } = {}) {
   if (!id) return
@@ -44,10 +51,14 @@ export async function select (id, { tab = null, view = true } = {}) {
   if (changed) {
     set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false, gone: null })
   }
-  if (tab && tab !== state.tab) set({ tab })
-  writeHash(id, tab)
-  // on a phone a link that names a tab opens that document, not the thread
+  // on a phone a link that names a tab opens that document, not the
+  // thread; a remembered tab only says which document waits behind it
   if (view && isMobile()) set({ view: tab ? 'panel' : 'thread' })
+  if (!tab && changed && picked.has(id)) tab = picked.get(id)
+  if (tab && tab !== state.tab) set({ tab })
+  // the address names the tab showing, so a reload opens it again — but
+  // not under a phone's thread, where naming one would open the document
+  writeHash(id, tab || (isMobile() && state.view !== 'panel' ? null : state.tab))
   const tabBefore = state.tab
   const card = await loadCard(id)
   // the panel follows the decision only when nothing chose a tab while the
@@ -55,6 +66,7 @@ export async function select (id, { tab = null, view = true } = {}) {
   // click wins over a guess made from a head that was still in flight
   if (changed && !tab && mine === picks && state.tab === tabBefore && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
     set({ tab: card.decision.anchor })
+    writeHash(id, card.decision.anchor)
   }
   if (changed) {
     loadThread(id, true)
