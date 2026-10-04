@@ -202,7 +202,7 @@ func (f *ocFake) respond(w http.ResponseWriter, r *http.Request) {
 
 func (f *ocFake) providers(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"providers":[{"id":"opencode","models":{"deepseek-v4-flash":{"id":"deepseek-v4-flash"},"qwen3-coder":{"id":"qwen3-coder"}}},{"id":"openrouter","models":{"z-ai/glm-5.3-flash":{"id":"z-ai/glm-5.3-flash"}}}]}`))
+	_, _ = w.Write([]byte(`{"providers":[{"id":"opencode","models":{"deepseek-v4-flash":{"id":"deepseek-v4-flash"},"qwen3-coder":{"id":"qwen3-coder","limit":{"context":262144,"output":65536}}}},{"id":"openrouter","models":{"z-ai/glm-5.3-flash":{"id":"z-ai/glm-5.3-flash"}}}]}`))
 }
 
 // push puts one bus event on the stream; it fails the test rather than

@@ -268,6 +268,11 @@ type opencodeSession struct {
 	// before this is ever true is the "misconfigured backend" shape a
 	// brand new user hits first, not a mid-task crash.
 	hadIdle bool
+	// ctxLimit is the model's context window from opencode's catalog,
+	// asked once the server is up (limitOnce); 0 until it answers, or
+	// when the catalog does not know the model.
+	ctxLimit  int64
+	limitOnce sync.Once
 }
 
 // ocTurn is one turn in flight: its context (canceled by Interrupt, which
@@ -438,6 +443,7 @@ func (s *opencodeSession) runTurn(t *ocTurn, msg string, imgs []Image) {
 		})
 		return
 	}
+	s.limitOnce.Do(func() { go s.fetchContextLimit() })
 	for attempt := 0; ; attempt++ {
 		err := s.postTurn(t, msg, imgs)
 		if err == nil {
@@ -474,6 +480,31 @@ func (s *opencodeSession) runTurn(t *ocTurn, msg string, imgs []Image) {
 		return
 	}
 	s.endTurn(t, nil)
+}
+
+// fetchContextLimit asks the server's catalog for the session model's
+// context window, so the context events it reports carry a limit the
+// meter and auto-compaction can read. A failed ask leaves it unknown.
+func (s *opencodeSession) fetchContextLimit() {
+	provider, model, ok := strings.Cut(s.model, "/")
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.sctx, 15*time.Second)
+	defer cancel()
+	limit, err := s.srv.contextLimit(ctx, provider, model)
+	if err != nil || limit <= 0 {
+		return
+	}
+	s.mu.Lock()
+	s.ctxLimit = limit
+	s.mu.Unlock()
+}
+
+func (s *opencodeSession) contextLimitValue() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ctxLimit
 }
 
 // postTurn addresses one message POST at the turn's session, creating the
@@ -1026,9 +1057,13 @@ type ocPart struct {
 		Error  string         `json:"error"`
 	} `json:"state"` // tool parts: arguments, a pre-rendered title, and the outcome
 	Tokens struct {
-		Input     int64 `json:"input"`
+		Input     int64 `json:"input"` // uncached input only; cache reads and writes are below
 		Output    int64 `json:"output"`
 		Reasoning int64 `json:"reasoning"`
+		Cache     struct {
+			Read  int64 `json:"read"`
+			Write int64 `json:"write"`
+		} `json:"cache"`
 	} `json:"tokens"`
 }
 
@@ -1139,17 +1174,30 @@ func (s *opencodeSession) mapOcEvent(e *ocEvent, msg ocMsgText) []Event {
 		}
 		return out
 	case "step_finish":
-		u := Usage{Model: s.model, InputTokens: e.Part.Tokens.Input, OutputTokens: e.Part.Tokens.Output}
+		tok := e.Part.Tokens
+		// Usage's convention: InputTokens is fresh input plus cache writes,
+		// CachedTokens the cache reads. opencode reports the three apart.
+		u := Usage{
+			Model:        s.model,
+			InputTokens:  tok.Input + tok.Cache.Write,
+			OutputTokens: tok.Output,
+			CachedTokens: tok.Cache.Read,
+			// opencode prices each step itself from its catalog, so its
+			// figure is the metered one even at zero — a free or
+			// subscription model must not be re-priced by the engine's
+			// token fallback into spend nobody charged.
+			Metered: true,
+		}
 		// opencode cost is USD; gummi credits are $0.01 units.
 		u.Credits = e.Part.Cost * 100
 		var out []Event
-		if u.Credits != 0 || u.InputTokens != 0 || u.OutputTokens != 0 {
+		if u.Credits != 0 || u.InputTokens != 0 || u.OutputTokens != 0 || u.CachedTokens != 0 {
 			out = append(out, Event{Kind: EventUsage, Usage: u})
 		}
-		// the step's input tokens approximate the current context size
-		// (opencode reports no window limit, so Limit stays 0/unknown).
-		if e.Part.Tokens.Input > 0 {
-			out = append(out, Event{Kind: EventContext, Context: Context{Tokens: e.Part.Tokens.Input}})
+		// the step's whole prompt — fresh, cache-read and cache-written —
+		// is the current context size; the window is the catalog's.
+		if ctxTok := tok.Input + tok.Cache.Read + tok.Cache.Write; ctxTok > 0 {
+			out = append(out, Event{Kind: EventContext, Context: Context{Tokens: ctxTok, Limit: s.contextLimitValue()}})
 		}
 		// reason="length" means the step hit its max_tokens cap. For a
 		// reasoning-capable model this usually presents as "reasoning ate

@@ -235,6 +235,49 @@ func (o opencodeServer) rejectQuestion(ctx context.Context, requestID string) er
 // full provider/model pairs under /config/providers, one per model,
 // sorted for a stable picker.
 func (o opencodeServer) providers(ctx context.Context) ([]string, error) {
+	cat, err := o.catalog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, p := range cat.Providers {
+		for mid := range p.Models {
+			ids = append(ids, p.ID+"/"+mid)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
+// contextLimit returns the context window opencode's catalog declares for
+// one provider/model, or 0 when the catalog does not know the model.
+func (o opencodeServer) contextLimit(ctx context.Context, provider, model string) (int64, error) {
+	cat, err := o.catalog(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, p := range cat.Providers {
+		if p.ID == provider {
+			return p.Models[model].Limit.Context, nil
+		}
+	}
+	return 0, nil
+}
+
+// ocCatalog is the slice of /config/providers the adapter reads.
+type ocCatalog struct {
+	Providers []struct {
+		ID     string `json:"id"`
+		Models map[string]struct {
+			ID    string `json:"id"`
+			Limit struct {
+				Context int64 `json:"context"`
+			} `json:"limit"`
+		} `json:"models"`
+	} `json:"providers"`
+}
+
+func (o opencodeServer) catalog(ctx context.Context) (*ocCatalog, error) {
 	resp, err := o.do(ctx, http.MethodGet, "/config/providers", nil)
 	if err != nil {
 		return nil, err
@@ -247,25 +290,11 @@ func (o opencodeServer) providers(ctx context.Context) ([]string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("opencode providers: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-	var out struct {
-		Providers []struct {
-			ID     string `json:"id"`
-			Models map[string]struct {
-				ID string `json:"id"`
-			} `json:"models"`
-		} `json:"providers"`
-	}
+	var out ocCatalog
 	if err := json.Unmarshal(body, &out); err != nil {
 		return nil, fmt.Errorf("opencode providers: %w", err)
 	}
-	var ids []string
-	for _, p := range out.Providers {
-		for mid := range p.Models {
-			ids = append(ids, p.ID+"/"+mid)
-		}
-	}
-	slices.Sort(ids)
-	return ids, nil
+	return &out, nil
 }
 
 // opencodeProc is one running `opencode serve` process: the handle a

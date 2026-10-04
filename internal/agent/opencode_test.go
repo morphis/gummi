@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newOCSession() *opencodeSession {
@@ -70,6 +71,31 @@ func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	}
 	if evs[1].Context.Tokens != 100 {
 		t.Errorf("context tokens = %d, want 100 (step input)", evs[1].Context.Tokens)
+	}
+}
+
+// A step-finish carries opencode's own price and the cache split: the
+// price is metered even at $0 (a free model must not be token-priced into
+// spend), cache reads go to CachedTokens and cache writes count as input,
+// and the context size is the step's whole prompt — the shape is opencode
+// 1.2.16's, where a warm turn's fresh input is a sliver of its context.
+func TestOpencodeMapEventStepFinishCacheAndMetering(t *testing.T) {
+	s := newOCSession()
+	var msg strings.Builder
+	evs := s.mapEvent([]byte(`{"type":"step_finish","part":{"type":"step-finish","reason":"stop","cost":0,`+
+		`"tokens":{"total":13741,"input":45,"output":125,"reasoning":0,"cache":{"write":30,"read":13571}}}}`), &msg)
+	if len(evs) != 2 || evs[0].Kind != EventUsage || evs[1].Kind != EventContext {
+		t.Fatalf("step_finish = %+v, want [usage, context]", evs)
+	}
+	u := evs[0].Usage
+	if !u.Metered || u.Credits != 0 || u.Estimate {
+		t.Errorf("usage = %+v, want a metered zero-credit sample", u)
+	}
+	if u.InputTokens != 75 || u.CachedTokens != 13571 || u.OutputTokens != 125 {
+		t.Errorf("usage tokens = in%d/cached%d/out%d, want in75/cached13571/out125", u.InputTokens, u.CachedTokens, u.OutputTokens)
+	}
+	if got := evs[1].Context.Tokens; got != 45+13571+30 {
+		t.Errorf("context tokens = %d, want the whole prompt %d", got, 45+13571+30)
 	}
 }
 
@@ -404,5 +430,42 @@ func TestOpencodeUsageCarriesModel(t *testing.T) {
 	}
 	if u == nil || u.Model != "opencode/gpt-5" {
 		t.Errorf("usage = %+v, want the turn's model", u)
+	}
+}
+
+// The context window is the catalog's: once the server is up the session
+// asks /config/providers for its model's limit, and the context events it
+// reports from then on carry it.
+func TestOpencodeContextLimitFromCatalog(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/qwen3-coder"})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		runCleanTurn(t, f, sess)
+		if sess.contextLimitValue() == 262144 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("context limit = %d, want the catalog's 262144", sess.contextLimitValue())
+		}
+	}
+	f.mu.Lock()
+	posted := len(f.msgs)
+	f.mu.Unlock()
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPostedN(t, posted+1)
+	f.push(f.partEvent("step-finish", "s1", ""))
+	f.releaseTurn()
+	var c *Context
+	for _, e := range waitTurnEnd(t, sess) {
+		if e.Kind == EventContext {
+			c = &e.Context
+		}
+	}
+	if c == nil || c.Limit != 262144 {
+		t.Errorf("context = %+v, want the catalog's limit", c)
 	}
 }
