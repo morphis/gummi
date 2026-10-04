@@ -77,6 +77,10 @@ func TestAttachmentUpload(t *testing.T) {
 	if res.Header.Get("X-Content-Type-Options") != "nosniff" {
 		t.Errorf("missing X-Content-Type-Options: nosniff")
 	}
+	// authenticated content: a shared cache must never keep it
+	if cc := res.Header.Get("Cache-Control"); cc != "private, max-age=31536000, immutable" {
+		t.Errorf("Cache-Control = %q, want private", cc)
+	}
 	if !bytes.Equal(got, testPNG) {
 		t.Errorf("served bytes differ from the upload")
 	}

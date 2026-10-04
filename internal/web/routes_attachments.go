@@ -81,7 +81,9 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	// an id never serves other bytes, but only to a paired browser
+	// cookie: no shared cache may keep a copy for anyone else
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, f)
 }
