@@ -620,15 +620,23 @@ func (m *Shell) requireRepo(name string) error {
 }
 
 // duplicateFeature mints a fresh card from an existing one: same title,
-// one-liner, kind, skip flags, profile, and budget envelope, starting
-// over in todo with nothing spent. The original stays untouched — the
-// copy is how a feature restarts from scratch without rewinding the
-// workflow or losing the original's history and cost record. Nothing
-// else carries over: the external ref stays on the original (re-ingest
-// dedupe resolves items by ref, which must stay unambiguous) and the
-// copy has no artifacts — a blank template is seeded when it enters
-// design (spec.EnsureDraft). The shared slug is safe: branch, worktree,
-// and artifact paths are all keyed by ID.
+// one-liner, kind, skip flags, profile, and budget envelope, and the same
+// identity set the source was minted with — its repo, base, and severity.
+// A card with an empty repo is one mint refuses in a repos:-only
+// workspace, so a copy that dropped it would be born un-routable and
+// fail at its first git operation (a delete's worktree probe included).
+// The branch scheme is stamped to the current default like every fresh
+// card: a copy is never adopted and never resurrects the scheme the
+// source was minted under. The original stays untouched — the copy is
+// how a feature restarts from scratch without rewinding the workflow or
+// losing the original's history and cost record. Nothing else carries
+// over: the external ref stays on the original (re-ingest dedupe
+// resolves items by ref, which must stay unambiguous), and the adopted
+// branch, stack position, goal membership, spend, session backend/model,
+// main-checkout, and gate approval all stay unset, as does the copy's
+// record of work — it has no artifacts, and a blank template is seeded
+// when it enters design (spec.EnsureDraft). The shared slug is safe:
+// branch, worktree, and artifact paths are all keyed by ID.
 func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -652,7 +660,9 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 			// would put it in todo, a stage Validate refuses for its kind.
 			Slug: src.Slug, Stage: workflow.InitialFor(src.Kind),
 			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
-			CreatedAt: now, UpdatedAt: now,
+			Repo: src.Repo, Base: src.Base, Severity: src.Severity,
+			BranchScheme: domain.DefaultBranchScheme,
+			CreatedAt:    now, UpdatedAt: now,
 		}
 		if err := m.store.CreateFeature(ctx, &f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}

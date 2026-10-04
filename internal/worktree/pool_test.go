@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -178,6 +179,37 @@ func TestPoolReposOnlyNoDefault(t *testing.T) {
 		t.Fatal("expected a no-default error for the empty name")
 	} else if !strings.Contains(err.Error(), "no default repository configured") {
 		t.Errorf("unexpected no-default error: %v", err)
+	}
+}
+
+// TestEmptyRepoNameWithoutDefaultUnwraps: in a repos:-only workspace the
+// empty repo name fails with the same error kind as a name dropped from
+// `repos:` — it unwraps to ErrRepoNotConfigured — so every consumer that
+// already tolerates an unreachable repo (the delete path's
+// degrade-to-record-only-removal) covers this case with no new tolerance
+// code. The user-facing text stays exactly what it was.
+func TestEmptyRepoNameWithoutDefaultUnwraps(t *testing.T) {
+	ws := t.TempDir()
+	repoA := filepath.Join(ws, "git", "a")
+	if err := os.MkdirAll(repoA, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repoA, "init", "-q", "-b", "main")
+
+	p, err := NewPool(ctx, ws, "", []NamedRepo{{Name: "a", Root: repoA}}, &memForkStore{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = p.ManagerForName(ctx, "")
+	if err == nil {
+		t.Fatal("expected an error for the empty name with no default configured")
+	}
+	if !errors.Is(err, ErrRepoNotConfigured) {
+		t.Errorf("error does not unwrap to ErrRepoNotConfigured: %v", err)
+	}
+	const want = "no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml"
+	if err.Error() != want {
+		t.Errorf("error text changed:\n got: %s\nwant: %s", err.Error(), want)
 	}
 }
 

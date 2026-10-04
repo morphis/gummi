@@ -19,11 +19,12 @@ type NamedRepo struct {
 	Root string
 }
 
-// ErrRepoNotConfigured reports a card whose repository was dropped from
-// `repos:` after the card was minted into it. Nothing on disk answers for
-// it any more — same shape as ErrGoalWorktreeMissing — so a caller that
-// cannot reach the card's worktree or branch this way can still fall back
-// to removing the record.
+// ErrRepoNotConfigured reports a card whose repository cannot be reached
+// by name: either it was dropped from `repos:` after the card was minted
+// into it, or it names the workspace default and none is configured.
+// Nothing on disk answers for it any more — same shape as
+// ErrGoalWorktreeMissing — so a caller that cannot reach the card's
+// worktree or branch this way can still fall back to removing the record.
 var ErrRepoNotConfigured = errors.New("repository is not configured")
 
 // repoNotConfiguredError carries the detailed, user-facing message while
@@ -214,12 +215,14 @@ func (p *Pool) ManagerFor(ctx context.Context, f *domain.Feature) (*Manager, err
 
 // ManagerForName resolves a repo name ("" = default) to its cached manager.
 // An empty name with no default configured fails here — at the point a card
-// actually needs the default — never at pool construction.
+// actually needs the default — never at pool construction, unwrapping to
+// ErrRepoNotConfigured exactly like the named-but-unconfigured case, so the
+// two kinds of unreachable repo are one error to every consumer.
 func (p *Pool) ManagerForName(ctx context.Context, name string) (*Manager, error) {
 	var root string
 	if name == "" {
 		if p.defaultRoot == "" {
-			return nil, fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
+			return nil, &repoNotConfiguredError{msg: "no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml"}
 		}
 		root = p.defaultRoot
 	} else {
