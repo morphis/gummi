@@ -1042,6 +1042,29 @@ func TestBackendInfoForAntigravity(t *testing.T) {
 	}
 }
 
+// TestPricingCheckWarnsWithoutAnAntigravityRate: agy reports tokens only,
+// so doctor warns when nothing prices them, names a bad value as bad, and
+// reports a set rate — and says nothing for a backend that reports money.
+func TestPricingCheckWarnsWithoutAnAntigravityRate(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_ANTIGRAVITY_CREDITS_PER_1K", "")
+	c, ok := pricingCheck("antigravity")
+	if !ok || c.Status != statusWarn || !strings.Contains(c.Detail, "unset") || c.Remediation == "" {
+		t.Fatalf("unset rate: %+v ok=%v, want a warn naming it unset with a remediation", c, ok)
+	}
+	t.Setenv("GUMMI_ANTIGRAVITY_CREDITS_PER_1K", "abc")
+	if c, _ := pricingCheck("antigravity"); c.Status != statusWarn || !strings.Contains(c.Detail, "not a positive number") {
+		t.Fatalf("bad rate: %+v, want a warn naming the value bad", c)
+	}
+	t.Setenv("GUMMI_ANTIGRAVITY_CREDITS_PER_1K", "0.08")
+	if c, _ := pricingCheck("antigravity"); c.Status != statusOK || !strings.Contains(c.Detail, "0.08") {
+		t.Fatalf("set rate: %+v, want ok reporting 0.08", c)
+	}
+	if _, ok := pricingCheck("claude"); ok {
+		t.Fatal("pricing check emitted for claude, which reports its own cost")
+	}
+}
+
 // A fresh TTL cache entry is reused verbatim: the live probe is never
 // called and the cached servable result is reported.
 func TestProbeCacheFreshHit(t *testing.T) {

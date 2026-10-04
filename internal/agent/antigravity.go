@@ -93,15 +93,20 @@ func (a *Antigravity) Capabilities() Capabilities {
 	return Capabilities{Resume: true, UsageEvents: true, MCPTools: true, WriteCage: WriteCageCwd, SkillDirs: true}
 }
 
-// antigravityRateEnv is the operator's token price for an antigravity
+// AntigravityRateEnv is the operator's token price for an antigravity
 // session, in credits per 1k tokens. agy reports only token counts,
 // never USD, so without it the engine's default token pricing applies.
-const antigravityRateEnv = "GUMMI_ANTIGRAVITY_CREDITS_PER_1K"
+const AntigravityRateEnv = "GUMMI_ANTIGRAVITY_CREDITS_PER_1K"
 
 // CreditRate implements Agent: the operator-configured rate, zero when
 // unset (the engine's token fallback covers then).
-func (a *Antigravity) CreditRate(string) float64 {
-	v := strings.TrimSpace(os.Getenv(antigravityRateEnv))
+func (a *Antigravity) CreditRate(string) float64 { return AntigravityCreditRate() }
+
+// AntigravityCreditRate is the rate AntigravityRateEnv configures, zero
+// when it is unset or not a positive number — the one parse the adapter
+// and doctor share.
+func AntigravityCreditRate() float64 {
+	v := strings.TrimSpace(os.Getenv(AntigravityRateEnv))
 	if v == "" {
 		return 0
 	}

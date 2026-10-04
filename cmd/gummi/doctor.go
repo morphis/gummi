@@ -231,6 +231,14 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		}
 	}
 
+	// pricing — a backend that reports tokens and never money is priced
+	// by an operator rate, and without one its spend is a guess.
+	for _, name := range ordered {
+		if c, ok := pricingCheck(name); ok {
+			checks = append(checks, c)
+		}
+	}
+
 	// 4. profile
 	bi := backendInfoFor(def)
 	switch {
@@ -537,6 +545,35 @@ func profilesLiveCheck(st engine.ProfilesState) doctorCheck {
 // envelopeCheck validates GUMMI_ENVELOPE. It never fails readiness: a run
 // can still take --envelope N, and the run itself enforces the requirement.
 //
+// pricingCheck reports how a required backend's spend is priced, for the
+// backend that needs an operator rate to price it at all: agy reports
+// token counts only, so with no GUMMI_ANTIGRAVITY_CREDITS_PER_1K its
+// tokens fall back to gummi's generic BYOK rate, which can be far from
+// what a Gemini model costs, and every budget on those cards trips early
+// or late by the same factor. ok is false for a backend this does not
+// apply to.
+func pricingCheck(backend string) (doctorCheck, bool) {
+	if backend != "antigravity" {
+		return doctorCheck{}, false
+	}
+	if r := agent.AntigravityCreditRate(); r > 0 {
+		return doctorCheck{
+			Name: "pricing:antigravity", Status: statusOK,
+			Detail: fmt.Sprintf("antigravity tokens priced at %g credits per 1k (%s)", r, agent.AntigravityRateEnv),
+		}, true
+	}
+	detail := agent.AntigravityRateEnv + " is unset"
+	if v := strings.TrimSpace(os.Getenv(agent.AntigravityRateEnv)); v != "" {
+		detail = agent.AntigravityRateEnv + "=" + v + " is not a positive number"
+	}
+	return doctorCheck{
+		Name: "pricing:antigravity", Status: statusWarn,
+		Detail: fmt.Sprintf("%s — agy reports token counts only, so its spend is priced at gummi's default %g credits per 1k tokens, which may be far from the model's real price",
+			detail, domain.ByokCreditsPer1KTokens),
+		Remediation: "export " + agent.AntigravityRateEnv + "=<credits per 1k tokens> for the models your profiles run, so budgets measure real spend",
+	}, true
+}
+
 // The check REPORTS itself as "budget", not "envelope". The env var and
 // the flag keep their names — they are an API scripts already call — but
 // the word a human reads is the plain one, matching the TUI, which stopped
