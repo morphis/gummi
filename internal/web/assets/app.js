@@ -33,7 +33,7 @@ import {
   initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, step
 } from './selection.js?v=__ASSET_V__'
 import { initResume } from './resume.js?v=__ASSET_V__'
-import { registerWorker } from './push.js?v=__ASSET_V__'
+import { registerWorker, openPush } from './push.js?v=__ASSET_V__'
 import './views/index.js?v=__ASSET_V__'
 
 let started = false
@@ -117,7 +117,12 @@ async function startBoard () {
     openModal,
     refreshBoard: loadBoard
   }))
-  initTop({ nextNeeding: () => nextNeeding(toast), palette: () => palette(ctx.select), keysHelp, toggleRail })
+  // the palette opens what the rail's foot does, besides the cards and views
+  const openPalette = () => palette(ctx.select, [
+    { id: 'newsession', label: 'New session', run: newSession },
+    { id: 'push', label: 'Notifications on this device', run: openPush }
+  ])
+  initTop({ nextNeeding: () => nextNeeding(toast), palette: openPalette, keysHelp, toggleRail })
   initRail({ select: ctx.select, unpair, newSession })
   initHead(ctx)
   initThread()
@@ -131,7 +136,7 @@ async function startBoard () {
   initApprovals()
   registerWorker()
   initKeys({
-    palette: () => palette(ctx.select),
+    palette: openPalette,
     keysHelp,
     step: (d) => step(d, visibleIds()),
     nextNeeding: () => nextNeeding(toast),

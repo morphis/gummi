@@ -15,6 +15,8 @@ test('a browser pairs with the printed code and lands on the board', async ({ pa
   await page.getByLabel(/code/i).fill(wrong);
   await page.getByRole('button', { name: /^pair$/i }).click();
   await expect(page.getByTestId('pair-error')).toContainText(/tries? left/);
+  // the count is said once, not by the server and again by the page
+  expect((await page.getByTestId('pair-error').textContent())!.match(/left/g)).toHaveLength(1);
   await page.getByLabel(/code/i).fill(code);
   await page.getByRole('button', { name: /^pair$/i }).click();
   await expect(page.getByTestId('app')).toBeVisible();

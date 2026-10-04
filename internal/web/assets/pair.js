@@ -23,7 +23,10 @@ const refusals = {
 export function showPair (session, onPaired) {
   const root = $('#pair')
   clear(root)
-  const name = h('input', { id: 'pair-name', testid: 'pair-name', name: 'name', maxlength: '40', autocomplete: 'nickname' })
+  // the name is not marked required: a code printed for a named person
+  // carries it, and only the server knows which code this is — it says
+  // so, without spending a guess, when a name is missing
+  const name = h('input', { id: 'pair-name', testid: 'pair-name', name: 'name', maxlength: '40', autocomplete: 'nickname', 'aria-describedby': 'pair-name-hint' })
   const code = h('input', { id: 'pair-code', testid: 'pair-code', class: 'code', name: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', pattern: '[0-9]*', maxlength: '6', placeholder: '······', spellcheck: 'false', required: true })
   const msg = h('p', { class: 'msg-err', testid: 'pair-error', role: 'alert' })
   const refused = refusals[session.approval]
@@ -32,7 +35,10 @@ export function showPair (session, onPaired) {
   const note = h('p', { class: 'msg-ok', testid: 'pair-note', role: 'status' })
   const btn = h('button', { class: 'btn pri', type: 'submit', testid: 'pair-submit' }, 'Pair')
   const form = h('form', { autocomplete: 'off', novalidate: true, testid: 'pair-form' },
-    h('label', { class: 'field', for: 'pair-name' }, 'Your name', name),
+    // the hint sits beside the label, not in it: it is the field's
+    // description, not part of its name
+    h('div', { class: 'field' }, h('label', { for: 'pair-name' }, 'Your name'), name,
+      h('span', { class: 'fh', id: 'pair-name-hint', testid: 'pair-name-hint' }, 'Needed unless the code was printed with your name.')),
     h('label', { class: 'field', for: 'pair-code' }, 'Pairing code', code),
     btn, msg)
   form.addEventListener('submit', async (e) => {
@@ -46,8 +52,12 @@ export function showPair (session, onPaired) {
       await post('/api/pair', { code: c, name: name.value.trim() })
       onPaired()
     } catch (err) {
+      // the server's sentence already counts the tries left ("wrong
+      // pairing code (2 tries left)"); say it only when it did not
       const left = err.data?.remaining
-      msg.textContent = err.message + (left != null ? ` ${left === 1 ? '1 try' : left + ' tries'} left on this code.` : '')
+      const counted = /\btr(y|ies) left\b/i.test(err.message)
+      msg.textContent = err.message + (left != null && !counted ? ` ${left === 1 ? '1 try' : left + ' tries'} left on this code.` : '')
+      if (err.data?.error && /needs a name/.test(err.message)) { name.focus(); return }
       code.select()
     } finally {
       btn.disabled = false

@@ -42,6 +42,11 @@ test('resume picks the chosen cards back up', async ({ pairedPage: page, server,
   await expect(page.getByTestId('resume-banner')).toBeVisible();
   await page.getByTestId('resume-choose').click();
   await page.getByTestId(`resume-card-${b}`).uncheck();
+  // a board event redraws the banner: what was unticked stays unticked
+  const other = (await api('POST', '/api/cards', { kind: 'feature', title: 'Add a tick helper' })).json.id;
+  await expect(page.getByTestId(`rail-row-${other}`)).toHaveCount(1);
+  await expect(page.getByTestId(`resume-card-${b}`)).not.toBeChecked();
+  await expect(page.getByTestId(`resume-card-${a}`)).toBeChecked();
   await shot(page, info, 'resume-choose');
   await page.getByTestId('resume-picked').click();
   await expect(page.getByTestId('resume-banner')).toHaveCount(0);
