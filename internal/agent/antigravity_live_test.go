@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morphis/gummi/internal/rmtree"
 )
 
 // The live antigravity tests drive the real agy binary. They spend real
@@ -40,6 +42,27 @@ func antigravityLiveGate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")); err != nil {
 		t.Skip("the operator's home carries no agy OAuth token; log in with `agy` first")
 	}
+}
+
+// antigravityLiveScratch is a live session's scratch anchor, where its
+// card home and so a copy of the operator's real OAuth token land. It is
+// removed through rmtree rather than t.TempDir's plain RemoveAll: a real
+// agy that ran `go` leaves a read-only module cache under the home, the
+// plain removal fails, and the token copy outlives the test. Every test
+// here closes its adapter (killing each child's process group) before
+// cleanups run, so nothing is still writing into the tree.
+func antigravityLiveScratch(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "gummi-agy-live-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := rmtree.RemoveAll(dir); err != nil {
+			t.Errorf("removing live scratch %s (it holds an OAuth token copy): %v", dir, err)
+		}
+	})
+	return dir
 }
 
 // antigravityLiveReply sends one turn and returns the joined reply text,
@@ -82,7 +105,7 @@ func TestAntigravityLiveTurn(t *testing.T) {
 	}
 	defer ag.Close()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: t.TempDir(),
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: antigravityLiveScratch(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +162,7 @@ func TestAntigravityLiveResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ag.Close()
-	scratch := t.TempDir()
+	scratch := antigravityLiveScratch(t)
 
 	a, err := ag.NewSession(context.Background(), SessionOpts{
 		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: scratch,
@@ -184,7 +207,7 @@ func TestAntigravityLiveResumeUsageBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ag.Close()
-	scratch := t.TempDir()
+	scratch := antigravityLiveScratch(t)
 
 	// Session A: one turn whose usage is collected in the same loop that
 	// watches for the turn's end (the reply helper below consumes events
@@ -316,7 +339,7 @@ func TestAntigravityLiveMCPWiring(t *testing.T) {
 	}
 	defer ag.Close()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: t.TempDir(),
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: antigravityLiveScratch(t),
 		FeatureID: "FD-012", MCPSockPath: filepath.Join(t.TempDir(), "FD-012.sock"),
 	})
 	if err != nil {
@@ -349,7 +372,7 @@ func TestAntigravityLiveSkillForwarding(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: t.TempDir(),
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: antigravityLiveScratch(t),
 		SkillDirs: []string{skill},
 	})
 	if err != nil {
