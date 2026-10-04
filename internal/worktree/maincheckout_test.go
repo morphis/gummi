@@ -20,7 +20,8 @@ func mainCheckoutFeature(num int) *domain.Feature {
 // TestAMainCheckoutCardDiffsTheCheckout: no worktree, no branch — the diff
 // family reads the managed checkout itself, and its base is the checkout's
 // HEAD, so the loose tracked work is what the diff describes. An untracked
-// file is not in it, exactly as it is not in a worktree's diff.
+// file is not in it: in the person's own checkout it is theirs, not the
+// card's (withUntracked).
 func TestAMainCheckoutCardDiffsTheCheckout(t *testing.T) {
 	root := newRepo(t)
 	writeFile(t, root, "tracked.txt", "original\n")

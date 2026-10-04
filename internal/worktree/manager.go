@@ -1885,12 +1885,76 @@ func (m *Manager) assertNoForkDriftAgainstBase(ctx context.Context, f *domain.Fe
 // it forked from main: the merge base to the worktree (so both committed
 // branch work and uncommitted edits show, without main's later commits
 // appearing as spurious reversals). Empty when nothing changed.
+//
+// Untracked files the repository does not ignore show as additions too
+// (withUntracked): they are uncommitted edits like any other, and the
+// next commit of the worktree — a checkpoint, or the landing's own —
+// takes them along, so a reviewer reading this before a landing must see
+// them.
 func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 	p, base, err := m.diffBase(ctx, f)
 	if err != nil {
 		return "", err
 	}
-	return runGit(ctx, p, "diff", base)
+	env, done, err := m.withUntracked(ctx, f, p)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	return runGitEnv(ctx, p, env, "diff", base)
+}
+
+// withUntracked returns the environment a `git diff` in the worktree at p
+// runs under so that it also shows the untracked, non-ignored files as
+// new: a throwaway copy of the worktree's index with those paths added
+// intent-to-add. The real index is never touched — nothing is staged on
+// the agent's or the person's behalf by looking at a diff. done removes
+// the copy; with nothing untracked the environment is empty and the diff
+// runs exactly as before.
+//
+// Two trees are the exception. What a goal's own sessions leave in its
+// tree is scratch by design (a binary built to run a check), never part
+// of the branch. And a main-checkout card works in the person's own
+// checkout, where an untracked file is theirs rather than the card's.
+// Both diffs stay the committed and tracked work alone.
+func (m *Manager) withUntracked(ctx context.Context, f *domain.Feature, p string) (env []string, done func(), err error) {
+	done = func() {}
+	if f.IsGoal() || f.MainCheckout {
+		return nil, done, nil
+	}
+	list, err := runGitRaw(ctx, p, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil || strings.Trim(list, "\x00") == "" {
+		return nil, done, err
+	}
+	idx, err := runGit(ctx, p, "rev-parse", "--path-format=absolute", "--git-path", "index")
+	if err != nil {
+		return nil, done, err
+	}
+	raw, err := os.ReadFile(idx)
+	if err != nil {
+		return nil, done, err
+	}
+	dir, err := os.MkdirTemp("", "gummi-diff-")
+	if err != nil {
+		return nil, done, err
+	}
+	done = func() { _ = os.RemoveAll(dir) }
+	tmpIdx, paths := filepath.Join(dir, "index"), filepath.Join(dir, "paths")
+	if err := os.WriteFile(tmpIdx, raw, 0o600); err != nil { //nolint:gosec // a file in our own temp dir
+		done()
+		return nil, func() {}, err
+	}
+	if err := os.WriteFile(paths, []byte(list), 0o600); err != nil {
+		done()
+		return nil, func() {}, err
+	}
+	env = []string{"GIT_INDEX_FILE=" + tmpIdx, "GIT_LITERAL_PATHSPECS=1"}
+	if _, err := runGitEnv(ctx, p, env, "add", "--intent-to-add",
+		"--pathspec-from-file="+paths, "--pathspec-file-nul"); err != nil {
+		done()
+		return nil, func() {}, err
+	}
+	return env, done, nil
 }
 
 // revRe is what DiffSince accepts as a revision: a commit id, never a ref
@@ -1912,7 +1976,13 @@ func (m *Manager) DiffSince(ctx context.Context, f *domain.Feature, rev string) 
 	if _, err := runGit(ctx, p, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
 		return "", fmt.Errorf("unknown commit %s", rev)
 	}
-	return runGit(ctx, p, "diff", "-U0", rev, "--")
+	// the same untracked files Diff shows, so a new file reads as new here too
+	env, done, err := m.withUntracked(ctx, f, p)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	return runGitEnv(ctx, p, env, "diff", "-U0", rev, "--")
 }
 
 // Upstream is the remote branch the card's branch tracks, as git's own
