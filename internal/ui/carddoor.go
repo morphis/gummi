@@ -55,6 +55,12 @@ func (m *Shell) stackCands() []stackCand {
 		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal || f.GoalID != "" {
 			continue
 		}
+		if f.Kind == domain.KindFreeform && (f.MainCheckout || f.Stage == domain.StageDone) {
+			// a main-checkout session holds no branch to fork from (DESIGN
+			// §19.5), and a closed session's branch is no longer worked:
+			// stacking onto either is a refusal waiting to happen
+			continue
+		}
 		if r.Landed {
 			// a branch already on main has nothing left to stack on: a
 			// card forked from it forks from main. A done card that has

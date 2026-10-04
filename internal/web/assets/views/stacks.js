@@ -26,9 +26,11 @@ function errText (err) {
 
 // stackable: the cards that could carry a fork, as the new-card form's
 // stack row offers them (GET /api/form: not research, which has no branch,
-// and not a goal or a goal's card, which share the goal's branch), less
-// the ones already in a stack. Until the form's list arrives the board's
-// rows stand in, by the same rule. The server has the last word.
+// not a goal or a goal's card, which share the goal's branch, and not a
+// session that is closed or works in the main checkout), less the ones
+// already in a stack. Until the form's list arrives the board's rows
+// stand in, by the same rule as far as a row tells it. The server has the
+// last word.
 let formStackable = null
 function stackable (ctx) {
   const rows = ctx.state.board?.rows || []
@@ -39,7 +41,7 @@ function stackable (ctx) {
   }
   return rows.filter(r =>
     !['RS', 'GL'].includes(kindTag(r)) && r.kind !== 'research' && r.kind !== 'goal' &&
-    !r.goal && !r.stack && !r.landed)
+    !r.goal && !r.stack && !r.landed && !(r.kind === 'freeform' && r.stage === 'done'))
 }
 
 registerView('stacks', {
@@ -271,12 +273,12 @@ function stackBox (st, ctx, hooks, focused) {
 
   const move = (m, to) => write(() => ctx.api.post(`${path}/move`, { card: m.id, pos: to }))
   const remove = (m) => confirmRow(
-    [`Take ${m.id} out of the stack?`, h('span', { class: 'sk-sub' }, members.some(x => x.pos > m.pos) ? (members.filter(x => x.pos > m.pos).length === 1 ? ' The card above it is replayed onto its new base.' : ' The cards above it are replayed onto their new base.') : ' Its branch and work stay; it just stops forking from the card below.')],
+    [`Take ${m.id} out of the stack?`, h('span', { class: 'sk-sub' }, members.some(x => x.pos > m.pos) ? (members.filter(x => x.pos > m.pos).length === 1 ? ' The card above it is replayed onto its new base.' : ' The cards above it are replayed onto their new base.') : (members.some(x => x.pos < m.pos) ? ' Its branch and work stay; it just stops forking from the card below.' : ' Its branch and work stay; it just leaves the stack.'))],
     'Remove', 'stack-remove',
     () => write(() => ctx.api.del(`${path}/cards/${encodeURIComponent(m.id)}`)))
   const del = () => confirmRow(`Delete the empty stack ${st.name || st.id}?`, 'Delete', 'stack-delete', () => write(() => ctx.api.del(path)))
 
-  const restackBtn = h('button', { class: 'btn', type: 'button', testid: 'stack-restack', title: 'Replay every card onto its current base now (gummi stack restack)', onclick: (e) => restack(e.currentTarget) }, 'Restack')
+  const restackBtn = h('button', { class: 'btn', type: 'button', testid: 'stack-restack', title: 'Replay every card onto its current base now', onclick: (e) => restack(e.currentTarget) }, 'Restack')
   const header = h('div', { class: 'sk-head' },
     h('div', { class: 'sk-title' },
       h('b', { testid: 'stack-name' }, st.name || st.id),
@@ -316,7 +318,12 @@ function memberRow (m, i, members, row, act) {
   if (m.stale) marks.push(h('span', { class: 'sk-mark t-warn', testid: 'marker-stale', title: 'It sits on commits that have since moved; the next tick replays it' }, 'stale'))
   if (m.running) marks.push(h('span', { class: 'sk-mark t-run', testid: 'marker-running', title: 'A session is working on it; a replay waits' }, 'running'))
   if (m.dirty) marks.push(h('span', { class: 'sk-mark t-warn', testid: 'marker-dirty', title: 'Its worktree has uncommitted changes; a replay waits' }, 'uncommitted changes'))
-  if (!m.tree && !m.landed && !m.handedOff) marks.push(h('span', { class: 'sk-mark t-mute', testid: 'marker-notree', title: 'Its branch is cut when it starts' }, 'no branch yet'))
+  if (!m.tree && !m.landed && !m.handedOff) {
+    // an adopted branch exists already; only its worktree waits for the start
+    marks.push(m.adopted
+      ? h('span', { class: 'sk-mark t-mute', testid: 'marker-notree', title: 'Its adopted branch exists; the worktree on it is made when the card starts' }, 'no worktree yet')
+      : h('span', { class: 'sk-mark t-mute', testid: 'marker-notree', title: 'Its branch is cut when it starts' }, 'no branch yet'))
+  }
   if (row?.status === 'needs') marks.push(h('span', { class: 'sk-mark t-run', testid: 'marker-needs' }, 'needs you'))
   const below = m.below || ''
   return h('li', {
@@ -352,7 +359,12 @@ const isClosed = (m) => !!m.landed || !!m.handedOff || m.stage === 'done'
 // board's own, most often, which got there first — still has push lines
 // to show; then that walk.
 function shownResult (st) {
-  const r = results.get(st.id)
+  // a replay of cards that have all left the stack since is nothing to
+  // show any more: its cards are no longer here to push
+  if (!(st.members || []).length) return null
+  const members = new Set(st.members.map(m => m.id))
+  let r = results.get(st.id)
+  if (r && (r.replayed || []).length && !r.replayed.some(id => members.has(id))) r = null
   const idle = r && !(r.replayed || []).length && !r.conflict && !r.waiting
   return (idle && lastReplay(st)) || r || lastReplay(st)
 }
@@ -362,6 +374,8 @@ function shownResult (st) {
 // answer, so a page opened after the replay still shows its push lines.
 function lastReplay (st) {
   if (!(st.push || []).length || dismissed.has(`${st.id}@${st.replayedAt}`)) return null
+  const members = new Set((st.members || []).map(m => m.id))
+  if (!(st.replayed || []).some(id => members.has(id))) return null
   return { replayed: st.replayed || [], stack: st, auto: true, at: st.replayedAt }
 }
 

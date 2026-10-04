@@ -719,3 +719,23 @@ func lastLines(s string, n int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// The stack row (and the web's stackable list, which is the same list)
+// offers a freeform session only while it holds a branch of its own: not
+// one in the main checkout, and not one that is closed.
+func TestStackCandidatesSkipBranchlessSessions(t *testing.T) {
+	m := NewShell(theme.GummiDark(), "v0.1.0-test")
+	open := freeformRow(1, "open session", true)
+	main := freeformRow(2, "main checkout", true)
+	main.F.MainCheckout = true
+	closed := freeformRow(3, "closed session", true)
+	closed.F.Stage = domain.StageDone
+	m.rows = []featureRow{row(42, "dark mode", domain.StageImplement, "thrifty", true), open, main, closed}
+	var got []domain.FeatureID
+	for _, c := range m.stackCands() {
+		got = append(got, c.ID)
+	}
+	if len(got) != 2 || got[0] != "FD-042" || got[1] != open.F.ID {
+		t.Errorf("stack candidates = %v, want FD-042 and %s", got, open.F.ID)
+	}
+}

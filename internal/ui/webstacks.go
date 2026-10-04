@@ -91,7 +91,7 @@ func webStack(view engine.StackView) webapi.Stack {
 			Landed: mem.Landed, Stale: mem.Stale, Running: mem.Running, Dirty: mem.Dirty,
 		}
 		if f, ok := view.Card(mem.ID); ok {
-			sm.Title, sm.Stage = f.Title, string(f.Stage)
+			sm.Title, sm.Stage, sm.Adopted = f.Title, string(f.Stage), f.Adopted()
 			// the policy counts a finished card as landed so nothing forks
 			// from it again; the page must not tell a handed-off card's
 			// reader that its branch reached the base
@@ -159,6 +159,13 @@ func webStoreErr(err error) error {
 // touched and reloads the board — what the TUI does after it stacks a
 // card (cardCreated's stack tick).
 func (b *Bridge) stackWrite(ctx context.Context, edit func(context.Context, *state.Store) (domain.StackID, string, error)) (WebOutcome, error) {
+	return b.stackWriteTick(ctx, true, edit)
+}
+
+// stackWriteTick is stackWrite, with the tick left out when tick is false:
+// a deleted stack has nothing left to walk, and ticking it would only
+// report that it is gone.
+func (b *Bridge) stackWriteTick(ctx context.Context, tick bool, edit func(context.Context, *state.Store) (domain.StackID, string, error)) (WebOutcome, error) {
 	var store *state.Store
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd { store = m.store; return nil }); err != nil {
 		return WebOutcome{}, err
@@ -171,7 +178,9 @@ func (b *Bridge) stackWrite(ctx context.Context, edit func(context.Context, *sta
 		return WebOutcome{}, webStoreErr(err)
 	}
 	out, err := b.Await(ctx, func(m *Shell) (tea.Cmd, error) {
-		m.queueStackTick(id)
+		if tick {
+			m.queueStackTick(id)
+		}
 		return func() tea.Msg { return noticeMsg{text: text, reload: true} }, nil
 	})
 	out.ID = string(id)
@@ -272,7 +281,7 @@ func (b *Bridge) RenameStack(ctx context.Context, id, name string) (WebOutcome, 
 
 // DeleteStack is DELETE /api/stacks/{id}: only an empty stack goes.
 func (b *Bridge) DeleteStack(ctx context.Context, id string) (WebOutcome, error) {
-	return b.stackWrite(ctx, func(ctx context.Context, store *state.Store) (domain.StackID, string, error) {
+	return b.stackWriteTick(ctx, false, func(ctx context.Context, store *state.Store) (domain.StackID, string, error) {
 		sid := domain.StackID(id)
 		if _, err := store.GetStack(ctx, sid); err != nil {
 			return "", "", err

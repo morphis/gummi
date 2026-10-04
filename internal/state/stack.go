@@ -36,6 +36,47 @@ var ErrStackNotStackable = errors.New("card kind has no branch to stack")
 // cards would name a closed card as what they fork from.
 var ErrStackCardClosed = errors.New("card is closed and keeps its place in the stack")
 
+// freeformStackable refuses the two freeform cards with no branch a stack
+// could use: a session in the main checkout, which holds none (DESIGN
+// §19.5), and a closed session, whose branch nobody works any more. A
+// freeform session in a worktree of its own may stack like any card.
+func freeformStackable(f domain.Feature) error {
+	switch {
+	case f.Kind != domain.KindFreeform:
+		return nil
+	case f.MainCheckout:
+		return ErrStackNotStackable
+	case f.Stage == domain.StageDone:
+		return ErrStackSessionClosed
+	}
+	return nil
+}
+
+// ErrStackSessionClosed reports a closed freeform card offered to a stack:
+// its session is over, so its branch is not one anything should fork from.
+var ErrStackSessionClosed = errors.New("the session is closed, so its branch has nothing left to stack")
+
+// ErrStackNameTaken reports a name another stack already goes by: two
+// stacks a reader can only tell apart by a dim id are one mistake away
+// from the wrong restack.
+var ErrStackNameTaken = errors.New("another stack already has that name")
+
+// stackNameFree refuses name when a stack other than except already goes
+// by it, ignoring case.
+func (s *Store) stackNameFree(ctx context.Context, name string, except domain.StackID) error {
+	var other string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id FROM stacks WHERE lower(name) = lower(?) AND id != ? LIMIT 1`,
+		name, string(except)).Scan(&other)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	return fmt.Errorf("naming a stack %q: %w (%s)", name, ErrStackNameTaken, other)
+}
+
 // CreateStack records a new stack. The caller derives the id, normally
 // from the bottom card's slug via domain.NewStackID.
 func (s *Store) CreateStack(ctx context.Context, st *domain.Stack, at time.Time) error {
@@ -72,8 +113,17 @@ func (s *Store) StartStack(ctx context.Context, bottom domain.FeatureID, name st
 	if k := f.Kind; k == domain.KindResearch || k == domain.KindGoal {
 		return domain.Stack{}, fmt.Errorf("starting a stack on %s: %w", f.ID, ErrStackNotStackable)
 	}
-	if name == "" {
+	if err := freeformStackable(f); err != nil {
+		return domain.Stack{}, fmt.Errorf("starting a stack on %s: %w", f.ID, err)
+	}
+	named := name != ""
+	if !named {
 		name = f.Slug
+	}
+	if named {
+		if err := s.stackNameFree(ctx, name, ""); err != nil {
+			return domain.Stack{}, err
+		}
 	}
 	id, err := domain.NewStackID(name, f.ID)
 	if err != nil {
@@ -81,6 +131,11 @@ func (s *Store) StartStack(ctx context.Context, bottom domain.FeatureID, name st
 	}
 	if _, gerr := s.GetStack(ctx, id); gerr == nil {
 		id = domain.StackID(strings.ToLower(string(f.ID)) + "-" + string(id))
+	}
+	if !named && s.stackNameFree(ctx, name, "") != nil {
+		// the slug is another stack's name already: the id it was given
+		// is the one name that tells the two apart
+		name = string(id)
 	}
 	st := domain.Stack{ID: id, Name: name, Repo: f.Repo}
 	if err := s.CreateStack(ctx, &st, at); err != nil {
@@ -135,6 +190,9 @@ func (s *Store) ListStacks(ctx context.Context) ([]domain.Stack, error) {
 func (s *Store) RenameStack(ctx context.Context, id domain.StackID, name string) error {
 	st := domain.Stack{ID: id, Name: name}
 	if err := st.Validate(); err != nil {
+		return err
+	}
+	if err := s.stackNameFree(ctx, name, id); err != nil {
 		return err
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE stacks SET name = ? WHERE id = ?`, name, string(id))
@@ -205,6 +263,11 @@ func (s *Store) AddToStack(ctx context.Context, id domain.StackID, card domain.F
 		}
 		if k := f.Kind; k == domain.KindResearch || k == domain.KindGoal {
 			return fmt.Errorf("adding %s to %s: %w", card, id, ErrStackNotStackable)
+		}
+		if f.StackID == "" {
+			if err := freeformStackable(f); err != nil {
+				return fmt.Errorf("adding %s to %s: %w", card, id, err)
+			}
 		}
 		if f.Repo != st.Repo {
 			return fmt.Errorf("adding %s (repo %q) to %s (repo %q): %w",

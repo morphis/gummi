@@ -127,3 +127,31 @@ test('the card head’s stack badge opens its stack', async ({ pairedPage: page,
   await expect(box.getByTestId('stack-delete')).toHaveCount(0);
   await shot(page, info, 'stack-focused');
 });
+
+test('an emptied stack is deleted with one notice, and two stacks never share a name', async ({ pairedPage: page, api }) => {
+  const made = await api('POST', '/api/stacks', { card: ids.wave, name: 'solo' });
+  expect(made.status).toBe(200);
+  const stack = made.json.id as string;
+  // a second stack, or a rename, onto a name already taken is refused
+  const dup = await api('POST', '/api/stacks', { card: ids.shrug, name: 'Solo' });
+  expect(dup.status).toBe(409);
+  expect(String(dup.json?.error)).toContain('already has that name');
+
+  await openStacks(page);
+  const box = page.getByTestId(`stack-${stack}`);
+  // the only card has nothing below it to stop forking from
+  await box.getByTestId(`stack-remove-${ids.wave}`).click();
+  await expect(box.getByTestId('stack-remove-dialog')).toContainText('it just leaves the stack');
+  await expect(box.getByTestId('stack-remove-dialog')).not.toContainText('card below');
+  await box.getByTestId('stack-remove-confirm').click();
+  await expect(box.getByTestId(`stack-member-${ids.wave}`)).toHaveCount(0);
+  await expect(box.getByTestId('stack-result')).toHaveCount(0);
+
+  await box.getByTestId('stack-delete').click();
+  await box.getByTestId('stack-delete-confirm').click();
+  await expect(box).toHaveCount(0);
+  await expect(page.getByTestId('toast').filter({ hasText: `stack ${stack} deleted` })).toHaveCount(1);
+  // nothing ticks a stack that is gone, so no error follows the notice
+  await page.waitForTimeout(800);
+  await expect(page.locator('[data-testid="toast"].err')).toHaveCount(0);
+});
