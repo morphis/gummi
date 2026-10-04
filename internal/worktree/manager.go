@@ -454,6 +454,12 @@ func (m *Manager) createAt(ctx context.Context, f *domain.Feature, start string)
 			return "", err
 		}
 	}
+	if err := relinkGitFile(p); err != nil {
+		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
+		}
+		return "", fmt.Errorf("linking new worktree: %w", err)
+	}
 	// The checkout tracks whatever HEAD carries, including .gummi content
 	// the launch untracking only removed from main's index. Untrack it
 	// here too, or agent adds in this worktree sweep .gummi churn in.
@@ -564,6 +570,10 @@ func (m *Manager) Attach(ctx context.Context, f *domain.Feature) (string, error)
 		if _, rerr := runGit(ctx, m.repo, "worktree", "add", "--", p, branch); rerr != nil {
 			return "", rerr
 		}
+	}
+	if err := relinkGitFile(p); err != nil {
+		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+		return "", fmt.Errorf("linking adopted worktree: %w", err)
 	}
 	// Only bites when the adopted branch actually tracks .gummi, which a
 	// branch cut in a gummi-initialized repo does not. Where it does bite
@@ -679,6 +689,10 @@ func (m *Manager) Recreate(ctx context.Context, f *domain.Feature) (string, erro
 	}
 	if _, err := runGit(ctx, m.repo, "worktree", "add", "--", p, branch); err != nil {
 		return "", err
+	}
+	if err := relinkGitFile(p); err != nil {
+		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+		return "", fmt.Errorf("linking recreated worktree: %w", err)
 	}
 	return p, nil
 }

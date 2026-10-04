@@ -362,6 +362,12 @@ func (m *Manager) CreateGoalTree(ctx context.Context, goal *domain.Feature, name
 	if _, err := runGit(ctx, m.repo, args...); err != nil {
 		return "", err
 	}
+	if err := relinkGitFile(p); err != nil {
+		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil && !have {
+			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
+		}
+		return "", fmt.Errorf("linking new goal worktree: %w", err)
+	}
 	if err := untrackGummiInWorktree(ctx, m.wsRoot, m.repo, p); err != nil {
 		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil && !have {
 			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
