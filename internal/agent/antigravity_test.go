@@ -861,6 +861,42 @@ func TestAntigravityToolDoneWithoutActiveAnnouncesItsCall(t *testing.T) {
 	}
 }
 
+// TestAntigravitySubagentStepEmitsToolCallAndResult asserts that when agy emits
+// a step_update with step_type "subagent", it is mapped to EventToolCall and
+// EventToolResult so the subagent invocation appears in the card thread.
+func TestAntigravitySubagentStepEmitsToolCallAndResult(t *testing.T) {
+	s := &antigravitySession{model: "m"}
+	s.mapLine([]byte(`{"event":"init","conversation_id":"c"}`))
+	activeLine := []byte(`{"event":"step_update","step_update":{"conversation_id":"c","step_index":2,"state":"ACTIVE","step_type":"subagent","tool_name":"invoke_subagent","subagent_info":{"subagents":[{"type_name":"research","role":"File Researcher","initial_prompt":"Check files"}]}}}`)
+	evs := s.mapLine(activeLine)
+	if len(evs) != 1 || evs[0].Kind != EventToolCall {
+		t.Fatalf("ACTIVE subagent step emitted %v, want 1 EventToolCall", evs)
+	}
+	if evs[0].Tool != "invoke_subagent" || evs[0].Detail != "File Researcher" {
+		t.Errorf("announced call = %+v, want invoke_subagent with detail File Researcher", evs[0])
+	}
+
+	doneLine := []byte(`{"event":"step_update","step_update":{"conversation_id":"c","step_index":2,"state":"DONE","step_type":"subagent","tool_name":"invoke_subagent","duration_seconds":0.5,"subagent_info":{"subagents":[{"type_name":"research","role":"File Researcher","conversation_id":"sub-1"}]}}}`)
+	if doneEvs := s.mapLine(doneLine); len(doneEvs) != 0 {
+		t.Fatalf("DONE subagent step emitted %v, want buffering only", doneEvs)
+	}
+
+	resultLine := []byte(`{"event":"result","result":{"conversation_id":"c","status":"SUCCESS","response":"done","usage":{}}}`)
+	resEvs := s.mapLine(resultLine)
+	var sawResult bool
+	for _, ev := range resEvs {
+		if ev.Kind == EventToolResult && ev.CallID == "2" {
+			sawResult = true
+			if !ev.Result.OK {
+				t.Errorf("subagent result OK = false, want true")
+			}
+		}
+	}
+	if !sawResult {
+		t.Fatalf("result events %v missing EventToolResult for CallID 2", resEvs)
+	}
+}
+
 // TestAntigravityRefusalsBeforeAnySideEffect: guarded and ReadOnly
 // sessions are refused before anything is created — no card home, no
 // scratch dir touched.

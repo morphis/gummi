@@ -571,3 +571,27 @@ func TestReportChargesAnAnsweredAskInsideAPassToYou(t *testing.T) {
 		t.Errorf("idle = %v, want none", run.Clock.Idle)
 	}
 }
+
+// Subagent calls using invoke_subagent (e.g. from Antigravity) are
+// categorized under Hands.Subagents.
+func TestReportCategorizesInvokeSubagentAsSubagent(t *testing.T) {
+	tool := func(name, detail, status string, ms int64) state.CardEvent {
+		p, _ := json.Marshal(state.ToolPayload{
+			Label: name + "  " + detail, Tool: name, Detail: detail, Call: name + detail, MS: ms,
+		})
+		return state.CardEvent{
+			Stage: domain.StageImplement, Kind: state.EventTool, Status: status,
+			At: base, Payload: string(p),
+		}
+	}
+	evs := []state.CardEvent{
+		tool("invoke_subagent", "File Researcher", state.StatusOK, 5000),
+	}
+	run := Report(Input{Feature: card(1, 100), Events: evs})
+	if len(run.Hands.Subagents) != 1 || run.Hands.Subagents[0].Name != "invoke_subagent" {
+		t.Fatalf("subagents = %+v, want invoke_subagent", run.Hands.Subagents)
+	}
+	if run.Hands.Subagents[0].Detail != "File Researcher" {
+		t.Errorf("detail = %q, want File Researcher", run.Hands.Subagents[0].Detail)
+	}
+}

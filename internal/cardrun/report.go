@@ -644,7 +644,7 @@ func isSkill(t ToolUse) bool { return strings.EqualFold(t.Name, "skill") }
 
 func isSubagent(t ToolUse) bool {
 	n := strings.ToLower(t.Name)
-	return n == "task" || n == "agent" || n == "subagent"
+	return n == "task" || n == "agent" || strings.Contains(n, "subagent")
 }
 
 func pick(all []ToolUse, want func(ToolUse) bool) []ToolUse {

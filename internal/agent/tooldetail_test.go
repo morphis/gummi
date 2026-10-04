@@ -19,6 +19,8 @@ func TestToolDetailPicksSalientArg(t *testing.T) {
 		{"nothing displayable", map[string]any{"todos": []any{"a"}}, ""},
 		{"nil args", nil, ""},
 		{"monitor websocket", map[string]any{"ws": map[string]any{"url": "wss://example.com/ci"}}, "wss://example.com/ci"},
+		{"subagents array with role", map[string]any{"subagents": []any{map[string]any{"role": "File Researcher", "type_name": "research"}}}, "File Researcher"},
+		{"Subagents camel array with type fallback", map[string]any{"Subagents": []any{map[string]any{"type_name": "research"}}}, "research"},
 	}
 	for _, c := range cases {
 		if got := toolDetail("/wt", c.args); got != c.want {

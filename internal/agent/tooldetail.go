@@ -20,6 +20,7 @@ var detailKeys = []string{
 	"file_path", "filePath", "path", "file",
 	"pattern", "query", "url",
 	"skill", "subagent_type",
+	"role", "Role",
 	"description", "prompt",
 }
 
@@ -48,6 +49,34 @@ func toolDetail(workdir string, args map[string]any) string {
 		if v, ok := ws["url"].(string); ok {
 			if d := collapseDetail(workdir, v); d != "" {
 				return d
+			}
+		}
+	}
+	// Subagent delegation (e.g. invoke_subagent) nests its target under
+	// "subagents" or "Subagents" list.
+	for _, listKey := range []string{"subagents", "Subagents"} {
+		if raw, ok := args[listKey]; ok {
+			if subs, ok := raw.([]any); ok {
+				for _, item := range subs {
+					if subMap, ok := item.(map[string]any); ok {
+						for _, subKey := range []string{
+							"role", "Role",
+							"description", "Description",
+							"type_name", "typeName", "TypeName", "type", "Type",
+							"prompt", "Prompt", "initial_prompt", "initialPrompt",
+						} {
+							if val, ok := subMap[subKey].(string); ok && strings.TrimSpace(val) != "" {
+								if d := collapseDetail(workdir, val); d != "" {
+									return d
+								}
+							}
+						}
+					} else if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+						if d := collapseDetail(workdir, s); d != "" {
+							return d
+						}
+					}
+				}
 			}
 		}
 	}

@@ -474,12 +474,13 @@ type agyLine struct {
 // tool_name/tool_info. user_input steps (the turn's own echo) are
 // ignored.
 type agyStep struct {
-	Index     int             `json:"step_index"`
-	Type      string          `json:"step_type"`
-	State     string          `json:"state"`
-	TextDelta string          `json:"text_delta"`
-	ToolName  string          `json:"tool_name"`
-	ToolInfo  json.RawMessage `json:"tool_info"`
+	Index        int             `json:"step_index"`
+	Type         string          `json:"step_type"`
+	State        string          `json:"state"`
+	TextDelta    string          `json:"text_delta"`
+	ToolName     string          `json:"tool_name"`
+	ToolInfo     json.RawMessage `json:"tool_info"`
+	SubagentInfo json.RawMessage `json:"subagent_info"`
 }
 
 // agyToolInfo is a tool step's tool_info: the invocation's parameters
@@ -543,7 +544,7 @@ func (s *antigravitySession) mapStep(raw json.RawMessage) []Event {
 	switch st.Type {
 	case "agent_response":
 		return s.mapAgentResponse(st)
-	case "tool":
+	case "tool", "subagent":
 		return s.mapToolStep(st)
 	default:
 		return nil
@@ -569,6 +570,24 @@ func (s *antigravitySession) mapAgentResponse(st agyStep) []Event {
 // (CommandLine), so the keyed probe toolDetail runs first, and the first
 // string value the parameters carry stands in when no key matches.
 func agyArgDetail(workdir string, st agyStep) string {
+	if len(st.SubagentInfo) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(st.SubagentInfo, &m); err == nil {
+			if d := toolDetail(workdir, m); d != "" {
+				return d
+			}
+			keys := make([]string, 0, len(m))
+			for k := range m {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if v, ok := m[k].(string); ok && strings.TrimSpace(v) != "" {
+					return collapseDetail(workdir, v)
+				}
+			}
+		}
+	}
 	if len(st.ToolInfo) == 0 {
 		return ""
 	}
@@ -605,8 +624,11 @@ func agyToolName(st agyStep) string {
 		return st.ToolName
 	}
 	var ti agyToolInfo
-	if err := json.Unmarshal(st.ToolInfo, &ti); err == nil {
+	if err := json.Unmarshal(st.ToolInfo, &ti); err == nil && ti.Name != "" {
 		return ti.Name
+	}
+	if st.Type == "subagent" {
+		return "invoke_subagent"
 	}
 	return ""
 }
@@ -632,9 +654,10 @@ func (s *antigravitySession) mapToolStep(st agyStep) []Event {
 		s.toolNames[id] = name
 		return []Event{{Kind: EventToolCall, Tool: name, Detail: detail, CallID: id}}
 	case "DONE":
-		output := agyStepOutput(st.ToolInfo)
-		_, announced := s.toolNames[id]
+		output := agyStepOutput(firstNonEmptyJSON(st.ToolInfo, st.SubagentInfo))
+		prev, announced := s.toolNames[id]
 		delete(s.toolNames, id)
+		name = cmp.Or(name, prev)
 		s.doneSteps = append(s.doneSteps, agyDoneStep{
 			id: id, name: name, detail: detail, call: !announced,
 			output: output,
