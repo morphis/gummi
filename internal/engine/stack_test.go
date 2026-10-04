@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
@@ -503,6 +504,15 @@ func TestAFinishedSessionDoesNotHoldAReplay(t *testing.T) {
 	}
 }
 
+// idleAgentSession is a backend attached and waiting between turns: it
+// accepts nothing and emits nothing.
+type idleAgentSession struct{}
+
+func (idleAgentSession) Send(context.Context, string) error { return nil }
+func (idleAgentSession) Events() <-chan agent.Event         { return nil }
+func (idleAgentSession) Interrupt(context.Context) error    { return nil }
+func (idleAgentSession) Close() error                       { return nil }
+
 // A freeform card's conversation lives in the engine's freeform map, not
 // among the stage sessions, and a turn in flight there writes to the
 // card's worktree like any stage does. It must hold the card's replay the
@@ -554,6 +564,21 @@ func TestALiveFreeformTurnHoldsAReplay(t *testing.T) {
 	}
 	if view.Snapshot.Members[1].Running {
 		t.Error("a freeform conversation with no backend still holds its card's replay")
+	}
+
+	// nor does an open session idle between turns with its backend still
+	// attached — the ordinary state of a session someone has open: it
+	// writes nothing while it waits on its person, and holding the replay
+	// for it stalled the stack for as long as the card stayed open
+	sess.mu.Lock()
+	sess.agentSess = idleAgentSession{}
+	sess.mu.Unlock()
+	view, err = f.eng.StackSnapshot(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Snapshot.Members[1].Running {
+		t.Error("an idle open freeform session holds its card's replay")
 	}
 }
 

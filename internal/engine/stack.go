@@ -286,10 +286,15 @@ func sessionHoldsTree(s *Session) bool {
 
 // freeformHoldsTree is sessionHoldsTree for a freeform card, whose
 // conversation lives in e.freeform rather than in the stage sessions'
-// map. The same rule applies to its current backend: a turn in flight,
-// or an agent still attached between turns, may write to the worktree,
-// and this process holding the card's lock for it is exactly why
-// stackRestackOne's own lock would not keep the replay out.
+// map. Only a turn in flight holds the tree. An open session keeps its
+// backend attached between turns for as long as the card is open — that
+// is what a session is (DESIGN §19) — and nothing writes the worktree
+// while it waits on its person, so reading the attachment as "may still
+// write" kept an idle session's stack from ever replaying (§19.5 lets a
+// freeform card with its own worktree sit in a stack). This process holds
+// the card's lock for the session's whole life, which is why
+// stackRestackOne's own lock would not keep a live turn's replay out and
+// this check has to.
 func (e *Engine) freeformHoldsTree(id domain.FeatureID) bool {
 	ff := e.Freeform(id)
 	if ff == nil {
@@ -298,7 +303,7 @@ func (e *Engine) freeformHoldsTree(id domain.FeatureID) bool {
 	ff.mu.Lock()
 	sess := ff.sess
 	ff.mu.Unlock()
-	return sessionHoldsTree(sess) || (sess != nil && sess.Busy())
+	return sess != nil && sess.Busy()
 }
 
 // forksFromMember reports whether f's base is the branch of another card
