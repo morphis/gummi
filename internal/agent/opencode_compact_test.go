@@ -3,47 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
-
-// A request that reaches `opencode serve` while it is still starting can
-// be held unanswered; the readiness poll must give up on it and ask again
-// rather than wait on it for good.
-func TestOpencodeServerWaitReadyOutlivesAHeldRequest(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if hits.Add(1) == 1 {
-			<-r.Context().Done() // the first poll is never answered
-			return
-		}
-		if r.URL.Path != "/session/ses_1" {
-			t.Errorf("polled %s", r.URL.Path)
-		}
-		if u, p, _ := r.BasicAuth(); u != "opencode" || p != "pw" {
-			t.Errorf("auth = %q/%q", u, p)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-	o := opencodeServer{base: srv.URL, password: "pw"}
-	if err := o.waitReady(context.Background(), "ses_1", 10*time.Second); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestOpencodeServerWaitReadyNamesALostSession(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	defer srv.Close()
-	err := opencodeServer{base: srv.URL}.waitReady(context.Background(), "ses_gone", 5*time.Second)
-	if err == nil || !strings.Contains(err.Error(), "ses_gone") {
-		t.Fatalf("err = %v, want it to name the lost session", err)
-	}
-}
 
 func TestOpencodeServerSummarize(t *testing.T) {
 	var got map[string]string
@@ -73,22 +39,154 @@ func TestOpencodeServerSummarize(t *testing.T) {
 }
 
 // With no turn behind it there is no opencode session to compact: Compact
-// says so and ends idle, without starting a server.
+// says so and ends idle, without touching the server.
 func TestOpencodeCompactBeforeAnyTurn(t *testing.T) {
-	s := &opencodeSession{o: &Opencode{bin: "/nonexistent"}, model: "p/m", raw: make(chan Event, 4), events: make(chan Event), stop: make(chan struct{})}
-	go s.forward()
-	defer s.Close()
-	if err := s.Compact(context.Background()); err != nil {
+	_, _ = stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "p/m"})
+	defer func() { _ = sess.Close() }()
+	if err := sess.Compact(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var kinds []EventKind
-	for e := range s.Events() {
-		kinds = append(kinds, e.Kind)
-		if e.Kind == EventIdle {
-			break
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			kinds = append(kinds, e.Kind)
+			if e.Kind == EventIdle {
+				if len(kinds) != 2 || kinds[0] != EventMessage {
+					t.Errorf("events = %v, want a message then idle", kinds)
+				}
+				return
+			}
+			if e.Kind == EventError {
+				t.Fatalf("compacting with no conversation errored: %v", e.Err)
+			}
+		case <-deadline:
+			t.Fatal("no idle before deadline")
 		}
 	}
-	if len(kinds) != 2 || kinds[0] != EventMessage {
-		t.Errorf("events = %v, want a message then idle", kinds)
+}
+
+// The compaction rides the session's own server: one summarize call
+// against it, and the report when it lands.
+func TestOpencodeCompactRunsOnTheSessionServer(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/mimo"})
+	defer func() { _ = sess.Close() }()
+	// a turn first, so the session exists
+	runCleanTurn(t, f, sess)
+	id := sess.SessionID()
+
+	if err := sess.Compact(context.Background()); err != nil {
+		t.Fatal(err)
 	}
+	var sawMessage bool
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			switch e.Kind {
+			case EventMessage:
+				if !strings.Contains(e.Text, "Compacted the conversation") {
+					t.Errorf("compaction message = %q", e.Text)
+				}
+				sawMessage = true
+			case EventError:
+				t.Fatalf("compaction failed: %v", e.Err)
+			case EventIdle:
+				f.mu.Lock()
+				summaries := append([]string(nil), f.summaries...)
+				spawns := len(f.spawns)
+				f.mu.Unlock()
+				if !sawMessage {
+					t.Error("compaction reported no message")
+				}
+				if len(summaries) != 1 || summaries[0] != id {
+					t.Errorf("summaries = %v, want one against %s", summaries, id)
+				}
+				if spawns != 1 {
+					t.Errorf("spawns = %d, want only the session's own (no per-compaction serve)", spawns)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("compaction never ended")
+		}
+	}
+}
+
+// Interrupting a running compaction cancels the summarize call and keeps
+// the "stopped" report: the conversation is as it was.
+func TestOpencodeCompactInterruptStopsTheSummarize(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/mimo"})
+	defer func() { _ = sess.Close() }()
+	runCleanTurn(t, f, sess)
+
+	f.holdSummarize()
+	if err := sess.Compact(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case <-time.After(50 * time.Millisecond):
+			f.mu.Lock()
+			n := len(f.summaries)
+			f.mu.Unlock()
+			if n > 0 {
+				goto compacting
+			}
+		case <-deadline:
+			t.Fatal("compaction never started")
+		}
+	}
+compacting:
+	if err := sess.Interrupt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sawStopped := false
+	deadline = time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			switch e.Kind {
+			case EventMessage:
+				if !strings.Contains(e.Text, "Compaction stopped") {
+					t.Errorf("report = %q, want the compaction-stopped wording", e.Text)
+				}
+				sawStopped = true
+			case EventError:
+				t.Fatalf("an interrupted compaction surfaced as error: %v", e.Err)
+			case EventIdle:
+				if !sawStopped {
+					t.Error("the stop was not reported")
+				}
+				f.releaseSummarize()
+				return
+			}
+		case <-deadline:
+			t.Fatal("the interrupted compaction never ended")
+		}
+	}
+}
+
+// A turn while a compaction runs is refused, the same way a turn during a
+// turn is.
+func TestOpencodeCompactBusy(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/mimo"})
+	defer func() { _ = sess.Close() }()
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	f.push(f.partEvent("text", "p", "ok"))
+	if err := sess.Compact(context.Background()); !errors.Is(err, ErrBusy) {
+		t.Errorf("Compact during a turn = %v, want ErrBusy", err)
+	}
+	f.releaseTurn()
+	waitTurnEnd(t, sess)
 }

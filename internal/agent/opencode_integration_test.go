@@ -86,9 +86,14 @@ func TestOpencodeIntegration(t *testing.T) {
 				case EventIdle:
 					return text.String()
 				case EventError:
+					// a failed turn leaves nothing running; a skipped one
+					// may still be mid-turn (the server's own retries) —
+					// stop it, so the next subtest's turn is not refused
+					_ = sess.Interrupt(context.Background())
 					t.Skipf("opencode/network unavailable: %v", e.Err)
 				}
 			case <-deadline:
+				_ = sess.Interrupt(context.Background())
 				t.Skip("opencode did not respond in time (network?)")
 			}
 		}
@@ -136,6 +141,64 @@ func TestOpencodeIntegration(t *testing.T) {
 			case <-deadline:
 				t.Fatal("no call_tool ping reached the stub")
 			case <-time.After(500 * time.Millisecond):
+			}
+		}
+	})
+
+	t.Run("guarded approval holds and answers", func(t *testing.T) {
+		dir := filepath.Join(wt, "guarded")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		gsess, err := ag.NewSession(context.Background(), SessionOpts{
+			WorkDir:     dir, // its own cage root
+			MCPSockPath: stubSock,
+			FeatureID:   "FD-011",
+			Model:       ocIntegrationModel(),
+			Permission:  PermissionGuarded,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer gsess.Close()
+		if err := gsess.Send(context.Background(),
+			"Use your shell tool to run exactly: echo guarded-ok > guarded.txt. Do nothing else."); err != nil {
+			t.Fatal(err)
+		}
+		var resolver PermissionResolver
+		var ruling func()
+		var sawAsk bool
+		deadline := time.After(180 * time.Second)
+		for {
+			select {
+			case e := <-gsess.Events():
+				switch e.Kind {
+				case EventPermission:
+					if e.CallID != "" && resolver == nil {
+						var ok bool
+						if resolver, ok = gsess.(PermissionResolver); !ok {
+							t.Fatal("opencode session does not resolve permissions")
+						}
+						ruling = func() {
+							_ = resolver.ResolvePermission(context.Background(), e.CallID, true)
+						}
+						ruling()
+						sawAsk = true
+					}
+				case EventIdle:
+					if !sawAsk {
+						t.Fatal("the guarded session ran its tool call without surfacing an approval")
+					}
+					data, err := os.ReadFile(filepath.Join(dir, "guarded.txt"))
+					if err != nil || string(data) != "guarded-ok\n" {
+						t.Fatalf("the approved call never ran (err=%v, data=%q)", err, data)
+					}
+					return
+				case EventError:
+					t.Fatalf("the guarded turn errored: %v", e.Err)
+				}
+			case <-deadline:
+				t.Skip("the guarded turn did not finish in time (network?)")
 			}
 		}
 	})
@@ -286,7 +349,7 @@ func (s *ocStub) serve(conn net.Conn) {
 // launched with --feature FD-011, by finding its command line in /proc.
 func verifyChildFeature(t *testing.T, stub *ocStub) {
 	t.Helper()
-	matches := findChildArgv(t)
+	matches := findChildArgv(t, gummiBinPath())
 	if matches == "" {
 		t.Skip("could not locate the __mcp child's cmdline")
 	}
@@ -295,7 +358,17 @@ func verifyChildFeature(t *testing.T, stub *ocStub) {
 	}
 }
 
-func findChildArgv(t *testing.T) string {
+// gummiBinPath reports the binary the adapter was last told to spawn as
+// its MCP child (the integration test rebinds opencodeExecPath to it).
+func gummiBinPath() string {
+	bin, err := opencodeExecPath()
+	if err != nil {
+		return ""
+	}
+	return bin
+}
+
+func findChildArgv(t *testing.T, own string) string {
 	t.Helper()
 	procs, err := os.ReadDir("/proc")
 	if err != nil {
@@ -312,7 +385,9 @@ func findChildArgv(t *testing.T) string {
 				continue
 			}
 			joined := strings.Join(strings.FieldsFunc(string(cmdline), func(r rune) bool { return r == 0 }), " ")
-			if strings.Contains(joined, "__mcp") {
+			// the child gummi spawned, not a process whose prompt happens
+			// to quote the shim's name: match the binary it was told to run
+			if own != "" && strings.HasPrefix(joined, own) && strings.Contains(joined, "__mcp") {
 				return joined
 			}
 		}
@@ -324,11 +399,71 @@ func findChildArgv(t *testing.T) string {
 	}
 }
 
-// ocIntegrationModel is the model the live test runs on: a free one,
+// ocIntegrationModel is the model the live tests run on: a free one,
 // overridable with GUMMI_OPENCODE_TEST_MODEL since the free list changes.
 func ocIntegrationModel() string {
 	if m := os.Getenv("GUMMI_OPENCODE_TEST_MODEL"); m != "" {
 		return m
 	}
-	return "opencode/deepseek-v4-flash-free"
+	return "opencode/mimo-v2.6-flash-free"
+}
+
+// TestOpencodeLiveRoundTrip drives the real opencode binary against a free
+// hosted model. It skips when opencode isn't installed, and treats an
+// error/timeout (network or gateway trouble) as a skip — it verifies the
+// adapter's mapping, not opencode's uptime. Tagged like the rest of this
+// file: the default suite must not depend on a live model.
+func TestOpencodeLiveRoundTrip(t *testing.T) {
+	if _, err := exec.LookPath("opencode"); err != nil {
+		t.Skip("opencode not installed")
+	}
+	ag, err := NewOpencode("opencode")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer ag.Close()
+
+	ctx := context.Background()
+	sess, err := ag.NewSession(ctx, SessionOpts{
+		WorkDir: t.TempDir(),
+		Model:   ocIntegrationModel(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if err := sess.Send(ctx, "Reply with exactly one word: PONG"); err != nil {
+		t.Fatal(err)
+	}
+
+	var text string
+	var sawUsage, sawIdle bool
+	deadline := time.After(90 * time.Second)
+	for !sawIdle {
+		select {
+		case e := <-sess.Events():
+			switch e.Kind {
+			case EventTextDelta, EventMessage:
+				if e.Kind == EventMessage {
+					text = e.Text
+				} else {
+					text += e.Text
+				}
+			case EventUsage:
+				sawUsage = true
+			case EventIdle:
+				sawIdle = true
+			case EventError:
+				t.Skipf("opencode/network unavailable: %v", e.Err)
+			}
+		case <-deadline:
+			t.Skip("opencode did not respond in time (network?)")
+		}
+	}
+	if !strings.Contains(strings.ToUpper(text), "PONG") {
+		t.Errorf("reply %q did not contain PONG", text)
+	}
+	if !sawUsage {
+		t.Error("no usage event from the turn")
+	}
 }

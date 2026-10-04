@@ -1086,6 +1086,12 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 	case agent.EventClientToolCall:
 		e.dispatchFreeformClientTool(ff, sess, ev.ToolCall)
 		return
+	case agent.EventPermission:
+		// A guarded board's tool call, held until answered — surfaced on
+		// the freeform card through the same decisions machinery its
+		// ask_user questions ride.
+		e.handlePermissionEvent(sess, ev)
+		return
 	case agent.EventContext:
 		sess.setContext(ev.Context)
 	case agent.EventTasks:

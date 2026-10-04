@@ -130,7 +130,7 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile, repo string, p
 		WorkDir:         wt.RepoRoot(),
 		Role:            agent.RoleArchitect,
 		Model:           rc.Model,
-		Permission:      e.cfg.Permission,
+		Permission:      agent.PermissionAllowAll,
 		SystemHints:     hints,
 		Tools:           tools,
 		ExtraReadAllows: []string{absPath},

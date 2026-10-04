@@ -3,9 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -373,13 +370,11 @@ func TestSessionModelCatalogCachesTheAsk(t *testing.T) {
 }
 
 // TestSessionModelCatalogAsksOpencodeWithoutStartingIt: opencode answers
-// without an adapter to start — its CLI is asked directly, through the
-// same *_BIN override every probe honors — so a picker offers its catalog
-// on a board that runs none of it.
+// without an adapter to start — its no-adapter probe is asked directly,
+// rebindable like every seam the engine reads — so a picker offers its
+// catalog on a board that runs none of it, and the probe spawns nothing
+// here.
 func TestSessionModelCatalogAsksOpencodeWithoutStartingIt(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
 	var starts atomic.Int32
 	e := New(Config{
 		Agents: map[string]agent.Agent{},
@@ -390,15 +385,15 @@ func TestSessionModelCatalogAsksOpencodeWithoutStartingIt(t *testing.T) {
 		Model: "fallback",
 	})
 	t.Cleanup(func() { e.Close() })
-	bin := filepath.Join(t.TempDir(), "opencode")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho opencode/claude-sonnet-5-5\necho opencode/gpt-5\n"), 0o700); err != nil {
-		t.Fatal(err)
+	old := agent.OpencodeModelCatalog
+	t.Cleanup(func() { agent.OpencodeModelCatalog = old })
+	agent.OpencodeModelCatalog = func(context.Context, string) ([]string, error) {
+		return []string{"opencode/claude-sonnet-5-5", "opencode/gpt-5"}, nil
 	}
-	t.Setenv("GUMMI_OPENCODE_BIN", bin)
 
 	ids, ok := e.SessionModelCatalog(context.Background(), "opencode")
 	if !ok || !slices.Equal(ids, []string{"opencode/claude-sonnet-5-5", "opencode/gpt-5"}) {
-		t.Fatalf("opencode catalog = %v (ok=%v), want the CLI's own ids", ids, ok)
+		t.Fatalf("opencode catalog = %v (ok=%v), want the probe's own ids", ids, ok)
 	}
 	if starts.Load() != 0 {
 		t.Errorf("the probe started a backend to ask it")

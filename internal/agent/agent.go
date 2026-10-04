@@ -77,6 +77,18 @@ type ToolResolver interface {
 	Resolve(ctx context.Context, callID, result string) error
 }
 
+// PermissionResolver is implemented by sessions whose backend can hold a
+// tool call for approval and take the answer by request id. In guarded
+// mode the backend surfaces a held call as EventPermission (request id in
+// CallID); the call stays blocked — no tokens burned — until the
+// orchestrator answers it through here, approve letting it run once and
+// deny refusing it, with the refusal reaching the model as the call's
+// error. It is the answering path guarded mode has never had: every other
+// guarded backend either auto-approves or refuses without surfacing.
+type PermissionResolver interface {
+	ResolvePermission(ctx context.Context, requestID string, approve bool) error
+}
+
 // Identified is implemented by sessions whose backend assigns a durable
 // session id — e.g. the Copilot CLI, which keeps a full event log under
 // ~/.copilot/session-state/<id>/. The orchestrator surfaces the id so

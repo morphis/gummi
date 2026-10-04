@@ -516,7 +516,10 @@ them.
 - **copilot** (default): the Copilot CLI through its Go SDK.
 - **claude**: the Claude Code CLI. Needs `permissions: allow-all`.
 - **codex**: the Codex CLI. Needs `permissions: allow-all`.
-- **opencode**: the opencode CLI.
+- **opencode**: one `opencode serve` process per session, every action
+  over HTTP — turns, aborts, the model catalog, compaction — with guarded
+  mode surfacing each held tool call for approval. The CLI is still what
+  `gummi doctor` probes and what auth runs through.
 - **pi**: the pi coding agent, in its RPC mode.
 - **headless**: any binary speaking a small stdio JSON protocol.
 
@@ -529,7 +532,11 @@ Two files in `.gummi/`, both scaffolded on first run:
   `repo` and `repos` when `.gummi` sits above the
   repository, `checks.default` to fix the verify commands instead of
   discovering them, `env` prerequisites the verification plan can cite,
-  `instructions` files, and `hooks` scripts run on board events.
+  `instructions` files, and `hooks` scripts run on board events. In
+  `guarded` mode a tool call a backend holds — opencode's server does —
+  becomes the card's open decision with approve/deny options, answered
+  from the thread like any question; loops with no decision surface
+  (title scribes, estimates, ingest) run allow-all regardless.
 - **`profiles.yaml`**: named profiles mapping each role to
   `{backend, model}`, and which one is the default. A running board
   picks up an edit for its next session (a session already running keeps

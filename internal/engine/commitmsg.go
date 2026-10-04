@@ -642,7 +642,7 @@ func (e *Engine) draftCommitMessage(ctx context.Context, f domain.Feature, verif
 		WorkDir:    workDir,
 		Role:       agent.RoleScribe,
 		Model:      rc.Model,
-		Permission: e.cfg.Permission,
+		Permission: agent.PermissionAllowAll,
 		SystemHints: append([]string{
 			"You are composing a commit message read-only; do not modify any files.",
 		}, commitScribeRepoHints(e.repoInstructionsCard(wt.RepoRoot()))...),

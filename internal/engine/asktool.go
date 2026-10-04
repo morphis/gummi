@@ -68,6 +68,15 @@ type Ask struct {
 	// with the question still up (see Engine.askOutlivedItsCall). Its
 	// answer travels as a turn, to the session that asked.
 	Outlived bool `json:"-"`
+	// Permission marks this ask AS a guarded tool-call approval the
+	// backend itself raised, not the agent's own question: its options are
+	// gummi's approve/deny, its answer is a ruling delivered through the
+	// session's PermissionResolver by request id (the id in CallID), and
+	// it never rides a turn while the held call is still live — the turn
+	// continues server-side the moment the ruling lands. Free-form words
+	// that are not the approve option deny: the held call takes a ruling,
+	// and the only one typed words can be is no.
+	Permission bool `json:"-"`
 }
 
 // AskOption is one selectable answer.
@@ -1128,6 +1137,75 @@ func GateAskOptions() []AskOption {
 	}
 }
 
+// PermissionApproveLabel and PermissionDenyLabel are the options a held
+// tool call offers. The wording is gummi's own, like a gate's: what
+// "Approve" does has to be reliable, and the labels are what both faces
+// render and what an answer is matched against.
+const (
+	PermissionApproveLabel = "Approve"
+	PermissionDenyLabel    = "Deny"
+)
+
+// PermissionAskOptions are the choices a guarded tool call's decision
+// offers. There is no recommended row: a permission is the operator's
+// call, not one autopilot takes for them (§10.17 — an approval widens
+// what runs).
+func PermissionAskOptions() []AskOption {
+	return []AskOption{
+		{Label: PermissionApproveLabel, Detail: "let this tool call run"},
+		{Label: PermissionDenyLabel, Detail: "refuse this tool call — the model sees the refusal and can go another way"},
+	}
+}
+
+// permissionQuestion is the question a held tool call puts up: the tool,
+// then what it was about to touch, when the backend said.
+func permissionQuestion(tool, detail string) string {
+	if detail == "" {
+		return "Allow " + tool + "?"
+	}
+	return "Allow " + tool + " — " + detail + "?"
+}
+
+// handlePermissionEvent turns a guarded tool-call approval into the card's
+// open decision, on the same machinery an ask_user question rides: one
+// open decision at a time, a durable row the moment it is installed, and
+// the answer delivered through the ask answer route to the session's
+// resolver by request id. The turn continues when it is answered —
+// server-side, where the call was held.
+//
+// A permission arriving while another decision is open is refused at
+// once rather than parked: two things cannot both hold the card, and the
+// refused call's model sees the refusal and can go another way.
+func (e *Engine) handlePermissionEvent(s *Session, ev agent.Event) {
+	if ev.CallID == "" {
+		return // nothing to answer by request id; refusing blind helps nobody
+	}
+	ask := &Ask{
+		CallID:     ev.CallID,
+		Question:   permissionQuestion(ev.Tool, ev.Detail),
+		Options:    PermissionAskOptions(),
+		Permission: true,
+	}
+	ask.DecisionID = decisionIDFor(s, ask)
+	if !s.trySetPendingAsk(ask) {
+		s.appendActivity("tool call refused while another decision is open: " +
+			permissionQuestion(ev.Tool, ev.Detail))
+		e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
+		if r, ok := s.agent().(agent.PermissionResolver); ok {
+			_ = r.ResolvePermission(context.Background(), ev.CallID, false)
+		}
+		return
+	}
+	// the call is now holding a human: the open decision's durable row
+	// goes down in the same breath, and the spinner drops the same way an
+	// ask_user's does — the turn is blocked, and the decision is what the
+	// card is doing.
+	s.setBusy(false)
+	e.openAskDecision(s, ask)
+	e.persist(s)
+	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
+}
+
 // parseAsk decodes an ask_user tool call's arguments into an Ask.
 func parseAsk(callID string, args json.RawMessage) (*Ask, error) {
 	var a Ask
@@ -1253,6 +1331,23 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
 		return fmt.Errorf("empty answer")
+	}
+	// A permission's answer is a ruling on a held tool call, not a reply
+	// the turn consumes: the call stays blocked server-side until the
+	// ruling lands through the session's own resolver, and the turn
+	// continues on its own — nothing rides a turn, nothing echoes into
+	// the transcript. Any words that are not the approve option's own
+	// deny, so the only reading a held call can take is the one typed.
+	// A session that is gone (a pause, a restart), or an ask carried over
+	// one (its request id cleared), cannot take a ruling — its answer
+	// falls through to the restoration machinery below.
+	if open.Permission && open.CallID != "" {
+		if s.Live() {
+			if r, ok := s.agent().(agent.PermissionResolver); ok {
+				ask := s.takePendingAsk()
+				return e.answerPermission(ctx, s, ask, answer, by, r)
+			}
+		}
 	}
 	// Where the answer goes is settled before anything is recorded: an
 	// answer written to the transcript, the card's log and the spec that
@@ -1411,6 +1506,31 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		s.trySetPendingAsk(ask)
 		return err
 	}
+	return nil
+}
+
+// answerPermission delivers a permission ruling to the session's resolver
+// and records it: the activity line and the ask-answer event close the
+// decision the held call opened, and the turn continues server-side on
+// its own. A ruling the resolver could not take restores the ask, exactly
+// as every other failing answer branch does.
+func (e *Engine) answerPermission(ctx context.Context, s *Session, ask *Ask, answer, by string, r agent.PermissionResolver) error {
+	if ask == nil {
+		return fmt.Errorf("%s has no open question", s.Feature.ID)
+	}
+	approve := answer == PermissionApproveLabel
+	if err := r.ResolvePermission(ctx, ask.CallID, approve); err != nil {
+		s.trySetPendingAsk(ask)
+		return fmt.Errorf("answer for %s not delivered: %w", s.Feature.ID, err)
+	}
+	verb := "denied"
+	if approve {
+		verb = "approved"
+	}
+	s.appendActivity("tool call " + verb + ": " + strings.TrimPrefix(ask.Question, "Allow "))
+	e.appendAskEvent(s, ask, answer, by)
+	e.persist(s)
+	e.resumeAfterAnswer(s)
 	return nil
 }
 

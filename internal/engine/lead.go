@@ -202,8 +202,10 @@ func (e *Engine) GoalAnswer(ctx context.Context, id domain.FeatureID, ask *Ask) 
 }
 
 func (e *Engine) goalFallbackAnswer(ctx context.Context, goal, card domain.Feature, ask *Ask, fallback, why string) string {
-	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalAnswered, Card: card.ID, By: ActorGoal,
-		Detail: fmt.Sprintf("%s: took the recommended answer %q to %q", why, fallback, clip(ask.Question, 200))})
+	e.goalLog(ctx, goal.ID, state.GoalPayload{
+		Action: state.GoalAnswered, Card: card.ID, By: ActorGoal,
+		Detail: fmt.Sprintf("%s: took the recommended answer %q to %q", why, fallback, clip(ask.Question, 200)),
+	})
 	return fallback
 }
 
@@ -326,6 +328,15 @@ func (e *Engine) leadSession(ctx context.Context, lt *leadTurn, prompt string) (
 					out = "error: " + derr.Error()
 				}
 				resolve(tctx, sess, ev.ToolCall.ID, out)
+			case agent.EventPermission:
+				// A guarded tool call the lead's own session raised. A goal
+				// turn runs unattended and its decisions are recorded for
+				// review, not answered live — a permission held here with
+				// nowhere to answer would stall the goal until the turn's
+				// own clock expired it. It is refused at once, the refusal
+				// reaching the model as the call's error, and recorded on
+				// the goal so the review sees what was refused and why.
+				e.refuseLeadPermission(goal.ID, sess, ev)
 			case agent.EventTextDelta:
 				text.delta(ev.Text)
 			case agent.EventMessage:
@@ -341,6 +352,26 @@ func (e *Engine) leadSession(ctx context.Context, lt *leadTurn, prompt string) (
 			return text.String(), fmt.Errorf("the lead turn did not finish: %w", tctx.Err())
 		}
 	}
+}
+
+// refuseLeadPermission answers a guarded tool-call approval the lead's own
+// session raised with a refusal, and records it on the goal so the review
+// sees what was refused. A goal turn runs unattended; its decisions are
+// recorded for later review, not answered live — so unlike a stage
+// session's permission, which becomes the card's open decision, one on a
+// lead turn takes its ruling at once and the model goes another way.
+func (e *Engine) refuseLeadPermission(goal domain.FeatureID, sess agent.Session, ev agent.Event) {
+	if r, ok := sess.(agent.PermissionResolver); ok {
+		_ = r.ResolvePermission(context.Background(), ev.CallID, false)
+	}
+	if e.cfg.Store == nil {
+		return
+	}
+	e.goalLog(context.Background(), goal, state.GoalPayload{
+		Action: state.GoalLeadTurn,
+		Detail: "refused a tool call a guarded board held: " + permissionQuestion(ev.Tool, ev.Detail),
+		By:     "lead",
+	})
 }
 
 // recordLeadUsage books a lead turn's spend to the goal card at implement,
@@ -679,7 +710,9 @@ func leadTool(name, desc string, props map[string]any, required ...string) agent
 }
 
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+
 func num(desc string) map[string]any { return map[string]any{"type": "integer", "description": desc} }
+
 func strs(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 }
@@ -1012,8 +1045,10 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 			return "", err
 		}
 		if c.Feature.GoalAttached {
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, Card: c.Feature.ID,
-				Detail: "dropped attached card " + string(c.Feature.ID) + ": " + a.Reason, Alternative: "keep it in the goal", By: "lead"})
+			e.goalLog(ctx, goal.ID, state.GoalPayload{
+				Action: state.GoalDecision, Card: c.Feature.ID,
+				Detail: "dropped attached card " + string(c.Feature.ID) + ": " + a.Reason, Alternative: "keep it in the goal", By: "lead",
+			})
 		}
 		mark()
 		return "dropped " + string(c.Feature.ID), nil
@@ -1236,8 +1271,10 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 		case view.NeedsOwner.Waiting():
 			return "", fmt.Errorf("the owner has already been asked about %s and has not answered; one question at a time", view.NeedsOwner.Item)
 		}
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalNeedOwner, Item: item, Detail: strings.TrimSpace(a.Question),
-			Alternative: strings.TrimSpace(a.Proposal), Ref: strings.TrimSpace(a.Finding), By: "lead"})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{
+			Action: state.GoalNeedOwner, Item: item, Detail: strings.TrimSpace(a.Question),
+			Alternative: strings.TrimSpace(a.Proposal), Ref: strings.TrimSpace(a.Finding), By: "lead",
+		})
 		mark()
 		e.send(Event{Feature: goal.ID, Stage: goal.Stage, Kind: EventGoal})
 		var frozen []string
@@ -1260,8 +1297,10 @@ func (lt *leadTurn) dispatch(ctx context.Context, name string, raw json.RawMessa
 			return "", errors.New("a decided constant is a decision for review: give the reason and the alternative not taken")
 		}
 		nb := e.goalNotebook(goal.ID)
-		en := e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, By: "lead",
-			Detail: "registry: " + strings.TrimSpace(a.Key) + " = " + clip(a.Value, 200), Alternative: a.Alternative})
+		en := e.goalLog(ctx, goal.ID, state.GoalPayload{
+			Action: state.GoalDecision, By: "lead",
+			Detail: "registry: " + strings.TrimSpace(a.Key) + " = " + clip(a.Value, 200), Alternative: a.Alternative,
+		})
 		prev, err := nb.Set(notebook.Entry{Key: a.Key, Value: a.Value, Why: a.Reason, Decision: en.DecisionRef(), At: e.now()})
 		if err != nil {
 			return "", err
@@ -1474,9 +1513,11 @@ func (lt *leadTurn) fixDoneWhenCheck(ctx context.Context, goal domain.Feature, v
 		return "", err
 	}
 	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalCheckFixed, Item: id, Detail: a.Reason, Ref: clip(old.Check, 300), By: "lead"})
-	en := e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalDecision, Item: id,
+	en := e.goalLog(ctx, goal.ID, state.GoalPayload{
+		Action: state.GoalDecision, Item: id,
 		Detail:      fmt.Sprintf("%s's check now runs `%s`: %s", id, cmd, clip(a.Reason, 400)),
-		Alternative: fmt.Sprintf("the agreed check `%s`", old.Check), By: "lead"})
+		Alternative: fmt.Sprintf("the agreed check `%s`", old.Check), By: "lead",
+	})
 	lt.mu.Lock()
 	lt.acted = true
 	lt.mu.Unlock()
@@ -1535,7 +1576,7 @@ func (e *Engine) resolveConflicts(ctx context.Context, goal domain.Feature, dir,
 	defer cancel()
 	sess, err := ag.NewSession(tctx, agent.SessionOpts{
 		WorkDir: dir, Role: agent.RoleImplementer, Model: rc.Model,
-		Permission: e.cfg.Permission, MaxCredits: min(view.Ledger.OwnBudget(), 200) * capHeadroom,
+		Permission: agent.PermissionAllowAll, MaxCredits: min(view.Ledger.OwnBudget(), 200) * capHeadroom,
 		SystemHints: []string{hint},
 	})
 	if err != nil {

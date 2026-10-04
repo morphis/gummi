@@ -9,7 +9,12 @@ import (
 
 func buildConfig(t *testing.T, extra []string) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, nil, "")
+	return buildConfigPerm(t, extra, PermissionAllowAll)
+}
+
+func buildConfigPerm(t *testing.T, extra []string, permission Permission) map[string]any {
+	t.Helper()
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, nil, "", permission)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -40,6 +45,11 @@ func TestBuildOpencodeConfig(t *testing.T) {
 	}
 	if _, present := perm["read"]; present {
 		t.Errorf("read block present without extraReadAllows: %v", perm["read"])
+	}
+	// The catch-all rules everything the cage does not name: allow-all
+	// auto-approves it (what `--auto` did), so no call is ever held.
+	if perm["*"] != "allow" {
+		t.Errorf("permission[*] = %v, want allow in allow-all mode", perm["*"])
 	}
 
 	mcp, ok := m["mcp"].(map[string]any)
@@ -72,7 +82,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, nil, "")
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, nil, "", PermissionAllowAll)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -126,7 +136,7 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 // pattern map), while read stays open — the deny is structural, so
 // enforce/warn/off sandbox modes cannot re-arm the write tools.
 func TestBuildOpencodeConfigReadOnly(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, nil, "")
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, nil, "", PermissionAllowAll)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -165,7 +175,7 @@ func TestBuildOpencodeConfigOpensTheScratchDir(t *testing.T) {
 	const scratch = "/ws/.gummi/state/scratch/FD-025"
 	perm := func(readOnly bool, extra []string) map[string]any {
 		t.Helper()
-		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, nil, scratch)
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, nil, scratch, PermissionAllowAll)
 		if err != nil {
 			t.Fatalf("buildOpencodeConfig: %v", err)
 		}
@@ -206,7 +216,7 @@ func TestBuildOpencodeConfigOpensTheScratchDir(t *testing.T) {
 // forwarding is safe to turn on for a repo that carries skills already.
 func TestOpencodeConfigForwardsSkillPaths(t *testing.T) {
 	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, false,
-		[]string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"}, "")
+		[]string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"}, "", PermissionAllowAll)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -250,4 +260,37 @@ func TestWorktreeCageAllowsRelativeInWorktreePaths(t *testing.T) {
 			t.Errorf("%s[/**] = %v, want deny", key, b["/**"])
 		}
 	}
+}
+
+// Guarded adds only the ask-on-request behavior on top of the cage: with
+// everything else byte-identical, the catch-all asks instead of allows,
+// so the server surfaces what the cage does not name. The cage itself —
+// edit, write, external_directory, read — must not move.
+func TestBuildOpencodeConfigGuardedOnlyAsksOnTopOfTheCage(t *testing.T) {
+	allow := buildConfig(t, []string{"/ws/.gummi/specs/FD-011-artifact.md"})
+	guarded := buildConfigPerm(t, []string{"/ws/.gummi/specs/FD-011-artifact.md"}, PermissionGuarded)
+	permAllow := allow["permission"].(map[string]any)
+	permGuarded := guarded["permission"].(map[string]any)
+	if permGuarded["*"] != "ask" {
+		t.Errorf("guarded permission[*] = %v, want ask", permGuarded["*"])
+	}
+	for key, v := range permAllow {
+		if key == "*" {
+			continue
+		}
+		if !reflect.DeepEqual(v, permGuarded[key]) {
+			t.Errorf("cage rule %s moved between modes: %v vs %v", key, v, permGuarded[key])
+		}
+	}
+	if len(permAllow) != len(permGuarded) {
+		t.Errorf("permission keys %v vs %v — the modes must differ in the catch-all alone", keys(permAllow), keys(permGuarded))
+	}
+}
+
+func keys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

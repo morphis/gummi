@@ -20,6 +20,13 @@ import "encoding/json"
 // allowance cannot slip through otherwise) and the named paths are then
 // whitelisted under `read`, while edits/writes stay caged by permission.edit.
 //
+// Everything the cage does not name is ruled by the catch-all rule, and
+// that is where allow-all and guarded part: allow-all approves every
+// other tool (what `opencode run --auto` used to do), guarded asks — the
+// server surfaces each unmatched call as a permission request the session
+// answers. The cage itself is identical between the two: guarded only
+// adds surfaced approvals on top of it.
+//
 // Note that opencode's shell (`bash`) tool is deliberately NOT caged here:
 // its policy is command-string based rather than path based, so a real cage
 // requires process-level confinement, which is out of scope for this feature
@@ -41,7 +48,7 @@ import "encoding/json"
 // Every pattern map relies on opencode letting the LAST matching rule
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, skillDirs []string, scratchDir string) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, skillDirs []string, scratchDir string, permission Permission) ([]byte, error) {
 	worktreeOnly := worktreeCage(workdir)
 	var external any = "deny"
 	if scratchDir != "" {
@@ -50,7 +57,7 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 		external = map[string]string{"*": "deny", scratch: "allow"}
 	}
 
-	permission := map[string]any{
+	perm := map[string]any{
 		"edit":               worktreeOnly,
 		"write":              worktreeOnly,
 		"external_directory": external,
@@ -60,11 +67,11 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	// tools are structurally absent regardless of the operator's sandbox
 	// mode, while read (and external_directory, above) stay open.
 	if readOnly {
-		permission["edit"] = "deny"
-		permission["write"] = "deny"
+		perm["edit"] = "deny"
+		perm["write"] = "deny"
 	}
 	if len(extraReadAllows) > 0 {
-		permission["external_directory"] = "allow"
+		perm["external_directory"] = "allow"
 		readOnly := worktreeCage(workdir)
 		for _, p := range extraReadAllows {
 			readOnly[p] = "allow"
@@ -72,10 +79,15 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 		if scratchDir != "" {
 			readOnly[scratchDir+"/**"] = "allow"
 		}
-		permission["read"] = readOnly
+		perm["read"] = readOnly
+	}
+	if permission == PermissionGuarded {
+		perm["*"] = "ask"
+	} else {
+		perm["*"] = "allow"
 	}
 
-	out := map[string]any{"permission": permission}
+	out := map[string]any{"permission": perm}
 	// Skills forwarded from the workspace root. opencode's own discovery
 	// does not climb out of the worktree, so a skill beside .gummi is
 	// invisible without this; `skills.paths` is additive, so the

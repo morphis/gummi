@@ -3,12 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
-	"time"
 )
 
 func newOCSession() *opencodeSession {
@@ -30,10 +27,6 @@ func TestOpencodeMapEventText(t *testing.T) {
 	}
 	if msg.String() != "Hello, world" {
 		t.Errorf("accumulated message = %q, want 'Hello, world'", msg.String())
-	}
-	// session id captured from the first event
-	if s.sessionID != "ses_1" {
-		t.Errorf("sessionID = %q, want ses_1", s.sessionID)
 	}
 }
 
@@ -80,11 +73,11 @@ func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	}
 }
 
-// opencode writes a tool_use line once the call has finished, and the
-// line carries its outcome. A permission denial is an "error" part; it
-// must reach the engine as a failed result, or a model retrying the
-// denial loops with nothing ever seeing it fail. The part shape is
-// opencode 1.18's, the error text the one its permission layer writes.
+// opencode reports a tool part once the call has finished, and the part
+// carries its outcome. A permission denial is an "error" part; it must
+// reach the engine as a failed result, or a model retrying the denial
+// loops with nothing ever seeing it fail. The part shape is opencode
+// 1.18's, the error text the one its permission layer writes.
 func TestOpencodeMapEventToolOutcome(t *testing.T) {
 	s := newOCSession()
 	var msg strings.Builder
@@ -186,11 +179,10 @@ func TestOpencodeRequiresModel(t *testing.T) {
 	}
 }
 
-// The per-session config cages opencode's file tools to the worktree, and
-// --auto only auto-approves what isn't explicitly denied, so guarded is as
-// safe as allow-all for opencode until a per-tool approval bridge lands.
-// Guarded must therefore be accepted, not rejected.
+// Guarded is accepted and stamps the session's config with the ask-on-
+// request catch-all; the adapter answers what the server asks for.
 func TestOpencodeGuardedAccepted(t *testing.T) {
+	_, spawns := stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
 	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x", Permission: PermissionGuarded})
 	if err != nil {
@@ -199,6 +191,21 @@ func TestOpencodeGuardedAccepted(t *testing.T) {
 	if sess == nil {
 		t.Fatal("guarded NewSession returned a nil session")
 	}
+	env := strings.Join((*spawns)[0].env, "\n")
+	cfgPath := sess.(*opencodeSession).configPath
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("session config not readable: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	perm := m["permission"].(map[string]any)
+	if perm["*"] != "ask" {
+		t.Errorf("guarded config's catch-all = %v, want ask", perm["*"])
+	}
+	_ = env
 	_ = sess.Close()
 }
 
@@ -215,6 +222,7 @@ func TestOpencodeCapabilitiesReportsMCPTools(t *testing.T) {
 // NewSession must materialize the OPENCODE_CONFIG file, with the caller's
 // worktree/socket/feature id reaching the emitted mcp.gummi command.
 func TestOpencodeNewSessionMaterializesConfig(t *testing.T) {
+	_, _ = stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
 	wt := t.TempDir()
 	sess, err := o.NewSession(context.Background(), SessionOpts{
@@ -251,6 +259,7 @@ func TestOpencodeNewSessionMaterializesConfig(t *testing.T) {
 // An unbound session (no MCPSockPath/FeatureID) must still materialize the
 // config file, but emit no top-level mcp key — so no __mcp child spawns.
 func TestOpencodeNewSessionOmitsMCPWhenUnbound(t *testing.T) {
+	_, _ = stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
 	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x"})
 	if err != nil {
@@ -274,8 +283,45 @@ func TestOpencodeNewSessionOmitsMCPWhenUnbound(t *testing.T) {
 	}
 }
 
+// The session's server runs with the role's output-token cap exported,
+// and with nothing exported when the role sets none — it is opencode's
+// sole lever above its hardcoded 32000 per-step output cap.
+func TestOpencodeSpawnInjectsOutputTokenMax(t *testing.T) {
+	if old, ok := os.LookupEnv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"); ok {
+		os.Unsetenv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX")
+		t.Cleanup(func() { os.Setenv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX", old) })
+	}
+	for _, tc := range []struct {
+		name    string
+		otm     int
+		want    string
+		present bool
+	}{
+		{"set", 128000, "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=128000", true},
+		{"unset", 0, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, spawns := stubServeOpencode(t)
+			sess, err := (&Opencode{bin: "opencode"}).NewSession(context.Background(),
+				SessionOpts{WorkDir: t.TempDir(), Model: "x", OutputTokenMax: tc.otm})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sess.Close()
+			env := strings.Join((*spawns)[0].env, "\n")
+			if tc.present && !strings.Contains(env, tc.want) {
+				t.Errorf("spawn env missing %q:\n%s", tc.want, env)
+			}
+			if !tc.present && strings.Contains(env, "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX") {
+				t.Errorf("otm=0 must not set OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX:\n%s", env)
+			}
+		})
+	}
+}
+
 // Close must remove the session's config file.
 func TestOpencodeCloseRemovesConfig(t *testing.T) {
+	_, _ = stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
 	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x"})
 	if err != nil {
@@ -291,705 +337,72 @@ func TestOpencodeCloseRemovesConfig(t *testing.T) {
 	}
 }
 
-// Send must pass --auto to `opencode run` so tool calls touching paths outside
-// the worktree (the spec at .gummi/specs/... lives in the main checkout) are
-// not silently rejected.
-func TestOpencodeSendPassesAutoFlag(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	argsFile := dir + "/args"
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
-		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case e := <-sess.Events():
-			if e.Kind == EventIdle {
-				data, err := os.ReadFile(argsFile)
-				if err != nil {
-					t.Fatal(err)
-				}
-				lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-				var seen bool
-				for _, l := range lines {
-					if l == "--auto" {
-						seen = true
-						break
-					}
-				}
-				if !seen {
-					t.Errorf("opencode args %q missing --auto flag", lines)
-				}
-				return
-			}
-			if e.Kind == EventError {
-				t.Fatalf("send errored: %v", e.Err)
-			}
-		case <-deadline:
-			t.Fatal("no idle before deadline")
-		}
-	}
-}
-
-// TestOpencodeSendTurnFileFlags asserts that a turn's images each become a
-// `--file <path>` flag on that invocation's argv.
-func TestOpencodeSendTurnFileFlags(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	argsFile := dir + "/args"
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
-		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	sender, ok := sess.(ImageSender)
-	if !ok {
-		t.Fatal("opencode session does not implement ImageSender")
-	}
-	turn := Turn{Text: "go", Images: []Image{
-		{Path: "/tmp/a.png", MediaType: "image/png"},
-		{Path: "/tmp/b.png", MediaType: "image/png"},
-	}}
-	if err := sender.SendTurn(ctx, turn); err != nil {
-		t.Fatal(err)
-	}
-	waitOpencodeIdle(t, sess)
-	data, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	got := strings.Join(lines, " ")
-	if !strings.Contains(got, "--file /tmp/a.png --file /tmp/b.png") {
-		t.Errorf("opencode args %q missing one --file flag per image", got)
-	}
-}
-
-// Send exports OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX into opencode's
-// environment when (and only when) the role sets output_token_max — it is
-// opencode's sole lever above its hardcoded 32000 per-step output cap.
-func TestOpencodeSendInjectsOutputTokenMax(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	// The harness may already export this var; scrub it for the test's
-	// duration so the "unset" subtest's absence assertion isn't confounded
-	// by an ambient value leaking into the fake opencode's env dump.
-	if old, ok := os.LookupEnv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"); ok {
-		os.Unsetenv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX")
-		t.Cleanup(func() { os.Setenv("OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX", old) })
-	}
-	run := func(t *testing.T, otm int) string {
-		dir := t.TempDir()
-		envFile := dir + "/env"
-		path := dir + "/opencode"
-		body := "#!/bin/sh\n" +
-			"env > " + envFile + "\n" +
-			`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-		if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		ag, err := NewOpencode(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer ag.Close()
-		ctx := context.Background()
-		sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x", OutputTokenMax: otm})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer sess.Close()
-		if err := sess.Send(ctx, "go"); err != nil {
-			t.Fatal(err)
-		}
-		deadline := time.After(5 * time.Second)
-		for {
-			select {
-			case e := <-sess.Events():
-				if e.Kind == EventIdle {
-					data, err := os.ReadFile(envFile)
-					if err != nil {
-						t.Fatal(err)
-					}
-					return string(data)
-				}
-				if e.Kind == EventError {
-					t.Fatalf("send errored: %v", e.Err)
-				}
-			case <-deadline:
-				t.Fatal("no idle before deadline")
-			}
-		}
-	}
-	t.Run("set", func(t *testing.T) {
-		if env := run(t, 128000); !strings.Contains(env, "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=128000") {
-			t.Errorf("env missing OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX=128000:\n%s", env)
-		}
-	})
-	t.Run("unset", func(t *testing.T) {
-		if env := run(t, 0); strings.Contains(env, "OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX") {
-			t.Errorf("otm=0 must not set OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX:\n%s", env)
-		}
-	})
-}
-
-func TestOpencodeSendPassesOpencodeConfigEnv(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	envFile := dir + "/env"
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"env > " + envFile + "\n" +
-		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x", FeatureID: "FD-011"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case e := <-sess.Events():
-			if e.Kind == EventIdle {
-				data, err := os.ReadFile(envFile)
-				if err != nil {
-					t.Fatal(err)
-				}
-				want := "OPENCODE_CONFIG=" + sess.(*opencodeSession).configPath
-				if !strings.Contains(string(data), want) {
-					t.Errorf("env missing %q:\n%s", want, data)
-				}
-				return
-			}
-			if e.Kind == EventError {
-				t.Fatalf("send errored: %v", e.Err)
-			}
-		case <-deadline:
-			t.Fatal("no idle before deadline")
-		}
-	}
-}
-
-// fakeOC writes a fake `opencode` script that emits one text event then
-// sleeps, so a turn can be interrupted mid-flight deterministically.
-func fakeOC(t *testing.T) string {
-	t.Helper()
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		`echo '{"type":"text","sessionID":"ses_test","part":{"id":"p1","type":"text","text":"working"}}'` + "\n" +
-		"sleep 10\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	_ = sh
-	return path
-}
-
-func TestOpencodeInterruptYieldsIdle(t *testing.T) {
-	ag, err := NewOpencode(fakeOC(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	// wait for the first text event, then interrupt the (sleeping) turn
-	deadline := time.After(5 * time.Second)
-	got := false
-	for !got {
-		select {
-		case e := <-sess.Events():
-			if e.Kind == EventTextDelta {
-				got = true
-			}
-		case <-deadline:
-			t.Fatal("no text event before interrupt")
-		}
-	}
-	if err := sess.Interrupt(ctx); err != nil {
-		t.Fatal(err)
-	}
-	// the interrupted turn must end idle, never error
-	for {
-		select {
-		case e := <-sess.Events():
-			switch e.Kind {
-			case EventIdle:
-				return
-			case EventError:
-				t.Fatalf("interrupt surfaced as error: %v", e.Err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("interrupted turn never went idle")
-		}
-	}
-}
-
-// A backend that exits cleanly (status 0) with zero stdout — no text, no
-// tool call, no usage, no error line — is indistinguishable from a real
-// empty pass today: the engine marks the session done with empty spend and
-// no error, and the verdict falls to "unclear". Surface it as a legible
-// EventError so the operator can tell a silent backend outage from a model
-// that genuinely failed to reach a verdict.
-func TestOpencodeZeroEventSessionSurfacesError(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	binary := dir + "/opencode"
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(binary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "critique the plan"); err != nil {
-		t.Fatal(err)
-	}
-	var kinds []EventKind
-	var errMsg string
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case e := <-sess.Events():
-			kinds = append(kinds, e.Kind)
-			if e.Kind == EventError && e.Err != nil {
-				errMsg = e.Err.Error()
-			}
-			if e.Kind == EventIdle {
-				t.Fatalf("zero-event opencode session ended idle (kinds=%v); must surface EventError", kinds)
-			}
-			if e.Kind == EventError {
-				goto gotError
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for an event")
-		}
-	}
-gotError:
-	if !strings.Contains(strings.ToLower(errMsg), "no output") &&
-		!strings.Contains(strings.ToLower(errMsg), "no events") &&
-		!strings.Contains(strings.ToLower(errMsg), "empty") {
-		t.Errorf("EventError present but wording %q does not name the empty-session failure mode", errMsg)
-	}
-}
-
-// TestOpencodeRunFailureCarriesDiagnostic pins §1.4 of the 2026-09-10
-// UX drive: a failed run used to surface as bare "opencode run failed:
-// exit status 1" — the process's exit code with none of the backend's
-// own diagnosis, because gummi captured stderr but never attached it to
-// anything a caller could act on. The turn's exit code (1) here IS the
-// only thing Go's exec error carries, so proving the diagnostic survives
-// depends entirely on the *RunFailure wrapping: Error() must fold the
-// captured stderr in, and a caller (the engine, then the UI) must be
-// able to reach it structurally via errors.As instead of re-parsing a
-// string.
-func TestOpencodeRunFailureCarriesDiagnostic(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"echo 'error: openrouter/z-ai/glm-5.3-flash: provider not authenticated' >&2\n" +
-		"exit 1\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case e := <-sess.Events():
-			if e.Kind != EventError {
-				continue
-			}
-			var rf *RunFailure
-			if !errors.As(e.Err, &rf) {
-				t.Fatalf("EventError.Err = %v (%T), want a *RunFailure", e.Err, e.Err)
-			}
-			if rf.Backend != "opencode" {
-				t.Errorf("RunFailure.Backend = %q, want opencode", rf.Backend)
-			}
-			if !rf.FirstTurn {
-				t.Error("RunFailure.FirstTurn = false on the session's first Send")
-			}
-			if !strings.Contains(rf.Diagnostic, "provider not authenticated") {
-				t.Errorf("RunFailure.Diagnostic = %q, missing the backend's own stderr", rf.Diagnostic)
-			}
-			if !strings.Contains(e.Err.Error(), "provider not authenticated") {
-				t.Errorf("Error() = %q, does not fold the diagnostic in for a caller that only reads the string", e.Err.Error())
-			}
-			return
-		case <-deadline:
-			t.Fatal("no EventError before deadline")
-		}
-	}
-}
-
-// TestOpencodeRunFailureFirstTurnFalseAfterASuccess: FirstTurn must read
-// false once a prior turn on the same session has already reached idle
-// — otherwise every mid-task crash would misreport as a fresh session's
-// first turn and wrongly point a reader at `gummi doctor` for a backend
-// that was, until a moment ago, working fine.
-func TestOpencodeRunFailureFirstTurnFalseAfterASuccess(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	marker := dir + "/turn-two"
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"if [ -f " + marker + " ]; then\n" +
-		"  echo 'boom' >&2\n" +
-		"  exit 1\n" +
-		"fi\n" +
-		"touch " + marker + "\n" +
-		`echo '{"type":"text","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-
-	waitIdle := func() {
-		t.Helper()
-		deadline := time.After(5 * time.Second)
-		for {
-			select {
-			case e := <-sess.Events():
-				if e.Kind == EventIdle {
-					return
-				}
-				if e.Kind == EventError {
-					t.Fatalf("unexpected error waiting for the first turn's idle: %v", e.Err)
-				}
-			case <-deadline:
-				t.Fatal("no idle before deadline")
-			}
-		}
-	}
-
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	waitIdle()
-
-	if err := sess.Send(ctx, "go again"); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case e := <-sess.Events():
-			if e.Kind != EventError {
-				continue
-			}
-			var rf *RunFailure
-			if !errors.As(e.Err, &rf) {
-				t.Fatalf("EventError.Err = %v, want a *RunFailure", e.Err)
-			}
-			if rf.FirstTurn {
-				t.Error("RunFailure.FirstTurn = true on a session's second turn")
-			}
-			return
-		case <-deadline:
-			t.Fatal("no EventError before deadline")
-		}
-	}
-}
-
-func TestOpencodeRejectsConcurrentSend(t *testing.T) {
-	ag, err := NewOpencode(fakeOC(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "one"); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Send(ctx, "two"); err == nil {
-		t.Error("a second Send during an in-flight turn should be rejected")
-	}
-}
-
-// TestOpencodeLiveRoundTrip drives the real opencode binary against a free
-// hosted model. It skips when opencode isn't installed, and treats an
-// error/timeout (network or gateway trouble) as a skip — it verifies the
-// adapter's mapping, not opencode's uptime.
-func TestOpencodeLiveRoundTrip(t *testing.T) {
-	if _, err := exec.LookPath("opencode"); err != nil {
-		t.Skip("opencode not installed")
-	}
-	ag, err := NewOpencode("opencode")
-	if err != nil {
-		t.Skip(err)
-	}
-	defer ag.Close()
-
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{
-		WorkDir: t.TempDir(),
-		Model:   "opencode/deepseek-v4-flash-free",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "Reply with exactly one word: PONG"); err != nil {
-		t.Fatal(err)
-	}
-
-	var text string
-	var sawUsage, sawIdle bool
-	deadline := time.After(90 * time.Second)
-	for !sawIdle {
-		select {
-		case e := <-sess.Events():
-			switch e.Kind {
-			case EventTextDelta, EventMessage:
-				if e.Kind == EventMessage {
-					text = e.Text
-				} else {
-					text += e.Text
-				}
-			case EventUsage:
-				sawUsage = true
-			case EventIdle:
-				sawIdle = true
-			case EventError:
-				t.Skipf("opencode/network unavailable: %v", e.Err)
-			}
-		case <-deadline:
-			t.Skip("opencode did not respond in time (network?)")
-		}
-	}
-	if !strings.Contains(strings.ToUpper(text), "PONG") {
-		t.Errorf("reply %q did not contain PONG", text)
-	}
-	if !sawUsage {
-		t.Error("no usage event from the turn")
-	}
-}
-
-// A session id handed in by the engine is what `run --session` carries:
-// without it a session opened after a restart begins a blank conversation
-// and re-reads what the last one had open. The adapter also has to publish
-// the id, or the engine can never persist one to hand back.
+// A session id handed in by the engine is what the turn's message POST
+// addresses: without it a session opened after a restart begins a blank
+// conversation and re-reads what the last one had open. The adapter also
+// has to publish the id, or the engine can never persist one to hand back.
 func TestOpencodeResumesAHandedInSession(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	argsFile := dir + "/args"
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > " + argsFile + "\n" +
-		`echo '{"type":"text","sessionID":"ses_prior","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{WorkDir: t.TempDir(), Model: "x", ResumeID: "ses_prior"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	id, ok := sess.(Identified)
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "x", ResumeID: "ses_prior"})
+	f.mu.Lock()
+	f.cur = "ses_prior" // the conversation the session continues
+	f.mu.Unlock()
+	id, ok := Session(sess).(Identified)
 	if !ok {
 		t.Fatal("opencode session does not implement Identified; the engine cannot persist its id")
 	}
 	if id.SessionID() != "ses_prior" {
 		t.Errorf("SessionID() = %q, want the session it was told to continue", id.SessionID())
 	}
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
+	runCleanTurn(t, f, sess)
+	f.mu.Lock()
+	msgs := append([]ocFakeMsg(nil), f.msgs...)
+	created := append([]string(nil), f.sids...)
+	f.mu.Unlock()
+	if len(created) != 0 {
+		t.Errorf("a resumed turn created server sessions: %v", created)
 	}
-	waitOpencodeIdle(t, sess)
-	data, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	argv := strings.Split(strings.TrimSpace(string(data)), "\n")
-	var resumed bool
-	for i, a := range argv {
-		if a == "--session" && i+1 < len(argv) && argv[i+1] == "ses_prior" {
-			resumed = true
-		}
-	}
-	if !resumed {
-		t.Errorf("argv does not resume the handed-in session:\n%s", data)
+	if len(msgs) != 1 || msgs[0].SessionID != "ses_prior" {
+		t.Errorf("turn addressed %v, want the handed-in session", msgs)
 	}
 }
 
-// A session opencode no longer holds must not fail the stage: the first
-// failed turn drops the id and runs the same turn again on a fresh
-// session, with the stage hints back on the wire.
-func TestOpencodeDropsAnUnusableSessionAndRetries(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not available")
-	}
-	dir := t.TempDir()
-	argsFile := dir + "/args"
-	path := dir + "/opencode"
-	body := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" >> " + argsFile + "\n" +
-		"case \"$*\" in *--session*) echo 'opencode: unknown session' >&2; exit 1;; esac\n" +
-		`echo '{"type":"text","sessionID":"ses_new","part":{"id":"p1","type":"text","text":"ok"}}'` + "\n"
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+// A session whose backend failed mid-task reports FirstTurn false — the
+// signal a caller needs to tell a misconfigured backend from a mid-task
+// crash.
+func TestOpencodeRunFailureFirstTurnFalseAfterASuccess(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	runCleanTurn(t, f, sess)
+
+	f.failNext.Store(true)
+	if err := sess.Send(context.Background(), "go again"); err != nil {
 		t.Fatal(err)
 	}
-	ag, err := NewOpencode(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ag.Close()
-	ctx := context.Background()
-	sess, err := ag.NewSession(ctx, SessionOpts{
-		WorkDir: t.TempDir(), Model: "x", ResumeID: "ses_gone",
-		SystemHints: []string{"STAGE-HINTS"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-	if err := sess.Send(ctx, "go"); err != nil {
-		t.Fatal(err)
-	}
-	waitOpencodeIdle(t, sess) // the retry's clean turn, not an error
-	data, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := strings.Count(string(data), "STAGE-HINTS"); n != 2 {
-		t.Errorf("stage hints rode %d turn(s), want the resumed attempt and the fresh retry:\n%s", n, data)
-	}
-	if strings.Count(string(data), "--session") != 1 {
-		t.Errorf("the retry still resumed the dead session:\n%s", data)
+	rf := waitTurnFailure(t, sess)
+	if rf.FirstTurn {
+		t.Error("RunFailure.FirstTurn = true on a session's second turn")
 	}
 }
 
-// waitOpencodeIdle drains events until the turn ends, failing on an error
-// event — the retry above must reach idle, not surface the dead session's
-// failure.
-func waitOpencodeIdle(t *testing.T, sess Session) {
-	t.Helper()
-	for {
-		select {
-		case e := <-sess.Events():
-			if e.Kind == EventError {
-				t.Fatalf("turn failed: %v", e.Err)
-			}
-			if e.Kind == EventIdle {
-				return
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("timeout waiting for idle")
+// The zero-spend sanity: usage carries the model the turn ran.
+func TestOpencodeUsageCarriesModel(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/gpt-5"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	f.push(f.partEvent("step-finish", "s1", ""))
+	f.releaseTurn()
+	var u *Usage
+	for _, e := range waitTurnEnd(t, sess) {
+		if e.Kind == EventUsage {
+			u = &e.Usage
 		}
+	}
+	if u == nil || u.Model != "opencode/gpt-5" {
+		t.Errorf("usage = %+v, want the turn's model", u)
 	}
 }

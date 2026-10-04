@@ -104,3 +104,47 @@ func TestGateAnswerCrosses(t *testing.T) {
 		t.Error("something other than a gate ask's advance option crossed")
 	}
 }
+
+// TestDecisionPermissionRanksWithAsk: a guarded tool call's decision rides
+// the ask lane — it ranks where an ask ranks, and its options are
+// gummi's own approve/deny wording, with the free-form row after them
+// like every ask has.
+func TestDecisionPermissionRanksWithAsk(t *testing.T) {
+	ask := &engine.Ask{Question: "Allow bash — make test?", Options: engine.PermissionAskOptions()}
+	opts := AskOptions(ask)
+	if len(opts) != 3 {
+		t.Fatalf("options = %+v, want approve, deny and the chat row", opts)
+	}
+	if opts[0].Label != engine.PermissionApproveLabel || opts[1].Label != engine.PermissionDenyLabel {
+		t.Errorf("options = %+v, want approve then deny", opts[:2])
+	}
+	if opts[0].Chat || opts[1].Chat || !opts[2].Chat {
+		t.Errorf("chat row = %+v, want it on the appended row alone", opts)
+	}
+	// the ruling is the option's own label
+	if got := AnswerText(ask, 0, nil); got != engine.PermissionApproveLabel {
+		t.Errorf("approve answer = %q", got)
+	}
+	if got := AnswerText(ask, 1, nil); got != engine.PermissionDenyLabel {
+		t.Errorf("deny answer = %q", got)
+	}
+	// it ranks in the ask lane: a question lane decision, ahead of a
+	// gate's, and the attention lane is the question's
+	decs := []state.OpenDecision{
+		{ID: "gate", Kind: state.DecisionKindGate, Question: "advance?"},
+		{ID: "perm", Kind: state.DecisionKindAsk, Question: ask.Question},
+	}
+	winner, ok := Rank(decs)
+	if !ok || winner.ID != "perm" {
+		t.Errorf("Rank = %+v (ok=%v), want the permission ahead of the gate", winner, ok)
+	}
+	lane, escalated, ok := Attention(string(state.DecisionKindAsk))
+	if !ok || lane != LaneQuestion || escalated {
+		t.Errorf("Attention = (%v, %v, %v), want the question lane", lane, escalated, ok)
+	}
+	// a gate ask and a permission can be told apart: a permission is
+	// never a gate crossing
+	if GateAnswerCrosses(ask, engine.PermissionApproveLabel) {
+		t.Error("an approve ruling crossed a gate")
+	}
+}

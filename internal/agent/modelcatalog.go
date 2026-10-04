@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -26,21 +26,29 @@ type ModelCataloger interface {
 	ModelCatalog(ctx context.Context) ([]string, error)
 }
 
-// opencodeModelsTimeout bounds one `opencode models` probe: the
-// subprocess answers from opencode's local catalog, and a hung probe must
-// not hang a picker open behind it.
-const opencodeModelsTimeout = 15 * time.Second
+// opencodeModelsTimeout bounds one catalog probe: it now asks a server —
+// the transient serve a probe spawns for the ask — and a hung probe must
+// not hang a picker open behind it. The server answers from opencode's
+// local catalog once it is up; this covers the boot, not the answer.
+const opencodeModelsTimeout = 30 * time.Second
 
-// OpencodeModelCatalog returns the model ids opencode itself offers —
-// the full provider/model pairs its own catalog ships, one per line of
-// `opencode models` — not a list gummi keeps. bin "" is "opencode".
+// OpencodeModelCatalog returns the model ids opencode itself offers — the
+// full provider/model pairs its own catalog ships — not a list gummi
+// keeps. bin "" is "opencode".
 //
-// It needs only the binary on PATH, no adapter and no authentication, so
-// a picker can offer opencode's catalog on a board that runs none of it;
-// the engine asks it directly when no opencode adapter is started
-// (sessionmodel.go). Each call spawns the CLI; callers that repeat the
-// ask are expected to cache (engine.SessionModelCatalog does).
-func OpencodeModelCatalog(ctx context.Context, bin string) ([]string, error) {
+// It needs only the binary on PATH, no adapter and no session: the probe
+// spawns a transient `opencode serve` (default environment, no session
+// config, a throwaway directory), asks its providers endpoint, and kills
+// the server as soon as it answers — so a picker can offer opencode's
+// catalog on a board that runs none of it. Callers that repeat the ask
+// are expected to cache (engine.SessionModelCatalog does), which keeps
+// this at one transient serve per cache miss.
+//
+// It is a variable, the seam opencodeExecPath is: the engine's
+// no-adapter probe path rebinds it in tests instead of spawning anything.
+var OpencodeModelCatalog = opencodeModelCatalog
+
+func opencodeModelCatalog(ctx context.Context, bin string) ([]string, error) {
 	if bin == "" {
 		bin = "opencode"
 	}
@@ -50,15 +58,44 @@ func OpencodeModelCatalog(ctx context.Context, bin string) ([]string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, opencodeModelsTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, resolved, "models").Output()
+	dir, err := os.MkdirTemp("", "gummi-opencode-probe-*")
 	if err != nil {
-		return nil, fmt.Errorf("opencode models: %w", err)
+		return nil, fmt.Errorf("opencode catalog: %w", err)
 	}
-	var ids []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if id := strings.TrimSpace(line); id != "" {
-			ids = append(ids, id)
+	defer func() { _ = os.RemoveAll(dir) }()
+	port, err := freeLoopbackPort()
+	if err != nil {
+		return nil, fmt.Errorf("opencode catalog: %w", err)
+	}
+	password, err := randomToken()
+	if err != nil {
+		return nil, fmt.Errorf("opencode catalog: %w", err)
+	}
+	// The probe's server runs on the inherited environment minus whatever
+	// session config the process itself was started under — a probe is the
+	// operator's own catalog, not one session's cage.
+	env := envWithout("OPENCODE_CONFIG")
+	env = append(env, "OPENCODE_SERVER_PASSWORD="+password)
+	proc, err := serveOpencode(ctx, resolved, port, dir, env)
+	if err != nil {
+		return nil, fmt.Errorf("opencode catalog: starting opencode serve: %w", err)
+	}
+	defer func() {
+		proc.cancel()
+		if proc.cmd != nil && proc.cmd.Process != nil {
+			_ = proc.cmd.Wait()
 		}
+	}()
+	srv := opencodeServer{base: proc.url, password: password}
+	if err := srv.waitReady(ctx, opencodeModelsTimeout); err != nil {
+		return nil, fmt.Errorf("opencode catalog: %w", err)
+	}
+	ids, err := srv.providers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("opencode catalog: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("opencode catalog: the server answered with no models")
 	}
 	return ids, nil
 }

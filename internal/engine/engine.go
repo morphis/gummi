@@ -2658,6 +2658,13 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	case agent.EventClientToolCall:
 		e.handleClientTool(s, ev.ToolCall)
 		return
+	case agent.EventPermission:
+		// A guarded board's tool call, held by the backend until it is
+		// answered. It becomes the card's open decision — the same
+		// machinery an ask_user question rides — so the ask's answer route
+		// delivers it to the session by request id.
+		e.handlePermissionEvent(s, ev)
+		return
 	case agent.EventContext:
 		s.setContext(ev.Context)
 	case agent.EventUsage:

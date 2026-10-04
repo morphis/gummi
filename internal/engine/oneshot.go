@@ -61,7 +61,7 @@ func (e *Engine) oneShot(ctx context.Context, f domain.Feature, prompt string, h
 		ArtifactPath: specPath,
 		Role:         agent.RoleScribe,
 		Model:        rc.Model,
-		Permission:   e.cfg.Permission,
+		Permission:   agent.PermissionAllowAll,
 		SystemHints: append([]string{
 			"You are reading this card read-only; do not modify any file.",
 			fmt.Sprintf("The card's artifact is at %s.", specPath),

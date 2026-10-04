@@ -380,8 +380,14 @@ UI stays coherent and beautiful.
 terminal to a real `copilot` session in the worktree (`tea.ExecProcess`),
 for when you want the native experience. Cheap to build, zero risk.
 
-**opencode adapter (v2):** opencode ships a headless server with an HTTP API
-(`opencode serve`), so it fits the same interface. Also planned: a **generic
+**opencode adapter:** one `opencode serve` process per gummi session,
+started with the session's own config (the worktree permission cage, the
+session's MCP endpoint, forwarded skills), killed with it. Every action is
+an HTTP call against that server — a turn is one message POST that blocks
+until the turn resolves while the server's event bus streams the same
+mapped activity a CLI process used to; an interrupt is a server-side
+abort (partial work aborted, not lost); the model catalog, compaction and
+guarded approvals all ride the same client. Also shipped: a **generic
 headless adapter** (spawn `<cmd> -p "<prompt>"`, capture output) as the
 lowest common denominator for one-shot autonomous stages with any CLI agent.
 
@@ -3719,7 +3725,8 @@ does not know, which is the one way it differs from `agentFor`.
 
 **The list is the agent's own, asked live.** Where a backend can
 enumerate what it provides — copilot through its SDK's model list,
-opencode through its own CLI — the picker offers that catalog, merged
+opencode through its server's providers endpoint — the picker offers
+that catalog, merged
 with the ids the workspace's profiles run on it and the pairs sessions on
 the board use, and accepts any other id typed in. There is still no
 registry gummi keeps: a baked-in list would go stale
@@ -3727,8 +3734,10 @@ the week a provider ships something, and the agent's answer about itself
 never does. A backend that cannot enumerate is not faked — its picker
 keeps the profile ids and the typed entry — and no backend is ever
 *started* just to be asked: the catalog comes from an adapter the board
-already runs, or, for opencode, from a CLI probe that needs nothing
-started. The ask is cached briefly, since a picker repeats it, and both
+already runs, or, for opencode, from a transient serve spawned for the
+ask and killed as soon as it answers — the engine caches, so that is
+one transient serve per cache miss. The ask is cached briefly, since a
+picker repeats it, and both
 faces read the one merged view (`SessionModelChoices`), so the terminal
 and the page cannot disagree about what a session can run on.
 `CheckSessionModel` still refuses a pair before it is stored: an unknown
@@ -3805,11 +3814,11 @@ the loop, like every read that opens a dialog.
 
 Deferred: the model pick at CREATION for a terminal mint (the form has
 no session rows; the web's draft does — a card made in the terminal starts
-on its profile's implementer and switches from its page); a permission
-dock for guarded mode, which needs an adapter
-that emits `EventPermission` first (none does); and a terminal and a files
+on its profile's implementer and switches from its page); a terminal and a files
 tab, since a shell in the browser is a new surface under §20.5, not a
-restyle.
+restyle. The permission dock is no longer deferred on the adapter: a
+backend that emits `EventPermission` and takes the ruling by request id
+now exists (opencode's server), so the dock's work is its own card.
 
 ### 19.9 Schedules and heartbeats
 

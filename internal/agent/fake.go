@@ -141,7 +141,10 @@ type fakeSession struct {
 	turns     []Turn
 	interrupt bool
 	resolved  map[string]string // client-tool callID → result (Resolve)
-	compacts  int
+	// permissions holds the rulings the orchestrator delivered through
+	// ResolvePermission (request id → approve).
+	permissions map[string]bool
+	compacts    int
 }
 
 // Resolve implements ToolResolver: records the result so a test can
@@ -157,6 +160,34 @@ func (s *fakeSession) Resolve(_ context.Context, callID, result string) error {
 	}
 	s.resolved[callID] = result
 	return nil
+}
+
+// ResolvePermission implements PermissionResolver: it records the ruling
+// the orchestrator delivered, so a test can assert what answered a held
+// tool call and by which request id.
+func (s *fakeSession) ResolvePermission(_ context.Context, requestID string, approve bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("session closed")
+	}
+	if s.permissions == nil {
+		s.permissions = map[string]bool{}
+	}
+	s.permissions[requestID] = approve
+	return nil
+}
+
+// PermissionAnswers returns the rulings delivered through
+// ResolvePermission so far (test aid).
+func (s *fakeSession) PermissionAnswers() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]bool, len(s.permissions))
+	for id, approve := range s.permissions {
+		out[id] = approve
+	}
+	return out
 }
 
 // Resolved returns the result a client-tool call was answered with
@@ -327,6 +358,19 @@ func (s *fakeSession) SendCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sends
+}
+
+// SessionSendCounts reports every live session's turn count (test aid).
+func (f *Fake) SessionSendCounts() []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]int, 0, len(f.sessions))
+	for _, s := range f.sessions {
+		s.mu.Lock()
+		out = append(out, s.sends)
+		s.mu.Unlock()
+	}
+	return out
 }
 
 // Turns returns every Turn this session received via Send or SendTurn, in

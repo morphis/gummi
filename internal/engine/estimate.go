@@ -82,7 +82,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 		ArtifactPath:    specPath,
 		Role:            agent.RoleScribe,
 		Model:           rc.Model,
-		Permission:      e.cfg.Permission,
+		Permission:      agent.PermissionAllowAll,
 		SystemHints:     []string{fmt.Sprintf("The feature's spec is at %s; read it first.", specPath)},
 		ExtraReadAllows: []string{specPath},
 	})
