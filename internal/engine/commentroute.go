@@ -195,7 +195,12 @@ func (r CommentRoute) Question(id domain.FeatureID) string {
 	if !r.Rewinds() {
 		return ""
 	}
-	q := fmt.Sprintf("send %s back to %s? %s are %s's to answer", id, r.Target, r.Why(), r.Target)
+	why := r.Why()
+	// the reason starts a sentence of its own, after the question
+	if why != "" {
+		why = strings.ToUpper(why[:1]) + why[1:]
+	}
+	q := fmt.Sprintf("send %s back to %s? %s are %s's to answer", id, r.Target, why, r.Target)
 	var reruns []string
 	for _, s := range domain.Stages {
 		if stageAfter(s, r.Target) && !stageAfter(s, r.From) {

@@ -145,7 +145,7 @@ func TestSpecCommentsHoldingAndAnswered(t *testing.T) {
 // The confirmation names where the card goes, why, and what runs again.
 func TestCommentRouteQuestion(t *testing.T) {
 	r := RouteComments(domain.CardType{Kind: domain.KindFeature}, domain.StageVerify, routeSpec("Chosen approach"), 0)
-	want := "send FD-001 back to plan? the comments on Chosen approach are plan's to answer — implement and verify run again after it"
+	want := "send FD-001 back to plan? The comments on Chosen approach are plan's to answer — implement and verify run again after it"
 	if got := r.Question("FD-001"); got != want {
 		t.Errorf("question =\n%s\nwant\n%s", got, want)
 	}
