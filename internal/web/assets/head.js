@@ -73,9 +73,10 @@ function landButton (c, actions) {
 }
 
 // commitButton commits an open session's worktree with the person's own
-// message. gummi never commits a session's work on its own, so this is
-// shown whenever the worktree holds something to commit (the server lists
-// the action only then).
+// message. Between turns gummi leaves a session's work uncommitted (only
+// Land sweeps what is left into a final checkpoint), so this is shown
+// whenever the worktree holds something to commit (the server lists the
+// action only then).
 function commitButton (c, actions) {
   if (!c.session || c.stage !== 'open') return null
   const commit = actions.find(a => a.id === 'commit')

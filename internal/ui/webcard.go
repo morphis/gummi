@@ -581,7 +581,7 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
 			if !r.F.MainCheckout {
 				list = append(list,
-					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — gummi never commits a session's work on its own"})
+					cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " with your message — until you do, the session's work stays uncommitted, and Land commits whatever is left as a final checkpoint"})
 			}
 		}
 	} else {

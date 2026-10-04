@@ -192,3 +192,29 @@ test('a project command is offered while its name is typed', async ({ pairedPage
   await expect(input).toHaveValue('');
   await expect(page.getByTestId('thread')).toContainText('/review the parser', { timeout: 30_000 });
 });
+
+// A session's work stays uncommitted until the person commits it — or
+// lands, which commits what is left as a final checkpoint first. The
+// menu says so on both entries, and a commit sent with no message is
+// refused in words rather than asked again as if nothing was sent.
+test('commit and land say what each commits, and an empty commit message is refused', async ({ pairedPage: page, server, api, workspace }, info) => {
+  test.setTimeout(90_000);
+  const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the margins' })).json?.id);
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.actions?.some((a: any) => a.id === 'merge'), { timeout: 30_000 }).toBe(true);
+  fs.writeFileSync(path.join(workspace.worktree(id), 'MARGINS.md'), 'wider\n');
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.actions?.some((a: any) => a.id === 'commit'), { timeout: 30_000 }).toBe(true);
+  const actions = (await api('GET', `/api/cards/${id}`)).json.actions as any[];
+  expect(actions.find((a) => a.id === 'commit').detail).toContain('final checkpoint');
+  expect(actions.find((a) => a.id === 'commit').detail).not.toContain('never commits');
+  expect(actions.find((a) => a.id === 'merge').detail).toContain('uncommitted is committed first');
+
+  const refused = await api('POST', `/api/cards/${id}/actions/commit`, { message: '' });
+  expect(refused.status).toBe(400);
+  expect(String(refused.json?.error)).toContain('a commit needs a message');
+
+  if (info.project.name === 'phone') return;
+  await page.goto(`${server.url}/#${id}`);
+  await page.getByTestId('session-commit').click();
+  await page.getByTestId('action-confirm').click();
+  await expect(page.getByTestId('action-error')).toContainText('needs a message');
+});

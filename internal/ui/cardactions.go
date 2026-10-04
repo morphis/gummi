@@ -896,5 +896,10 @@ func mergeHelp(kind domain.Kind, base string) string {
 	if kind == domain.KindGoal {
 		return "merge the goal branch into " + base + " over its cards' commits (review & approve the drafted message)"
 	}
+	if kind == domain.KindFreeform {
+		// prepareMerge's final checkpoint: a session's loose work is
+		// committed before it lands, and the reader should know first
+		return "squash-merge branch into " + base + " — anything still uncommitted is committed first, as a final checkpoint (review & approve the drafted message)"
+	}
 	return "squash-merge branch into " + base + " (review & approve the drafted message)"
 }

@@ -1083,7 +1083,7 @@ func stageAnswers(in nextInput) []nextAction {
 		acts := []nextAction{
 			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
 			nextStep("merge", "m", "land it on "+in.landBase(),
-				"squash-merge the branch — you review and approve the message"),
+				"squash-merge the branch — anything still uncommitted is committed first, as a final checkpoint; you review and approve the message"),
 			nextStep("handoff", "h", "hand off",
 				"close the card and keep the branch exactly as it is"),
 		}

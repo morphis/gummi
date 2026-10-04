@@ -648,10 +648,10 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 		return m.switchSessionModel(r.F.ID, req.Backend, strings.TrimSpace(req.Model)), nil
 	case "commit":
 		if msg == "" {
-			return nil, &WebError{
-				Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
-				Text: "say what the commit is — your words are its message",
-			}
+			// the menu entry already asks for the message (webActionNeeds),
+			// so an empty one is a box sent empty: refused in words, not
+			// asked again as if nothing had been sent
+			return nil, refuse(WebBadRequest, "a commit needs a message — write what the commit is; your words are its message")
 		}
 		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; commit once this turn ends"}
