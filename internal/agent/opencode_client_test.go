@@ -59,7 +59,6 @@ type ocFakeMsg struct {
 }
 
 type ocFakeReply struct {
-	SessionID string
 	RequestID string
 	Body      map[string]string
 }
@@ -80,7 +79,7 @@ func newOcFake(t *testing.T) *ocFake {
 	mux.HandleFunc("POST /session/{id}/message", f.message)
 	mux.HandleFunc("POST /session/{id}/abort", f.abort)
 	mux.HandleFunc("POST /session/{id}/summarize", f.summarize)
-	mux.HandleFunc("POST /session/{id}/permissions/{pid}", f.respond)
+	mux.HandleFunc("POST /permission/{pid}/reply", f.respond)
 	mux.HandleFunc("POST /question/{qid}/reject", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.rejected = append(f.rejected, r.PathValue("qid"))
@@ -195,7 +194,7 @@ func (f *ocFake) respond(w http.ResponseWriter, r *http.Request) {
 	var body map[string]string
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	f.mu.Lock()
-	f.responds = append(f.responds, ocFakeReply{SessionID: r.PathValue("id"), RequestID: r.PathValue("pid"), Body: body})
+	f.responds = append(f.responds, ocFakeReply{RequestID: r.PathValue("pid"), Body: body})
 	f.mu.Unlock()
 	_, _ = w.Write([]byte("true"))
 }
@@ -732,8 +731,8 @@ func TestOpencodeServerModelCatalog(t *testing.T) {
 
 // TestOpencodeServerPermissionEvents: a guarded board's held tool call
 // surfaces as an EventPermission named by the server's request id, and
-// the answer goes to the server's respond endpoint — "once" for approve,
-// "reject" for deny.
+// the answer goes to the server's permission reply endpoint — "once" for
+// approve, "reject" for deny.
 func TestOpencodeServerPermissionEvents(t *testing.T) {
 	f, _ := stubServeOpencode(t)
 	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
@@ -772,11 +771,8 @@ func TestOpencodeServerPermissionEvents(t *testing.T) {
 	f.mu.Lock()
 	responds := append([]ocFakeReply(nil), f.responds...)
 	f.mu.Unlock()
-	if len(responds) != 1 || responds[0].RequestID != "perm_1" || responds[0].Body["response"] != "once" {
+	if len(responds) != 1 || responds[0].RequestID != "perm_1" || responds[0].Body["reply"] != "once" {
 		t.Errorf("responds = %+v, want perm_1 approved once", responds)
-	}
-	if responds[0].SessionID != f.lastSession() {
-		t.Errorf("respond targeted session %q, want the session's own %q", responds[0].SessionID, f.lastSession())
 	}
 	if err := resolver.ResolvePermission(context.Background(), "perm_1", false); err != nil {
 		t.Fatal(err)
@@ -784,7 +780,7 @@ func TestOpencodeServerPermissionEvents(t *testing.T) {
 	f.mu.Lock()
 	responds = f.responds
 	f.mu.Unlock()
-	if responds[1].Body["response"] != "reject" {
+	if responds[1].Body["reply"] != "reject" {
 		t.Errorf("deny reply = %v, want reject", responds[1].Body)
 	}
 	f.push(f.partEvent("text", "p", "done"))
@@ -793,11 +789,9 @@ func TestOpencodeServerPermissionEvents(t *testing.T) {
 }
 
 // TestOpencodeServerPermissionFromChildSession: a task tool's child
-// session asks under its own session id, and the answer must address that
-// session — the respond endpoint is session-scoped, so answering from the
-// parent's id would leave the child's call held. The foreign ask still
-// surfaces as the card's decision, not dropped like every other
-// foreign-session bus event.
+// session asks under its own session id. The foreign ask still surfaces
+// as the card's decision, not dropped like every other foreign-session
+// bus event, and its answer reaches the server by request id.
 func TestOpencodeServerPermissionFromChildSession(t *testing.T) {
 	f, _ := stubServeOpencode(t)
 	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
@@ -835,8 +829,8 @@ func TestOpencodeServerPermissionFromChildSession(t *testing.T) {
 	f.mu.Lock()
 	responds := append([]ocFakeReply(nil), f.responds...)
 	f.mu.Unlock()
-	if len(responds) != 1 || responds[0].SessionID != "ses_child" || responds[0].RequestID != "perm_child" || responds[0].Body["response"] != "once" {
-		t.Errorf("responds = %+v, want perm_child approved against ses_child", responds)
+	if len(responds) != 1 || responds[0].RequestID != "perm_child" || responds[0].Body["reply"] != "once" {
+		t.Errorf("responds = %+v, want perm_child approved once", responds)
 	}
 	f.push(f.partEvent("text", "p", "done"))
 	f.releaseTurn()

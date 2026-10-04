@@ -271,11 +271,6 @@ type opencodeSession struct {
 	// announced holds the tool calls announced while running, so their
 	// finished part reports only the outcome.
 	announced map[string]bool
-	// permOwner remembers, per permission request id, the server session
-	// that raised it. It is usually this session's own, but a task tool's
-	// child session asks under its own id — and the respond endpoint is
-	// session-scoped, so the answer must address the raiser.
-	permOwner map[string]string
 	// resumed marks a session id handed in by the engine whose first turn
 	// has not landed yet. A server that cannot find the id fails the
 	// turn's POST, and a resume must never be the reason a stage fails, so
@@ -828,29 +823,14 @@ func (s *opencodeSession) sessionIDValue() string {
 // ResolvePermission implements PermissionResolver: it answers the
 // server's held tool call. Approve lets this one call run ("once" — never
 // a saved rule); deny refuses it, the refusal reaching the model as the
-// call's error. The answer addresses the session that raised the request
-// — this session's own, or the task child's the bus named for it.
+// call's error. The request id names the call whichever session raised
+// it — this session's own, or a task child's.
 func (s *opencodeSession) ResolvePermission(ctx context.Context, requestID string, approve bool) error {
 	reply := "reject"
 	if approve {
 		reply = "once"
 	}
-	s.mu.Lock()
-	id := s.permOwner[requestID]
-	if id == "" {
-		id = s.sessionID
-	}
-	s.mu.Unlock()
-	if id == "" {
-		return errors.New("the session has no conversation to answer a permission against")
-	}
-	if err := s.srv.respond(ctx, id, requestID, reply); err != nil {
-		return err // the entry stays, so a retry answers the same session
-	}
-	s.mu.Lock()
-	delete(s.permOwner, requestID)
-	s.mu.Unlock()
-	return nil
+	return s.srv.respond(ctx, requestID, reply)
 }
 
 func (s *opencodeSession) interruptedValue() bool {
@@ -1015,23 +995,14 @@ func (s *opencodeSession) dispatch(data []byte) {
 		}
 	case "permission.asked":
 		// A guarded board's tool-call approval, held server-side until it
-		// is answered. The request id is what the answer names, and the
-		// raising session id is what the answer addresses: a task child
-		// asks under its own session id, and the respond endpoint is
-		// session-scoped. Unlike every other bus event this one is not
-		// dropped on a foreign session id — the child's held call holds
-		// this session's turn with it, so it must surface and be
-		// answerable. The turn produced activity the moment it was held,
-		// whatever else it relays after.
+		// is answered by its request id. Unlike every other bus event this
+		// one is not dropped on a foreign session id — a task child asks
+		// under its own, and its held call holds this session's turn with
+		// it, so it must surface and be answerable. The turn produced
+		// activity the moment it was held, whatever else it relays after.
 		s.mu.Lock()
 		if t := s.turn; t != nil && !t.finishing {
 			t.msg.mark(true)
-		}
-		if ev.Properties.ID != "" && ev.Properties.SessionID != "" {
-			if s.permOwner == nil {
-				s.permOwner = make(map[string]string)
-			}
-			s.permOwner[ev.Properties.ID] = ev.Properties.SessionID
 		}
 		s.mu.Unlock()
 		s.emit(Event{

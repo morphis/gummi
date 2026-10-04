@@ -199,11 +199,13 @@ func (o opencodeServer) summarize(ctx context.Context, id, provider, model strin
 }
 
 // respond answers a permission request the server raised: "once" lets
-// this one call through, "reject" refuses it.
-func (o opencodeServer) respond(ctx context.Context, sessionID, requestID, reply string) error {
+// this one call through, "reject" refuses it. The request id alone names
+// it — whichever session raised it, a task child's included — on the
+// endpoint that replaced the deprecated session-scoped one.
+func (o opencodeServer) respond(ctx context.Context, requestID, reply string) error {
 	resp, err := o.do(ctx, http.MethodPost,
-		"/session/"+url.PathEscape(sessionID)+"/permissions/"+url.PathEscape(requestID),
-		map[string]string{"response": reply})
+		"/permission/"+url.PathEscape(requestID)+"/reply",
+		map[string]string{"reply": reply})
 	if err != nil {
 		return err
 	}
