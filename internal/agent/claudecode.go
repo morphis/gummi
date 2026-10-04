@@ -195,6 +195,9 @@ func (c *ClaudeCode) supportsToolRoster() bool {
 	return c.roster
 }
 
+// claudeSessionSettings is the inline --settings every session runs with.
+const claudeSessionSettings = `{"attribution":{"commit":"","pr":""},"includeCoAuthoredBy":false}`
+
 // NewSession implements Agent: spawn one claude process in opts.WorkDir.
 func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	c.mu.Lock()
@@ -237,6 +240,11 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		// and no message_delta usage, so sessions would look frozen and the
 		// engine's budget check would only move at turn ends.
 		"--verbose", "--include-partial-messages",
+		// The CLI otherwise tells the model to sign every commit with its own
+		// Co-Authored-By trailer, which lands on the card's branch. Both keys:
+		// attribution is the current spelling, includeCoAuthoredBy the one
+		// older builds read.
+		"--settings", claudeSessionSettings,
 	}
 	// A ReadOnly research session runs in the main checkout with no
 	// worktree and no write cage to fall back on: drop --permission-mode

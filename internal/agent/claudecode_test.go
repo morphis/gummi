@@ -553,6 +553,15 @@ func TestClaudeCodeRejectsDottedModel(t *testing.T) {
 	}
 }
 
+// Every session runs with attribution off, or the CLI has the model sign
+// the card's commits with its own Co-Authored-By trailer.
+func TestClaudeCodeTurnsCommitAttributionOff(t *testing.T) {
+	msg := claudeRosterArgv(t, claudeArgvEchoScript, SessionOpts{})
+	if !strings.Contains(msg, "--settings "+claudeSessionSettings) {
+		t.Errorf("argv missing --settings %s: %s", claudeSessionSettings, msg)
+	}
+}
+
 func TestClaudeCodeMissingBinary(t *testing.T) {
 	if _, err := NewClaudeCode("definitely-not-a-real-binary-xyz"); err == nil {
 		t.Error("missing binary should fail fast")
