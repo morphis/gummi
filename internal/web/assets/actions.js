@@ -161,31 +161,22 @@ function fieldFor (card, a, need) {
   if (need === 'message') {
     const landing = /^(merge|squash)$/.test(a.id)
     const ta = h('textarea', { id: 'action-input', testid: 'action-input', value: def, rows: landing ? 8 : 4, spellcheck: 'true' })
-    const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(a, def ? 'default' : 'none')) : null
-    let before = null // the hint's words while a draft is being written
+    const squash = a.id === 'squash'
+    const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(squash, def ? 'default' : 'none')) : null
+    // the affordance the answer block's landing dialog shares (its own
+    // box is built there)
+    const aff = hint ? draftAffordance(ta, hint) : null
     return {
       el: h('label', { class: 'field' }, label, ta, hint),
       value: () => ({ message: ta.value.trim() }),
       focus: () => ta.focus(),
       // the draft the server stopped to have read is in the box now: the
       // hint says so rather than that nothing was drafted
-      drafted: () => { if (hint) { before = null; clear(hint).append(messageHint(a, 'drafted')) } },
+      drafted: () => { if (aff) aff.drafted(messageHint(squash, 'drafted')) },
       // while gummi drafts the message the box is not for typing and the
       // hint says what is being waited on; a reply that brought no draft
       // puts the hint back as it was
-      drafting: landing
-        ? (on) => {
-            ta.readOnly = on
-            if (on) {
-              before = hint.textContent
-              hint.classList.add('busy')
-              clear(hint).append(h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'gummi is drafting the message — this can take a minute.')
-            } else {
-              hint.classList.remove('busy')
-              if (before !== null) { clear(hint).append(before); before = null }
-            }
-          }
-        : null
+      drafting: aff ? aff.busy : null
     }
   }
   if (need === 'number') {
@@ -216,14 +207,39 @@ function fieldFor (card, a, need) {
 
 // messageHint is the line under a landing's or a squash's message: where
 // the message in the box came from (the verify gate's draft, one drafted
-// just now, or none yet) and what it becomes. A squash collapses the
-// branch where it is — nothing lands — so it never says "lands".
-function messageHint (a, from) {
-  const squash = a.id === 'squash'
+// just now, or none yet) and what it becomes. squash says which: a squash
+// collapses the branch where it is — nothing lands — so it never says
+// "lands". The answer block's landing dialog words its own box the same
+// way (decision.js).
+export function messageHint (squash, from) {
   const becomes = squash ? 'this is the one commit the branch becomes' : 'this is what lands'
   if (from === 'none') return 'Nothing was drafted yet: leave it empty and gummi drafts one for you to read first (this can take a minute), or write it.'
   const where = from === 'drafted' ? 'Drafted by gummi just now.' : squash ? 'Drafted for this branch.' : 'Drafted when verify passed.'
   return `${where} Read it, edit it if you like — ${becomes}.`
+}
+
+// draftAffordance is the drafting state of a landing message box, shared
+// by the menu's merge dialog and the answer block's landing dialog: busy
+// makes the box read-only and the hint say what is being waited on, off
+// restores the hint as busy found it, and drafted replaces the hint for a
+// reply that brought the draft to read — cancelling that restore, since
+// what busy was waiting for has arrived.
+export function draftAffordance (ta, hint) {
+  let before = null
+  return {
+    busy: (on) => {
+      ta.readOnly = on
+      if (on) {
+        before = hint.textContent
+        hint.classList.add('busy')
+        clear(hint).append(h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'gummi is drafting the message — this can take a minute.')
+      } else {
+        hint.classList.remove('busy')
+        if (before !== null) { clear(hint).append(before); before = null }
+      }
+    },
+    drafted: (text) => { before = null; clear(hint).append(text) }
+  }
 }
 
 // cardsField is a multi-select of the board's other cards, the ones set

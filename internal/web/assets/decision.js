@@ -26,10 +26,19 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
-import { runAction } from './actions.js?v=__ASSET_V__'
+import { runAction, messageHint, draftAffordance } from './actions.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
+// landing, while one is open: the dialog a landing answer opened, which
+// that answer's replies are routed into (see refused) instead of notes it
+// would cover. Opened by the press before its request, it is on screen
+// while the board drafts, the way the menu's merge entry already behaves.
+let landing = null
+// landingDismissed: the person closed the landing dialog while the answer
+// that opened it was still out. Its reply, arriving late, is said beside
+// the decision — a dialog the person walked away from does not come back.
+let landingDismissed = false
 
 // A decision that has just appeared is not a bare enter's to answer yet: a
 // second press meant for the answer before it (a double enter, a key held
@@ -151,6 +160,19 @@ const SURFACES = {
     const a = (state.card?.actions || []).find(x => x.id === 'profile')
     if (a) runAction(state.card, a)
   }
+}
+
+// isLanding mirrors the board's rule for which answers are landings
+// (webintents.go): the verify gate's "advance", and the merge answer a
+// stopped or handed-off card's set carries. That rule has no research
+// carve-out; the research card's "mark done" at the same gate is out
+// because the flow never asks it for a message — a research card lands
+// nothing (msgs.go advanceLands), so its advance settles without a
+// landing stop and no dialog is wanted. Such an answer stops on the
+// landing message, and its dialog opens for it on the press.
+function isLanding (o) {
+  if (state.card?.kind === 'research') return false
+  return (o.id === 'advance' && state.card?.stage === 'verify') || o.id === 'merge'
 }
 
 function onOption (i, compact) {
@@ -409,12 +431,45 @@ export async function answer ({ picked = false } = {}) {
     return
   }
   const label = text && o.words ? (o.relabel || o.label) : o.label
-  return send(state.sel, {
+  const body = {
     ref: d.ref,
     option: o.id,
     words: o.words && text ? text : undefined,
     against: d.against?.token || ''
-  }, label, !!(o.words && text), o.danger)
+  }
+  // A landing pressed bare opens its dialog on the press, before the
+  // request — the menu's merge entry already behaves so — and shows its
+  // drafting state while the answer waits on the live draft pass behind
+  // it. Words typed for the option are the person's own message; a landing
+  // on those goes straight to the board.
+  if (isLanding(o) && !body.words) {
+    landingDismissed = false
+    const dlg = openLanding(state.sel, d, o, '')
+    dlg.wait(true)
+    try {
+      await send(state.sel, body, label, false, o.danger)
+    } finally {
+      dlg.wait(false)
+      // the person dismissed the dialog mid-flight: its close could not
+      // hand the focus back, the answer's own buttons being disabled
+      // (the request was still out). They are theirs again now.
+      if (dlg.left) refocusAnswer(o.id)
+    }
+    // a reply the dialog kept — the draft to read, a failure to retry
+    // from — holds it open; anything else (the card moved on without one)
+    // closes it
+    if (!dlg.kept) dlg.close()
+    return
+  }
+  return send(state.sel, body, label, !!(o.words && text), o.danger)
+}
+
+// refocusAnswer puts the focus back on the answer a dismissed dialog was
+// opened from — the first such answer on screen that can take it.
+function refocusAnswer (id) {
+  const back = [...document.querySelectorAll(`[data-testid$="-option-${CSS.escape(id)}"]`)]
+    .find(el => el.getClientRects().length && !el.disabled)
+  back?.focus()
 }
 
 async function send (id, body, label, tookWords, danger) {
@@ -438,22 +493,33 @@ async function send (id, body, label, tookWords, danger) {
 }
 
 function refused (id, err, body, label, tookWords, danger) {
-  if (err.notBuilt && err.status !== 404) { toast('Answering from the web is not available yet'); return }
+  if (err.notBuilt && err.status !== 404) {
+    landing?.close()
+    toast('Answering from the web is not available yet')
+    return
+  }
   if (err.status !== 409) {
+    if (landing) { landing.failed(err.message); return }
     note(err.message, { tone: 'err', testid: 'decision-error' })
     return
   }
   const e = err.data || {}
   switch (e.error) {
     case 'answered':
+      // the dialog was about a card that is no longer the one it was:
+      // close it, and say what happened where the decision is
+      landing?.close()
       note(`Answered by ${e.by || 'someone else'}${e.receipt ? ` — ${e.by && e.receipt.startsWith(e.by + ' ') ? e.receipt.slice(e.by.length + 1) : e.receipt}` : ''}. Here is the card as it stands now.`, { tone: 'warn', testid: 'decision-answered' })
       ctx.refresh(id)
       return
     case 'moved':
+      landing?.close()
       note(`${id} moved since you read it${e.text ? ` (${e.text.replace(/^the card moved since you read it\s*[—-]\s*/, '')})` : ''}. Read it again, then answer if it still holds.`, { tone: 'warn', testid: 'decision-moved' })
       ctx.refresh(id)
       return
     case 'confirm':
+      landing?.close()
+      landingDismissed = false // the close was the flow's, not the person's
       // the server's question, verbatim; the yes sent back is its token
       set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: label, danger, go: () => send(id, { ...body, confirm: [body.confirm, e.confirm].filter(Boolean).join(' ') }, label, tookWords, danger) } })
       reveal = true
@@ -462,33 +528,51 @@ function refused (id, err, body, label, tookWords, danger) {
       if (e.needs === 'decision') {
         // which decision to reverse is picked on the goal's page, which
         // lists them with the lead's reasons
+        landing?.close()
         note(sentence(e.text) || 'Pick the decision on the goal’s page.', { testid: 'decision-needs' })
         openView('goal', { id })
         return
       }
       if (e.needs === 'message' && e.draft !== undefined && e.draft !== null) {
-        // a landing stopped to have its message read: show it, editable
+        // a landing stopped to have its message read: into the dialog the
+        // press opened when one is up (a second one on top of it would
+        // stack two of the same), else it opens on the draft — unless the
+        // person dismissed that dialog while the answer was still out: a
+        // dialog they walked away from does not come back, and the note
+        // says where the landing stands instead
+        if (landing) { landing.fill(e.draft, sentence(e.text)); return }
+        if (landingDismissed) { note(sentence(e.text) || 'This answer needs more from you.', { tone: 'info', testid: 'decision-needs' }); return }
         const d = openDecision()
         const o = d?.options.find(x => x.id === body.option)
         if (d && o) { openLanding(id, d, o, e.draft, sentence(e.text)); return }
       }
       if (e.needs === 'message') {
+        if (landing) { landing.asked(sentence(e.text)); return }
         const w = wordsOption()
         if (w >= 0) set({ hi: w })
         if (isMobile()) set({ view: 'thread' })
         $('#composer-input').focus()
+      } else {
+        landing?.close()
       }
       note(sentence(e.text) || 'This answer needs more from you.', { tone: 'info', testid: 'decision-needs' })
       return
     case 'newcard':
+      landing?.close()
       note('That reads as separate work — start it as its own card.', { testid: 'decision-newcard' })
       openView('newcard', { text: e.text })
       return
     case 'busy':
+      landing?.close()
       if (e.text) ctx.restoreComposer?.(e.text)
       note('The agent is mid-turn. Your words are back in the composer; send them when this turn ends.', { tone: 'warn', testid: 'decision-busy' })
       return
   }
+  // A refusal with no reason of its own — the give-up on a draft pass, or
+  // one of the landing's own — reads in the dialog while it is open: a
+  // note behind it is a note nobody sees, and the dialog is the way to
+  // retry (send bare again) or land on a message written here.
+  if (landing) { landing.failed(err.message); ctx.refresh(id); return }
   note(err.message, { tone: 'err', testid: 'decision-error' })
   ctx.refresh(id)
 }
@@ -499,21 +583,42 @@ export function sentence (s) {
   return s ? s[0].toUpperCase() + s.slice(1) : ''
 }
 
-// openLanding shows the landing message a landing answer carries — the
-// draft the board wrote, editable — and lands only on its own button, as
-// the TUI's landing dialog does: a branch never lands on a message nobody
-// read.
+// draftWhere says where the message in the box came from, for the hint:
+// the verify gate's stored draft when the box holds exactly it, else one
+// a live pass just brought back, else none.
+function draftWhere (msg) {
+  msg = String(msg || '').trim()
+  if (!msg) return 'none'
+  const stored = String(state.card?.actions?.find(x => x.id === 'merge')?.default || '').trim()
+  return msg === stored ? 'default' : 'drafted'
+}
+
+// openLanding is the landing dialog a landing answer opens. A press opens
+// it before the request, empty: the hint offers the leave-it-empty path —
+// sent bare again, the landing stops on its message once more, the stored
+// draft right away and a fresh pass after a give-up — and the drafting
+// state covers the wait. An answer that stopped to have its message read
+// opens it on the draft. It lands only on its own button, as the TUI's
+// landing dialog does: a branch never lands on a message nobody read.
 function openLanding (id, d, o, draft, question = '') {
   const input = h('textarea', { class: 'lmsg', rows: '8', testid: 'landing-message', 'aria-label': 'Landing message' })
   input.value = draft || ''
+  const q = h('p', { class: 'aq', testid: 'landing-question' }, question || 'Read the landing message, then land.')
+  const hint = h('span', { class: 'fh', testid: 'landing-hint' }, messageHint(false, draftWhere(draft)))
+  const aff = draftAffordance(input, hint)
   const err = h('p', { class: 'aerr', testid: 'landing-error', role: 'alert', hidden: true })
+  // kept: the last reply was routed into the dialog rather than past it,
+  // so the send that is out must not close it (a draft to read, a failure
+  // to retry from)
+  const dlg = { kept: false }
   const m = openModal({
     title: `${sentence(o.label)} · ${id}`,
     testid: 'landing-dialog',
     card: id,
     // the answer that opened it is redrawn while it is up
     returnTo: `[data-testid$="-option-${CSS.escape(o.id)}"]`,
-    body: [h('p', { class: 'aq', testid: 'landing-question' }, question || 'Read the landing message, then land.'), input, err],
+    onClose: () => { dlg.left = true; landing = null; landingDismissed = true },
+    body: [q, h('label', { class: 'field' }, input, hint), err],
     actions: [
       { label: 'Cancel', testid: 'landing-cancel' },
       {
@@ -523,15 +628,62 @@ function openLanding (id, d, o, draft, question = '') {
         testid: 'landing-confirm',
         onClick: async () => {
           const words = input.value.trim()
-          if (!words) { clear(err).append('Write the landing message first.'); err.hidden = false; input.focus(); return false }
-          await send(id, { ref: d.ref, option: o.id, words, against: d.against?.token || '' }, o.label, false, true)
-          return true
+          const b = { ref: d.ref, option: o.id, against: d.against?.token || '' }
+          if (words) b.words = words
+          dlg.kept = false
+          go.disabled = true
+          // sent bare, the landing waits on its drafting pass again: the
+          // button and the hint say so, the way the menu's merge entry does
+          const wait = !words
+          if (wait) { aff.busy(true); go.textContent = 'Drafting…' }
+          try {
+            await send(id, b, o.label, false, true)
+          } finally {
+            if (wait) aff.busy(false)
+            go.disabled = false
+            go.textContent = sentence(o.label)
+            if (dlg.left) refocusAnswer(o.id)
+          }
+          // a reply the dialog kept holds it open; a landing that went
+          // through, or a question it handed back to the decision, closes it
+          return !dlg.kept
         }
       }
     ]
   })
+  const go = m.el.querySelector('[data-testid="landing-confirm"]')
+  // wait shows the drafting state while the answer the press sent is out,
+  // and ends it however the reply landed
+  dlg.wait = (on) => {
+    if (on) { aff.busy(true); go.textContent = 'Drafting…'; go.disabled = true }
+    else { aff.busy(false); go.disabled = false; go.textContent = sentence(o.label) }
+  }
+  dlg.fill = (draft, text) => {
+    dlg.kept = true
+    clear(q).append(text || 'Read the landing message, then land.')
+    err.hidden = true
+    // the box is filled only while it is empty: the person's own words
+    // stand, as the TUI's dialog never overwrites typed ones
+    if (!input.value.trim() && draft.trim()) {
+      input.value = draft
+      aff.drafted(messageHint(false, draftWhere(draft)))
+      input.focus(); input.setSelectionRange(0, 0); input.scrollTop = 0
+    }
+  }
+  dlg.asked = (text) => {
+    dlg.kept = true
+    clear(q).append(text || 'This answer needs more from you.')
+    err.hidden = true
+  }
+  dlg.failed = (text) => {
+    dlg.kept = true
+    clear(err).append(sentence(text) || text)
+    err.hidden = false
+  }
+  dlg.close = () => m.close()
+  landing = dlg
   input.focus()
   input.setSelectionRange(0, 0)
   input.scrollTop = 0
-  return m
+  return dlg
 }
