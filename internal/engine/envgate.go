@@ -34,7 +34,7 @@ func (e *Engine) gateVerifyVerdict(s *Session) {
 		return
 	}
 
-	s.setVerdictFloor("blocked", reason)
+	s.setVerdictFloor(FloorOmission, "blocked", reason)
 	s.appendActivity("Pass downgraded to blocked: present prerequisite + zero [env:] live checks + no waiver")
 }
 

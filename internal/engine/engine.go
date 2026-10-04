@@ -1438,7 +1438,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// commands, which a partial goal fails by definition — the review judges
 	// the combined diff, and verify is where an unmet item counts.
 	if len(liveFailures) > 0 && !(s.Feature.IsGoal() && s.Critique) {
-		s.setVerdictFloor("blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
+		s.setVerdictFloor(FloorChecks, "blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
 	}
 	// What the branch SHIPS, read from the tree rather than from the diff.
 	// A committed build artifact is a fact, and the one part of the floor
@@ -1446,7 +1446,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	if findings := e.diffHygiene(s); len(findings) > 0 {
 		b.WriteString(hygieneBlock(findings))
 		if names, blocking := blockingHygiene(findings); blocking {
-			s.setVerdictFloor("fail", "branch ships "+strings.Join(names, ", "))
+			s.setVerdictFloor(FloorHygiene, "fail", "branch ships "+strings.Join(names, ", "))
 		}
 	}
 	// The inventory of what this branch changed, so the coverage question

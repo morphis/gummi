@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	error         TEXT NOT NULL DEFAULT '',
 	verdict       TEXT NOT NULL DEFAULT '',
 	verdict_floor        TEXT NOT NULL DEFAULT '',
+	verdict_floor_kind   TEXT NOT NULL DEFAULT '',
 	verdict_floor_reason TEXT NOT NULL DEFAULT '',
 	exhausted     INTEGER NOT NULL DEFAULT 0,
 	updated_at    TEXT NOT NULL,
@@ -720,6 +721,13 @@ var migrations = []string{
 	// blocked verify could say only THAT it was blocked and never why.
 	`ALTER TABLE sessions ADD COLUMN verdict_floor TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE sessions ADD COLUMN verdict_floor_reason TEXT NOT NULL DEFAULT ''`,
+	// Which floor stamped the verdict floor. The floor and its reason were
+	// already persisted; the kind is what makes a stamped verdict
+	// re-checkable — a promise floor restored with its kind is re-run
+	// against the artifact it cited on read, so correcting the artifact
+	// clears the overrule instead of holding the card for a fresh verify
+	// run. Empty for legacy rows.
+	`ALTER TABLE sessions ADD COLUMN verdict_floor_kind TEXT NOT NULL DEFAULT ''`,
 	// Whether the session stopped because the card's envelope ran out,
 	// rather than because it had finished. The engine has always known the
 	// difference — markExhausted/isExhausted, and the EventIdle path warns

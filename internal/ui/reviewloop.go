@@ -46,6 +46,8 @@ func parseVerdict(text string) reviewVerdict { return verdict.Parse(text) }
 
 func sessionVerdict(snap engine.Snapshot) reviewVerdict { return verdict.SessionVerdict(snap) }
 
+func flooredPass(snap engine.Snapshot) bool { return verdict.FloorOverruledPass(snap) }
+
 // onAutonomousDone drives the review loop when an autonomous session
 // finishes. It returns (handled, cmd): handled means the loop consumed
 // this completion (so the caller must not also raise a generic gate),
@@ -133,8 +135,20 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 		m.raiseBlocked(id, "verify BLOCKED — this machine can't run the verification plan; "+
 			"what it lacks is in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
 	case out.Reason == "verify-blocked":
-		m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
-			"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
+		// a pass gummi's own floor refused: the environment is not what
+		// stopped it, and the floor's reason is the thing to act on, so
+		// the stop names the overrule instead of the environment wording
+		// the arm carried when Blocked could only mean that.
+		if snap := s.Snapshot(); snap.VerdictFloorReason != "" {
+			text := "verify BLOCKED — gummi overruled the pass: " + snap.VerdictFloorReason
+			if snap.VerdictFloorKind == engine.FloorPromise {
+				text += " Meet or strike the promise it cites — a corrected plan clears the overrule without a re-run."
+			}
+			m.raiseEscalation(id, text)
+		} else {
+			m.raiseEscalation(id, "verify BLOCKED — the environment can't run the verification plan; "+
+				"the missing prerequisites are in the "+artifactNoun(id.Kind())+". Fix the environment or tag the plan — re-implementing won't help")
+		}
 	case out.Reason == "verify-fail":
 		// repeat failures warn off the bounce: each prior one bought a
 		// full rework round that changed nothing (m.rows is at most one

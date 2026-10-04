@@ -61,7 +61,7 @@ func (e *Engine) gateDocumentVerdict(s *Session) {
 	rep, err := e.documentReport(context.Background(), &f)
 	if err != nil {
 		s.appendToolDone("check "+DocumentFloorCheck+": NOT RUN ("+err.Error()+")", false, "")
-		s.setVerdictFloor("blocked", "the document floor could not run: "+err.Error())
+		s.setVerdictFloor(FloorDocument, "blocked", "the document floor could not run: "+err.Error())
 		return
 	}
 	l := spec.LayoutOf(&f)
@@ -70,7 +70,7 @@ func (e *Engine) gateDocumentVerdict(s *Session) {
 		return
 	}
 	s.appendToolDone("check "+DocumentFloorCheck+": FAIL ("+rep.Summary(l)+")", false, rep.Explain(l))
-	s.setVerdictFloor("fail", documentFloorReason+rep.Summary(l))
+	s.setVerdictFloor(FloorDocument, "fail", documentFloorReason+rep.Summary(l))
 }
 
 // documentFloorReason opens the verdict-floor reason a failing document

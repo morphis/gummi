@@ -116,13 +116,17 @@ func (v Verdict) String() string {
 // backends/agents that didn't use it. A stamped verdict floor is applied
 // before returning: it only ever downgrades, never promotes.
 //
-// Two floors exist. "blocked" is the environment saying the plan could not
-// be executed here. "fail" is gummi's own machine judgement that the
-// branch is not landable whatever the agent concluded — a committed build
-// artifact, say, which is a fact about the tree rather than an opinion
-// about the code. A fail floor outranks a blocked one: an environment gap
-// can be resolved by running somewhere else, while the branch shipping a
-// binary is true everywhere.
+// Several floors share the one slot. "fail" is gummi's own machine
+// judgement that the branch is not landable whatever the agent concluded
+// — a committed build artifact, say, which is a fact about the tree
+// rather than an opinion about the code, or a research document its own
+// floor rejects. "blocked" is every other refusal of a pass: the
+// environment saying the plan could not be executed here, a live check
+// that failed during the run, or a promise the plan made — an invariant
+// never answered, a golden pinned by nothing on the branch — left
+// unmet. A fail floor outranks a blocked one: an environment gap can be
+// resolved by running somewhere else, while the branch shipping a binary
+// is true everywhere.
 func SessionVerdict(snap engine.Snapshot) Verdict {
 	var raw Verdict
 	if v := FromTool(snap.Verdict); v != Unclear {
@@ -158,6 +162,24 @@ func BlockedByEnvironment(snap engine.Snapshot) bool {
 		raw = Parse(LastAssistant(snap))
 	}
 	return raw == Blocked && snap.VerdictFloor != "fail"
+}
+
+// FloorOverruledPass reports that a session's Blocked verdict is gummi's
+// floor refusing a pass the verifier itself wrote, rather than the
+// verifier's own "this machine cannot run the plan". Both reach every
+// caller as the same Blocked verdict (SessionVerdict), and only one of
+// them is a verify that failed: an overruled pass ran and passed, and
+// the surfaces that report the stop word it as the overrule it is —
+// naming the floor's reason — instead of as a failure or an environment
+// gap. The complement of BlockedByEnvironment within the blocked
+// verdicts: a raw Blocked that a floor left alone is the environment's
+// own word, and reads as one.
+func FloorOverruledPass(snap engine.Snapshot) bool {
+	raw := FromTool(snap.Verdict)
+	if raw == Unclear {
+		raw = Parse(LastAssistant(snap))
+	}
+	return raw == Pass && snap.VerdictFloor == "blocked"
 }
 
 // LastAssistant returns the content of the most recent assistant message

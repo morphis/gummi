@@ -210,6 +210,29 @@ func (s *Session) generation() string {
 	return strconv.FormatInt(s.startedAt.UnixNano(), 10)
 }
 
+// The verdict floor's kinds: which deterministic floor holds a session's
+// one floor slot. Recorded beside the floor and its reason because the
+// reason string alone cannot say what re-derives the block — and one
+// kind can. The promise floor re-reads the artifact it cited, so a plan
+// corrected after the stamp clears the overrule at the next read
+// instead of holding the card for a full verify re-run; the others are
+// facts about a moment (a check that failed, a probe that probed,
+// a document as it stood) and keep their semantics.
+const (
+	// FloorOmission: a bug's verify passed without exercising any [env:]
+	// live check while a prerequisite probed present.
+	FloorOmission = "env-omission"
+	// FloorChecks: a live gummi-check failed during the verify run.
+	FloorChecks = "checks"
+	// FloorHygiene: the branch ships a build artifact (diff hygiene).
+	FloorHygiene = "hygiene"
+	// FloorPromise: a promise the plan made — an invariant verify never
+	// answered, or a golden pinned by nothing on the branch — is unmet.
+	FloorPromise = "promise"
+	// FloorDocument: the research document floor failed.
+	FloorDocument = "document"
+)
+
 // Snapshot is an immutable view of a session's state, safe to render.
 type Snapshot struct {
 	Feature     domain.Feature
@@ -236,6 +259,12 @@ type Snapshot struct {
 	Verdict            string        // review verdict via submit_verdict, if submitted
 	VerdictFloor       string        // deterministic ceiling applied before returning the stage verdict
 	VerdictFloorReason string        // human-readable reason for the floor, if any
+	// VerdictFloorKind names which floor holds the slot (FloorPromise,
+	// FloorOmission, …). It is what lets a reader tell a floor it can
+	// re-derive from the one it read at the idle the stage ended: a
+	// promise floor re-runs against the artifact on read, so correcting
+	// the plan clears the overrule without a new verify session.
+	VerdictFloorKind string
 	// Exhausted is true when this session stopped because the card's
 	// envelope ran out, not because it finished. Both states persist as
 	// StateDone, and only this tells them apart.
@@ -389,11 +418,30 @@ type Session struct {
 	envProbes []envprobe.Result
 
 	// verdictFloor is a deterministic ceiling applied to the raw agent
-	// verdict. Currently only "blocked" is used, and only for a bug whose
-	// Verify finish omitted every [env:] live check while a prerequisite
-	// probed present. It only ever downgrades Pass -> Blocked.
+	// verdict. Several floors share the one slot, last writer wins at the
+	// verify idle: a live check failure (FloorChecks), a shipped build
+	// artifact (FloorHygiene), a bug whose Verify finish omitted every
+	// [env:] live check while a prerequisite probed present
+	// (FloorOmission), an unmet plan promise (FloorPromise), and a
+	// research document failing its floor (FloorDocument). They only ever
+	// downgrade — Pass -> Blocked, or either -> Fail — and the downgrade
+	// itself happens in verdict.SessionVerdict from the stamped floor.
 	verdictFloor       string
+	verdictFloorKind   string
 	verdictFloorReason string
+	// The promise floor's re-check bookkeeping, cached at stamp time so
+	// the read path can re-run the check without re-entering locate or
+	// the worktree manager: where the branch and the artifact live, and
+	// the artifact's mtime+size signature as of the last check. An
+	// unchanged signature serves a read as-is with no grep; a changed one
+	// re-checks once and records the new signature. All three are cleared
+	// by any other stamper (the slot is one) and left empty for floors
+	// that never re-check. A session restored from persistence has the
+	// paths re-armed by Restore and no signature, so its first read
+	// re-checks once, then follows the guard.
+	verdictFloorWorkDir  string
+	verdictFloorSpecPath string
+	verdictFloorSig      string
 
 	// mcpTeardown releases the session's MCP inbound endpoint (closes the
 	// listener, joins its goroutines, removes the socket file) exactly
@@ -428,9 +476,30 @@ type Session struct {
 }
 
 // Snapshot returns a render-safe copy of the session's state.
+//
+// A promise-floor stamp is re-checked here, on the read path. The floor
+// stamps once, at the idle that ends the stage, and nothing else in a
+// live session ever revisits that verdict — so a plan corrected after
+// the stamp stayed blocked until a fresh verify session ran, even though
+// the condition is a pure read of the artifact and the branch. The check
+// runs only when the artifact's signature has moved since the last check
+// (a still-unmet card never greps per frame), runs outside s.mu — a git
+// grep has no business under the session lock — and takes a short write
+// afterwards that clears the stamp only if it still holds: a stamper
+// that fired meanwhile wins.
 func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	re := s.promiseRecheckArmedLocked()
+	snap := s.snapshotLocked()
+	s.mu.Unlock()
+	if re != nil {
+		s.settlePromiseFloor(re, &snap)
+	}
+	return snap
+}
+
+// snapshotLocked is the render-safe copy itself, taken with s.mu held.
+func (s *Session) snapshotLocked() Snapshot {
 	return Snapshot{
 		Feature:            s.Feature,
 		Role:               s.Role,
@@ -451,12 +520,66 @@ func (s *Session) Snapshot() Snapshot {
 		PendingAsk:         s.pendingAsk,
 		Verdict:            s.verdict,
 		VerdictFloor:       s.verdictFloor,
+		VerdictFloorKind:   s.verdictFloorKind,
 		VerdictFloorReason: s.verdictFloorReason,
 		Exhausted:          s.exhausted,
 		Err:                s.err,
 		EnvProbes:          append([]envprobe.Result(nil), s.envProbes...),
 		StartedAt:          s.startedAt,
 	}
+}
+
+// settlePromiseFloor applies one read-path re-check: it runs the bounded
+// promises check against the paths cached at stamp time, then takes a
+// short write that records the new signature and either lifts the stamp
+// (the promises now check out — and the env-omission floor is re-derived
+// before settling, so a clear does not erase a block that still holds)
+// or refreshes the reason to what the artifact now says. A read error is
+// no opinion and keeps the stamp. The copy is patched to the post-check
+// state, so the read that did the work reports it.
+func (s *Session) settlePromiseFloor(re *promiseRecheck, snap *Snapshot) {
+	rep, ok := runPromiseRecheck(re)
+	s.mu.Lock()
+	cleared := false
+	if s.verdictFloorKind == FloorPromise && s.verdictFloor == "blocked" &&
+		s.verdictFloorReason == re.reason {
+		// nobody re-stamped the slot while the check ran; a concurrent
+		// stamper's reason would differ from the one checked here
+		s.verdictFloorSig = artifactSignature(re.specPath)
+		if ok && !rep.blocks() {
+			s.verdictFloor, s.verdictFloorReason, s.verdictFloorKind = "", "", ""
+			s.verdictFloorWorkDir, s.verdictFloorSpecPath, s.verdictFloorSig = "", "", ""
+			cleared = true
+		} else if ok {
+			s.verdictFloorReason = rep.reason()
+		}
+	}
+	s.patchFloorFields(snap)
+	s.mu.Unlock()
+	if !cleared {
+		return
+	}
+	s.appendActivity(promiseFloorLiftedLine)
+	// Re-derive the omission floor before settling: the floor is one slot
+	// and the stampers are last-writer-wins at the same verify idle, so
+	// the promise stamp may have been sitting on top of an env-omission
+	// block that still holds. Re-derived from the session's env probes and
+	// one read of the artifact — no grep — and nothing lands unsafe either
+	// way: the omission gate re-reads at Advance.
+	reStampOmissionFloor(s, re.specPath)
+	s.mu.Lock()
+	s.patchFloorFields(snap)
+	s.mu.Unlock()
+}
+
+// patchFloorFields copies the session's current floor fields — and the
+// activity feed, which a lift appends to — onto a snapshot built before
+// the floor's state settled. Caller holds s.mu.
+func (s *Session) patchFloorFields(snap *Snapshot) {
+	snap.VerdictFloor = s.verdictFloor
+	snap.VerdictFloorKind = s.verdictFloorKind
+	snap.VerdictFloorReason = s.verdictFloorReason
+	snap.Activity = append([]string(nil), s.activity...)
 }
 
 // kickoffMessage returns the autonomous stage kickoff, with the user's
@@ -1002,11 +1125,54 @@ func (s *Session) setVerdict(v string) {
 	s.verdict = v
 }
 
-func (s *Session) setVerdictFloor(v, reason string) {
+// setVerdictFloor stamps the verdict floor: kind names which floor holds
+// the slot, v the ceiling it applies ("blocked"/"fail"), reason the
+// sentence a reader acts on. It replaces any stamp in the slot, floor
+// kind and re-check bookkeeping included — the slot is one and the
+// stampers are last-writer-wins.
+func (s *Session) setVerdictFloor(kind, v, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.setVerdictFloorLocked(kind, v, reason)
+}
+
+// setVerdictFloorLocked is setVerdictFloor for a caller already holding
+// s.mu.
+func (s *Session) setVerdictFloorLocked(kind, v, reason string) {
 	s.verdictFloor = v
+	s.verdictFloorKind = kind
 	s.verdictFloorReason = reason
+	s.verdictFloorWorkDir = ""
+	s.verdictFloorSpecPath = ""
+	s.verdictFloorSig = ""
+}
+
+// setPromiseVerdictFloor stamps the promises floor and caches what its
+// read-path re-check needs: the branch and artifact paths the check ran
+// against, and the artifact's signature as of this check, so a later
+// read re-runs it only when the artifact has moved.
+func (s *Session) setPromiseVerdictFloor(v, reason, workDir, specPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setVerdictFloorLocked(FloorPromise, v, reason)
+	s.verdictFloorWorkDir = workDir
+	s.verdictFloorSpecPath = specPath
+	s.verdictFloorSig = artifactSignature(specPath)
+}
+
+// cachePromiseFloorPaths arms a restored promise floor's re-check with
+// where its branch and artifact live. No signature is recorded — the
+// first read re-checks once, then follows the guard. A no-op for any
+// other floor in the slot, and for a session whose floor has already
+// been replaced.
+func (s *Session) cachePromiseFloorPaths(workDir, specPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.verdictFloorKind != FloorPromise {
+		return
+	}
+	s.verdictFloorWorkDir = workDir
+	s.verdictFloorSpecPath = specPath
 }
 
 // outlivePendingAsk cuts the open ask loose from the tool call that

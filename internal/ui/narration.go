@@ -492,6 +492,17 @@ func verifyStopped(in nextInput, art string) string {
 		return "Verify stopped on the '" + sanitize(in.failedCheck) + "' check." + loopBreaker(in)
 	}
 	if in.verdict == verdictBlocked {
+		// an overruled pass ran and passed: "could not run" is the one
+		// thing it did not do. Name the overrule, and for the promise
+		// floor the lever that clears it — meet or strike what the plan
+		// promised, and the overrule lifts at the next read.
+		if in.flooredPass && in.verdictFloorReason != "" {
+			s := "Verify was overruled: " + sanitize(in.verdictFloorReason)
+			if in.verdictFloorKind == engine.FloorPromise {
+				s += " Meet or strike the promise and the overrule clears without a re-run."
+			}
+			return s
+		}
 		if in.verdictFloorReason != "" {
 			return "Verify could not run: " + sanitize(in.verdictFloorReason) + "."
 		}

@@ -164,6 +164,19 @@ type nextInput struct {
 	// blocker instead of pointing vaguely at the artifact.
 	verdictFloorReason string
 
+	// verdictFloorKind names which floor holds the slot (engine.FloorPromise,
+	// FloorOmission, …). It separates a floor whose lever is the artifact
+	// it cited — the promise floor, where meeting or striking the promise
+	// clears the overrule on the next read — from one whose lever lives
+	// elsewhere.
+	verdictFloorKind string
+
+	// flooredPass marks a blocked verdict that is gummi's floor refusing
+	// a pass the verifier itself wrote (verdict.FloorOverruledPass):
+	// neither a verify that failed nor an environment gap, so the
+	// surfaces that report the stop word it as the overrule it is.
+	flooredPass bool
+
 	reviewRound   int    // automatic review→fix rounds burned so far
 	verifyBounces int    // verify→work bounces already burned (each one a failed verify)
 	failedCheck   string // first failing manual `v` check, "" if none
@@ -541,6 +554,8 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 			in.verdict = sessionVerdict(snap)
 		}
 		in.verdictFloorReason = snap.VerdictFloorReason
+		in.verdictFloorKind = snap.VerdictFloorKind
+		in.flooredPass = flooredPass(snap)
 		var rf *agent.RunFailure
 		in.backendNeverStarted = errors.As(snap.Err, &rf) && rf.FirstTurn
 		if words, out := agent.Unavailable(snap.Err); out {
@@ -1302,6 +1317,17 @@ func stageAnswers(in nextInput) []nextAction {
 			// "re-run verify" here is itself id "run" / key "enter" — the
 			// same collision the blockedGate branches above guard against
 			// — so this stays stopHere rather than stopOrResume too.
+			if in.flooredPass && in.verdictFloorKind == engine.FloorPromise {
+				// a pass the promise floor refused: the lever is the
+				// artifact it cited, and meeting or striking the promise
+				// clears the overrule at the next read — a re-run buys
+				// nothing the edit does not, and the landing gate
+				// re-reads the promises before anything lands anyway
+				return append([]nextAction{
+					nextStep("run", "enter", "re-run verify", "after meeting or striking the promise — a corrected plan clears the overrule without one"),
+					nextStep("advance", "g", "land anyway", "the landing gate re-reads the promises, so a plan that no longer makes the promise does not hold"),
+				}, stopHere(in)...)
+			}
 			return append([]nextAction{
 				nextStep("run", "enter", "re-run verify", "after fixing the environment or tagging the plan's env-bound steps"),
 				nextStep("advance", "g", "land anyway", "only if you verified it by hand — verify never proved this build"),

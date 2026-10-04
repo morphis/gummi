@@ -222,6 +222,10 @@ func (e *Engine) promiseGateBlocksAdvance(ctx context.Context, f domain.Feature)
 //
 // Same one-way shape as gateVerifyVerdict: it only ever downgrades a raw
 // pass, and a card with no promises in its artifact is untouched.
+//
+// The paths the check ran against are cached on the stamp, because the
+// floor is re-checked on the read path (Session.Snapshot) and must not
+// re-enter locate or the worktree manager from there.
 func (e *Engine) gatePromiseVerdict(s *Session) {
 	if s == nil || s.Feature.Stage != domain.StageVerify {
 		return
@@ -242,8 +246,97 @@ func (e *Engine) gatePromiseVerdict(s *Session) {
 	if !rep.blocks() {
 		return
 	}
-	s.setVerdictFloor("blocked", rep.reason())
+	s.setPromiseVerdictFloor("blocked", rep.reason(), workDir, specPath)
 	s.appendActivity("Pass downgraded to blocked: " + rep.reason())
+}
+
+// promiseFloorLiftedLine is the restoration line the read-path re-check
+// appends when a corrected artifact lifts the stamp — the mirror of the
+// downgrade line the stamper appends, so the activity log says the
+// overrule lifted as plainly as it said it landed.
+const promiseFloorLiftedLine = "Pass restored: the promise floor's condition no longer holds — " +
+	"the plan's promises check out against the branch as it stands."
+
+// promiseRecheck carries one pending read-path re-check of a promise
+// floor: the paths cached at stamp time and the reason as last recorded
+// (the concurrency guard — a stamp replaced while the check ran has a
+// different reason, and the check's answer is not that stamp's to keep
+// or lift).
+type promiseRecheck struct {
+	workDir  string
+	specPath string
+	reason   string
+}
+
+// promiseRecheckArmedLocked reports a promise-floor re-check waiting to
+// run, or nil when the read can be served as-is: no promise floor in the
+// slot, no cached paths to check against (a restored session Restore
+// could not locate), or an artifact whose mtime+size signature has not
+// moved since the last check — the unchanged case is the common one, and
+// it never greps. Caller holds s.mu.
+func (s *Session) promiseRecheckArmedLocked() *promiseRecheck {
+	if s.verdictFloorKind != FloorPromise || s.verdictFloor == "" {
+		return nil
+	}
+	if s.verdictFloorWorkDir == "" || s.verdictFloorSpecPath == "" {
+		return nil
+	}
+	if artifactSignature(s.verdictFloorSpecPath) == s.verdictFloorSig {
+		return nil
+	}
+	return &promiseRecheck{
+		workDir:  s.verdictFloorWorkDir,
+		specPath: s.verdictFloorSpecPath,
+		reason:   s.verdictFloorReason,
+	}
+}
+
+// runPromiseRecheck runs the bounded promises check outside any session
+// lock. ok is false when the artifact cannot be read — no opinion, and
+// the caller keeps the stamp rather than clearing on silence
+// (checkPromises itself reports an unreadable artifact as an empty,
+// all-met report, which here would read as a clear).
+func runPromiseRecheck(re *promiseRecheck) (rep promiseReport, ok bool) {
+	if _, err := os.ReadFile(re.specPath); err != nil {
+		return promiseReport{}, false
+	}
+	return checkPromises(context.Background(), re.specPath, re.workDir), true
+}
+
+// artifactSignature is the artifact's mtime+size identity: cheap to take
+// on every read, and it moves when and only when the file a floor was
+// checked against has been rewritten. An unreadable artifact signs "".
+func artifactSignature(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", fi.ModTime().UnixNano(), fi.Size())
+}
+
+// reStampOmissionFloor re-derives the env-omission floor after a promise
+// re-check lifted the stamp. It is gateVerifyVerdict's condition, run
+// against the artifact as it now stands: the session's env probes and
+// one read, no grep. A read error is no opinion and leaves the slot
+// empty — the omission gate re-reads at Advance, which is the safety net
+// either way.
+func reStampOmissionFloor(s *Session, specPath string) {
+	if s.Feature.Stage != domain.StageVerify || s.Feature.Kind != domain.KindBug {
+		return
+	}
+	if !hasCleanPresentProbe(s) {
+		return
+	}
+	content, err := os.ReadFile(specPath)
+	if err != nil {
+		return
+	}
+	reason := omissionGateReason(s.Feature.Kind, true, string(content))
+	if reason == "" {
+		return
+	}
+	s.setVerdictFloor(FloorOmission, "blocked", reason)
+	s.appendActivity("Pass downgraded to blocked: present prerequisite + zero [env:] live checks + no waiver")
 }
 
 // changedPaths lists the paths f's branch changes, or nil when the

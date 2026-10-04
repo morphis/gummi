@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // promiseRepo makes a git repo with one tracked file, so git grep has
@@ -191,5 +195,80 @@ func TestGrammarSweepHintFiresAtTheSeam(t *testing.T) {
 	quiet := "## Problem\nThe status bar loses its badge on resize.\n"
 	if got := grammarSweepHint(quiet, []string{"internal/ui/board.go"}); got != "" {
 		t.Errorf("a UI card was asked for a grammar sweep:\n%s", got)
+	}
+}
+
+// The promise floor's stamp has to survive a restart as more than a
+// ceiling: with its kind restored, a corrected artifact clears the
+// overrule at the next read in the new process too — no fresh verify
+// session, and no stamp holding a card whose promises now check out.
+func TestARestoredPromiseFloorStillRechecksTheArtifactItCited(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := feature(1, "golden promise", domain.StageVerify)
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+
+	// the artifact pins a golden nothing on the branch contains — the
+	// shape the floor stamps at the verify idle
+	artifact := filepath.Join(ws.Root, f.ArtifactPath())
+	const golden = "- golden `TestParse_Error[\"name eq c7)\"] = \"unbalanced\"` because the stack is at its root.\n"
+	body := "# " + string(f.ID) + "\n\n## Plan claims\n\n" + golden +
+		"\n## Verification plan\n\nThe suite ran clean on the branch.\n"
+	if err := os.MkdirAll(filepath.Dir(artifact), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(artifact, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SaveSession(ctx, state.SessionSnapshot{
+		Feature: f.ID, Stage: domain.StageVerify, Role: "reviewer",
+		Flavor: "stage", State: "done",
+		Verdict: "pass", VerdictFloor: "blocked",
+		VerdictFloorKind:   FloorPromise,
+		VerdictFloorReason: "the plan's own promises are not met.",
+		Transcript: []state.SessionMessage{
+			{Author: "assistant", Content: "all green\nVERDICT: pass"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	e := persistEngine(t, agent.NewFake("x"), ws, store, wt)
+	if err := e.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := e.Get(f.ID)
+	if s == nil {
+		t.Fatal("session not restored")
+	}
+
+	// the stamp came back with its kind, and the artifact unchanged
+	// reads exactly as it did before the restart
+	snap := s.Snapshot()
+	if snap.VerdictFloor != "blocked" || snap.VerdictFloorKind != FloorPromise {
+		t.Fatalf("restored floor = %q kind %q, want blocked/%s — the agent's pass stands unchallenged",
+			snap.VerdictFloor, snap.VerdictFloorKind, FloorPromise)
+	}
+
+	// correcting the artifact the floor cited — strike the golden —
+	// clears the overrule at the next read
+	if err := os.WriteFile(artifact, []byte(strings.Replace(body, golden, "", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snap = s.Snapshot()
+	if snap.VerdictFloor != "" || snap.VerdictFloorKind != "" {
+		t.Errorf("after the golden was struck the floor still reads %q (%s) — the restored stamp survived the artifact it cited",
+			snap.VerdictFloor, snap.VerdictFloorKind)
+	}
+	// the raw verdict the agent wrote is what reads now: the same
+	// verdict.SessionVerdict mapping that turned it into Blocked while
+	// the floor stood has nothing left to apply
+	if snap.Verdict != "pass" {
+		t.Errorf("after the golden was struck the verdict reads %q, want the agent's own pass", snap.Verdict)
+	}
+	if !strings.Contains(strings.Join(snap.Activity, "\n"), "Pass restored") {
+		t.Errorf("the restoration is not in the activity log:\n%s", strings.Join(snap.Activity, "\n"))
 	}
 }

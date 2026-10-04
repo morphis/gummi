@@ -177,8 +177,14 @@ func (m *Shell) webDecisionWord(kind webapi.DecisionKind, r featureRow) (word, t
 		// writes a beat after the gate is raised and a research card
 		// never gets at all — so a pass the question called "verification
 		// passed" was headed "verify failed" above it.
-		if r.F.Stage == domain.StageVerify && m.nextInputFor(r).verdict == verdictPass {
+		in := m.nextInputFor(r)
+		if in.verdict == verdictPass {
 			return "verify passed", "ok"
+		}
+		// a pass gummi's own floor refused is not a verify that failed:
+		// it ran and passed, and what stopped it is the overrule
+		if in.flooredPass {
+			return "verify overruled", "warn"
 		}
 		return "verify failed", "err"
 	case webapi.DecisionConflict:

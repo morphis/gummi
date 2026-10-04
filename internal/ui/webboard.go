@@ -92,7 +92,7 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		// needs-you outranks busy, the TUI row's own precedence: a person
 		// can act on a raised gate, not on a check still running under it.
 		row.Status = webapi.StatusNeeds
-		row.Needs = webNeeds(it, f.Stage)
+		row.Needs = webNeeds(it, f.Stage, m.flooredVerifyPass(f.ID))
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
@@ -123,8 +123,10 @@ func webKind(f domain.Feature) domain.Kind {
 
 // webNeeds projects a needs-you item, with the word the rail heads it
 // with: a failed verify is raised as an escalated gate, and reads as what
-// it is rather than as the gate it was raised as.
-func webNeeds(it attnItem, stage domain.Stage) *webapi.RowNeeds {
+// it is rather than as the gate it was raised as. flooredPass marks a
+// stop that is a pass gummi's own floor refused rather than a verify that
+// failed — the word says the overrule, not a failure that never happened.
+func webNeeds(it attnItem, stage domain.Stage, flooredPass bool) *webapi.RowNeeds {
 	n := &webapi.RowNeeds{Question: it.Text}
 	switch it.Kind {
 	case attnFailure:
@@ -141,11 +143,27 @@ func webNeeds(it attnItem, stage domain.Stage) *webapi.RowNeeds {
 		if it.Escalated {
 			n.Color = "warn"
 			if stage == domain.StageVerify {
-				n.Word, n.Color = "verify failed", "err"
+				if flooredPass {
+					n.Word = "verify overruled"
+				} else {
+					n.Word, n.Color = "verify failed", "err"
+				}
 			}
 		}
 	}
 	return n
+}
+
+// flooredVerifyPass reports whether a card's raised verify stop is a pass
+// gummi's own floor refused rather than a verify that failed. False with
+// no session — the stop's wording, which names the overrule when there is
+// one, still reaches the row through the item's text.
+func (m *Shell) flooredVerifyPass(id domain.FeatureID) bool {
+	s := m.sessionFor(id)
+	if s == nil {
+		return false
+	}
+	return flooredPass(s.Snapshot())
 }
 
 // gateWord names a stage's gate the way the page heads it.

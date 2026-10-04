@@ -449,6 +449,12 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			}
 			return "verification passed — decide how this work leaves gummi."
 		}
+		// an overruled pass names the overrule: verify ran and passed,
+		// and the floor's reason is the thing to act on — "stopped here"
+		// would read as a verify that found something wrong.
+		if in.flooredPass && in.verdictFloorReason != "" {
+			return "verify was overruled: " + in.verdictFloorReason + " Choose what happens next."
+		}
 		return "verification stopped here — choose what happens next."
 	case decisionGate:
 		// "ready for your decision" is true of a gate the critique

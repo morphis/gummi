@@ -98,8 +98,11 @@ func (e *Engine) saveLocked(s *Session) {
 		Verdict:      snap.Verdict,
 		// gummi's own ceiling on that verdict travels with it: a verdict
 		// saved without the floor that overruled it reads, on the next
-		// process, as the agent's unchallenged word.
+		// process, as the agent's unchallenged word. The kind rides too:
+		// it is what makes a restored promise floor re-checkable instead
+		// of a stale stamp only a fresh verify run could clear.
 		VerdictFloor:       snap.VerdictFloor,
+		VerdictFloorKind:   snap.VerdictFloorKind,
 		VerdictFloorReason: snap.VerdictFloorReason,
 		// And so does the budget stop. A session that ran out is saved as
 		// StateDone like any other finished one, so without this a new
@@ -409,9 +412,23 @@ func (e *Engine) Restore(ctx context.Context) error {
 		s.verdict = snap.Verdict
 		// restored alongside the verdict it overrules, so the rehydrated
 		// session judges the stage the way the live one did — and can still
-		// say which check made it say so.
+		// say which check made it say so. The kind comes back with them: a
+		// promise floor restored without its kind could never be re-checked,
+		// and the stale stamp this floor exists to avoid would survive every
+		// restart.
 		s.verdictFloor = snap.VerdictFloor
+		s.verdictFloorKind = snap.VerdictFloorKind
 		s.verdictFloorReason = snap.VerdictFloorReason
+		// A restored promise floor must stay re-checkable across the restart
+		// it just survived, so arm it with where its branch and artifact live.
+		// Best-effort like the restore itself: a locate that fails (the
+		// worktree gone) leaves the paths empty, the read path keeps the
+		// stamp, and the landing gate's own re-read stays the last word.
+		if snap.VerdictFloorKind == FloorPromise {
+			if workDir, specPath, lerr := e.locate(ctx, f); lerr == nil {
+				s.cachePromiseFloorPaths(workDir, specPath)
+			}
+		}
 		// and the budget stop, so the restored session still knows it was
 		// cut off rather than finished
 		s.exhausted = snap.Exhausted
