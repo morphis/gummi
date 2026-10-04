@@ -187,6 +187,14 @@ type ChangesRequest struct {
 	Confirm string `json:"confirm,omitempty"`
 }
 
+// AnnotationEditRequest is PATCH /api/cards/{id}/diff/annotations/{aid}:
+// the comment's new words. Where it is anchored does not change, and a
+// comment pulled from a pull request is GitHub's words, so it is refused.
+// Answers Diff.
+type AnnotationEditRequest struct {
+	Comment string `json:"comment"`
+}
+
 // AnnotationResolveRequest is the optional body of POST
 // /api/cards/{id}/diff/annotations/{aid}/resolve: Resolved false opens
 // the comment again. With no body the comment is resolved. Answers Diff,

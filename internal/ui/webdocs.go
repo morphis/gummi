@@ -698,6 +698,27 @@ func (d *WebDocs) DeleteAnnotation(ctx context.Context, aid int64) (webapi.Diff,
 	return d.Diff(ctx, "")
 }
 
+// EditAnnotation rewrites one of the card's comments' words. A comment
+// pulled from the linked pull request is a reviewer's words, read from
+// GitHub: it is resolved or deleted here, never rewritten.
+func (d *WebDocs) EditAnnotation(ctx context.Context, aid int64, comment string) (webapi.Diff, error) {
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		return webapi.Diff{}, invalid("a comment needs some text")
+	}
+	a, err := d.annotation(ctx, aid)
+	if err != nil {
+		return webapi.Diff{}, err
+	}
+	if a.SourceRef != "" {
+		return webapi.Diff{}, invalid("a comment pulled from the pull request is the reviewer's: resolve or delete it instead")
+	}
+	if err := d.store.SetDiffAnnotationComment(ctx, aid, comment); err != nil {
+		return webapi.Diff{}, err
+	}
+	return d.Diff(ctx, "")
+}
+
 // ResolveAnnotation marks one of the card's comments resolved, or open
 // again (the diff surface's x, which toggles; a page says which it
 // means, so two viewers pressing it at once agree on the outcome).

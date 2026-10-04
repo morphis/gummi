@@ -38,6 +38,7 @@ func (s *Server) docsRoutes() {
 	s.api("GET /api/cards/{id}/diff", s.handleDiff)
 	s.api("POST /api/cards/{id}/diff/annotations", s.handleAnnotate)
 	s.api("DELETE /api/cards/{id}/diff/annotations/{aid}", s.handleAnnotationDelete)
+	s.api("PATCH /api/cards/{id}/diff/annotations/{aid}", s.handleAnnotationEdit)
 	s.api("POST /api/cards/{id}/diff/annotations/{aid}/resolve", s.handleAnnotationResolve)
 	s.api("POST /api/cards/{id}/diff/changes", s.handleDiffChanges)
 	s.api("GET /api/cards/{id}/pr", func(w http.ResponseWriter, r *http.Request) { s.handlePR(w, r, prs) })
@@ -286,6 +287,29 @@ func (s *Server) handleAnnotationDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	diff, err := d.DeleteAnnotation(r.Context(), aid)
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	s.changed(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, diff)
+}
+
+func (s *Server) handleAnnotationEdit(w http.ResponseWriter, r *http.Request) {
+	aid, ok := annotationID(w, r)
+	if !ok {
+		return
+	}
+	var req webapi.AnnotationEditRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	diff, err := d.EditAnnotation(r.Context(), aid, req.Comment)
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return

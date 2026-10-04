@@ -70,6 +70,14 @@ func (s *Store) SetDiffAnnotationResolved(ctx context.Context, annID int64, reso
 	return err
 }
 
+// SetDiffAnnotationComment rewrites an annotation's comment, leaving its
+// anchor, author and resolved flag as they were.
+func (s *Store) SetDiffAnnotationComment(ctx context.Context, annID int64, comment string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE diff_annotations SET comment=? WHERE id=?`, comment, annID)
+	return err
+}
+
 // DeleteDiffAnnotation removes an annotation.
 func (s *Store) DeleteDiffAnnotation(ctx context.Context, annID int64) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM diff_annotations WHERE id=?`, annID)

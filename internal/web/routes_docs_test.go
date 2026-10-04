@@ -566,6 +566,29 @@ func TestDocsDiffParsesAndAnnotates(t *testing.T) {
 		t.Errorf("after reopen = %+v", res.Annotations)
 	}
 
+	// an edit changes the words and nothing else; it needs some, and a
+	// thread pulled from the pull request is the reviewer's to keep
+	var edited webapi.Diff
+	if st := b.send(http.MethodPatch, fmt.Sprintf("/api/cards/FD-001/diff/annotations/%d", a.ID), `{"comment":" why two funcs? "}`, &edited); st != http.StatusOK {
+		t.Fatalf("edit = %d", st)
+	}
+	if e := edited.Annotations[0]; e.Comment != "why two funcs?" || e.Idx != a.Idx || e.Excerpt != a.Excerpt || e.By != a.By || e.Resolved {
+		t.Errorf("after edit = %+v", e)
+	}
+	if st := b.send(http.MethodPatch, fmt.Sprintf("/api/cards/FD-001/diff/annotations/%d", a.ID), `{"comment":"  "}`, nil); st != http.StatusBadRequest {
+		t.Errorf("an empty edit = %d, want 400", st)
+	}
+	pulled, err := b.store.AddDiffAnnotation(context.Background(), domain.DiffAnnotation{Feature: b.f.ID, File: "main.go", Anchor: "x", Comment: "@octo: nit", SourceRef: "thread-1"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := b.send(http.MethodPatch, fmt.Sprintf("/api/cards/FD-001/diff/annotations/%d", pulled), `{"comment":"mine now"}`, nil); st != http.StatusBadRequest {
+		t.Errorf("editing a pulled thread = %d, want 400", st)
+	}
+	if err := b.store.DeleteDiffAnnotation(context.Background(), pulled); err != nil {
+		t.Fatal(err)
+	}
+
 	// a new commit: only what it changed is marked since the first
 	writeFile(t, filepath.Join(b.wt, "main.go"), "package main\n\nfunc a() { b() }\nfunc b() {}\n\n// end\nfunc c() {}\n")
 	gitIn(t, b.wt, "commit", "-qam", "more")
