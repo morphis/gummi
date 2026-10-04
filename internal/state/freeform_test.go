@@ -158,3 +158,30 @@ func TestASessionRecordsTheSpecItWentOnAs(t *testing.T) {
 		t.Error("a feature card recorded a spec it went on as")
 	}
 }
+
+// TestACardKeepsTheSkillsItWasCreatedWith: the library skills picked for
+// a card are read back as written, in order, and a card with none picked
+// reads back with none.
+func TestACardKeepsTheSkillsItWasCreatedWith(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := freeformFeat(1, "review the branch")
+	f.Skills = []string{"skill-review", "skill-deploy"}
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Skills) != 2 || got.Skills[0] != "skill-review" || got.Skills[1] != "skill-deploy" {
+		t.Fatalf("skills read back as %q, want [skill-review skill-deploy]", got.Skills)
+	}
+	plain := freeformFeat(2, "tidy the cli help text")
+	if err := s.CreateFeature(ctx, plain); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetFeature(ctx, plain.ID); err != nil || got.Skills != nil {
+		t.Fatalf("a card with no skills read back %q (%v), want none", got.Skills, err)
+	}
+}

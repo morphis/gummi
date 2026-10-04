@@ -29,6 +29,9 @@ type Card struct {
 	// resolved the way its next turn will resolve them; nil on a card in
 	// the workflow, whose stages take theirs from its profile.
 	Session *SessionModel `json:"session,omitempty"`
+	// Skills are the library skills the card was created with; empty
+	// means its sessions get the whole library.
+	Skills []string `json:"skills,omitempty"`
 	// Files is where the page may open the card's worktree files from;
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`

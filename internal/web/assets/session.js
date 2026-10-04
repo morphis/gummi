@@ -102,6 +102,7 @@ function pickedOnly (d) {
   for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
   if (d.envelope != null) out.envelope = d.envelope
   if (d.mainCheckout) out.mainCheckout = true
+  if (d.skills?.length) out.skills = d.skills
   return out
 }
 
@@ -126,6 +127,7 @@ export async function startSession (text, atts = []) {
   if (d.mainCheckout) req.mainCheckout = true
   else if (d.base) req.base = d.base
   if (atts.length) req.attachments = atts
+  if (d.skills?.length) req.skills = d.skills
   const c = await post('/api/cards', req)
   set({ sessionDraft: null })
   await ctx.refreshBoard?.()
@@ -250,6 +252,44 @@ function render () {
     onclick: () => (pop?.kind === 'budget' ? closePop() : openBudget(bud))
   }, 'budget ', h('b', null, budgetWord(d.envelope)))
   row.append(bud)
+  const skills = form?.skills || []
+  if (skills.length) {
+    const n = (d.skills || []).length
+    const sk = h('button', {
+      class: 'dsel dbtn', type: 'button', testid: 'draft-skills', 'aria-haspopup': 'dialog',
+      title: 'Which library skills the session gets',
+      onclick: () => (pop?.kind === 'skills' ? closePop() : openSkills(sk))
+    }, 'skills ', h('b', null, n === 0 ? 'all' : n === 1 ? labelOf(d.skills[0]) : `${n} picked`))
+    row.append(sk)
+  }
+}
+
+function labelOf (id) {
+  return (form?.skills || []).find(s => s.value === id)?.label || id
+}
+
+// openSkills picks the library skills a new session gets. None picked is
+// the whole library; any picked are the only ones it gets, and its agent
+// is told to use them.
+function openSkills (anchor) {
+  const picked = new Set(state.sessionDraft.skills || [])
+  // the draft is updated in place, not through set: a re-render would
+  // replace the button this popover hangs from while it is open
+  const save = () => {
+    state.sessionDraft.skills = [...picked]
+    const b = anchor.querySelector('b')
+    if (b) b.textContent = picked.size === 0 ? 'all' : picked.size === 1 ? labelOf([...picked][0]) : `${picked.size} picked`
+  }
+  const el = h('div', { class: 'spop skillpop', role: 'dialog', 'aria-label': 'Skills for the new session', testid: 'draft-skills-pop' },
+    h('div', { class: 'fl' }, 'Skills for the new session'),
+    h('div', { class: 'cpicks' }, (form?.skills || []).map(s => h('label', { class: 'cpick skill', title: s.detail || s.label },
+      h('input', {
+        type: 'checkbox', checked: picked.has(s.value), testid: `draft-skill-${s.value}`,
+        onchange: (e) => { if (e.target.checked) picked.add(s.value); else picked.delete(s.value); save() }
+      }),
+      h('span', { class: 't' }, s.label), s.detail ? h('span', { class: 's' }, s.detail) : null))),
+    h('p', { class: 'fh' }, 'Ticked skills are the only ones the agent gets, and it is told to use them. Leave all unticked to give it the whole library.'))
+  openPop('skills', anchor, el, { alignLeft: true })
 }
 
 // ---- popovers ----

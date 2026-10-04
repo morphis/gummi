@@ -331,6 +331,7 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	st.card.Actions = m.webActions(r)
 	st.card.Composer = m.webComposer(r, "")
 	st.card.Session = m.webSessionOf(r.F)
+	st.card.Skills = append([]string(nil), r.F.Skills...)
 	return st, true
 }
 
@@ -731,9 +732,20 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	if line == "" {
 		line = "…"
 	}
+	images := m.engine != nil && m.engine.SessionTakesImages(context.Background(), r.F.ID)
+	skill := ""
+	if out, id, ok, problem := m.expandSkill(line); ok {
+		if problem != "" {
+			return webapi.Composer{Route: webapi.RouteBlocked, Says: problem, Images: images}
+		}
+		line = out
+		skill = ", asking it to use the " + id + " skill"
+	}
 	c := m.classifyThreadLine(r, line, func() *threadDecision { return m.openDecision(r) })
 	route, says := m.webLineRoute(r, line, c)
-	images := m.engine != nil && m.engine.SessionTakesImages(context.Background(), r.F.ID)
+	if says != "" && skill != "" {
+		says += skill
+	}
 	// an answer route is either an ask's reply, which answers at once, or
 	// words going with a stop's answer, which are read first (webLineRoute)
 	out := webapi.Composer{Route: route, Says: says, Images: images, Read: route == webapi.RouteAnswer && c.route != lineAskAnswer}

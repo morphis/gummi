@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentplugins"
@@ -127,14 +128,23 @@ func skillRootList() string {
 // the backend cannot honor it. The warning is the point: silence here
 // would look exactly like a skill whose instructions the model chose to
 // ignore.
-func (e *Engine) skillDirsFor(ag skillCapable, backend string) []string {
+//
+// picked are the library skills the card was created with: empty is the
+// whole library, anything else is only those. Skills configured under
+// `skills:` are forwarded either way — they describe the environment,
+// not the work.
+func (e *Engine) skillDirsFor(ag skillCapable, backend string, picked []string) []string {
 	dirs := e.forwardedSkillDirs()
 	if e.cfg.Workspace.Root != "" {
-		managed, err := agentplugins.SkillDirs(e.cfg.Workspace.Root)
+		managed, missing, err := agentplugins.PickedSkillDirs(e.cfg.Workspace.Root, picked)
 		if err != nil {
 			e.warn(fmt.Sprintf("agent plugin skills: %v", err))
 		} else {
 			dirs = append(dirs, managed...)
+		}
+		if len(missing) > 0 {
+			e.warn(fmt.Sprintf("agent plugin skills: %s picked for this card but no longer in the library",
+				strings.Join(missing, ", ")))
 		}
 	}
 	if len(dirs) == 0 {
@@ -145,6 +155,48 @@ func (e *Engine) skillDirsFor(ag skillCapable, backend string) []string {
 		return nil
 	}
 	return uniqueDirs(dirs)
+}
+
+// pickedSkillsHint tells a session which library skills the person
+// picked for its card, so the model reaches for them rather than leaving
+// them as a description it may or may not match. Nothing is said when
+// nothing was picked, or when none of the skills reached the session.
+//
+// Backends name a forwarded skill differently — by its SKILL.md name, by
+// its directory, under a plugin namespace — so each one is named by all
+// three handles: its name, its library id and its SKILL.md.
+func (e *Engine) pickedSkillsHint(picked, dirs []string) string {
+	if len(picked) == 0 || len(dirs) == 0 || e.cfg.Workspace.Root == "" {
+		return ""
+	}
+	// a library skill's directory is named by its id
+	reached := make(map[string]string, len(dirs))
+	for _, d := range dirs {
+		reached[filepath.Base(d)] = d
+	}
+	names := map[string]string{}
+	if lib, err := agentplugins.Skills(e.cfg.Workspace.Root); err == nil {
+		for _, s := range lib {
+			names[s.ID] = s.Name
+		}
+	}
+	var lines []string
+	for _, id := range picked {
+		dir, ok := reached[id]
+		if !ok {
+			continue
+		}
+		name := names[id]
+		if name == "" {
+			name = id
+		}
+		lines = append(lines, fmt.Sprintf("- %q (library id `%s`, instructions in `%s`)", name, id, filepath.Join(dir, "SKILL.md")))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "The person picked these skills for this card. Load each one and follow it wherever it applies to the work:\n" +
+		strings.Join(lines, "\n")
 }
 
 func uniqueDirs(dirs []string) []string {

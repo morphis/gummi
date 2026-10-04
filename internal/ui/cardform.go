@@ -37,6 +37,9 @@ type cardForm struct {
 	// them — so a card made in the terminal leaves both empty and runs on
 	// its profile's implementer, as it always did.
 	sessionBackend, sessionModel string
+	// skills are the library skills picked for the card (item ids), set
+	// by the web face's form; empty forwards the whole library.
+	skills []string
 
 	repo repoPicker
 	// origins caches each repository's parsed origin, resolved through
@@ -892,6 +895,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		Start: start, FromPicker: d.fromPicker,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 		MainCheckout: d.mainCheckout,
+		Skills: append([]string(nil), d.skills...),
 	}
 	if d.ct.Kind == domain.KindBug {
 		res.Severity = bugSeverityChoices[d.sev]

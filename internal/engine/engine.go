@@ -1814,6 +1814,10 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 	// on start never races the bind. The teardown is returned for the caller
 	// to stash on the Session's lifecycle; on any failure below the endpoint
 	// is released here, so callers see a nil teardown alongside an error.
+	skillDirs := e.skillDirsFor(ag, backendLabel(backend), f.Skills)
+	if h := e.pickedSkillsHint(f.Skills, skillDirs); h != "" {
+		hints = append(hints, h)
+	}
 	mcpPath, mcpTeardown, err := e.startMCPEndpoint(ctx, f, flavor)
 	if err != nil {
 		return nil, "", nil, err
@@ -1842,7 +1846,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// Workspace skills the operator forwarded. The worktree is a
 		// sibling of the repository, so nothing the workspace root holds
 		// is in this session's project scope unless it is named here.
-		SkillDirs: e.skillDirsFor(ag, backendLabel(backend)),
+		SkillDirs: skillDirs,
 	})
 	if specErr != nil {
 		mcpTeardown()

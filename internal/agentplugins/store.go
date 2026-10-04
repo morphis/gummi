@@ -722,38 +722,95 @@ func (s *Store) Export(id string) ([]byte, string, error) {
 // SkillDirs returns every managed skill directory in the workspace. Managed
 // skills are always globally available — there is no per-repository scope.
 func SkillDirs(workspace string) ([]string, error) {
-	if _, err := os.Lstat(filepath.Join(workspace, ".gummi")); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
-		return nil, fmt.Errorf("inspect workspace .gummi directory: %w", err)
+	dirs, _, err := PickedSkillDirs(workspace, nil)
+	return dirs, err
+}
+
+// Skills lists the workspace's library skills, ordered by name. A
+// workspace with no .gummi directory has none.
+func Skills(workspace string) ([]Item, error) {
+	s, ok, err := workspaceStore(workspace)
+	if err != nil || !ok {
+		return nil, err
 	}
-	s, err := New(workspace, []Repo{{Name: "default", Root: workspace}})
+	items, err := s.List()
 	if err != nil {
 		return nil, err
+	}
+	out := items[:0:0]
+	for _, item := range items {
+		if item.Kind == KindSkill {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+// PickedSkillDirs returns the managed skill directories for ids, in
+// library order. An empty ids is the whole library. An id the library no
+// longer holds is reported in missing rather than failing: a card created
+// with a skill that was later removed should still start.
+func PickedSkillDirs(workspace string, ids []string) (dirs, missing []string, err error) {
+	s, ok, err := workspaceStore(workspace)
+	if err != nil || !ok {
+		if len(ids) > 0 && err == nil {
+			missing = append(missing, ids...)
+		}
+		return nil, missing, err
 	}
 	m, err := s.readManifest()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []string
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
 	for _, item := range m.Items {
-		if item.Kind != KindSkill {
+		if item.Kind != KindSkill || (len(ids) > 0 && !want[item.ID]) {
 			continue
 		}
+		delete(want, item.ID)
 		root, err := s.itemRoot(item.ID)
 		if err != nil {
-			return nil, fmt.Errorf("managed skill %q is unavailable: %w", item.Name, err)
+			return nil, nil, fmt.Errorf("managed skill %q is unavailable: %w", item.Name, err)
 		}
 		info, err := os.Lstat(filepath.Join(root, "SKILL.md"))
 		if err != nil {
-			return nil, fmt.Errorf("managed skill %q is unavailable: %w", item.Name, err)
+			return nil, nil, fmt.Errorf("managed skill %q is unavailable: %w", item.Name, err)
 		}
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("managed skill %q has no regular SKILL.md", item.Name)
+			return nil, nil, fmt.Errorf("managed skill %q has no regular SKILL.md", item.Name)
 		}
-		out = append(out, s.itemPath(item.ID))
+		dirs = append(dirs, s.itemPath(item.ID))
 	}
-	return out, nil
+	for _, id := range ids {
+		if want[id] {
+			missing = append(missing, id)
+		}
+	}
+	return dirs, missing, nil
+}
+
+// ItemDir is where the library keeps item id in workspace — the
+// directory a skill's SKILL.md sits in.
+func ItemDir(workspace, id string) string {
+	return filepath.Join(workspace, ".gummi", "agent-plugins", "items", id)
+}
+
+// workspaceStore opens the library of a workspace; ok is false when the
+// workspace has no .gummi directory and so no library at all.
+func workspaceStore(workspace string) (*Store, bool, error) {
+	if _, err := os.Lstat(filepath.Join(workspace, ".gummi")); errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	} else if err != nil {
+		return nil, false, fmt.Errorf("inspect workspace .gummi directory: %w", err)
+	}
+	s, err := New(workspace, []Repo{{Name: "default", Root: workspace}})
+	if err != nil {
+		return nil, false, err
+	}
+	return s, true, nil
 }
 
 func (s *Store) resolveSource(source Candidate) (root, entry, name, sourcePath string, err error) {

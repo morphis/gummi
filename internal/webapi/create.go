@@ -55,6 +55,10 @@ type CreateCardRequest struct {
 	// stored by reference, so every later stage that reads the spec sees
 	// them too.
 	Attachments []string `json:"attachments,omitempty"`
+	// Skills are library skills (agent-plugin item ids, as Form.Skills
+	// offers them) to hand this card's sessions instead of the whole
+	// library; empty forwards the whole library.
+	Skills []string `json:"skills,omitempty"`
 }
 
 // Form is GET /api/form: the choices the new-card form offers.
@@ -81,6 +85,9 @@ type Form struct {
 	Envelope int `json:"envelope"`
 	// Sessions is what a session's model picker offers.
 	Sessions SessionModels `json:"sessions"`
+	// Skills are the library skills a card can be created with: Value is
+	// the item id, Label its name, Detail its description.
+	Skills []Choice `json:"skills"`
 }
 
 // AdoptChoice is one branch the new-card form's adopt list shows. Why is

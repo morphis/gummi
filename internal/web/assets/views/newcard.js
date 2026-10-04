@@ -39,6 +39,7 @@ const WAITS = new Set(['feature', 'bug', 'research', 'research:diagnosis'])
 // ("main is the branch this card would land on; adopting it…", "FD-001
 // already has feat/x — one branch, one card").
 const FIELD_OF = [
+  [/skill/i, 'skills'],
   [/title|first line/i, 'title'],
   [/description/i, 'desc'],
   [/adopt|one branch, one card/i, 'adopt'],
@@ -216,6 +217,17 @@ registerView('newcard', {
       } else {
         el.after = null
       }
+      if (st.kind !== 'goal' && f.skills?.length) {
+        const picked = new Set(st.skills || [])
+        el.skills = f.skills.map(s => ({ s, cb: h('input', { type: 'checkbox', value: s.value, checked: picked.has(s.value), testid: `newcard-skill-${s.value}` }) }))
+        side.push(h('div', { class: 'field', data: { f: 'skills' } }, h('span', { class: 'fl' }, 'Skills'),
+          h('div', { class: 'cpicks', role: 'group', 'aria-label': 'Skills', testid: 'newcard-skills' },
+            el.skills.map(({ s, cb }) => h('label', { class: 'cpick skill', title: s.detail || s.label }, cb,
+              h('span', { class: 't' }, s.label), s.detail ? h('span', { class: 's' }, s.detail) : null))),
+          h('span', { class: 'fh' }, 'Ticked skills are the only ones this card’s agents get, and they are told to use them. Leave all unticked to give them the whole library.'), errEl('skills')))
+      } else {
+        el.skills = null
+      }
 
       const err = h('p', { class: 'aerr', testid: 'newcard-error', role: 'alert', hidden: true })
       errs._ = err
@@ -258,6 +270,7 @@ registerView('newcard', {
       st.expected = el.expected?.value
       st.actual = el.actual?.value
       st.after = el.after ? el.after.filter(x => x.cb.checked).map(x => x.c.id) : st.after
+      st.skills = el.skills ? el.skills.filter(x => x.cb.checked).map(x => x.s.value) : st.skills
     }
 
     const showErr = (msg) => {
@@ -289,6 +302,7 @@ registerView('newcard', {
       if (st.attachments.some((a) => a.error)) { showErr('remove the failed attachment before creating'); return }
       keep()
       const env = el.envelope.value.trim()
+      const skills = el.skills ? el.skills.filter(x => x.cb.checked).map(x => x.s.value) : []
       const req = {
         kind: st.kind.startsWith('research') ? 'research' : st.kind,
         diagnosis: st.kind === 'research:diagnosis' || undefined,
@@ -302,7 +316,8 @@ registerView('newcard', {
         stackOn: el.stack?.value || undefined,
         dependsOn: el.after ? el.after.filter(x => x.cb.checked).map(x => x.c.id) : undefined,
         autopilot: autopilot || undefined,
-        attachments: st.attachments.length ? st.attachments.map((a) => a.id) : undefined
+        attachments: st.attachments.length ? st.attachments.map((a) => a.id) : undefined,
+        skills: skills.length ? skills : undefined
       }
       if (st.kind === 'bug') {
         Object.assign(req, {

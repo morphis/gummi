@@ -355,6 +355,12 @@ type Feature struct {
 	// just sent it to. MayLandAfterAll refuses it. Freeform-only, and set
 	// once, on the hand-off that continued it.
 	ContinuedAs FeatureID
+	// Skills are the agent-plugin library skills (their item ids) the
+	// person picked for this card when creating it. Empty forwards the
+	// whole library, which is what every card did before a card could
+	// pick; non-empty forwards only these and tells the sessions to use
+	// them.
+	Skills []string
 	// GateApproval is who crosses this card's gates on an unattended
 	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass

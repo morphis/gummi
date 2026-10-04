@@ -357,6 +357,14 @@ func (b *Bridge) Send(ctx context.Context, id string, req webapi.SendRequest, pe
 				return nil, err
 			}
 			decide := func() *threadDecision { return m.openDecision(r) }
+			text := text
+			// a "/skill" line is a message, rewritten before it is routed
+			if out, _, ok, problem := m.expandSkill(text); ok {
+				if problem != "" {
+					return nil, refuse(WebBadRequest, problem)
+				}
+				text = out
+			}
 			route, _ = m.webLineRoute(r, text, m.classifyThreadLine(r, text, decide))
 			var images []engine.AttachmentRef
 			if len(req.Attachments) > 0 {

@@ -454,10 +454,15 @@ beside it. It is a board host like the TUI — it builds the board the same
 way and runs the TUI's own model without a screen — so one board has one
 host at a time, and whichever starts second names the first and exits.
 The **Agent Plugins** view in the More menu manages workspace-local agent
-definitions and skills: create or import them, enable them globally or for
-selected repositories, and export them to keep a copy. Managed skills are
+definitions and skills: scan the workspace's repositories to import them,
+create them, and export them to keep a copy. Managed skills are
 forwarded to new card and freeform sessions on backends that support skill
-directories; the view shows that support per backend. Custom agent
+directories; the view shows that support per backend. By default a card
+gets the whole library; ticking skills on the new-card form (or under
+**skills** in a new session's composer) gives it only those, and its agent
+is told to use them. Typing `/skill <name> [message]` in the composer —
+completed from the library as you type — asks the agent to use that skill
+for one turn. Custom agent
 definitions are stored and exportable, but are not yet loaded into stage
 sessions. The library lives under `.gummi/agent-plugins/` and is not added
 to a product repository. Imported skills link to their source directory

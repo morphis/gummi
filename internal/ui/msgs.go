@@ -496,6 +496,9 @@ type formResult struct {
 	// own — no branch cut, no worktree created (DESIGN §19). Refused at
 	// the mint on every other kind.
 	MainCheckout bool
+	// Skills are the library skills picked for the card (item ids); empty
+	// forwards the whole library. Only the web face sets them today.
+	Skills []string
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
@@ -559,6 +562,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
 			MainCheckout: res.MainCheckout,
+			Skills: res.Skills,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
