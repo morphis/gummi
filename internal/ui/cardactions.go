@@ -276,6 +276,11 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		advanceOffered = false
 	case in.stage == domain.StagePlan && len(in.depBlockers) > 0 && in.kind != domain.KindGoal:
 		advanceOffered = false
+	case in.stage == domain.StagePlan && len(in.undrafted) > 0:
+		// the design's owed sections are still blank (an architect that
+		// never ran, or wrote nothing there): engine.Advance refuses the
+		// approval, and the decision offers the run that drafts them
+		advanceOffered = false
 	case in.agentAtWork():
 		// the stage's agent is still on it; g refuses the same
 		advanceOffered = false

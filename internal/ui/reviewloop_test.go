@@ -1288,3 +1288,28 @@ func draftRequiredSections(t *testing.T, m *Shell) {
 		}
 	}
 }
+
+// draftDesignFor writes f's draft the way its architect would have: the
+// blank template with the sections the design gate owes filled in. It is
+// for fixtures that put a card at plan with a finished stage behind it
+// without running one — a real run writes the draft, and
+// a plan with no artifact at all reads as the blank template its gate
+// refuses (engine.UndraftedAt).
+func draftDesignFor(t *testing.T, ws state.Workspace, f domain.Feature) {
+	t.Helper()
+	content := spec.BlankTemplate(&f)
+	for _, name := range engine.UndraftedGateSections(domain.CardTypeOf(&f), domain.StagePlan, domain.StageImplement, content) {
+		next, _, err := spec.ReplaceSection(content, name, "drafted by the fixture.\n\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		content = next
+	}
+	path := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

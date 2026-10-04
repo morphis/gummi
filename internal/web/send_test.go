@@ -143,11 +143,11 @@ func TestComposerOffersTheCardsSlashWords(t *testing.T) {
 			t.Errorf("completion %q is not a /word row", o.Text)
 		}
 	}
-	if !slices.Contains(words, "/run ") || !slices.Contains(words, "/verify ") {
+	if !slices.Contains(words, "/run ") || !slices.Contains(words, "/rebase ") {
 		t.Errorf("the vocabulary offers %v, want what the card's menu offers", words)
 	}
-	if got := h.composer(c.ID, "/ver").Completions; len(got) == 0 || got[0].Text != "/verify " {
-		t.Errorf("/ver offers %+v, want /verify", got)
+	if got := h.composer(c.ID, "/reb").Completions; len(got) == 0 || got[0].Text != "/rebase " {
+		t.Errorf("/reb offers %+v, want /rebase", got)
 	}
 	if got := h.composer(c.ID, "/zzz").Completions; len(got) != 0 {
 		t.Errorf("/zzz offers %+v, want none", got)

@@ -751,15 +751,36 @@ func (e *Engine) UndraftedBlocking(f domain.Feature) []string {
 // shut, because a card whose artifact moved (or hasn't been created yet)
 // would otherwise become permanently unadvanceable.
 func (e *Engine) undraftedBlockingGate(f domain.Feature) []string {
-	path := e.artifactFile(&f)
+	return UndraftedAt(f, e.artifactFile(&f), e.nextStage(f))
+}
+
+// UndraftedAt is the undrafted-sections floor for f crossing to `to`,
+// read from the artifact at path ("" when the card has none on disk). It
+// is the one reading both faces make — the engine's gate and the board
+// row that names the blocker — so the two cannot disagree about a card.
+//
+// No artifact at all is not the same as an artifact gummi cannot find.
+// At the design gate it means nothing has written the design: a draft
+// exists only once the architect writes one, someone opens the spec, or
+// the card was minted with one. What is there to approve is the blank
+// template, so the gate reads that, and a design nobody wrote does not
+// cross into implementation (DESIGN §10 D3). Past
+// the design gate the artifact always exists — the crossing promotes it —
+// so a missing or unreadable one there is the "moved under us" case,
+// which falls through rather than wedging the card.
+func UndraftedAt(f domain.Feature, path string, to domain.Stage) []string {
+	ct := domain.CardTypeOf(&f)
 	if path == "" {
-		return nil
+		if f.Stage != domain.StagePlan {
+			return nil
+		}
+		return UndraftedGateSections(ct, f.Stage, to, spec.BlankTemplate(&f))
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	return UndraftedGateSections(domain.CardTypeOf(&f), f.Stage, e.nextStage(f), string(raw))
+	return UndraftedGateSections(ct, f.Stage, to, string(raw))
 }
 
 // openQuestionsBlockingGate returns the number of open, USER-authored `%%`

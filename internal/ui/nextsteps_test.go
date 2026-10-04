@@ -92,7 +92,11 @@ func TestNextActionsByState(t *testing.T) {
 		// (blockedGate) so it cannot appear as a second, identical-looking
 		// way to say "start the architect".
 		{"design gate with a blank section leads with the redraft", nextInput{stage: domain.StagePlan, kind: feat, attn: attnGate, undrafted: []string{"Chosen approach"}}, "enter enter"},
-		{"a blank section before the first run is not a blocker", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter g"},
+		// before the first run a blank section is no blocker row either —
+		// but nothing has written the design, so there is nothing to
+		// approve: starting the architect is the only way forward.
+		{"a blank design before the first run offers only the architect", nextInput{stage: domain.StagePlan, kind: feat, undrafted: []string{"Chosen approach"}}, "enter"},
+		{"a drafted design before the critique still offers approve", nextInput{stage: domain.StagePlan, kind: feat}, "enter g"},
 		// nothing has been produced yet, so there is nothing to send back:
 		// the rewind to plan is /bounce, in the inventory.
 		{"implement idle runs the stage", nextInput{stage: domain.StageImplement, kind: feat}, "enter"},

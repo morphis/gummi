@@ -1206,6 +1206,12 @@ func stageAnswers(in nextInput) []nextAction {
 			// added, dropped, or renamed, and an unfinished stop still
 			// talks first, because there is nothing to approve yet.
 			acts = append([]nextAction{approve}, talk...)
+		} else if len(in.undrafted) > 0 {
+			// nothing has written the design yet — the sections the gate
+			// owes are still the template's — so there is nothing to
+			// approve, and engine.Advance refuses the crossing. Starting
+			// the architect is the way forward.
+			acts = talk
 		} else {
 			acts = append(talk, approve)
 		}

@@ -1417,15 +1417,7 @@ func artifactFileIn(root, drafts string, f *domain.Feature) string {
 // re-raising a gate approving cannot cross. Nil for an edge that owes no
 // sections — a research card's stages among them.
 func (m *Shell) undraftedGate(f domain.Feature) []string {
-	path := m.artifactFile(&f)
-	if path == "" {
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	return engine.UndraftedGateSections(domain.CardTypeOf(&f), f.Stage, forwardEdge(f), string(raw))
+	return engine.UndraftedAt(f, m.artifactFile(&f), forwardEdge(f))
 }
 
 // bounceStage sends a feature back for rework. Implement and Verify

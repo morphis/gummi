@@ -19,11 +19,13 @@ import (
 func (h *cardBoard) planCard(title string) webapi.Card {
 	h.t.Helper()
 	c := h.create(webapi.CreateCardRequest{Kind: "feature", Title: title, Description: "make it so"})
+	// drafted before the crossing into plan, so the board row the decision
+	// is built from has read the drafted design rather than a blank one
+	h.draft(c.ID, "Chosen approach", "Implementation notes")
 	c = h.action(c.ID, "advance", webapi.ActionRequest{})
 	if c.Stage != string(domain.StagePlan) {
 		h.t.Fatalf("advance from todo left %s at %s", c.ID, c.Stage)
 	}
-	h.draft(c.ID, "Chosen approach", "Implementation notes")
 	return h.card(c.ID)
 }
 
@@ -90,11 +92,12 @@ func TestAnswerApprovesTheDesignGate(t *testing.T) {
 func TestAnswerAgainstAMovedCardIsRefused(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
 	c := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Dark mode"})
-	c = h.action(c.ID, "advance", webapi.ActionRequest{})
-	// the page read the stop while the spec still owed its sections; then
-	// the architect wrote them, and the answers on offer moved
-	stale := c.Decision
 	h.draft(c.ID, "Chosen approach", "Implementation notes")
+	c = h.action(c.ID, "advance", webapi.ActionRequest{})
+	// the page read the stop; then the architect wrote into the spec again,
+	// and the revision the answers were given against moved
+	stale := c.Decision
+	h.draft(c.ID, "Problem")
 	now := h.card(c.ID)
 	if now.Decision == nil || now.Decision.Ref != stale.Ref || now.Decision.Against.Token == stale.Against.Token {
 		t.Fatalf("the fixture did not move the stop: before %+v, after %+v", stale, now.Decision)

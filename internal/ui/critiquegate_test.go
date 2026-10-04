@@ -24,6 +24,10 @@ func restartedAt(t *testing.T, stage domain.Stage, snap state.SessionSnapshot) (
 	ctx := context.Background()
 
 	f := mkFeature(t, store, 1, "rename the bridge", stage)
+	if stage == domain.StagePlan {
+		// the critique this stop comes after read a plan the architect wrote
+		draftDesignFor(t, ws, f)
+	}
 	snap.Feature, snap.Stage = f.ID, stage
 	if err := store.SaveSession(ctx, snap); err != nil {
 		t.Fatal(err)

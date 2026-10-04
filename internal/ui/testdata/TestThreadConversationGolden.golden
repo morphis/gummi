@@ -8,23 +8,23 @@
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;96;95;107m⌄ [38;2;133;131;146mspec[38;2;96;95;107m · Chosen approach[39m [38;2;58;57;67m────────────────────────────────────────────────────────────────[39m [38;2;191;188;200malt+s[39m   [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m    [38;2;96;95;107m↑ 16 more · [38;2;191;188;200mpgup[39m                                                                                [m
-[48;2;32;31;38m    [38;2;191;188;200mPersist per-device via localStorage; account sync is a follow-up.[39m                               [m
-[48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m  [38;2;191;188;200myou[39m                                                                                               [m
+[48;2;32;31;38m    [38;2;96;95;107m↑ 19 more · [38;2;191;188;200mpgup[39m                                                                                [m
 [48;2;32;31;38m    [38;2;247;246;251mper-device or synced?[39m                                                                           [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;255;96;255;1mconsult[39;22m                                                                                           [m
 [48;2;32;31;38m    [38;2;191;188;200mPersist per-device via localStorage; account sync is a follow-up.[39m                               [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m                                                                                                    [m
-[48;2;32;31;38m   [38;2;247;246;251mThe plan critique gave no clear verdict, and the loop gave up rather than passing it.[39m            [m
+[48;2;32;31;38m   [38;2;247;246;251mThe spec still has Chosen approach and Implementation notes blank, and they are required[39m         [m
+[48;2;32;31;38m   [38;2;247;246;251mbefore the gate opens.[39m                                                                           [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;133;131;146mgummi[39m  [38;2;247;246;251mplan critique gave no clear verdict — choose what happens next.[39m                            [m
-[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. start the architect[38;2;96;95;107m — the findings are in the spec — your line goes with them[39m                [m
-[48;2;32;31;38m  [38;2;247;246;251m  2. approve anyway[38;2;96;95;107m — overrules the critique — moves the card into implement[39m                      [m
+[48;2;32;31;38m  [38;2;191;188;200;1m▸ [39;22m1. draft the missing sections                                                                   [m
+[48;2;32;31;38m    [38;2;96;95;107mChosen approach, Implementation notes are required in the spec and still blank — the gate[39m       [m
+[48;2;32;31;38m    [38;2;96;95;107mstays shut until they are drafted; enter runs the stage to draft them[39m                           [m
+[48;2;32;31;38m  [38;2;247;246;251m  2. start the architect[38;2;96;95;107m — shape the spec until it convinces you[39m                                  [m
 [48;2;32;31;38m  [38;2;247;246;251m  3. stop here[38;2;96;95;107m — park it — nothing runs until you come back[39m                                       [m
 [48;2;32;31;38m                                                                                                    [m
 [48;2;32;31;38m  [38;2;191;188;200m┃ [38;2;107;80;255;7mm[38;2;96;95;107;27message the agent, /approve /verify /diff…, or ↑ for actions[39m                                    [m
 [48;2;32;31;38m                                                                                                    [m
-[38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [48;2;32;31;38m [48;2;77;76;87m [38;2;191;188;200mFD-001: plan written → critiquing[39m [48;2;32;31;38m        [38;2;191;188;200m↑↓[39m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[39m [38;2;133;131;146mstart the architect[38;2;96;95;107m · [38;2;191;188;200mesc[39m [38;2;133;131;146mboard[m
+[38;2;247;246;251;48;2;107;80;255m [38;2;255;250;241;1mgummi[39;22m [48;2;32;31;38m [48;2;77;76;87m [38;2;191;188;200mFD-001: plan written → critiquing[39m [48;2;32;31;38m [38;2;191;188;200m↑↓[39m [38;2;133;131;146mchoose[38;2;96;95;107m · [38;2;191;188;200menter[39m [38;2;133;131;146mdraft the missing sections[38;2;96;95;107m · [38;2;191;188;200mesc[39m [38;2;133;131;146mboard[m

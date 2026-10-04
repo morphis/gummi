@@ -35,6 +35,38 @@ func putFeature(t *testing.T, store *state.Store, f domain.Feature) {
 	}
 }
 
+// draftDesign writes f's draft the way the stages would have: the blank
+// template with every section a gate on the walk to done requires filled
+// in. A card at plan with no artifact at all has
+// had nothing written for it, and the gate reads it as the blank template
+// it would start from (UndraftedAt) — so a walk that crosses the design
+// gate without running the stage has to supply the design itself.
+func draftDesign(t *testing.T, ws state.Workspace, f domain.Feature) {
+	t.Helper()
+	content := spec.BlankTemplate(&f)
+	ct := domain.CardTypeOf(&f)
+	for _, edge := range [][2]domain.Stage{
+		{domain.StagePlan, domain.StageImplement},
+		{domain.StageImplement, domain.StageVerify},
+		{domain.StageVerify, domain.StageDone},
+	} {
+		for _, name := range UndraftedGateSections(ct, edge[0], edge[1], content) {
+			next, _, err := spec.ReplaceSection(content, name, "drafted by the fixture.\n\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			content = next
+		}
+	}
+	path := filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f))
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // gitIn runs a git command inside dir, failing the test on error.
 func gitIn(t *testing.T, dir string, args ...string) {
 	t.Helper()
@@ -141,10 +173,11 @@ func TestAdvanceRecordsGateEvent(t *testing.T) {
 // crossings under different actors and checks each gets its own row, in
 // order, rather than colliding on a shared dedupe key.
 func TestAdvanceGateEventsOneRowPerCrossing(t *testing.T) {
-	e, _, store, _ := advanceEngine(t)
+	e, ws, store, _ := advanceEngine(t)
 	ctx := context.Background()
 	f := feature(1, "dark mode", domain.StageTodo)
 	putFeature(t, store, f)
+	draftDesign(t, ws, f)
 
 	actors := []string{"user", "auto", "caller"}
 	for _, actor := range actors {
@@ -258,11 +291,12 @@ func TestAdvanceForwardWalkFeature(t *testing.T) {
 // A bug walks its own graph; leaving Diagnose creates the worktree and
 // promotes the report under .gummi/bugs.
 func TestAdvanceBugWorktreeGate(t *testing.T) {
-	e, _, store, wt := advanceEngine(t)
+	e, ws, store, wt := advanceEngine(t)
 	f := feature(1, "login loops", domain.StageTodo)
 	f.ID = domain.FeatureID("BG-001")
 	f.Kind = domain.KindBug
 	putFeature(t, store, f)
+	draftDesign(t, ws, f)
 
 	for _, want := range []domain.Stage{domain.StagePlan, domain.StageImplement} {
 		res := mustAdvance(t, e, f.ID)
@@ -364,9 +398,10 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 
 	// branch ahead → NeedsMerge, no transition
 	t.Run("ahead needs merge", func(t *testing.T) {
-		e, _, store, wt := advanceEngine(t)
+		e, ws, store, wt := advanceEngine(t)
 		f := feature(1, "ship it", domain.StagePlan)
 		putFeature(t, store, f)
+		draftDesign(t, ws, f)
 		mustAdvance(t, e, f.ID) // spec → plan, creates the worktree
 		// the plan→implement gate expects Implementation notes drafted.
 		fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
@@ -414,9 +449,10 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 
 	// no branch commits → straight to Done
 	t.Run("empty branch to done", func(t *testing.T) {
-		e, _, store, wt := advanceEngine(t)
+		e, ws, store, wt := advanceEngine(t)
 		f := feature(2, "nothing to land", domain.StagePlan)
 		putFeature(t, store, f)
+		draftDesign(t, ws, f)
 		for stage := domain.StagePlan; stage != domain.StageVerify; {
 			res := mustAdvance(t, e, f.ID)
 			if res.Status != StatusAdvanced {
@@ -676,10 +712,11 @@ func TestUnmetDeps(t *testing.T) {
 // coding stage: StatusBlockedDependency, BlockingDeps naming the dep, and
 // the stored stage left at Plan.
 func TestAdvanceBlockedByDependency(t *testing.T) {
-	e, _, store, _ := advanceEngine(t)
+	e, ws, store, _ := advanceEngine(t)
 	ctx := context.Background()
 	f := feature(1, "dependent", domain.StagePlan)
 	putFeature(t, store, f)
+	draftDesign(t, ws, f)
 	dep := feature(2, "dep", domain.StageImplement)
 	putFeature(t, store, dep)
 	if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
@@ -700,10 +737,11 @@ func TestAdvanceBlockedByDependency(t *testing.T) {
 
 // Once the dependency reaches Done, the same Advance lands in Implement.
 func TestAdvanceDependencyMet(t *testing.T) {
-	e, _, store, _ := advanceEngine(t)
+	e, ws, store, _ := advanceEngine(t)
 	ctx := context.Background()
 	f := feature(1, "dependent", domain.StagePlan)
 	putFeature(t, store, f)
+	draftDesign(t, ws, f)
 	dep := feature(2, "dep", domain.StageImplement)
 	putFeature(t, store, dep)
 	if err := store.AddDependency(ctx, f.ID, dep.ID); err != nil {
@@ -811,12 +849,13 @@ func TestAdvanceDependencyGateNotCoding(t *testing.T) {
 // to the main checkout, so Advance never reports EnteredWorktree and no
 // worktree exists.
 func TestAdvanceResearchNoWorktree(t *testing.T) {
-	e, _, store, wt := advanceEngine(t)
+	e, ws, store, wt := advanceEngine(t)
 	ctx := context.Background()
 	f := feature(1, "rs topic", domain.StageTodo)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	putFeature(t, store, f)
+	draftDesign(t, ws, f)
 
 	for _, want := range []domain.Stage{
 		domain.StagePlan, domain.StageImplement, domain.StageVerify, domain.StageDone,
@@ -839,11 +878,12 @@ func TestAdvanceResearchNoWorktree(t *testing.T) {
 // transition, and the squash-merge/commit-message scribe path (only ever
 // reached from StatusNeedsMerge) is never entered.
 func TestAdvanceResearchVerifyDoneNoMerge(t *testing.T) {
-	e, _, store, _ := advanceEngine(t)
+	e, ws, store, _ := advanceEngine(t)
 	f := feature(1, "research no land", domain.StagePlan)
 	f.ID = domain.FeatureID("RS-001")
 	f.Kind = domain.KindResearch
 	putFeature(t, store, f)
+	draftDesign(t, ws, f)
 
 	for stage := domain.StagePlan; stage != domain.StageVerify; {
 		res := mustAdvance(t, e, f.ID)
@@ -1081,17 +1121,36 @@ func TestAdvanceBlockedByUndraftedRootCause(t *testing.T) {
 	}
 }
 
-// A card whose artifact does not exist on disk at all — never drafted, or
-// moved out from under it — must not block: the zero-on-error contract
-// proves a missing artifact can never wedge a gate shut permanently.
-func TestAdvanceUndraftedGateFallsThroughOnMissingArtifact(t *testing.T) {
+// A design nobody wrote does not cross into implementation. A card at
+// plan with no artifact on disk has had nothing written for it, so its
+// gate reads the blank template and is refused for the sections it owes,
+// rather than waved through on the absence (DESIGN §10 D3).
+func TestAdvanceRefusesAPlanNothingWrote(t *testing.T) {
 	e, _, store, _ := advanceEngine(t)
 	f := feature(1, "no artifact yet", domain.StagePlan)
 	putFeature(t, store, f)
 
 	res := mustAdvance(t, e, f.ID)
-	if res.Status != StatusAdvanced || res.To != domain.StageImplement {
-		t.Fatalf("status=%d to=%s, want advanced/implement (missing artifact must fall through)", res.Status, res.To)
+	if res.Status != StatusBlockedUndrafted || len(res.Undrafted) != 2 {
+		t.Fatalf("status=%d undrafted=%v, want blocked on Chosen approach and Implementation notes", res.Status, res.Undrafted)
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StagePlan {
+		t.Fatalf("a blank plan crossed to %s", got.Stage)
+	}
+}
+
+// Past the design gate the crossing has promoted the artifact, so one
+// missing there moved out from under the card: the zero-on-error contract
+// holds, and a missing artifact never wedges a later gate shut.
+func TestAdvanceUndraftedGateFallsThroughOnMissingArtifact(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	f := feature(1, "artifact gone", domain.StageImplement)
+	putFeature(t, store, f)
+	withWorktree(t, wt, f)
+
+	res := mustAdvance(t, e, f.ID)
+	if res.Status != StatusAdvanced || res.To != domain.StageVerify {
+		t.Fatalf("status=%d to=%s, want advanced/verify (missing artifact must fall through)", res.Status, res.To)
 	}
 }
 

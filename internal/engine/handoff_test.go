@@ -20,6 +20,7 @@ func verifiedCardWithWork(t *testing.T, e *Engine, store *state.Store, wt *workt
 	t.Helper()
 	f := feature(num, "ship it", domain.StagePlan)
 	putFeature(t, store, f)
+	draftDesign(t, e.cfg.Workspace, f)
 	mustAdvance(t, e, f.ID)
 	fillPromotedSection(t, wt, f, "Implementation notes", "Add a settings toggle; persist per-device.")
 	for stage := domain.StagePlan; stage != domain.StageVerify; {

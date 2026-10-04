@@ -771,6 +771,12 @@ func EnsureDraft(path string, f *domain.Feature) error {
 	return atomicfile.Write(path, []byte(blankTemplate(f)), 0o600)
 }
 
+// BlankTemplate is the artifact a work item starts from before anything
+// has written to it — what EnsureDraft would materialize. A gate reading a
+// card that has no artifact yet reads this, because that is what is
+// there to approve.
+func BlankTemplate(f *domain.Feature) string { return blankTemplate(f) }
+
 // blankTemplate is the initial artifact for a work item: a bug report for
 // bugs, a research document for research cards, a goal doc for goals, a
 // spec draft for features.
