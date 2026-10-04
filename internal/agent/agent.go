@@ -181,6 +181,13 @@ type SessionOpts struct {
 	// it read-write; the engine also gates on the capability before
 	// constructing one.
 	ReadOnly bool
+	// Watch marks a session that outlives its turns — a freeform card's —
+	// and so may start work that reports after the turn ends: the
+	// backend's own watch (Capabilities.NativeWatch) and backgrounded
+	// commands. A stage session leaves it false: the engine closes it at
+	// idle, which would kill such work with its result unread, so an
+	// adapter keeps those tools away from it.
+	Watch bool
 	// ResumePath, when non-empty, is the absolute filesystem path an adapter
 	// uses for its DURABLE conversation transcript — stamped by the engine,
 	// meaningful only to adapters that know what to do with it, ignored by

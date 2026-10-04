@@ -317,12 +317,21 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		roster := claudeStageTools(opts.WorkDir, opts.SkillDirs)
 		if opts.ReadOnly {
 			roster = claudeReadOnlyRoster()
+		} else if opts.Watch {
+			// The adapter reports NativeWatch, so the engine offers a
+			// freeform session no watch of its own: leaving Monitor off the
+			// roster left that session with no watch at all.
+			roster = append(roster, "Monitor")
 		}
 		args = append(args, "--tools", strings.Join(roster, ","))
 	}
-	if opts.ReadOnly {
+	switch {
+	case opts.ReadOnly:
 		args = append(args, "--allowedTools", strings.Join(claudeReadOnlyTools(), " "))
-	} else {
+	case opts.Watch:
+		// Monitor runs a command the way Bash does, and Bash is already here.
+		args = append(args, "--allowedTools", "Bash Read Grep Glob Monitor mcp__gummi")
+	default:
 		args = append(args, "--allowedTools", "Bash Read Grep Glob mcp__gummi")
 	}
 
@@ -338,6 +347,13 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// Claude Code session spawns a top-level child, not a bridge child of the
 	// caller's session (auth vars are preserved — see scrubClaudeSessionEnv).
 	cmd.Env = scrubClaudeSessionEnv(os.Environ())
+	// A session the engine closes at idle has nowhere for a backgrounded
+	// command to report to: the agent ends its turn on "I'll be notified
+	// when it completes", the stage gates or closes, and the command dies
+	// with its result unread. Take run_in_background off its Bash instead.
+	if !opts.Watch || opts.ReadOnly {
+		cmd.Env = append(cmd.Env, "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
+	}
 	// Run the child in its own process group and, on cancel/close, kill the
 	// whole group: claude spawns tool subprocesses (bash, editors) that
 	// would otherwise orphan and keep the stdout pipe open, stalling

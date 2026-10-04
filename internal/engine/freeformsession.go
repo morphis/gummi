@@ -362,6 +362,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
 		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
+		// The session lives past its turns, so the backend's own watch
+		// and backgrounded commands have somewhere to report back to.
+		Watch: true,
 		// The card's scratch-files anchor: a backend that anchors its
 		// config in a per-card home (antigravity) derives it from here,
 		// so the session's home — and the conversations it keeps there —

@@ -562,6 +562,35 @@ func TestClaudeCodeTurnsCommitAttributionOff(t *testing.T) {
 	}
 }
 
+// A stage session is closed at idle, so nothing could read a backgrounded
+// command's result: background tasks are off and Monitor is not offered.
+// A freeform session (Watch) lives past its turns and gets both, Monitor
+// on the roster and the allowlist alike.
+func TestClaudeCodeBackgroundWorkOnlyForWatchSessions(t *testing.T) {
+	stage := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{})
+	if !strings.Contains(stage, "bg=1") {
+		t.Errorf("stage session keeps background tasks: %s", stage)
+	}
+	if strings.Contains(stage, "Monitor") {
+		t.Errorf("stage session offered Monitor: %s", stage)
+	}
+
+	ff := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{Watch: true})
+	if !strings.Contains(ff, "bg=<unset>") {
+		t.Errorf("watch session lost background tasks: %s", ff)
+	}
+	want := "--tools " + strings.Join(append(claudeStageTools("", nil), "Monitor"), ",")
+	if !strings.Contains(ff, want) || !strings.Contains(ff, "--allowedTools Bash Read Grep Glob Monitor mcp__gummi") {
+		t.Errorf("watch session missing Monitor (want %q and it allowlisted): %s", want, ff)
+	}
+
+	// read-only research is never a watch session, whatever it is asked
+	ro := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{ReadOnly: true, Watch: true})
+	if strings.Contains(ro, "Monitor") || !strings.Contains(ro, "bg=1") {
+		t.Errorf("read-only session offered background work: %s", ro)
+	}
+}
+
 func TestClaudeCodeMissingBinary(t *testing.T) {
 	if _, err := NewClaudeCode("definitely-not-a-real-binary-xyz"); err == nil {
 		t.Error("missing binary should fail fast")
@@ -969,7 +998,7 @@ for line in sys.stdin:
     if not line: continue
     m = json.loads(line)
     if m.get("type") != "user": continue
-    text = "argv=" + " ".join(sys.argv[1:]) + " cwd=" + os.getcwd() + " msg=" + m["message"]["content"][0]["text"]
+    text = "argv=" + " ".join(sys.argv[1:]) + " cwd=" + os.getcwd() + " msg=" + m["message"]["content"][0]["text"] + " bg=" + os.environ.get("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS","<unset>")
     out({"type":"assistant","message":{"model":"m","content":[{"type":"text","text":text}]}})
     out({"type":"result","subtype":"success","is_error":False,"modelUsage":{}})
 `
