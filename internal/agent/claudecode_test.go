@@ -539,6 +539,20 @@ func TestClaudeCodeRejectsForeignModel(t *testing.T) {
 	}
 }
 
+// A dotted id is another backend's spelling; the CLI 404s it at the first
+// turn, so it is refused at session start with the dashed form to use.
+func TestClaudeCodeRejectsDottedModel(t *testing.T) {
+	ag, err := NewClaudeCode(writeFakeClaude(t, fakeClaudeScript))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	_, err = ag.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "claude-opus-4.8"})
+	if err == nil || !strings.Contains(err.Error(), `"claude-opus-4-8"`) {
+		t.Errorf("dotted-model session error = %v, want a rejection naming claude-opus-4-8", err)
+	}
+}
+
 func TestClaudeCodeMissingBinary(t *testing.T) {
 	if _, err := NewClaudeCode("definitely-not-a-real-binary-xyz"); err == nil {
 		t.Error("missing binary should fail fast")

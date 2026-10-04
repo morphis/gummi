@@ -303,23 +303,46 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 }
 
 // With the claude backend and no profiles.yaml yet, doctor evaluates the
-// seed template that WOULD be written and fails the profile check, naming
-// each role whose model the Anthropic-only backend cannot drive — the
-// warning fires before the first run that would hit it.
-func TestDoctorClaudeBackendFlagsForeignSeedModels(t *testing.T) {
+// seed template that WOULD be written — the one seeded for claude, whose
+// default profile the Anthropic-only backend can drive.
+func TestDoctorClaudeBackendSeedsModelsItCanDrive(t *testing.T) {
 	clearDoctorEnv(t)
 	t.Setenv("GUMMI_AGENT", "claude")
 
 	r := buildDoctorReport(gitRepo(t), doctorOpts{}) // no .gummi workspace → seed template
 	c := checkByName(r, "profile")
-	if c.Status != statusFail {
-		t.Fatalf("profile = %+v, want fail (claude can't drive the mixed thrifty default)", c)
-	}
-	if !strings.Contains(c.Detail, "implementer=gpt-5-mini") {
-		t.Errorf("profile detail should name the incompatible role: %q", c.Detail)
+	if c.Status == statusFail {
+		t.Fatalf("profile = %+v, want the claude seed template to pass", c)
 	}
 	if !strings.Contains(c.Detail, "would be seeded") {
 		t.Errorf("profile detail should note it is the seed template: %q", c.Detail)
+	}
+}
+
+// A profiles.yaml whose default profile hands the claude backend a model
+// it cannot drive fails the profile check, naming each such role — the
+// warning fires before the first run that would hit it.
+func TestDoctorClaudeBackendFlagsForeignModels(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_AGENT", "claude")
+	repo := gitRepo(t)
+	writeProfiles(t, repo, `
+default: thrifty
+profiles:
+  thrifty:
+    architect: { model: claude-sonnet-5 }
+    implementer: { model: gpt-5-mini }
+    reviewer: { model: claude-sonnet-5 }
+    scribe: { model: gpt-5-mini }
+`)
+
+	r := buildDoctorReport(repo, doctorOpts{})
+	c := checkByName(r, "profile")
+	if c.Status != statusFail {
+		t.Fatalf("profile = %+v, want fail (claude can't drive gpt-5-mini)", c)
+	}
+	if !strings.Contains(c.Detail, "implementer=gpt-5-mini") {
+		t.Errorf("profile detail should name the incompatible role: %q", c.Detail)
 	}
 	if r.Ready {
 		t.Error("report is ready despite a backend/model conflict")

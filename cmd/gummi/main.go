@@ -496,7 +496,7 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 	}
 	for _, f := range []struct{ path, body string }{
 		{w.ConfigFile(), config.Template},
-		{w.ProfilesFile(), config.ProfilesTemplate},
+		{w.ProfilesFile(), config.ProfilesTemplateFor(defaultBackendName())},
 	} {
 		if _, err := os.Stat(f.path); os.IsNotExist(err) {
 			if err := os.WriteFile(f.path, []byte(f.body), 0o600); err != nil {

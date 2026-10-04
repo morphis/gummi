@@ -222,6 +222,13 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 			"the Claude Code CLI only routes to Anthropic models — set this role to a claude-* "+
 			"model in .gummi/profiles.yaml, or point the role at a different `backend:`", opts.Model, provider)
 	}
+	// A dotted id (claude-opus-4.8) is another backend's spelling of an
+	// Anthropic model: the CLI 404s it at the first turn and the stage
+	// fails with nothing better than "turn failed". Same fail-fast posture.
+	if suggest, bad := ClaudeModelIDHint(opts.Model); bad {
+		return nil, fmt.Errorf("claude backend cannot drive model %q: Anthropic model ids spell the "+
+			"version with dashes — use %q in .gummi/profiles.yaml", opts.Model, suggest)
+	}
 
 	args := []string{
 		"-p", "--input-format", "stream-json", "--output-format", "stream-json",

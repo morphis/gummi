@@ -190,7 +190,52 @@ func ParseProfiles(raw []byte, path string) (Profiles, error) {
 	return p, nil
 }
 
-// ProfilesTemplate is the starter profiles.yaml written by `gummi init`.
+// thriftyDefault is the template's thrifty profile as written for the
+// default backends: model ids in the bare form copilot takes.
+const thriftyDefault = `  thrifty: # everyday features — backend omitted → engine default
+    architect: { model: claude-sonnet-5 }
+    implementer: { model: gpt-5-mini }
+    reviewer: { model: claude-sonnet-5 }
+    scribe: { model: gpt-5-mini }
+`
+
+// thriftyFor holds the thrifty profile for a default backend that cannot
+// take thriftyDefault's ids. Its roles omit `backend:`, so whatever the
+// default backend is drives them, and a first run on the claude backend
+// failed at the implementer on gpt-5-mini, on opencode at the first turn
+// on an id with no provider in it.
+var thriftyFor = map[string]string{
+	// The CLI's own aliases resolve to the current model of each tier, so
+	// the seeded file does not go stale as model ids move.
+	"claude": `  thrifty: # everyday features — backend omitted → engine default
+    architect: { model: sonnet }
+    implementer: { model: haiku }
+    reviewer: { model: sonnet }
+    scribe: { model: haiku }
+`,
+	// opencode names every model provider/model.
+	"opencode": `  thrifty: # everyday features — backend omitted → engine default
+    architect: { model: anthropic/claude-sonnet-4-5 }
+    implementer: { model: anthropic/claude-haiku-4-5 }
+    reviewer: { model: anthropic/claude-sonnet-4-5 }
+    scribe: { model: anthropic/claude-haiku-4-5 }
+`,
+}
+
+// ProfilesTemplateFor is the starter profiles.yaml seeded for a workspace
+// whose default backend is backend: ProfilesTemplate with its thrifty
+// profile — the default, whose roles follow the default backend — spelled
+// in ids that backend accepts.
+func ProfilesTemplateFor(backend string) string {
+	t, ok := thriftyFor[backend]
+	if !ok {
+		return ProfilesTemplate
+	}
+	return strings.Replace(ProfilesTemplate, thriftyDefault, t, 1)
+}
+
+// ProfilesTemplate is the starter profiles.yaml written by `gummi init`
+// for the default backends; ProfilesTemplateFor adapts it to the others.
 const ProfilesTemplate = `# gummi profiles: map each role to a backend + model. A feature picks a
 # profile; roles indirect between the fixed workflow and concrete backends,
 # so the same process can run cheap or premium, or mix providers. See
@@ -206,26 +251,21 @@ default: thrifty
 
 profiles:
   premium: # ship-critical features — cross-model review catches more
-    architect: { backend: claude, model: claude-opus-4.8 }
+    architect: { backend: claude, model: opus }
     implementer: { backend: copilot, model: claude-sonnet-5 }
-    reviewer: { backend: claude, model: claude-sonnet-5 }
+    reviewer: { backend: claude, model: sonnet }
     scribe: { backend: copilot, model: gpt-5-mini }
     # sandbox: warn  # enforce refuses a backend without tool coverage;
     #                # warn and off let such a run start anyway.
 
-  thrifty: # everyday features — backend omitted → engine default
-    architect: { model: claude-sonnet-5 }
-    implementer: { model: gpt-5-mini }
-    reviewer: { model: claude-sonnet-5 }
-    scribe: { model: gpt-5-mini }
-
+` + thriftyDefault + `
   # local-heavy: mix a local llama.cpp endpoint (via the headless adapter)
   # with cloud models. Point GUMMI_AGENT_CMD at a wrapper that speaks
   # OpenAI to your local runner; set GUMMI_HEADLESS_CREDITS_PER_1K to a
   # small rate so local spend meters cheaply against the same budget.
   #
   # local-heavy:
-  #   architect: { backend: claude, model: claude-sonnet-5 }
+  #   architect: { backend: claude, model: sonnet }
   #   implementer: { backend: headless, model: qwen2.5-coder-32b }
   #   reviewer: { backend: headless, model: qwen2.5-coder-32b }
   #   scribe: { backend: copilot, model: gpt-5-mini }

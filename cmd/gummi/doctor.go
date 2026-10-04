@@ -316,7 +316,7 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 // after. A parse error is surfaced verbatim.
 func effectiveProfiles(path string) (profiles config.Profiles, seeded bool, err error) {
 	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-		p, perr := config.ParseProfiles([]byte(config.ProfilesTemplate), "seed template")
+		p, perr := config.ParseProfiles([]byte(config.ProfilesTemplateFor(defaultBackendName())), "seed template")
 		return p, true, perr
 	}
 	p, perr := config.LoadProfiles(path)

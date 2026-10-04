@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -130,6 +131,42 @@ func TestLoadProfilesRejectsMissingModel(t *testing.T) {
 	_, err := LoadProfiles(profilesPath(t, "profiles:\n  x:\n    architect: {}\n"))
 	if err == nil {
 		t.Error("role without a model should error")
+	}
+}
+
+// The seeded thrifty profile omits `backend:`, so the default backend
+// drives it and its ids must be ones that backend takes: dashed or alias
+// ids for claude (never a dotted or foreign one), provider/model for
+// opencode. Every variant still parses, and only thrifty changes.
+func TestProfilesTemplateForBackend(t *testing.T) {
+	if ProfilesTemplateFor("copilot") != ProfilesTemplate || ProfilesTemplateFor("") != ProfilesTemplate {
+		t.Error("the default backends should get the template unchanged")
+	}
+	for _, backend := range []string{"claude", "opencode"} {
+		tmpl := ProfilesTemplateFor(backend)
+		if tmpl == ProfilesTemplate {
+			t.Fatalf("%s: thrifty was not rewritten", backend)
+		}
+		p := writeProfiles(t, tmpl)
+		if !reflect.DeepEqual(p.Profiles["premium"], writeProfiles(t, ProfilesTemplate).Profiles["premium"]) {
+			t.Errorf("%s: premium changed", backend)
+		}
+		for role, rc := range p.Profiles["thrifty"] {
+			switch backend {
+			case "claude":
+				if strings.Contains(rc.Model, ".") || strings.HasPrefix(rc.Model, "gpt") {
+					t.Errorf("claude thrifty %s = %q, an id the claude CLI refuses", role, rc.Model)
+				}
+			case "opencode":
+				if !strings.Contains(rc.Model, "/") {
+					t.Errorf("opencode thrifty %s = %q, want provider/model", role, rc.Model)
+				}
+			}
+		}
+	}
+	// premium's explicitly-claude architect must be a claude-CLI id.
+	if m := writeProfiles(t, ProfilesTemplate).Profiles["premium"]["architect"].Model; strings.Contains(m, ".") {
+		t.Errorf("premium architect = %q, a dotted id the claude CLI 404s", m)
 	}
 }
 
