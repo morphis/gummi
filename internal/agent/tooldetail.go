@@ -20,7 +20,6 @@ var detailKeys = []string{
 	"file_path", "filePath", "path", "file",
 	"pattern", "query", "url",
 	"skill", "subagent_type",
-	"role", "Role",
 	"description", "prompt",
 }
 

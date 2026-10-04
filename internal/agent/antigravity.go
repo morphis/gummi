@@ -671,27 +671,30 @@ func (s *antigravitySession) mapAgentResponse(st agyStep) []Event {
 	return []Event{{Kind: EventTextDelta, Text: st.TextDelta}}
 }
 
-// agyArgDetail renders a tool step's salient first-string argument from
-// its tool_info.parameters — the run_command's command line, the file
-// tool's target path. agy names its parameters in its own vocabulary
-// (CommandLine), so the keyed probe toolDetail runs first, and the first
-// string value the parameters carry stands in when no key matches.
+// agyDetailKeys is agy's own parameter vocabulary, in the order an
+// activity line wants it: the command line, then the file or directory a
+// tool reads or writes, then what a search looks for. agy spells these in
+// CamelCase, which the shared detailKeys never match, and without them
+// the line fell back to the alphabetically first string — the server
+// name of every MCP call, a search's directory instead of its query.
+var agyDetailKeys = []string{
+	"CommandLine",
+	"TargetFile", "AbsolutePath", "DirectoryPath", "File", "Path",
+	"Query", "Pattern", "Url", "URL",
+	"SearchPath", "SearchDirectory",
+}
+
+// agyArgDetail renders a tool step's salient argument from its
+// tool_info.parameters (or a subagent step's subagent_info): the
+// run_command's command line, the file tool's target path, the gummi
+// tool an MCP call invokes. agy's own keys go first, then the shared
+// probe, then the first string value the parameters carry.
 func agyArgDetail(workdir string, st agyStep) string {
 	if len(st.SubagentInfo) > 0 {
 		var m map[string]any
 		if err := json.Unmarshal(st.SubagentInfo, &m); err == nil {
-			if d := toolDetail(workdir, m); d != "" {
+			if d := agyParamDetail(workdir, "", m); d != "" {
 				return d
-			}
-			keys := make([]string, 0, len(m))
-			for k := range m {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				if v, ok := m[k].(string); ok && strings.TrimSpace(v) != "" {
-					return collapseDetail(workdir, v)
-				}
 			}
 		}
 	}
@@ -708,6 +711,26 @@ func agyArgDetail(workdir string, st agyStep) string {
 	var m map[string]any
 	if err := json.Unmarshal(ti.Parameters, &m); err != nil {
 		return ""
+	}
+	return agyParamDetail(workdir, cmp.Or(st.ToolName, ti.Name), m)
+}
+
+// agyParamDetail picks the one parameter worth showing for tool.
+// call_mcp_tool is how agy reaches every MCP tool — gummi's included —
+// and its ServerName is the same on every call, so the line names the
+// tool it calls.
+func agyParamDetail(workdir, tool string, m map[string]any) string {
+	if tool == "call_mcp_tool" {
+		if v, ok := m["ToolName"].(string); ok && strings.TrimSpace(v) != "" {
+			return collapseDetail(workdir, v)
+		}
+	}
+	for _, k := range agyDetailKeys {
+		if v, ok := m[k].(string); ok {
+			if d := collapseDetail(workdir, v); d != "" {
+				return d
+			}
+		}
 	}
 	if d := toolDetail(workdir, m); d != "" {
 		return d
@@ -776,13 +799,15 @@ func (s *antigravitySession) mapToolStep(st agyStep) []Event {
 }
 
 // agyStepOutput extracts a DONE tool step's captured output from its
-// tool_info, which may carry a plain string or a structured value.
+// tool_info, which may carry a plain string or a structured value. A
+// tool_info with no output is no output: echoing the object back would
+// show the call's own name and parameters where its result belongs.
 func agyStepOutput(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
 	}
 	var ti agyToolInfo
-	if err := json.Unmarshal(raw, &ti); err == nil && len(ti.Output) > 0 {
+	if err := json.Unmarshal(raw, &ti); err == nil && (ti.Name != "" || len(ti.Parameters) > 0 || len(ti.Output) > 0) {
 		return agyStepOutput(ti.Output)
 	}
 	var s string

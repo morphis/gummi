@@ -642,9 +642,15 @@ func checkName(p state.ToolPayload, ev state.CardEvent) (string, bool) {
 // because every backend spells its own.
 func isSkill(t ToolUse) bool { return strings.EqualFold(t.Name, "skill") }
 
+// isSubagent matches the delegation tools by exact name — Claude Code's
+// task/agent, agy's invoke_subagent — never by substring: an MCP tool
+// that merely talks about subagents (list_subagents) delegated nothing.
 func isSubagent(t ToolUse) bool {
-	n := strings.ToLower(t.Name)
-	return n == "task" || n == "agent" || strings.Contains(n, "subagent")
+	switch strings.ToLower(t.Name) {
+	case "task", "agent", "subagent", "invoke_subagent":
+		return true
+	}
+	return false
 }
 
 func pick(all []ToolUse, want func(ToolUse) bool) []ToolUse {
