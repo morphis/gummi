@@ -14,11 +14,14 @@ var scheduleAt = time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
 func TestScheduleShapes(t *testing.T) {
 	envelope := 50
 	golden.RequireEqual(t, marshal(t, struct {
-		List   Schedules       `json:"list"`
-		Create ScheduleRequest `json:"create"`
-		Edit   ScheduleRequest `json:"edit"`
-		Run    ScheduleFire    `json:"run"`
-		Forced ScheduleFire    `json:"forced"`
+		List    Schedules              `json:"list"`
+		Create  ScheduleRequest        `json:"create"`
+		Edit    ScheduleRequest        `json:"edit"`
+		Run     ScheduleFire           `json:"run"`
+		Forced  ScheduleFire           `json:"forced"`
+		Ask     SchedulePreviewRequest `json:"ask"`
+		Preview SchedulePreview        `json:"preview"`
+		Refused SchedulePreview        `json:"refused"`
 	}{
 		List: Schedules{Schedules: []Schedule{{
 			ID: "nightly", Name: "nightly triage", Kind: "mint",
@@ -49,5 +52,13 @@ func TestScheduleShapes(t *testing.T) {
 			Status: "paused-exhausted", Detail: "FF-012 has spent its envelope of 50 credits; raise it to carry on",
 			Card: "FF-012", Orphan: "FF-012", At: scheduleAt,
 		},
+		Ask: SchedulePreviewRequest{
+			Every: "1h", Timezone: "America/New_York", Backend: "claude", Model: "claude-sonnet",
+		},
+		Preview: SchedulePreview{
+			Cron: "0 * * * *", Fires: []time.Time{scheduleAt, scheduleAt.Add(time.Hour), scheduleAt.Add(2 * time.Hour)},
+			EnvelopeHint: "the envelope caps what one minted card may spend",
+		},
+		Refused: SchedulePreview{Error: "invalid cron \"0 0 30 2 *\": the day-of-month never exists in the months given"},
 	}))
 }

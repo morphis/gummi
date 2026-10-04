@@ -119,52 +119,82 @@ func scheduleFromRequest(req webapi.ScheduleRequest) (*domain.Schedule, error) {
 	}, nil
 }
 
+// scheduleFromForm validates a request-shaped definition against what
+// this board runs, before anything is stored: the cadence compiles (the
+// write boundary's own precedence — a cron named beside a preset wins),
+// the store's structural rules run on the definition the write will
+// receive, a mint's repository is one the board serves, and the pair a
+// mint names is one its sessions could run, the session picker's
+// refusal applied at the dialog rather than at the first fire. The
+// structural front-run is what keeps the terminal's dialog open on a
+// refusal — a brakeless mint, a targetless heartbeat — instead of
+// closing it and naming the store's refusal as a notice after the fact.
+// It is the shared front door of the web routes and the terminal's
+// dialog; the store's own checks re-run behind it. It runs on the loop:
+// requireRepo and the session check read the board's model.
+func (m *Shell) scheduleFromForm(req webapi.ScheduleRequest) (*domain.Schedule, error) {
+	sc, err := scheduleFromRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if sc.Kind == domain.ScheduleHeartbeat {
+		// A heartbeat has no repository, envelope or pair of its own;
+		// the target's session is the spender, and the store's
+		// validation refuses the rest.
+		sc.Repo, sc.Envelope, sc.Backend, sc.Model = "", 0, "", ""
+	}
+	if err := sc.Validate(); err != nil {
+		return nil, webErr(WebConflict, "%s", err)
+	}
+	if sc.Kind == domain.ScheduleHeartbeat {
+		return sc, nil
+	}
+	if problem := m.checkSessionPick(sc.Backend, sc.Model); problem != "" {
+		return nil, webErr(WebConflict, "%s", problem)
+	}
+	if err := m.requireRepo(sc.Repo); err != nil {
+		return nil, webErr(WebConflict, "%s", sanitize(err.Error()))
+	}
+	return sc, nil
+}
+
 // scheduleHandles grabs, on the loop, what a schedule write needs off it:
-// the store, the repository check, and the board's now.
-func (m *Shell) scheduleHandles() (*state.Store, func(string) error, time.Time) {
-	return m.store, m.requireRepo, m.now()
+// the store and the board's now. The repository check and the pair check
+// run inside scheduleFromForm, which every write calls on the loop.
+func (m *Shell) scheduleHandles() (*state.Store, time.Time) {
+	return m.store, m.now()
 }
 
 // CreateSchedule is POST /api/schedules: a definition, stored disabled.
 // A mint body's repo goes through the board's repository check before
 // the store write — the same check the card form runs.
 func (b *Bridge) CreateSchedule(ctx context.Context, req webapi.ScheduleRequest) (webapi.Schedule, error) {
-	sc, err := scheduleFromRequest(req)
-	if err != nil {
-		return webapi.Schedule{}, err
-	}
-	if sc.Kind == domain.ScheduleHeartbeat {
-		// A heartbeat has no repository of its own; the target's is the
-		// one that matters, and the store's validation refuses the rest.
-		sc.Repo = ""
-		sc.Envelope = 0
-		sc.Backend, sc.Model = "", ""
-	}
-	var store *state.Store
-	var requireRepo func(string) error
-	var now time.Time
+	var (
+		sc    *domain.Schedule
+		store *state.Store
+		now   time.Time
+		werr  error
+	)
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		store, requireRepo, now = m.scheduleHandles()
+		store, now = m.scheduleHandles()
+		sc, werr = m.scheduleFromForm(req)
 		return nil
 	}); err != nil {
 		return webapi.Schedule{}, err
 	}
+	if werr != nil {
+		return webapi.Schedule{}, werr
+	}
 	if store == nil {
 		return webapi.Schedule{}, webErr(WebUnavailable, "this board has no store to keep schedules in")
-	}
-	if sc.Kind == domain.ScheduleMint {
-		if err := requireRepo(sc.Repo); err != nil {
-			return webapi.Schedule{}, webErr(WebConflict, "%s", sanitize(err.Error()))
-		}
 	}
 	sc.CreatedAt = now
 	if err := store.CreateSchedule(ctx, sc); err != nil {
 		return webapi.Schedule{}, webScheduleErr(err)
 	}
-	_, err = b.Await(ctx, func(m *Shell) (tea.Cmd, error) {
+	if _, err := b.Await(ctx, func(m *Shell) (tea.Cmd, error) {
 		return m.scheduleNotice(fmt.Sprintf("schedule %s added — off until you enable it", sc.ID)), nil
-	})
-	if err != nil {
+	}); err != nil {
 		return webapi.Schedule{}, err
 	}
 	return webSchedule(*sc), nil
@@ -174,17 +204,20 @@ func (b *Bridge) CreateSchedule(ctx context.Context, req webapi.ScheduleRequest)
 // store forces the row off — a cadence the person has not re-approved is
 // a cadence that must not fire — so the answer says to re-enable it.
 func (b *Bridge) UpdateSchedule(ctx context.Context, id string, req webapi.ScheduleRequest) (webapi.Schedule, error) {
-	sc, err := scheduleFromRequest(req)
-	if err != nil {
-		return webapi.Schedule{}, err
-	}
-	var store *state.Store
-	var requireRepo func(string) error
+	var (
+		sc    *domain.Schedule
+		store *state.Store
+		werr  error
+	)
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		store, requireRepo, _ = m.scheduleHandles()
+		store, _ = m.scheduleHandles()
+		sc, werr = m.scheduleFromForm(req)
 		return nil
 	}); err != nil {
 		return webapi.Schedule{}, err
+	}
+	if werr != nil {
+		return webapi.Schedule{}, werr
 	}
 	if store == nil {
 		return webapi.Schedule{}, webErr(WebUnavailable, "this board has no store to keep schedules in")
@@ -206,9 +239,6 @@ func (b *Bridge) UpdateSchedule(ctx context.Context, id string, req webapi.Sched
 		}
 	} else {
 		sc.Target = ""
-		if err := requireRepo(sc.Repo); err != nil {
-			return webapi.Schedule{}, webErr(WebConflict, "%s", sanitize(err.Error()))
-		}
 	}
 	if err := store.UpdateScheduleDefinition(ctx, sc); err != nil {
 		return webapi.Schedule{}, webScheduleErr(err)
@@ -228,7 +258,7 @@ func (b *Bridge) EnableSchedule(ctx context.Context, id string) (webapi.Schedule
 	var store *state.Store
 	var now time.Time
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		store, _, now = m.scheduleHandles()
+		store, now = m.scheduleHandles()
 		return nil
 	}); err != nil {
 		return webapi.Schedule{}, err
@@ -261,7 +291,7 @@ func (b *Bridge) EnableSchedule(ctx context.Context, id string) (webapi.Schedule
 func (b *Bridge) DisableSchedule(ctx context.Context, id string) (webapi.Schedule, error) {
 	var store *state.Store
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		store, _, _ = m.scheduleHandles()
+		store, _ = m.scheduleHandles()
 		return nil
 	}); err != nil {
 		return webapi.Schedule{}, err
@@ -354,4 +384,70 @@ func webScheduleErr(err error) error {
 		return webErr(WebNotFound, "%s", sanitize(err.Error()))
 	}
 	return webErr(WebConflict, "%s", sanitize(err.Error()))
+}
+
+// scheduleBrakeWords is the envelope field's guidance when the workspace
+// cannot price the pair a mint names: what the brake is for, in words.
+const scheduleBrakeWords = "the envelope caps what one minted card may spend; the session stops when it is spent"
+
+// scheduleEnvelopeHint is the envelope field's guidance for the pair the
+// form picked: where the workspace can price the pair (a BYOK backend's
+// operator-configured rate), it estimates what a credit buys on it;
+// anywhere else it says what the brake is for. No per-model pricing is
+// invented: named models on managed backends are not priced here.
+func scheduleEnvelopeHint(eng *engine.Engine, backend, model string) string {
+	rate := 0.0
+	if eng != nil && backend != "" {
+		rate = eng.SessionCreditRate(backend, model)
+	}
+	if rate <= 0 {
+		return scheduleBrakeWords
+	}
+	tokens := 1000 / rate
+	buys := fmt.Sprintf("%.0f", tokens)
+	if tokens >= 1000 {
+		buys = fmt.Sprintf("%.1fk", tokens/1000)
+	}
+	return fmt.Sprintf("1 credit ≈ %s tokens on this model at %g credits per 1k — %s", buys, rate, scheduleBrakeWords)
+}
+
+// schedulePreview answers a preview request: the cadence inputs read the
+// way the write boundary reads them, plus the envelope hint for the pair
+// the form picked. It runs on the loop — pure over the schedule package
+// beside the board's now and the engine's rate read, none of which may
+// race a render — and costs no IO.
+func (m *Shell) schedulePreview(req webapi.SchedulePreviewRequest) webapi.SchedulePreview {
+	res := schedule.Preview(req.Every, req.Cron, req.Timezone, m.now())
+	out := webapi.SchedulePreview{Cron: res.Cron, Fires: []time.Time{}}
+	if res.Err != nil {
+		out.Error = res.Err.Error()
+	}
+	out.Fires = append(out.Fires, res.Next...)
+	out.EnvelopeHint = scheduleEnvelopeHint(m.engine, req.Backend, req.Model)
+	return out
+}
+
+// SchedulePreview is POST /api/schedules/preview: what the cadence
+// inputs would store and when they would next fire, answered before
+// anything is stored. A refused cadence answers 200 with the refusal in
+// words, so a form shows it where the person is typing.
+func (b *Bridge) SchedulePreview(ctx context.Context, req webapi.SchedulePreviewRequest) (webapi.SchedulePreview, error) {
+	var out webapi.SchedulePreview
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out = m.schedulePreview(req); return nil }); err != nil {
+		return webapi.SchedulePreview{}, err
+	}
+	return out, nil
+}
+
+// ScheduleCatalog is GET /api/schedules/catalog: the session picker's
+// catalog, for the schedule forms' backend and model pickers — the same
+// rows a freeform card's picker offers, with the pair a mint names
+// checked against the same refusals at save.
+func (b *Bridge) ScheduleCatalog(ctx context.Context) (webapi.SessionModels, error) {
+	var out webapi.SessionModels
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out = m.webSessionModels(); return nil }); err != nil {
+		return webapi.SessionModels{}, err
+	}
+	mergeSessionCatalog(ctx, b.shell.engine, &out)
+	return out, nil
 }

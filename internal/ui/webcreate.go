@@ -122,19 +122,7 @@ func (b *Bridge) Form(ctx context.Context, repo string) (webapi.Form, error) {
 	if werr != nil {
 		return webapi.Form{}, werr
 	}
-	if eng := b.shell.engine; eng != nil {
-		for i := range f.Sessions.Agents {
-			a := &f.Sessions.Agents[i]
-			if !a.Installed {
-				continue
-			}
-			a.Models = eng.SessionModelChoices(ctx, a.Name)
-			if a.Models == nil {
-				// the contract spells an empty list as [], not null
-				a.Models = []string{}
-			}
-		}
-	}
+	mergeSessionCatalog(ctx, b.shell.engine, &f.Sessions)
 	return f, nil
 }
 

@@ -66,5 +66,23 @@
     "card": "FF-012",
     "orphan": "FF-012",
     "at": "2026-10-03T10:00:00Z"
+  },
+  "ask": {
+    "every": "1h",
+    "timezone": "America/New_York",
+    "backend": "claude",
+    "model": "claude-sonnet"
+  },
+  "preview": {
+    "cron": "0 * * * *",
+    "fires": [
+      "2026-10-03T10:00:00Z",
+      "2026-10-03T11:00:00Z",
+      "2026-10-03T12:00:00Z"
+    ],
+    "envelopeHint": "the envelope caps what one minted card may spend"
+  },
+  "refused": {
+    "error": "invalid cron \"0 0 30 2 *\": the day-of-month never exists in the months given"
   }
 }

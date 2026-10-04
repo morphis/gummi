@@ -3,14 +3,10 @@ package ui
 // The schedules view (DESIGN §19.9): what comes back on a clock without
 // a person typing — a schedule that mints a freeform card on a cron
 // cadence, and a heartbeat that sends a recurring turn into one session.
-// The list is the board's only surface for them, so it carries the whole
-// of the v1 verbs: enable and disable (enabling asks, because it is the
-// switch that starts spending), run now (a forced fire, the one a
-// disabled row may take), and delete.
-//
-// Adding and editing are CLI and web verbs for v1, the same split the
-// stacks kept before their own forms landed: a cron expression is easier
-// to type into a flag than into a dialog.
+// The list carries the whole of the verbs: define (`n`, the dialog),
+// edit (enter, the same dialog prefilled), enable and disable (enabling
+// asks, because it is the switch that starts spending), run now (a
+// forced fire, the one a disabled row may take), and delete.
 
 import (
 	"context"
@@ -64,7 +60,8 @@ func (d *schedulesDialog) ID() string { return "schedules" }
 
 // HandleKey answers the view's own verbs. esc closes; the confirm steps
 // ride confirmDialog's onConfirm callbacks, which run their store and
-// engine work as commands and report back as notices.
+// engine work as commands and report back as notices; n and enter open
+// the schedule dialog — create, or edit the selected row.
 func (d *schedulesDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
 	case "esc", "q":
@@ -76,6 +73,12 @@ func (d *schedulesDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "k", "up":
 		if len(d.rows) > 0 {
 			d.cursor = clamp(d.cursor-1, 0, len(d.rows)-1)
+		}
+	case "n":
+		return true, d.m.openScheduleForm(nil)
+	case "enter":
+		if d.cursor < len(d.rows) {
+			return true, d.m.openScheduleForm(&d.rows[d.cursor])
 		}
 	case "e":
 		if d.cursor < len(d.rows) {
@@ -204,7 +207,7 @@ func (d *schedulesDialog) View(s *theme.Styles, w, _ int) string {
 	}
 	if len(d.rows) == 0 {
 		return closeOutFrame(s, "schedules", s.Base.Render(
-			"no schedules. `gummi schedule add` or the web page defines one —\n"+
+			"no schedules. `n` defines one, or `gummi schedule add` —\n"+
 				"cron mints a freeform card on a cadence, or sends a recurring\n"+
 				"turn into a session. Off until enabled."))
 	}
@@ -235,7 +238,7 @@ func (d *schedulesDialog) View(s *theme.Styles, w, _ int) string {
 		}
 		b.WriteString(ansi.Truncate(line, w, "…") + "\n")
 	}
-	b.WriteString("\n   " + s.Faint.Render("j/k select · e on/off · r run now · x delete · esc close"))
+	b.WriteString("\n   " + s.Faint.Render("n new · enter edit · j/k select · e on/off · r run now · x delete · esc close"))
 	return closeOutFrame(s, "schedules · "+strconv.Itoa(len(d.rows)), b.String())
 }
 

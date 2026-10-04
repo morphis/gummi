@@ -73,6 +73,42 @@ type ScheduleRequest struct {
 	Envelope *int `json:"envelope,omitempty"`
 }
 
+// SchedulePreviewRequest is POST /api/schedules/preview's body: the
+// cadence inputs a form holds so far, answered before anything is
+// stored. Every is a preset (`5m`, `@daily`), Cron the expression;
+// either may be empty when the other is present, and with both set the
+// cron wins — the same precedence the store write applies. Timezone is
+// a zone name, empty for the host's zone. Backend and Model, when the
+// form has already picked a pair, shape the envelope hint.
+type SchedulePreviewRequest struct {
+	Every    string `json:"every,omitempty"`
+	Cron     string `json:"cron,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
+	Backend  string `json:"backend,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+// SchedulePreview is POST /api/schedules/preview's answer. A valid
+// cadence answers with the canonical cron the store would hold and its
+// coming fires; a refused one answers 200 with Error saying why, so the
+// form shows the refusal where the person is typing rather than as a
+// failed request.
+type SchedulePreview struct {
+	// Cron is the canonical 5-field expression the store would hold:
+	// the preset compiled, or the expression trimmed. Empty when no
+	// cadence was given at all.
+	Cron string `json:"cron,omitempty"`
+	// Fires are the next fire times, soonest first, in the asked zone;
+	// empty whenever Error is set.
+	Fires []time.Time `json:"fires,omitempty"`
+	// Error says why the cadence is refused; empty when it is valid.
+	Error string `json:"error,omitempty"`
+	// EnvelopeHint is the mint form's guidance about the picked pair's
+	// credit rate: what a credit buys where the workspace can price the
+	// pair, otherwise what the brake is for.
+	EnvelopeHint string `json:"envelopeHint,omitempty"`
+}
+
 // ScheduleFire is one fire's recorded result, as POST
 // /api/schedules/{id}/run and the board's poll report it.
 type ScheduleFire struct {

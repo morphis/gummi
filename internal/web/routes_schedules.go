@@ -14,6 +14,37 @@ func (s *Server) scheduleRoutes() {
 	s.api("POST /api/schedules/{id}/enable", s.handleEnableSchedule)
 	s.api("POST /api/schedules/{id}/disable", s.handleDisableSchedule)
 	s.api("POST /api/schedules/{id}/run", s.handleRunSchedule)
+	s.api("POST /api/schedules/preview", s.handleSchedulePreview)
+	s.api("GET /api/schedules/catalog", s.handleScheduleCatalog)
+}
+
+// handleSchedulePreview is POST /api/schedules/preview: what the
+// cadence inputs would store and when they would next fire, answered
+// before anything is stored. A refused cadence answers 200 with the
+// refusal in words — a form typing debounce is not a failed request.
+func (s *Server) handleSchedulePreview(w http.ResponseWriter, r *http.Request) {
+	var req webapi.SchedulePreviewRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		return
+	}
+	out, err := s.opt.Board.SchedulePreview(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleScheduleCatalog is GET /api/schedules/catalog: the session
+// picker's catalog, for the schedule form's backend and model pickers.
+func (s *Server) handleScheduleCatalog(w http.ResponseWriter, r *http.Request) {
+	out, err := s.opt.Board.ScheduleCatalog(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleSchedules is GET /api/schedules: every row, oldest first.

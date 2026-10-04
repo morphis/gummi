@@ -253,15 +253,19 @@ own card its page), `card-stack` (opens the stacks view on the card's stack).
 
 ## Schedules (`views/schedules.js`)
 `schedules-list`, `schedules-count`, `schedules-new`, `schedules-empty`,
-`schedules-notice`; add form `schedule-form`, `schedule-form-name`,
-`schedule-form-kind-mint`/`-heartbeat`, `schedule-form-target`,
-`schedule-form-repo`, `schedule-form-backend`, `schedule-form-model`,
-`schedule-form-envelope`, `schedule-form-every`, `schedule-form-cron`,
-`schedule-form-tz`, `schedule-form-prompt`, `schedule-form-error`,
+`schedules-notice`; form `schedule-form` (create and edit — the same one),
+`schedule-form-name`, `schedule-form-kind-mint`/`-heartbeat`,
+`schedule-form-kind-fixed` (an edit's read-only kind),
+`schedule-form-target`, `schedule-form-repo`, `schedule-form-backend`,
+`schedule-form-model`, `schedule-form-envelope`, `schedule-form-every`,
+`schedule-form-cron`, `schedule-form-tz`, `schedule-form-prompt`,
+`schedule-form-preview` (`-cron`, `-fires`, `-error` and
+`schedule-form-envelope-hint` inside it), `schedule-form-error`,
 `schedule-form-error-detail`, `schedule-form-cancel`, `schedule-form-submit`.
 One row: `schedule-<id>` (`data-enabled`), `schedule-<id>-state`,
 `schedule-<id>-next`, `schedule-<id>-status`, `schedule-<id>-orphan`,
-`schedule-<id>-toggle`, `schedule-<id>-run`, `schedule-<id>-rm`,
+`schedule-<id>-toggle`, `schedule-<id>-edit`, `schedule-<id>-run`,
+`schedule-<id>-rm`,
 `schedule-<id>-confirm` (`-yes`/`-no` via the shared strip),
 `schedule-<id>-result`.
 

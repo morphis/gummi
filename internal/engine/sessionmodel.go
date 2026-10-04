@@ -280,6 +280,20 @@ func (e *Engine) HasAgent(name string) bool {
 	return name != "" && e.knownAgent(name) != nil
 }
 
+// SessionCreditRate is the token→credit rate the workspace can price a
+// session pair at — the agent's own answer for the model named (a BYOK
+// backend's operator-configured rate, for instance), asked of an agent
+// the board already holds. It never starts a backend to ask, and zero
+// means the workspace cannot price the pair: named models on managed
+// backends carry no rate here, and none is invented for them.
+func (e *Engine) SessionCreditRate(backend, model string) float64 {
+	a := e.knownAgent(backend)
+	if a == nil {
+		return 0
+	}
+	return a.CreditRate(model)
+}
+
 // SessionModelRule says whether backend refuses to start without a model
 // id, how it spells one, and a pattern a typed id must match (an
 // ECMAScript regular expression, case-insensitive, for the page; empty

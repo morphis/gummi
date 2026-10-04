@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -103,5 +104,50 @@ func TestScheduleLastWordsTruncatesByRune(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "…") || strings.Contains(got, "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé") {
 		t.Fatalf("the tail was not truncated: %d runes", utf8.RuneCountInString(got))
+	}
+}
+
+// TestTheScheduleViewOpensTheDialog: n opens the create dialog from the
+// schedules list, and enter opens the same dialog prefilled on the
+// selected row.
+func TestTheScheduleViewOpensTheDialog(t *testing.T) {
+	m := scheduleFormBoard(t)
+	seed := &domain.Schedule{
+		ID: "hourly", Name: "hourly", Kind: domain.ScheduleHeartbeat,
+		Target: "FF-003", Cron: "0 * * * *", Prompt: "keep going",
+	}
+	if err := m.store.CreateSchedule(context.Background(), seed); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.openSchedules())
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	d, ok := m.Overlay.Top().(*scheduleForm)
+	if !ok {
+		t.Fatalf("n did not open the schedule dialog: %T", m.Overlay.Top())
+	}
+	if d.edit != nil {
+		t.Error("n opened the dialog in edit mode")
+	}
+	m.Overlay.HandleKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	d2 := &schedulesDialog{m: m, rows: func() []domain.Schedule {
+		rows, err := m.store.ListSchedules(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}()}
+	m.Overlay.Push(d2)
+	m.Overlay.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	d3, ok := m.Overlay.Top().(*scheduleForm)
+	if !ok {
+		t.Fatalf("enter did not open the schedule dialog: %T", m.Overlay.Top())
+	}
+	if d3.edit == nil || d3.edit.ID != "hourly" {
+		t.Fatalf("enter opened %v, want the selected row's edit", d3.edit)
+	}
+	if d3.name.Value() != "hourly" || d3.target.Value() != "FF-003" {
+		t.Errorf("the edit dialog prefilled name=%q target=%q", d3.name.Value(), d3.target.Value())
 	}
 }

@@ -93,3 +93,68 @@ test('a schedule is defined, enabled through its confirm, fired and deleted', as
 
   await shot(page, info, 'schedules');
 });
+
+// The form answers while it is filled: the cadence is previewed against
+// the board (the page parses no cron of its own), the agent and model
+// are picked from the session picker's catalog rather than typed blind,
+// the timezone is a shortlist plus free text, and the same form edits an
+// existing row — which stays off across the save.
+test('the schedule form previews its cadence, picks a pair from the catalog, and edits', async ({ pairedPage: page, api }, info) => {
+  test.setTimeout(120_000);
+  const mobile = info.project.name === 'phone';
+  await openSchedules(page, mobile);
+
+  await page.getByTestId('schedules-new').click();
+  const form = page.getByTestId('schedule-form');
+  await expect(form).toBeVisible();
+
+  // the catalog fills the agent picker; headless is installed here (the
+  // workspace runs the scripted agent), so its row carries no refusal
+  const backend = page.getByTestId('schedule-form-backend');
+  await expect(backend).toContainText('headless');
+
+  // the cadence preview: the default preset compiles and shows when the
+  // schedule would fire, before anything is stored
+  await expect(page.getByTestId('schedule-form-preview-cron')).toContainText('0 * * * *');
+  await expect(page.getByTestId('schedule-form-preview-fires')).toBeVisible();
+
+  // an expression that can never fire is refused in the form, not at
+  // the first fire
+  await page.getByTestId('schedule-form-cron').fill('0 0 30 2 *');
+  await expect(page.getByTestId('schedule-form-preview-error')).toContainText(/never/i);
+
+  // a nonsense timezone is refused; a real one previews in its own wall
+  // clock
+  await page.getByTestId('schedule-form-cron').fill('');
+  await page.getByTestId('schedule-form-tz').fill('Mars/Olympus');
+  await expect(page.getByTestId('schedule-form-preview-error')).toContainText(/timezone/i);
+  await page.getByTestId('schedule-form-tz').fill('Europe/Berlin');
+  await expect(page.getByTestId('schedule-form-preview-fires')).toBeVisible();
+
+  // picking the pair from the catalog: headless' models are the ids this
+  // workspace's profiles run
+  await backend.selectOption('headless');
+  await page.getByTestId('schedule-form-model').fill('e2e-implementer');
+  await expect(page.getByTestId('schedule-form-envelope-hint')).toContainText(/envelope/i);
+
+  await page.getByTestId('schedule-form-name').fill('previewed mint');
+  await page.getByTestId('schedule-form-prompt').fill('triage new issues');
+  await page.getByTestId('schedule-form-submit').click();
+  const row = page.getByTestId('schedule-previewed-mint');
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute('data-enabled', 'false');
+
+  // the same form, opened on the row, prefilled; the saved edit leaves
+  // the row off — a cadence the person has not re-approved must not fire
+  await row.getByTestId('schedule-previewed-mint-edit').click();
+  await expect(form).toBeVisible();
+  await expect(page.getByTestId('schedule-form-name')).toHaveValue('previewed mint');
+  await expect(page.getByTestId('schedule-form-cron')).toHaveValue('0 * * * *');
+  await expect(page.getByTestId('schedule-form-kind-fixed')).toContainText('mint');
+  await page.getByTestId('schedule-form-cron').fill('30 5 * * *');
+  await page.getByTestId('schedule-form-submit').click();
+  await expect(row).toHaveAttribute('data-enabled', 'false');
+  await expect(row.locator('.sch-cron')).toHaveText('30 5 * * *');
+
+  await shot(page, info, 'schedules-form');
+});

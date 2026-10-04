@@ -367,8 +367,11 @@ How they behave:
 issues" --envelope 50` defines a mint; `--heartbeat FF-001` (with no
 envelope — the target's own is the brake) defines a heartbeat. `enable`,
 `disable`, `run-now` (the running board fires it off-cadence), `rm` and
-`list --json` round it out. The web page's Schedules view has the same
-verbs.
+`list --json` round it out. The board's Schedules view (`L`) defines and
+edits through a dialog of its own — the agent and model picked from the
+session picker's catalog, the cadence previewed as you type (the cron
+the store would keep, and when it fires next), the timezone picked from
+a shortlist — and the web page's Schedules view has the same form.
 
 ## Headless
 

@@ -153,6 +153,14 @@ func (m *Shell) updateSchedule(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		isErr := msg.fire.Outcome.Status == domain.ScheduleFailed
 		return func() tea.Msg { return noticeMsg{text: sanitize(text), isErr: isErr, reload: true} }, true
+	case scheduleModelsMsg:
+		// The schedule dialog's model probe landed. Only the top dialog
+		// takes it, and only for the backend it named — the row may have
+		// moved on while the probe ran.
+		if d, ok := m.Overlay.Top().(*scheduleForm); ok {
+			d.setModels(msg.backend, msg.models)
+		}
+		return nil, true
 	}
 	return nil, false
 }

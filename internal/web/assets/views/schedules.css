@@ -17,6 +17,14 @@
 .sch-form-row .field{min-width:180px}
 .sch-form-foot{display:flex;justify-content:flex-end;gap:8px}
 .sch-form-error:empty{display:none}
+.sch-kind-fixed{font-size:12.5px;color:var(--fg2);line-height:2.2}
+.sch-preview{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;font-size:12px;color:var(--fg3);border-left:2px solid var(--line2);padding-left:10px}
+.sch-preview:empty{display:none}
+.sch-preview-cron code{font-family:var(--mono);color:var(--fg2)}
+.sch-preview-fires{color:var(--fg2)}
+.sch-fire{white-space:nowrap}
+.sch-preview-err{color:var(--err)}
+.sch-preview-hint{color:var(--fg4)}
 
 .sch-row{border:1px solid var(--line);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:8px;padding:12px 14px}
 .sch-row[data-enabled="true"]{border-color:color-mix(in srgb,var(--ok) 35%,var(--line))}

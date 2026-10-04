@@ -83,6 +83,30 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 	return out
 }
 
+// mergeSessionCatalog replaces each installed agent's inline suggestions
+// with the merged view (SessionModelChoices) — the agent's own catalog
+// where it can say one, plus the workspace's profile ids. The merge asks
+// a backend and possibly runs its CLI, so it happens off the loop; the
+// loop builds the same rows inline from SessionSuggestions alone. Every
+// endpoint that ships the picker's catalog runs this one merge, so no
+// face can see a catalog the others do not.
+func mergeSessionCatalog(ctx context.Context, eng *engine.Engine, sm *webapi.SessionModels) {
+	if eng == nil {
+		return
+	}
+	for i := range sm.Agents {
+		a := &sm.Agents[i]
+		if !a.Installed {
+			continue
+		}
+		a.Models = eng.SessionModelChoices(ctx, a.Name)
+		if a.Models == nil {
+			// the contract spells an empty list as [], not null
+			a.Models = []string{}
+		}
+	}
+}
+
 // defaultProfile is the profile a card minted with none resolves under:
 // the declared default, which is also what the new-card form preselects.
 func (m *Shell) defaultProfile() string {
