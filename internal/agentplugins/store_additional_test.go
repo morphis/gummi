@@ -3,6 +3,7 @@ package agentplugins
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,5 +114,57 @@ func TestDiscoverAtFindsBundledItemsAndImportMany(t *testing.T) {
 	}
 	if !foundDesc {
 		t.Fatalf("did not find imported skill-a with description among items: %+v", items)
+	}
+}
+
+func TestDiscoverMarksAlreadyImportedCandidates(t *testing.T) {
+	store, _, repo := testStore(t)
+	bundle := filepath.Join(repo, "bundle")
+	for _, name := range []string{"kept", "fresh"} {
+		if err := os.MkdirAll(filepath.Join(bundle, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bundle, name, "SKILL.md"), []byte("# "+name+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(bundle, "kept.agent.md"), []byte("# Kept\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cands, err := store.DiscoverAt("bundle", "griffin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pick []Candidate
+	for _, c := range cands {
+		if c.Imported {
+			t.Fatalf("%s/%s flagged imported before any import", c.Kind, c.Name)
+		}
+		if c.Name == "kept" {
+			pick = append(pick, c)
+		}
+	}
+	if len(pick) != 2 {
+		t.Fatalf("want a kept skill and agent, got %+v", pick)
+	}
+	if _, err := store.ImportMany(pick); err != nil {
+		t.Fatal(err)
+	}
+	for _, scan := range []func() ([]Candidate, error){
+		func() ([]Candidate, error) { return store.DiscoverAt("bundle", "griffin") },
+		store.Discover,
+	} {
+		got, err := scan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range got {
+			if !strings.HasPrefix(c.Path, "bundle/") {
+				continue
+			}
+			if want := c.Name == "kept"; c.Imported != want {
+				t.Fatalf("%s/%s imported = %v, want %v", c.Kind, c.Name, c.Imported, want)
+			}
+		}
 	}
 }

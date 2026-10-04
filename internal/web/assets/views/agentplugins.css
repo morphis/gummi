@@ -16,7 +16,8 @@
 .pitemtitle abbr{border-bottom:1px dotted var(--line);cursor:help}
 .ptag,.plinked{font-size:11px;border-radius:10px;padding:2px 7px;color:var(--fg3);background:var(--sunk)}
 .psource{margin-top:3px;font-size:11px;color:var(--fg4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pitemactions{display:flex;gap:5px}
+.pitemactions{display:flex;gap:5px;grid-column:-2;justify-self:end;justify-content:flex-end}
+.pitem > .vconfirm{grid-column:1 / -1}
 .pitemactions .btn{padding:5px 8px}
 .pproviders{display:flex;flex-wrap:wrap;gap:5px}
 .pprovider{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:12px;background:var(--sunk);font:11px var(--mono);color:var(--fg3)}
@@ -30,14 +31,26 @@
 .pempty{padding:14px;border:1px dashed var(--line);border-radius:8px;color:var(--fg3);font-size:13px}
 .pimport,.peditor{display:flex;flex-direction:column;gap:10px;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .pimport{margin-top:4px}
+.pimporthead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.pimporttext{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pimporttext h3{font-size:15px;margin:0}
+.pimporttext .pquiet{margin:0}
+.pimporthead > .btn{flex-shrink:0}
+.pimport input:not([type="checkbox"]),.pimport select{height:34px;border:1px solid var(--line2);border-radius:8px;padding:0 10px;background:var(--bg);outline:0;font-size:13px;color:var(--fg)}
+.pimport input:not([type="checkbox"]):focus,.pimport select:focus{border-color:var(--accent)}
+.psearch{width:100%}
+.pcandlist{display:flex;flex-direction:column;gap:5px}
 .peditor{margin-top:4px}
 .peditor .field textarea{font:12px/1.5 var(--mono);min-height:240px;resize:vertical}
 .peditor .psectionhead{margin-bottom:2px}
 .pactions,.pimportactions{display:flex;justify-content:flex-end;gap:7px}
 .pcandidate input{accent-color:var(--accent)}
-.pcandidates{display:flex;flex-direction:column;gap:5px}
+.pcandidates{display:flex;flex-direction:column;gap:8px}
 .pcandidate{display:grid;grid-template-columns:18px minmax(100px,180px) minmax(75px,100px) minmax(0,1fr);align-items:center;gap:9px;padding:7px 8px;border:1px solid var(--line);border-radius:7px;color:var(--fg2);font-size:12px}
-.pcandname{color:var(--fg);font-weight:600}
+.pcandname{display:inline-flex;align-items:center;gap:6px;color:var(--fg);font-weight:600}
+.pcandidate.imported{background:var(--sunk);cursor:default}
+.pcandidate.imported .pcandname{color:var(--fg2)}
+.pcandname .ptag{font-weight:500}
 .pcandrepo{color:var(--fg3)}
 .pcandpath{font-size:11px;color:var(--fg4);overflow-wrap:anywhere}
 .pexplicit{display:flex;flex-direction:column;gap:7px;padding-top:8px;border-top:1px solid var(--line)}
@@ -46,6 +59,8 @@
 .pexplicitrow input{min-width:0}
 .pbusy{display:flex;align-items:center;gap:8px;color:var(--fg3);font-size:12px}
 @media(max-width:760px){
+  .pimporthead{flex-direction:column;align-items:stretch}
+  .pimporthead > .btn{align-self:flex-end}
   .pitem{grid-template-columns:1fr}
   .pitemactions{justify-content:flex-end}
   .pcandidate{grid-template-columns:18px minmax(0,1fr) minmax(75px,auto)}
