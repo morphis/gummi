@@ -3388,7 +3388,15 @@ one place the whole rule lives:
 
 - A card in the workflow lands on a **verified branch** — it walked the
   graph, its critique passed, its checks ran. Unchanged, and no
-  configuration softens it.
+  configuration softens it. "Verified" is about a revision, not a card:
+  the stamp records the branch tip the pass ran on, and a landing reads
+  the tip it would squash (after its own final checkpoint) against it
+  (`domain.Feature.MayLandAt`). A commit made after the pass — by hand,
+  by a later turn, by that checkpoint — is refused until a verify runs
+  on the new tip; the verify stop offers that re-verify in place of the
+  landing. A stamp written before the revision was recorded reads the
+  same way. A goal is not asked: it re-runs its checks itself when its
+  landing's catch-up moves one of its branches.
 - A freeform card lands on **a human's read of its diff**. That is the
   whole of what freeform means.
 

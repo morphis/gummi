@@ -384,6 +384,13 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "reverify":
+		// the verify stop on a branch that moved since its pass
+		// (nextsteps.go's verifyStale arm)
+		if r, ok := m.selected(); ok {
+			return m.reverify(r.F.ID)
+		}
+		return nil
 	case "wait":
 		// the row a held gate leads with (nextsteps.go's waitOnDeps, the
 		// stack's "lands after"): nothing to do but wait, and it says what

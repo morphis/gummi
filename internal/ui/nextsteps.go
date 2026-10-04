@@ -281,6 +281,11 @@ type nextInput struct {
 	// it is "" (cardActionsFor), so no door lists a landing the same
 	// board would then refuse.
 	landRefused string
+	// verifyStale is a verified card whose branch moved past the revision
+	// its verify passed on (domain.Feature.VerifyStale, read off the row's
+	// Head): the pass no longer describes what would land, so the verify
+	// stop offers a re-verify where it offered the landing.
+	verifyStale bool
 
 	// attnText is the attention item's own sentence — for a failure, the
 	// cause, which the decision's question names rather than leaving it
@@ -588,6 +593,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		}
 	}
 	in.verdict = escalatedGateVerdict(in.verdict, in.escalated)
+	in.verifyStale = r.F.Stage == domain.StageVerify && r.F.VerifyStale(r.Head)
 	// last, since the floor reads the answer set this input yields (a
 	// failed verify's "land anyway" is a landing it lets through)
 	in.landRefused = m.landingRefusalIn(r.F, r, true, &in)
@@ -1334,6 +1340,19 @@ func stageAnswers(in nextInput) []nextAction {
 				*b,
 				sendBackStep("bounce", "b", reworkStage(in.stage), "or send the open items back as rework"),
 			}, stopHere(in)...)
+		}
+		if in.verifyStale {
+			// verify passed, on a revision the branch has moved past: what
+			// would land now has not been checked, and every landing door
+			// refuses it (domain.Feature.MayLandAt). The answer is to check
+			// it — a re-run of the checks on the new tip, which records it
+			// — or to send it back; handing the branch off lands nothing.
+			return append([]nextAction{
+				nextStep("reverify", "", "re-verify", "the branch moved since verify passed — run the checks again on what would land"),
+				sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it"),
+				nextStep("handoff", "h", "hand off",
+					"close the card and keep "+in.keptBranch()+" — you push, PR or cherry-pick it"),
+			}, stopOrResume(in)...)
 		}
 		if in.failedCheck != "" {
 			// re-running the checks alone is /verify: it re-evaluates the

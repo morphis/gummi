@@ -162,7 +162,7 @@ func TestALandingAnswerHandsBackTheDraftToRead(t *testing.T) {
 		}
 	}
 	tip, _ := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
-	if err := store.SetVerifiedAt(ctx, f.ID, time.Now()); err != nil {
+	if err := store.SetVerifiedAt(ctx, f.ID, time.Now(), strings.TrimSpace(string(tip))); err != nil {
 		t.Fatal(err)
 	}
 	const draft = "feat: what the scribe wrote"
@@ -403,7 +403,7 @@ func TestProseOnAHandedOffGoalNeverLandsIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := store.SetVerifiedAt(ctx, g.ID, time.Now()); err != nil {
+	if err := store.SetVerifiedAt(ctx, g.ID, time.Now(), ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetHandedOffAt(ctx, g.ID, time.Now()); err != nil {

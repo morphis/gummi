@@ -607,6 +607,19 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	if _, err := wt.CommitAll(ctx, &f, string(id)+": final checkpoint"); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
+	// the verified floor is about what lands, so it is read on the tip the
+	// squash takes — after that checkpoint, which is itself work no verify
+	// has seen when it committed anything (domain.Feature.MayLandAt)
+	if !f.HandedOff() && !f.IsFreeform() {
+		head, err := wt.Head(ctx, &f)
+		if err != nil {
+			return d.fail(ctx, string(id), err)
+		}
+		if err := f.MayLandAt(head); err != nil {
+			return d.fail(ctx, string(id),
+				fmt.Errorf("%s is %w; run `gummi verify %s` to verify what would land", id, err, id))
+		}
+	}
 
 	sha, err := wt.SquashMerge(ctx, &f, message)
 	if err != nil {

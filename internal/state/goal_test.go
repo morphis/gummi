@@ -160,7 +160,7 @@ func TestAGoalBackAtImplementIsNoLongerWrappingUp(t *testing.T) {
 	if _, err := s.Transition(ctx, g.ID, domain.StageVerify, "auto"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetVerifiedAt(ctx, g.ID, time.Now()); err != nil {
+	if err := s.SetVerifiedAt(ctx, g.ID, time.Now(), ""); err != nil {
 		t.Fatal(err)
 	}
 

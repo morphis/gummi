@@ -63,8 +63,8 @@ func TestTheMenuNeverLandsAnUnverifiedCard(t *testing.T) {
 func TestTheMenusNextStageAtVerifyIsTheLanding(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
 	ctx := context.Background()
-	c, _ := h.verifiedCard("Dark mode")
-	if err := h.store.SetVerifiedAt(ctx, domain.FeatureID(c.ID), time.Now()); err != nil {
+	c, wt := h.verifiedCard("Dark mode")
+	if err := h.store.SetVerifiedAt(ctx, domain.FeatureID(c.ID), time.Now(), gitIn(t, wt, "rev-parse", "HEAD")); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.board.Reload(ctx); err != nil {

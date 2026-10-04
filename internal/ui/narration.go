@@ -435,6 +435,9 @@ func whyItStopped(in nextInput) string {
 	}
 
 	if in.stage == domain.StageVerify {
+		if in.verifyStale {
+			return "Verify passed, but the branch has moved since — what would land now has not been checked."
+		}
 		return verifyStopped(in, art)
 	}
 	switch in.stage {

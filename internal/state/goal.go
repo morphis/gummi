@@ -430,7 +430,7 @@ func parseOptTime(v string) (time.Time, error) {
 // verified branch back to work (the goal branch moved under it, or its
 // checks stopped passing there), so it is no longer ready to land.
 func (s *Store) ClearVerifiedAt(ctx context.Context, id domain.FeatureID) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE features SET verified_at = '' WHERE id = ?`, string(id))
+	_, err := s.db.ExecContext(ctx, `UPDATE features SET verified_at = '', verified_rev = '' WHERE id = ?`, string(id))
 	if err != nil {
 		return fmt.Errorf("clearing the verified stamp on %s: %w", id, err)
 	}

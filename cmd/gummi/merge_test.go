@@ -68,9 +68,6 @@ func verifiedCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetVerifiedAt(context.Background(), id, now); err != nil {
-		t.Fatal(err)
-	}
 	p, err := wt.Create(context.Background(), &f)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +77,63 @@ func verifiedCLIRepo(t *testing.T) (*state.Store, domain.Feature) {
 	}
 	cliGit(t, p, "add", ".")
 	cliGit(t, p, "commit", "-q", "-m", "feature work")
+	// verified on the tip it would land: the revision is what a landing checks
+	if err := store.SetVerifiedAt(context.Background(), id, now, cliGit(t, p, "rev-parse", "HEAD")); err != nil {
+		t.Fatal(err)
+	}
 	return store, f
+}
+
+// A commit added after verify passed is work no check has run on: merge
+// refuses it, main does not move, and the card stays at verify. The
+// refusal names the way forward.
+func TestMergeRefusesCommitsAddedAfterVerify(t *testing.T) {
+	store, f := verifiedCLIRepo(t)
+	p := filepath.Join(".gummi", "worktrees", string(f.ID))
+	if err := os.WriteFile(filepath.Join(p, "unverified.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, p, "add", ".")
+	cliGit(t, p, "commit", "-q", "-m", "after verify")
+	before := cliGit(t, ".", "rev-parse", "HEAD")
+
+	out, err := captureNDJSON(t, func() error { return runCLI("merge", string(f.ID), "-m", "feat(export): land headlessly") })
+	if err == nil || !strings.Contains(out, "moved since verify") || !strings.Contains(out, "gummi verify "+string(f.ID)) {
+		t.Fatalf("merge of a branch moved past its verify = %v %s, want the refusal naming gummi verify", err, out)
+	}
+	if cliGit(t, ".", "rev-parse", "HEAD") != before {
+		t.Fatal("an unverified commit landed on main")
+	}
+	if got, _ := store.GetFeature(context.Background(), f.ID); got.Stage != domain.StageVerify {
+		t.Fatalf("a refused merge moved the card to %s", got.Stage)
+	}
+}
+
+// Loose work after verify is the same: the landing's own final checkpoint
+// commits it, and that commit is no more verified than one made by hand.
+// And a card stamped before the revision was recorded is refused too —
+// there is no record of what its pass saw.
+func TestMergeRefusesLooseWorkAndUnrecordedVerifies(t *testing.T) {
+	store, f := verifiedCLIRepo(t)
+	p := filepath.Join(".gummi", "worktrees", string(f.ID))
+	if err := os.WriteFile(filepath.Join(p, "loose.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := cliGit(t, ".", "rev-parse", "HEAD")
+	if err := runCLI("merge", string(f.ID), "-m", "feat(export): land headlessly"); err == nil {
+		t.Fatal("loose work after verify landed through the final checkpoint")
+	}
+	if cliGit(t, ".", "rev-parse", "HEAD") != before {
+		t.Fatal("loose work landed on main")
+	}
+
+	if err := store.SetVerifiedAt(context.Background(), f.ID, time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureNDJSON(t, func() error { return runCLI("merge", string(f.ID), "-m", "feat(export): land headlessly") })
+	if err == nil || !strings.Contains(out, "recorded the revision") {
+		t.Fatalf("merge of a card verified before revisions were recorded = %v %s, want a re-verify refusal", err, out)
+	}
 }
 
 // A verified card merges and exits 0: main advances to a commit carrying

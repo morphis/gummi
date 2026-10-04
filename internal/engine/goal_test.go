@@ -114,7 +114,11 @@ func verifyCard(t *testing.T, e *Engine, store *state.Store, root string, id dom
 	art := spec.Template(&c)
 	art, _, _ = spec.ReplaceSection(art, "Verification plan", "Checked by hand.\n")
 	writeArtifact(t, root, c, art)
-	if err := store.SetVerifiedAt(ctx, id, time.Now().UTC()); err != nil {
+	head, err := m.Head(ctx, &c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetVerifiedAt(ctx, id, time.Now().UTC(), head); err != nil {
 		t.Fatal(err)
 	}
 }

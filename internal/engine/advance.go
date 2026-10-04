@@ -279,15 +279,26 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 					} else if ahead {
 						res.Status = StatusNeedsMerge
 						// The verify gate has passed and the branch is ready to
-						// land: stamp the verified marker (once, keeping the first
-						// pass's time stable) so status can report `verified` at
-						// this terminal state without moving the stage off verify.
-						if f.VerifiedAt.IsZero() {
+						// land: stamp the verified marker so status can report
+						// `verified` at this terminal state without moving the
+						// stage off verify, with the tip the pass ran on — the
+						// revision a landing checks (domain.Feature.MayLandAt).
+						// Once per revision: re-reaching the gate on the same tip
+						// keeps the first pass's time stable, and a pass on a new
+						// tip records that tip. Every door that lands by crossing
+						// here (the board's g, a goal landing a card) refuses or
+						// re-verifies a moved branch before it asks, so the
+						// crossing is a pass on the tip it records.
+						rev := ""
+						if !f.IsGoal() {
+							rev, _ = wt.Head(ctx, &f)
+						}
+						if f.VerifiedAt.IsZero() || f.VerifiedRev != rev {
 							now := time.Now().UTC()
-							if err := e.cfg.Store.SetVerifiedAt(ctx, id, now); err != nil {
+							if err := e.cfg.Store.SetVerifiedAt(ctx, id, now, rev); err != nil {
 								return res, err
 							}
-							res.Feature.VerifiedAt = now
+							res.Feature.VerifiedAt, res.Feature.VerifiedRev = now, rev
 						}
 						// a goal ready for you hands over: its report is
 						// written into the goal doc at the moment it is

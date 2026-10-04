@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -444,6 +445,21 @@ func TestAdvanceVerifyDoneGate(t *testing.T) {
 		}
 		if got, _ := store.GetFeature(ctx, f.ID); got.VerifiedAt.IsZero() {
 			t.Fatal("needs-merge gate did not persist verified_at")
+		}
+		// ...with the tip it verified, which is what a landing checks
+		tip := strings.TrimSpace(gitOut(t, wtDir, "rev-parse", "HEAD"))
+		if got, _ := store.GetFeature(ctx, f.ID); got.VerifiedRev != tip || got.MayLandAt(tip) != nil {
+			t.Fatalf("verified rev = %q, want the branch tip %q", got.VerifiedRev, tip)
+		}
+		// a commit after the pass is not what was verified
+		if err := os.WriteFile(filepath.Join(wtDir, "later.txt"), []byte("l\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, wtDir, "add", "later.txt")
+		gitIn(t, wtDir, "commit", "-q", "-m", "later")
+		moved := strings.TrimSpace(gitOut(t, wtDir, "rev-parse", "HEAD"))
+		if got, _ := store.GetFeature(ctx, f.ID); !errors.Is(got.MayLandAt(moved), domain.ErrVerifyStale) {
+			t.Fatalf("a commit after verify may land: %v", got.MayLandAt(moved))
 		}
 	})
 

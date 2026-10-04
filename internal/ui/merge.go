@@ -99,12 +99,15 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 	case f.Stage != domain.StageVerify:
 		return string(f.ID) + " is at " + string(f.Stage) + " — it lands from verify, once the branch has been verified"
 	case f.MayLand() == nil:
+		if ok {
+			return staleRefusal(r)
+		}
 		return ""
 	}
 	if ok {
 		if !r.F.VerifiedAt.IsZero() {
 			// the row read the stamp the copy passed in predates
-			return ""
+			return staleRefusal(r)
 		}
 		if in == nil {
 			built := m.nextInputFor(r)
@@ -117,6 +120,55 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 		}
 	}
 	return string(f.ID) + " has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)"
+}
+
+// staleRefusal is the landing floor's answer for a verified card whose
+// branch moved past the revision its verify passed on, read off the row
+// (featureRow.Head), or "" when the row says it has not. The landing's
+// own run checks the live tip again (verifiedTipRefusal), so a row a beat
+// stale costs a refusal one step later, never a landing.
+func staleRefusal(r featureRow) string {
+	if !r.F.VerifyStale(r.Head) {
+		return ""
+	}
+	return staleSentence(r.F, r.Head)
+}
+
+// staleSentence says why a verified card does not land on head.
+func staleSentence(f domain.Feature, head string) string {
+	if f.VerifiedRev == "" {
+		return string(f.ID) + ": verified before gummi recorded what it verified — re-verify before landing"
+	}
+	return fmt.Sprintf("%s: the branch moved since verify passed (verified %s, now %s) — re-verify before landing",
+		f.ID, domain.ShortRev(f.VerifiedRev), domain.ShortRev(head))
+}
+
+// verifiedTipRefusal is the verified floor read live, right before a
+// landing: the card as the store has it now and the tip the squash would
+// take. "" when it may land. A handed-off card has already ended and a
+// freeform one has no verify; their floors are the ones landingRefusal
+// reads.
+func (m *Shell) verifiedTipRefusal(ctx context.Context, f domain.Feature) string {
+	if f.IsFreeform() || f.HandedOff() || f.IsGoal() || m.store == nil || m.wt == nil {
+		return ""
+	}
+	cur, err := m.store.GetFeature(ctx, f.ID)
+	if err != nil {
+		return sanitize(err.Error())
+	}
+	if cur.VerifiedAt.IsZero() {
+		// the overrule: a failed verify a person chose to land anyway
+		// (landingRefusal let it through); there is no pass to be stale
+		return ""
+	}
+	head, err := m.wt.Head(ctx, &cur)
+	if err != nil {
+		return sanitize(err.Error())
+	}
+	if err := cur.MayLandAt(head); err != nil {
+		return staleSentence(cur, head)
+	}
+	return ""
 }
 
 // them is "it" or "them" for a count.
@@ -173,6 +225,12 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
 			return mergeReadyMsg{f: f, err: err}
 		}
+		// what lands is the tip after that checkpoint, which is itself new
+		// work when it committed anything: the verified floor reads it
+		// (domain.Feature.MayLandAt) before the message is ever drafted
+		if why := m.verifiedTipRefusal(ctx, f); why != "" {
+			return mergeReadyMsg{f: f, err: errors.New(why)}
+		}
 		if dirty, err := m.wt.MainTrackedDirty(ctx, &f); err != nil {
 			return mergeReadyMsg{f: f, err: err}
 		} else if dirty {
@@ -218,6 +276,11 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		} else if landed {
 			return noticeMsg{text: string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge, isErr: true}
+		}
+		// read again here, not only when the dialog opened: a commit made
+		// while the message was being written is work no verify has seen
+		if why := m.verifiedTipRefusal(ctx, f); why != "" {
+			return noticeMsg{text: why, isErr: true, id: f.ID}
 		}
 		if _, err := m.wt.SquashMerge(ctx, &f, message); err != nil {
 			var ce *worktree.MergeConflictError

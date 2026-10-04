@@ -53,26 +53,48 @@ func TestFailedVerifyLeavesVerifiedUnstamped(t *testing.T) {
 }
 
 // TestVerifiedStampKeepsTheFirstPassTime mirrors engine.Advance's own
-// idempotency: re-reaching a gate that is already stamped must not slide
-// the timestamp forward, or "when did this become ready to land" answers
-// "just now" for a branch that has been ready for a week.
+// idempotency: re-reaching a gate already stamped on the same tip must not
+// slide the timestamp forward, or "when did this become ready to land"
+// answers "just now" for a branch that has been ready for a week. A pass
+// on a tip the stamp does not name is a new verification, and records
+// that tip — the revision a landing checks.
 func TestVerifiedStampKeepsTheFirstPassTime(t *testing.T) {
 	m := runVerify(t, "All checks green.\nVERDICT: pass")
 	ctx := context.Background()
 
 	first := time.Date(2020, 3, 4, 5, 6, 7, 0, time.UTC)
-	if err := m.store.SetVerifiedAt(ctx, "FD-001", first); err != nil {
+	f, err := m.store.GetFeature(ctx, "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tip, err := m.wt.Head(ctx, &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.store.SetVerifiedAt(ctx, "FD-001", first, tip); err != nil {
 		t.Fatal(err)
 	}
 	m.now = func() time.Time { return time.Date(2031, 1, 1, 0, 0, 0, 0, time.UTC) }
 	m = pump(t, m, m.markVerified("FD-001"))
 
-	f, err := m.store.GetFeature(ctx, "FD-001")
-	if err != nil {
+	if f, err = m.store.GetFeature(ctx, "FD-001"); err != nil {
 		t.Fatal(err)
 	}
-	if !f.VerifiedAt.Equal(first) {
-		t.Errorf("VerifiedAt = %s, want the first pass's %s kept", f.VerifiedAt, first)
+	if !f.VerifiedAt.Equal(first) || f.VerifiedRev != tip {
+		t.Errorf("VerifiedAt = %s on %s, want the first pass's %s on %s kept", f.VerifiedAt, f.VerifiedRev, first, tip)
+	}
+
+	// the stamp names another tip (a pass before the branch moved): this
+	// pass is about the tip it ran on, and records it
+	if err := m.store.SetVerifiedAt(ctx, "FD-001", first, "0000000000000000000000000000000000000000"); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.markVerified("FD-001"))
+	if f, err = m.store.GetFeature(ctx, "FD-001"); err != nil {
+		t.Fatal(err)
+	}
+	if f.VerifiedRev != tip || f.VerifiedAt.Equal(first) {
+		t.Errorf("a pass on a new tip kept the old stamp: %s on %s, want now on %s", f.VerifiedAt, f.VerifiedRev, tip)
 	}
 }
 

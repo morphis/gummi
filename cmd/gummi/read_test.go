@@ -209,7 +209,7 @@ func TestBuildStatusVerified(t *testing.T) {
 	}
 
 	// the engine stamps this marker when it reaches the stop-at-verified gate.
-	if err := f.store.SetVerifiedAt(f.ctx, feat.ID, time.Now()); err != nil {
+	if err := f.store.SetVerifiedAt(f.ctx, feat.ID, time.Now(), ""); err != nil {
 		t.Fatal(err)
 	}
 	verified, err := f.store.GetFeature(f.ctx, feat.ID)

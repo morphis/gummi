@@ -176,13 +176,13 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 
 // markVerified stamps the card's verified marker, the store-side twin of
 // what engine.Advance does on the branch that returns StatusNeedsMerge.
-// Its semantics are copied from there deliberately: stamp only when
-// VerifiedAt is still zero, so re-reaching the gate (a re-run, a restart
-// that replays the completion) keeps the FIRST pass's time rather than
-// sliding the record forward every time the stage is looked at again.
-// The zero test reads the store, not a board row: a row is a snapshot
-// that can be a beat stale, and a stale zero here is exactly the read
-// that would move a timestamp that must not move.
+// Its semantics are copied from there deliberately: stamp once per branch
+// tip, so re-reaching the gate on the same tip (a re-run, a restart that
+// replays the completion) keeps the FIRST pass's time rather than sliding
+// the record forward every time the stage is looked at again. The test
+// reads the store, not a board row: a row is a snapshot that can be a
+// beat stale, and a stale read here is exactly the one that would move a
+// timestamp that must not move.
 //
 // It is a command because it writes: the store's single sqlite
 // connection (SetMaxOpenConns(1)) can block, and the render loop is not a
@@ -225,18 +225,25 @@ func (m *Shell) stampVerified(id domain.FeatureID) {
 	}
 }
 
-// writeVerified stamps VerifiedAt unless it is already set, returning a
-// notice when the store refuses.
+// writeVerified stamps VerifiedAt with the branch tip the pass ran on,
+// unless that very tip is already stamped, returning a notice when the
+// store refuses. A pass on a tip the stamp does not name — the card was
+// sent back and verified again — records the new one, as engine.Advance
+// does: the revision is what a landing checks (domain.Feature.MayLandAt).
 func (m *Shell) writeVerified(id domain.FeatureID) tea.Msg {
 	ctx := context.Background()
 	f, err := m.store.GetFeature(ctx, id)
 	if err != nil {
 		return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 	}
-	if !f.VerifiedAt.IsZero() {
+	rev := ""
+	if m.wt != nil && !f.IsGoal() {
+		rev, _ = m.wt.Head(ctx, &f)
+	}
+	if !f.VerifiedAt.IsZero() && f.VerifiedRev == rev {
 		return nil
 	}
-	if err := m.store.SetVerifiedAt(ctx, id, m.now().UTC()); err != nil {
+	if err := m.store.SetVerifiedAt(ctx, id, m.now().UTC(), rev); err != nil {
 		return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 	}
 	return nil

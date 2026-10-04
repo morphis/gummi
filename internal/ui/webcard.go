@@ -180,6 +180,10 @@ func (m *Shell) webDecisionWord(kind webapi.DecisionKind, r featureRow) (word, t
 		// never gets at all — so a pass the question called "verification
 		// passed" was headed "verify failed" above it.
 		in := m.nextInputFor(r)
+		if in.verifyStale {
+			// it passed, on a revision the branch has moved past
+			return "branch moved", "warn"
+		}
 		if in.verdict == verdictPass {
 			return "verify passed", "ok"
 		}

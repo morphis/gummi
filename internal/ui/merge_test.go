@@ -23,20 +23,34 @@ func mergeFixture(t *testing.T) (*Shell, string, string) {
 	m, root, wt := unverifiedFixture(t)
 	// a card lands from verify once it has passed it (merge.go's
 	// landingRefusal), so the one these tests land has
-	if err := m.store.SetVerifiedAt(context.Background(), "FD-001", fixedTime); err != nil {
-		t.Fatal(err)
-	}
+	stampVerifiedTip(t, m, "FD-001")
 	m = pump(t, m, m.loadRows)
 	return m, root, wt
+}
+
+// stampVerifiedTip stamps id verified on the branch tip it has now — the
+// revision a landing checks (domain.Feature.MayLandAt).
+func stampVerifiedTip(t *testing.T, m *Shell, id domain.FeatureID) {
+	t.Helper()
+	ctx := context.Background()
+	f, err := m.store.GetFeature(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := m.wt.Head(ctx, &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.store.SetVerifiedAt(ctx, id, fixedTime, head); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // passVerify stamps the selected-first card's verify pass, as the verify
 // gate does when the pass is clean (markVerified), and reloads the rows.
 func passVerify(t *testing.T, m *Shell) *Shell {
 	t.Helper()
-	if err := m.store.SetVerifiedAt(context.Background(), m.rows[0].F.ID, fixedTime); err != nil {
-		t.Fatal(err)
-	}
+	stampVerifiedTip(t, m, m.rows[0].F.ID)
 	return pump(t, m, m.loadRows)
 }
 
@@ -388,7 +402,7 @@ func TestSquashMergeRefusedWhenLanded(t *testing.T) {
 func TestSquashMergeCommitsDirtyBranchAsFinalCheckpoint(t *testing.T) {
 	m, root, wt := mergeFixture(t)
 	// uncommitted rework plus a brand-new untracked file: gummi owns the
-	// branch's commits, so both are swept into a final checkpoint and merge
+	// branch's commits, so both are swept into a final checkpoint
 	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x // rework\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -396,14 +410,23 @@ func TestSquashMergeCommitsDirtyBranchAsFinalCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = pressMerge(t, m)
-	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
-		t.Fatalf("dirty branch did not auto-checkpoint into the dialog (notice %q)", m.notice.text)
-	}
 	if got := gitOut(t, wt, "log", "-1", "--format=%s"); got != "FD-001: final checkpoint" {
 		t.Errorf("branch tip = %q, want the final checkpoint", got)
 	}
 	if out := gitOut(t, wt, "status", "--porcelain"); out != "" {
 		t.Errorf("worktree still dirty after checkpoint:\n%s", out)
+	}
+	// ...but that checkpoint is work no verify has seen, so it does not
+	// land on the strength of the pass before it
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); ok || !m.notice.isErr || !strings.Contains(m.notice.text, "re-verify") {
+		t.Fatalf("loose work after verify went to the landing dialog (notice %q)", m.notice.text)
+	}
+	// verified on the new tip, it lands — rework and the new file both
+	stampVerifiedTip(t, m, "FD-001")
+	m = pump(t, m, m.loadRows)
+	m = pressMerge(t, m)
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("a re-verified tip did not open the landing dialog (notice %q)", m.notice.text)
 	}
 	typeMessage(t, m, "FD-001: rework and extras")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -511,6 +534,7 @@ func TestAdvanceToDoneMergeConflictStaysAtVerify(t *testing.T) {
 	}
 	git(t, wt, "add", ".")
 	git(t, wt, "commit", "-qm", "feature readme")
+	stampVerifiedTip(t, m, "FD-001") // the tip that lands is the one verified
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -541,6 +565,7 @@ func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 	}
 	git(t, wt, "add", ".")
 	git(t, wt, "commit", "-qm", "feature readme")
+	stampVerifiedTip(t, m, "FD-001") // the tip that lands is the one verified
 	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("main version\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

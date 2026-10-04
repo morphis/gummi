@@ -29,8 +29,14 @@ type featureRow struct {
 	F           domain.Feature
 	HasWorktree bool
 	Landed      bool // branch has merged into main; worktree is cleanup-ready
-	History     []state.TransitionRecord
-	StageSpend  []state.StageSpend // per-stage/model spend rollup (forward-only)
+	// Head is the branch tip of a verified card waiting at verify, read at
+	// load beside the stamp, so the landing floor and the verify decision
+	// can tell a branch still at the revision verify passed on from one a
+	// commit has moved since (domain.Feature.VerifyStale) without doing IO
+	// per frame. Empty on every other row.
+	Head       string
+	History    []state.TransitionRecord
+	StageSpend []state.StageSpend // per-stage/model spend rollup (forward-only)
 	// BaseBranch is what f actually lands on, resolved once at load
 	// (loadRows) through Shell.baseBranch — the same map lookup shell.go
 	// resolves at attach — so a pure function holding only this row, not a
@@ -350,6 +356,9 @@ func (m *Shell) loadRows() tea.Msg {
 			if ok {
 				row.Landed = m.canHaveLanded(ctx, &f)
 				row.Drift = m.stoppedDrift(ctx, &f, row.Landed)
+				if !f.VerifiedAt.IsZero() && f.Stage == domain.StageVerify {
+					row.Head, _ = m.wt.Head(ctx, &f)
+				}
 			}
 		}
 		row.OpenSpecQs = m.openQuestionsBlockingGate(f)

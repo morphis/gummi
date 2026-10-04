@@ -82,7 +82,7 @@ func TestObserverVerifiedAtTheStamp(t *testing.T) {
 		}
 	}
 	obs.events = nil
-	if err := s.SetVerifiedAt(ctx, f.ID, time.Now().UTC()); err != nil {
+	if err := s.SetVerifiedAt(ctx, f.ID, time.Now().UTC(), ""); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(obs.kinds(), []string{EventVerified}) {
@@ -98,7 +98,7 @@ func TestObserverVerifiedAtTheStamp(t *testing.T) {
 
 	// Re-stamping an already-verified card is not a second landing.
 	obs.events = nil
-	if err := s.SetVerifiedAt(ctx, f.ID, time.Now().UTC()); err != nil {
+	if err := s.SetVerifiedAt(ctx, f.ID, time.Now().UTC(), ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(obs.events) != 0 {

@@ -667,6 +667,24 @@ test.describe('a verified card', () => {
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage).toBe('done');
     await expect(page.getByTestId('decision-confirm')).toHaveCount(0);
   });
+
+  // A commit after verify passed is work no check has run on: the stop
+  // stops offering the landing and offers a re-verify, which runs the
+  // checks on the new tip and brings the landing back.
+  test('a commit after verify asks for a re-verify, not a landing', async ({ pairedPage: page, server, workspace }, info) => {
+    test.skip(isPhone(info), 'the decision is the same on every face');
+    const tree = workspace.worktree(id);
+    fs.writeFileSync(path.join(tree, 'unverified.txt'), 'added after verify\n');
+    await workspace.git('-C', tree, 'add', 'unverified.txt');
+    await workspace.git('-C', tree, 'commit', '-q', '-m', 'after verify');
+    await open(page, server, id);
+    await expect(page.getByTestId('decision-option-reverify')).toBeVisible();
+    await expect(page.getByTestId('decision-option-advance')).toHaveCount(0);
+    await shot(page, info, 'verify-branch-moved');
+    await page.getByTestId('decision-option-reverify').click();
+    await expect(page.getByTestId('decision-option-advance')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('decision-option-reverify')).toHaveCount(0);
+  });
 });
 
 // A question that takes several answers, on a phone: tapping answers in

@@ -1512,6 +1512,24 @@ func (e *Engine) goalLand(ctx context.Context, goal, card domain.Feature) ([]Goa
 				"After rebasing onto the goal branch, these checks fail: %s. Fix them on this branch.", strings.Join(rv.Failed, ", ")), ActorGoal)
 			return []GoalStart{st}, berr
 		}
+	} else if head, herr := gm.Head(ctx, &card); herr == nil && card.VerifyStale(head) {
+		// No rebase, but the branch is not the tip its verify passed on —
+		// a commit since (the checkpoint above among them). What lands is
+		// what was checked, so the checks run again on this tip first; a
+		// card whose checks cannot run here waits for a person rather than
+		// landing work nothing has seen.
+		rv, err := e.Reverify(ctx, card.ID, ActorGoal)
+		if err != nil {
+			return nil, err
+		}
+		switch rv.Status {
+		case ReverifyFailed:
+			st, berr := e.goalBounce(ctx, goal, card, fmt.Sprintf(
+				"Commits after this card's verify make these checks fail: %s. Fix them on this branch.", strings.Join(rv.Failed, ", ")), ActorGoal)
+			return []GoalStart{st}, berr
+		case ReverifyUnavailable:
+			return nil, e.goalParkCard(ctx, card, "its branch moved since verify passed and its checks cannot be re-run here: "+rv.Reason)
+		}
 	}
 
 	adv, err := e.Advance(ctx, card.ID, ActorGoal)

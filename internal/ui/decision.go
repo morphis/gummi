@@ -427,6 +427,12 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 	case decisionBudget:
 		return string(r.F.Stage) + " ran out of budget."
 	case decisionVerify:
+		if in.verifyStale {
+			// not "verification passed": it did, on a revision that is no
+			// longer the branch, and the rows beneath offer the re-verify
+			// rather than the landing (stageActions)
+			return "the branch moved since verification passed — re-verify what would land, or send it back."
+		}
 		if in.verdict == verdictPass {
 			// A research card has no branch, so there is nothing to land
 			// and the picker this heads says "mark done" — the question

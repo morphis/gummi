@@ -412,6 +412,14 @@ type Feature struct {
 	// StageDone, which a merge sets: a verified branch is ready to land, not
 	// yet landed.
 	VerifiedAt time.Time
+	// VerifiedRev is the branch tip the verify pass behind VerifiedAt ran
+	// on: what was verified, as opposed to when. A commit added after it —
+	// a hand edit, a later agent turn, a landing's own final checkpoint —
+	// is work no verify has seen, and MayLandAt refuses to land it until a
+	// verify runs on the new tip. Empty on an unstamped card, and on one
+	// stamped before the revision was recorded (see MayLandAt for what
+	// that reads as).
+	VerifiedRev string
 	// HandedOffAt is stamped when someone ends a card WITHOUT landing it:
 	// the card moves to done and its branch stays where it is, theirs to
 	// push, PR, cherry-pick or sit on. Zero on every other card.
@@ -699,6 +707,59 @@ func (f *Feature) MayLand() error {
 		return fmt.Errorf("%w (stage %s)", ErrNotVerified, f.Stage)
 	}
 	return nil
+}
+
+// ErrVerifyStale is the refusal a verified card gets when its branch is
+// no longer the revision the verify pass ran on. It wraps ErrNotVerified:
+// what would land has not been verified, which is the same floor said
+// more precisely.
+var ErrVerifyStale = fmt.Errorf("%w: the branch moved since verify passed", ErrNotVerified)
+
+// MayLandAt is MayLand for a landing that knows what it would land: head
+// is the branch tip the squash would take. The verified floor is about
+// that revision, not about the card — a commit added after the verify
+// pass (by hand, by a later turn, by a landing's own final checkpoint) is
+// work no check has run on, so the card lands only once a verify has run
+// on its tip again. Every landing door asks this right before it lands.
+//
+// A card stamped before the revision was recorded (VerifiedAt set,
+// VerifiedRev empty) reads as stale: gummi cannot say what that pass saw,
+// and the safe answer to "was this verified?" without the evidence is
+// "verify it again" — a cheap re-run of the checks, which records the
+// revision from then on.
+//
+// A goal is not asked: its landing spans one branch per repository and
+// re-runs its checks itself whenever its last catch-up moved one
+// (Engine.LandGoal), so no single revision describes what it verified.
+// A freeform card has no verify, and a handed-off card is checked by its
+// callers before they ask, as with MayLand.
+func (f *Feature) MayLandAt(head string) error {
+	if err := f.MayLand(); err != nil || f.IsFreeform() || f.IsGoal() {
+		return err
+	}
+	if f.VerifiedRev == "" {
+		return fmt.Errorf("%w (verified before gummi recorded the revision it ran on)", ErrVerifyStale)
+	}
+	if head != f.VerifiedRev {
+		return fmt.Errorf("%w (verified %s, now %s)", ErrVerifyStale, ShortRev(f.VerifiedRev), ShortRev(head))
+	}
+	return nil
+}
+
+// VerifyStale reports a card whose verify pass passed on a revision its
+// branch has since moved off (MayLandAt's refusal, asked of a card that
+// is otherwise ready to land), for the surfaces that offer a re-verify in
+// place of the landing.
+func (f *Feature) VerifyStale(head string) bool {
+	return f.MayLand() == nil && head != "" && errors.Is(f.MayLandAt(head), ErrVerifyStale)
+}
+
+// ShortRev is a commit id cut to the length a sentence quotes it at.
+func ShortRev(rev string) string {
+	if len(rev) > 7 {
+		return rev[:7]
+	}
+	return rev
 }
 
 // InGoal reports whether the card belongs to a goal.

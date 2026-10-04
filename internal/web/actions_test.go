@@ -143,11 +143,6 @@ func (h *cardBoard) verifyCard(title string, passed bool) (webapi.Card, string) 
 			t.Fatal(err)
 		}
 	}
-	if passed {
-		if err := h.store.SetVerifiedAt(ctx, id, time.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
 	f := h.feature(c.ID)
 	if _, err := h.pool.Create(ctx, &f); err != nil {
 		t.Fatal(err)
@@ -158,6 +153,12 @@ func (h *cardBoard) verifyCard(title string, passed bool) (webapi.Card, string) 
 	}
 	gitIn(t, wt, "add", ".")
 	gitIn(t, wt, "commit", "-q", "-m", "work")
+	if passed {
+		// verified on the tip that lands: the revision is what a landing checks
+		if err := h.store.SetVerifiedAt(ctx, id, time.Now(), gitIn(t, wt, "rev-parse", "HEAD")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := h.board.Reload(ctx); err != nil {
 		t.Fatal(err)
 	}

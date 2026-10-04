@@ -67,7 +67,7 @@ func TestReconstructedVerifyGateSaysItLands(t *testing.T) {
 		}
 	}
 	// only the first card carries the marker a clean verify stamps
-	if err := store.SetVerifiedAt(ctx, fPassed.ID, time.Now().UTC()); err != nil {
+	if err := store.SetVerifiedAt(ctx, fPassed.ID, time.Now().UTC(), ""); err != nil {
 		t.Fatal(err)
 	}
 

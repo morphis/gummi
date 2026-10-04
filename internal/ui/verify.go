@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verify"
@@ -169,6 +170,51 @@ func (m *Shell) execChecks(f domain.Feature, workDir string, checks []domain.Che
 		results := verify.RunBounded(ctx, workDir, checks, verify.CheckTimeout)
 		return verifyResultMsg{feature: f.ID, stage: f.Stage, results: results}
 	})
+}
+
+// reverify re-runs a verified card's checks on its branch as it stands
+// now — engine.Reverify, the cheap re-attach `gummi verify` runs — after a
+// commit moved the branch past the revision its verify passed on. A pass
+// records the new tip, which is what lets the card land again; a failure
+// or a refusal says why, and the card stays where it is. It holds the
+// card's lock while the checks run in the worktree, like execChecks.
+func (m *Shell) reverify(id domain.FeatureID) tea.Cmd {
+	actor := m.humanActor()
+	return m.cardLocked(id, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), verifyTimeout)
+		defer cancel()
+		return m.withEngine(func(eng *engine.Engine) tea.Msg {
+			rv, err := eng.Reverify(ctx, id, actor)
+			if err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id, reload: true}
+			}
+			switch rv.Status {
+			case engine.ReverifyFinalized:
+				return noticeMsg{text: string(id) + ": re-verified — the checks pass on " + domain.ShortRev(rv.Feature.VerifiedRev) + ", and it can land", id: id, reload: true}
+			case engine.ReverifyFailed:
+				return noticeMsg{text: string(id) + ": re-verify failed — " + strings.Join(rv.Failed, ", ") + " fail on the branch as it stands; send it back to fix them", isErr: true, id: id, reload: true}
+			case engine.ReverifyBlocked:
+				return noticeMsg{text: string(id) + ": the checks pass, but the gate is held: " + describeReverifyBlock(rv.Advance), isErr: true, id: id, reload: true}
+			}
+			return noticeMsg{text: string(id) + ": " + sanitize(rv.Reason), isErr: true, id: id, reload: true}
+		})
+	})
+}
+
+// describeReverifyBlock names what held a re-verified card's gate.
+func describeReverifyBlock(res engine.AdvanceResult) string {
+	switch res.Status {
+	case engine.StatusBlockedQuestions:
+		return fmt.Sprintf("%d open comment%s in the spec", res.Blockers, plural(res.Blockers))
+	case engine.StatusBlockedDiff:
+		return fmt.Sprintf("%d open diff comment%s", res.Blockers, plural(res.Blockers))
+	case engine.StatusBlockedUndrafted:
+		return strings.Join(res.Undrafted, ", ") + " still blank"
+	}
+	if res.Reason != "" {
+		return sanitize(res.Reason)
+	}
+	return "resolve what the decision names"
 }
 
 // verifyDialog surfaces the check commands and asks for confirmation

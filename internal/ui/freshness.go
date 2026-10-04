@@ -358,7 +358,16 @@ func (m *Shell) applyWatchedRevs(revs map[domain.FeatureID]watchRev) bool {
 	for id, rev := range revs {
 		was, ok := fs.revs[id]
 		fs.revs[id] = rev
-		if !ok || was == rev {
+		if !ok {
+			// first sighting: nothing it moved from — unless the row read
+			// a branch tip at load (a verified card's, featureRow.Head) that
+			// is no longer the tip. A commit made before any page watched
+			// the card would otherwise leave the verify stop reading
+			// "verification passed" over a branch it no longer describes.
+			if r, found := m.rowByID(id); !found || r.Head == "" || rev.head == "" || r.Head == rev.head {
+				continue
+			}
+		} else if was == rev {
 			continue
 		}
 		moved = true

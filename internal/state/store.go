@@ -97,7 +97,8 @@ CREATE TABLE IF NOT EXISTS features (
 	stack_pos       INTEGER NOT NULL DEFAULT 0,
 	session_backend TEXT NOT NULL DEFAULT '',
 	session_model   TEXT NOT NULL DEFAULT '',
-	main_checkout   INTEGER NOT NULL DEFAULT 0
+	main_checkout   INTEGER NOT NULL DEFAULT 0,
+	verified_rev    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 -- features_stack is created by the column migrations, not here: this
@@ -806,6 +807,11 @@ var migrations = []string{
 	// its own worktree (DESIGN §19). Empty (0) is every row written
 	// before the column existed, and every card that works in a worktree.
 	`ALTER TABLE features ADD COLUMN main_checkout INTEGER NOT NULL DEFAULT 0`,
+	// The branch tip a card's verify pass ran on, beside verified_at's
+	// when (domain.Feature.VerifiedRev). Empty on every row stamped before
+	// the column existed, which domain.Feature.MayLandAt reads as a verify
+	// to run again before landing: there is no record of what it saw.
+	`ALTER TABLE features ADD COLUMN verified_rev TEXT NOT NULL DEFAULT ''`,
 	// A user turn's attachment refs (JSON-encoded []SessionMessage.Images),
 	// so an uploaded image survives a restart with the transcript entry it
 	// was sent on. Empty decodes to no images — every row written before
@@ -889,7 +895,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
-	session_backend, session_model, main_checkout`
+	session_backend, session_model, main_checkout, verified_rev`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -930,7 +936,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
-		&f.SessionBackend, &f.SessionModel, &f.MainCheckout)
+		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.VerifiedRev)
 	if err != nil {
 		return f, err
 	}
@@ -1029,7 +1035,11 @@ func (s *Store) AddDecomposeSpend(ctx context.Context, id domain.FeatureID, cred
 // stamped at verify forever without anyone merging it. Only a card that
 // was not already stamped reports — a re-verify after the stamp was
 // cleared reports again, because the branch became ready again.
-func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.Time) error {
+//
+// rev is the branch tip the pass ran on (domain.Feature.VerifiedRev) —
+// the half of the stamp a landing checks — or "" where there is no single
+// branch to name (a goal).
+func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.Time, rev string) error {
 	var prev, stage string
 	// Read before the write so the report is "became verified", not "is
 	// verified". A missing row leaves both empty and the update below
@@ -1037,8 +1047,8 @@ func (s *Store) SetVerifiedAt(ctx context.Context, id domain.FeatureID, t time.T
 	_ = s.db.QueryRowContext(ctx,
 		`SELECT verified_at, stage FROM features WHERE id = ?`, string(id)).Scan(&prev, &stage)
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE features SET verified_at = ? WHERE id = ?`,
-		t.UTC().Format(timeFmt), string(id))
+		`UPDATE features SET verified_at = ?, verified_rev = ? WHERE id = ?`,
+		t.UTC().Format(timeFmt), rev, string(id))
 	if err != nil {
 		return fmt.Errorf("marking %s verified: %w", id, err)
 	}
@@ -1801,7 +1811,7 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	// once.
 	if f.Kind == domain.KindGoal && to == domain.StageImplement {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE features SET goal_wrapup_at='', goal_partial='', verified_at='' WHERE id=?`, string(id)); err != nil {
+			`UPDATE features SET goal_wrapup_at='', goal_partial='', verified_at='', verified_rev='' WHERE id=?`, string(id)); err != nil {
 			return f, fmt.Errorf("lifting %s's wrap-up: %w", id, err)
 		}
 		f.Goal.WrapUpAt, f.Goal.Partial, f.VerifiedAt = time.Time{}, "", time.Time{}
