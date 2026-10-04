@@ -272,8 +272,8 @@ function judgmentSection (s) {
   if (!j) return null
   const parks = j.parks || []
   const lines = []
-  if (j.gates?.total) lines.push(h('li', { testid: 'stats-gates' }, h('b', null, `${j.gates.total} gates`), ` — ${j.gates.byYou} you, ${j.gates.byMachine} machine`))
-  if (j.asks?.total) lines.push(h('li', { testid: 'stats-asks' }, h('b', null, `${j.asks.total} asks`), ` — ${j.asks.byYou} you, ${j.asks.byMachine} autopilot`))
+  if (j.gates?.total) lines.push(h('li', { testid: 'stats-gates' }, h('b', null, plural(j.gates.total, 'gate')), ` — ${j.gates.byYou} you, ${j.gates.byMachine} machine`))
+  if (j.asks?.total) lines.push(h('li', { testid: 'stats-asks' }, h('b', null, plural(j.asks.total, 'ask')), ` — ${j.asks.byYou} you, ${j.asks.byMachine} autopilot`))
   if (!lines.length && !parks.length) return null
   return h('section', { class: 'sblock', testid: 'stats-judgment', 'aria-label': 'Its judgment' },
     h('h3', { class: 'shead' }, 'Its judgment'),

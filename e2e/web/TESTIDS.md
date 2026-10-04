@@ -126,11 +126,15 @@ dialog), `action-confirm`, `action-cancel`.
 | `panel-close` | hide the panel |
 | `panel-pane` | the tab body; `data-tab` = open tab |
 | `panel-loading`, `panel-unavailable`, `panel-error` | tab states (unavailable = the route answers 501) |
+| `panel-draft` | the pane under a new session's draft (no tabs: nothing has documents yet) |
 | `resizer` | panel resizer (drag, ←/→, double-click resets) |
 
 Spec: `spec`, `spec-toc`, `spec-toc-<i>`, `spec-doc`, `spec-src`, `spec-title`,
 `spec-section-<i>`, `spec-comment-<i>`, `spec-note-draft`, `spec-note-input`,
 `spec-note-save`, `spec-note`, `spec-prompt` (gummi's own `%%` prompts),
+`spec-note-hint` (a note is one line: line breaks become spaces),
+`spec-closed` (a done or landed card's spec takes no more notes, and offers
+no Comment, Resolve or Request changes),
 `spec-note-resolve`, `spec-note-resolution` (a resolution marker, folded onto
 the note above it: "resolved by" when it closes it, "answered by" when an
 agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-pending` (how many notes hold the
@@ -145,7 +149,8 @@ Request changes that sends a card back to an earlier stage asks first:
 `changes-confirm` (the dialog), `changes-question`, `changes-go`,
 `changes-cancel`, `changes-error`.
 
-Diff: `diff-head`, `diff-rev`, `diff-since`, `diff-since-all`, `diff-since-new`,
+Diff: `diff-head`, `diff-rev`, `diff-add`, `diff-del` (totals of the files
+listed: all, or only those changed since), `diff-since`, `diff-since-all`, `diff-since-new`,
 `diff-fresh` (branch moved banner), `diff-fresh-show`, `diff-pending`,
 `diff-request-changes` (sends the open comments to the implementer, or with an
 earlier stage's spec note back to it: the TUI's R),
@@ -154,21 +159,32 @@ earlier stage's spec note back to it: the TUI's R),
 `.o`/`.n` to comment), `diff-unfold-<i>` ("Show N lines" on a file folded
 because it is large, or the diff already drew many lines; a file with an open
 comment is never folded, and its lines have no `diff-line-*` until unfolded),
-`diff-orphans`, `annotation-<id>`,
+`diff-orphans` (a file's comments whose line is gone; each says so in
+`annotation-gone-<id>`), `diff-other` (comments on files the diff does not
+show — a pulled PR thread on an untouched file, a deleted file's — above the
+files, and under `diff-none` too; `annotation-where-<id>` names the file),
+`annotation-<id>`, `annotation-edit-<id>` (not on a pulled PR thread),
+`annotation-edit-input-<id>`, `annotation-edit-save-<id>`,
 `annotation-resolve-<id>`, `annotation-delete-<id>`, `annotation-draft`,
-`annotation-input`, `annotation-save`, `diff-none`.
+`annotation-input`, `annotation-save`, `annotation-adrift` (an unsent comment
+whose line the moved diff no longer has), `diff-none`. A done or landed card's
+line numbers open no comment box.
 
-PR: `pr`, `pr-state`, `pr-fetched`, `pr-refresh`, `pr-pull`, `pr-thread-<i>`,
-`pr-push`, `pr-push-cmd`, `pr-push-copy`, `pr-none`, `pr-link` (link a pull
+PR: `pr`, `pr-state`, `pr-open` (open threads), `pr-fetched`, `pr-refresh`,
+`pr-pull`, `pr-thread-<i>`, `pr-thread-show-<i>` (opens the diff at the
+thread's file and line), `pr-push` (what to push and when, or why there is
+nothing to push), `pr-push-cmd`, `pr-push-copy`, `pr-none`, `pr-link` (link a pull
 request, when the card's menu offers it).
 
 Log: `log`, `log-head`, `log-why` (why the history is read-only),
 `log-none`, `log-commit-<i>` (oldest first), `log-show-<i>` (a commit's
-changes, in `log-patch`), `log-reword-<i>`, `log-editor-<i>`,
+changes, in `log-patch`; a large file there folds behind `log-unfold-<i>`),
+`log-reword-<i>`, `log-editor-<i>`,
 `log-editor-save-<i>`, `log-squash-<i>` (`aria-pressed`), `log-plan` (the
 draft's bar), `log-plan-line` (what the dry run says), `log-confirm`
-(rewriting pushed commits), `log-reset`, `log-apply`, `log-push`,
-`log-push-cmd` (the force push a rewrite of pushed commits leaves).
+(rewriting pushed commits), `log-confirm-cmd`, `log-confirm-copy`,
+`log-reset`, `log-apply`, `log-push`, `log-push-cmd` (the force push a
+rewrite of pushed commits leaves), `log-push-copy`.
 
 Stats: `stats`, `stats-spent`, `stats-left` (a session's), `stats-passes`,
 `stats-rework`, `stats-models` (a session's), `stats-table`, `stats-none`,

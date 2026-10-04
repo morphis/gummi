@@ -153,7 +153,7 @@ test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info
   await expect(page.getByTestId('stats-checks')).toContainText('pre-existing, excused');
   // its judgment: gates and asks split by who answered, and the park
   await expect(page.getByTestId('stats-judgment')).toContainText('2 gates');
-  await expect(page.getByTestId('stats-judgment')).toContainText('1 asks');
+  await expect(page.getByTestId('stats-judgment')).toContainText('1 ask —');
   await expect(page.getByTestId('stats-judgment')).toContainText('1 of 3 checks failed');
   // the envelope line carries the utilization
   await expect(page.getByTestId('stats-envelope')).toContainText('granted 40 · spent 11.0 · 28% used');

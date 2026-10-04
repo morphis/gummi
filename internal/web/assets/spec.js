@@ -22,6 +22,16 @@ export const specTab = {
   render
 }
 
+// noteDrafts are the notes being written, per card: section line → the
+// draft's text and attachments. The panel redraws the tab whenever the
+// card changes (a running card changes often), and a half-written note
+// must come back from that redraw as it was.
+const noteDrafts = new Map() // card id -> Map(line -> { text, attachments })
+function draftsOf (id) {
+  if (!noteDrafts.has(id)) noteDrafts.set(id, new Map())
+  return noteDrafts.get(id)
+}
+
 const slug = (name, i) => `sec-${i}-` + String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 function render (pane, entry, ctx) {
@@ -53,17 +63,30 @@ function render (pane, entry, ctx) {
       s.draft ? h('span', { class: 'draftflag' }, ' · draft, not on the branch yet') : null),
     h('h1', { testid: 'spec-title' }, s.title || ctx.card?.title || ''),
     markdown(pre.join('\n'), opts),
+    ctx.closed ? h('p', { class: 'ro', testid: 'spec-closed' }, `${ctx.id} ${ctx.card?.landed ? 'has landed' : 'is done'}: its spec reads as it ended, and takes no more notes.`) : null,
     notes.filter(n => !n.anchor).map(n => noteEl(n, ctx)),
     notesIn(notes.filter(n => n.anchor), 1, firstLine - 1, ctx))
+  const headings = new Map() // section line -> its h2, for reopening drafts
   sections.forEach((sec, i) => {
     const end = i + 1 < sections.length ? sections[i + 1].line - 1 : lines.length
     const body = lines.slice(sec.line, end).join('\n')
+    // a landed card's spec is the record of what was built: no new notes
     const heading = h('h2', { class: 'sec', id: slug(sec.name, i), testid: `spec-section-${i}` }, sec.name,
-      h('button', { class: 'sc', type: 'button', testid: `spec-comment-${i}`, 'aria-label': `Comment on ${sec.name}`, onclick: (e) => openNote(e.currentTarget.closest('h2'), sec, ctx) }, 'Comment'))
+      ctx.closed ? null : h('button', { class: 'sc', type: 'button', testid: `spec-comment-${i}`, 'aria-label': `Comment on ${sec.name}`, onclick: (e) => openNote(e.currentTarget.closest('h2'), sec, ctx) }, 'Comment'))
+    headings.set(sec.line, { heading, sec })
     append(doc, [heading, markdown(body, { ...opts, headingBase: 3 }), notesIn(notes, sec.line, end, ctx)])
   })
+  // the notes being written come back where they were, unfocused (the
+  // panel puts the caret back in the one that had it)
+  for (const [line, dr] of draftsOf(ctx.id)) {
+    const at = headings.get(line)
+    if (at && !ctx.closed) openNote(at.heading, at.sec, ctx, dr)
+  }
   if (!checksDrawn && s.checks?.length) doc.append(h('h2', { class: 'sec' }, 'Checks'), checksBlock())
-  if (s.openComments) {
+  if (s.openComments && ctx.closed) {
+    pane.append(h('div', { class: 'pending' }, h('span', { testid: 'spec-pending' },
+      `${plural(s.openComments, 'comment')} ${s.openComments === 1 ? 'was' : 'were'} still open when it closed.`)))
+  } else if (s.openComments) {
     // the TUI's R: the open notes go now, not on the next pass — to the
     // stage writing what they are about, which may mean sending the card
     // back (asked first)
@@ -113,7 +136,7 @@ function noteEl (n, ctx) {
   const why = r ? String(r.text || '').trim().replace(RESOLVED, '').trim() : ''
   return h('div', { class: ['note', n.resolved && 'resolved', prompt && 'prompt'], testid: prompt ? 'spec-prompt' : 'spec-note' },
     n.resolved ? h('span', { class: 'rs' }, 'resolved')
-      : prompt ? null
+      : prompt || ctx.closed ? null
         : h('button', { class: 'rs', type: 'button', testid: 'spec-note-resolve', onclick: () => resolve(n, ctx) }, 'Resolve'),
     h('b', null, `%% @${n.by || n.author}${n.date ? ` (${n.date})` : ''}`),
     h('span', { class: 'tx' }, n.text),
@@ -137,14 +160,24 @@ function checksTable (checks) {
       h('span', { class: 'at' }, c.excused ? h('span', { class: 'excused', title: c.excusedOn ? `Already failing on ${c.excusedOn.slice(0, 7)}, the commit this card forks from — re-measured when its base moves` : 'Already failing when the branch was cut' }, c.excusedOn ? `excused on ${c.excusedOn.slice(0, 7)}` : 'excused') : c.last ? clock(c.last.at) : ''))))
 }
 
-function openNote (h2, sec, ctx) {
+// openNote opens the note box under a section's heading; saved is a
+// draft the tab is putting back after a redraw (not focused: the panel
+// gives the caret back to whichever box had it).
+function openNote (h2, sec, ctx, saved = null) {
   const next = h2.nextElementSibling
   if (next?.classList.contains('draft')) { next.querySelector('textarea')?.focus(); return }
+  const drafts = draftsOf(ctx.id)
   // attachments are stored by reference (internal/attachment.Link), so —
   // unlike the composer's turn — every backend can take one: the note
   // form always offers the control, never gated on Composer.Images.
-  let attachments = []
-  const ta = h('textarea', { testid: 'spec-note-input', 'aria-label': `Note on ${sec.name}`, placeholder: 'Written into the spec as a %% note under your name. The architect answers it on the next pass.' })
+  const dr = saved || { text: '', attachments: [] }
+  drafts.set(sec.line, dr)
+  const drop = () => { drafts.delete(sec.line); box.remove() }
+  // a %% note is one line of the spec: line breaks are written as spaces,
+  // which the box says rather than doing it silently
+  const ta = h('textarea', { testid: 'spec-note-input', 'aria-label': `Note on ${sec.name}`, 'aria-describedby': `note-hint-${sec.line}`, placeholder: 'Written into the spec as a %% note under your name. The architect answers it on the next pass.' })
+  ta.value = dr.text
+  ta.addEventListener('input', () => { dr.text = ta.value })
   const chips = h('div', { class: 'chips', testid: 'spec-note-chips', hidden: true })
   const file = h('input', {
     type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true,
@@ -153,7 +186,7 @@ function openNote (h2, sec, ctx) {
       e.target.value = ''
       for (const f of files) {
         const chip = { id: null, name: f.name || 'image', pending: true, error: null }
-        attachments.push(chip)
+        dr.attachments.push(chip)
         renderChips()
         try {
           Object.assign(chip, await uploadAttachment(f), { pending: false })
@@ -167,34 +200,36 @@ function openNote (h2, sec, ctx) {
   })
   const renderChips = () => {
     clear(chips)
-    chips.hidden = attachments.length === 0
-    for (const a of attachments) {
+    chips.hidden = dr.attachments.length === 0
+    for (const a of dr.attachments) {
       chips.append(h('span', { class: ['chip', a.error && 'err', a.pending && 'pending'] },
         a.pending ? 'Uploading…' : (a.error || a.name),
-        h('button', { type: 'button', title: 'Remove', onclick: () => { attachments = attachments.filter((x) => x !== a); renderChips() } }, '×')))
+        h('button', { type: 'button', title: 'Remove', onclick: () => { dr.attachments = dr.attachments.filter((x) => x !== a); renderChips() } }, '×')))
     }
   }
-  const box = h('div', { class: 'annot draft', testid: 'spec-note-draft' },
-    h('div', { class: 'a1' }, h('span', { class: 'who' }, h('b', null, ctx.person || 'you'), ` on ${sec.name}`), ta, chips),
+  const box = h('div', { class: 'annot draft', testid: 'spec-note-draft', data: { draft: `note:${sec.line}` } },
+    h('div', { class: 'a1' }, h('span', { class: 'who' }, h('b', null, ctx.person || 'you'), ` on ${sec.name}`), ta,
+      h('span', { class: 'hint', id: `note-hint-${sec.line}`, testid: 'spec-note-hint' }, 'A note is one line of the spec: line breaks become spaces.'), chips),
     h('div', { class: 'act' },
       h('button', { class: 'attach', type: 'button', testid: 'spec-note-attach', title: 'Attach an image', onclick: () => file.click() }, '📎'),
       file,
-      h('button', { class: 'btn', type: 'button', onclick: () => box.remove() }, 'Cancel'),
+      h('button', { class: 'btn', type: 'button', onclick: drop }, 'Cancel'),
       h('button', {
         class: 'btn pri',
         type: 'button',
         testid: 'spec-note-save',
         onclick: async (e) => {
-          const text = ta.value.trim()
+          const text = ta.value.replace(/\s*\n\s*/g, ' ').trim()
           if (!text) { ta.focus(); return }
-          if (attachments.some((a) => a.pending)) { toast('Still uploading an image — wait a moment and try again'); return }
-          if (attachments.some((a) => a.error)) { toast('Remove the failed attachment before saving', { err: true }); return }
+          if (dr.attachments.some((a) => a.pending)) { toast('Still uploading an image — wait a moment and try again'); return }
+          if (dr.attachments.some((a) => a.error)) { toast('Remove the failed attachment before saving', { err: true }); return }
           const btn = e.currentTarget
           btn.disabled = true
           try {
             const body = { line: sec.line, text }
-            if (attachments.length) body.attachments = attachments.map((a) => a.id)
+            if (dr.attachments.length) body.attachments = dr.attachments.map((a) => a.id)
             const spec = await post(cardPath(ctx.id, 'spec/notes'), body)
+            drafts.delete(sec.line)
             toast('Note written into the spec')
             ctx.swap(spec && spec.markdown !== undefined ? spec : null)
           } catch (err) {
@@ -203,9 +238,13 @@ function openNote (h2, sec, ctx) {
           }
         }
       }, 'Add note')))
-  ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); box.remove() } })
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); drop() }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); box.querySelector('[data-testid="spec-note-save"]').click() }
+  })
+  renderChips()
   h2.after(box)
-  ta.focus()
+  if (!saved) ta.focus()
 }
 
 async function resolve (n, ctx) {

@@ -32,7 +32,7 @@ function draftFor (id, head) {
   let d = drafts.get(id)
   // the branch moved since the draft was made: its commits are not these
   if (!d || d.head !== head) {
-    d = { head, squash: new Set(), msg: new Map(), editing: null, open: new Set(), preview: null, seq: 0, confirming: false }
+    d = { head, squash: new Set(), msg: new Map(), typing: new Map(), editing: null, open: new Set(), preview: null, seq: 0, confirming: false }
     drafts.set(id, d)
   }
   return d
@@ -71,7 +71,7 @@ function render (pane, entry, ctx) {
   const heads = new Set(groups.map(g => g.commits[0]))
   const sect = h('div', { class: 'sect log', testid: 'log' })
   sect.append(h('div', { class: 'loghead', testid: 'log-head' },
-    h('span', null, h('b', null, plural(d.commits.length, 'commit')), ` on ${d.base || 'its base'}`),
+    h('span', null, h('b', null, plural(d.commits.length, 'commit')), ` ahead of ${d.base || 'its base'}`),
     !can && d.why ? h('span', { class: 'why', testid: 'log-why' }, d.why) : null))
   if (pushes.has(ctx.id)) sect.append(pushBox(pushes.get(ctx.id), ctx))
 
@@ -104,7 +104,7 @@ function commitRow (c, i, { d, dr, ctx, can, folded, lead }) {
       folded ? h('span', { class: 'into' }, `squashed into ${leadShort(d, dr, i)}`) : null),
     h('div', { class: 'ca' },
       h('button', { class: 'link', type: 'button', testid: `log-show-${i}`, 'aria-expanded': String(dr.open.has(c.sha)), onclick: () => toggleOpen(c, dr, ctx) }, dr.open.has(c.sha) ? 'Hide changes' : 'Show changes'),
-      can && lead ? h('button', { class: 'link', type: 'button', testid: `log-reword-${i}`, onclick: () => { dr.editing = editing ? null : c.sha; ctx.rerender() } }, editing ? 'Cancel' : 'Reword') : null,
+      can && lead ? h('button', { class: 'link', type: 'button', testid: `log-reword-${i}`, onclick: () => { dr.editing = editing ? null : c.sha; dr.typing.delete(c.sha); ctx.rerender() } }, editing ? 'Cancel' : 'Reword') : null,
       can && i > 0 ? h('button', { class: ['link', folded && 'on'], type: 'button', testid: `log-squash-${i}`, 'aria-pressed': String(folded), title: 'Fold this commit into the one before it', onclick: () => { folded ? dr.squash.delete(c.sha) : dr.squash.add(c.sha); dr.confirming = false; ctx.rerender() } }, folded ? 'Unsquash' : 'Squash into previous') : null))
   if (editing) row.append(editor(c, i, dr, ctx, d))
   if (dr.open.has(c.sha)) row.append(patchView(c, ctx))
@@ -121,8 +121,11 @@ function leadShort (d, dr, i) {
 function editor (c, i, dr, ctx, d) {
   const group = groupOf(d.commits, dr, c)
   const ta = h('textarea', { class: 'msg', rows: '6', spellcheck: 'true', testid: `log-editor-${i}`, 'aria-label': group > 1 ? 'Message for the combined commit' : 'Commit message' })
-  ta.value = dr.msg.has(c.sha) ? dr.msg.get(c.sha) : fullMessage(c)
-  return h('div', { class: 'editor' },
+  // what is being typed outlives the tab's redraws (every change to the
+  // card redraws it); it becomes the draft's only on "Use this message"
+  ta.value = dr.typing.has(c.sha) ? dr.typing.get(c.sha) : dr.msg.has(c.sha) ? dr.msg.get(c.sha) : fullMessage(c)
+  ta.addEventListener('input', () => dr.typing.set(c.sha, ta.value))
+  return h('div', { class: 'editor', data: { draft: `msg:${c.sha}` } },
     group > 1 ? h('p', { class: 'hint' }, `This is the message of the ${group} commits squashed together.`) : null,
     ta,
     h('div', { class: 'row' },
@@ -130,11 +133,12 @@ function editor (c, i, dr, ctx, d) {
         const v = ta.value.trim()
         if (!v) { toast('A commit needs a message', { err: true }); return }
         if (v === fullMessage(c).trim() && group === 1) dr.msg.delete(c.sha); else dr.msg.set(c.sha, v)
+        dr.typing.delete(c.sha)
         dr.editing = null
         dr.confirming = false
         ctx.rerender()
       } }, 'Use this message'),
-      h('button', { class: 'btn', type: 'button', onclick: () => { dr.editing = null; ctx.rerender() } }, 'Cancel')))
+      h('button', { class: 'btn', type: 'button', onclick: () => { dr.editing = null; dr.typing.delete(c.sha); ctx.rerender() } }, 'Cancel')))
 }
 
 // groupOf is how many commits the group led by c holds.
@@ -158,20 +162,41 @@ async function toggleOpen (c, dr, ctx) {
   ctx.rerender()
 }
 
+// A commit's patch folds its large files the way the Diff tab does: a
+// file longer than BIG_FILE lines, or any once BUDGET lines are drawn,
+// waits behind a "Show N lines" button, and stays open once opened.
+const BIG_FILE = 400
+const SMALL_FILE = 40
+const BUDGET = 1500
+const unfoldedFiles = new Set() // `${sha}:${path}` a reader opened
+
 function patchView (c, ctx) {
   const p = patches.get(c.sha)
   if (!p) return h('div', { class: 'patch' }, h('span', { class: 'spinner' }))
   if (p.error) return h('div', { class: 'patch badc' }, p.error)
   if (!p.files?.length) return h('div', { class: 'patch hint' }, 'This commit changes no files.')
-  return h('div', { class: 'patch cdiff', testid: 'log-patch' }, p.files.map(f => h('section', { class: 'file' },
-    h('div', { class: 'fh' }, h('span', { class: 'p' }, f.oldPath ? `${f.oldPath} → ${f.path}` : f.path),
-      f.status && f.status !== 'modified' ? h('span', { class: 'fstatus' }, f.status) : null,
-      h('span', { class: 'add' }, `+${f.add}`), h('span', { class: 'del' }, `−${f.del}`)),
-    f.binary ? h('div', { class: 'binary' }, 'Binary file; not shown.') : null,
-    (f.hunks || []).map(hk => h('div', { class: 'hunk' }, h('div', { class: 'hh' }, hk.header),
+  let drawn = 0
+  return h('div', { class: 'patch cdiff', testid: 'log-patch' }, p.files.map((f, i) => {
+    const n = (f.hunks || []).reduce((a, hk) => a + (hk.lines?.length || 0), 0)
+    const key = `${c.sha}:${f.path}`
+    const folded = !unfoldedFiles.has(key) && (n > BIG_FILE || (n > SMALL_FILE && drawn + n > BUDGET))
+    if (!folded) drawn += n
+    const hunks = () => (f.hunks || []).map(hk => h('div', { class: 'hunk' }, h('div', { class: 'hh' }, hk.header),
       hk.lines.map(l => h('div', { class: ['ln', l.t === '+' ? 'a' : l.t === '-' ? 'd' : ''] },
         h('span', { class: 'o' }, l.old ? String(l.old) : ''), h('span', { class: 'n' }, l.new ? String(l.new) : ''),
-        h('span', { class: 'm', 'aria-hidden': 'true' }, l.t === ' ' ? '' : l.t), h('span', null, l.text || ' '))))))))
+        h('span', { class: 'm', 'aria-hidden': 'true' }, l.t === ' ' ? '' : l.t), h('span', null, l.text || ' ')))))
+    return h('section', { class: 'file' },
+      h('div', { class: 'fh' }, h('span', { class: 'p' }, f.oldPath ? `${f.oldPath} → ${f.path}` : f.path),
+        f.status && f.status !== 'modified' ? h('span', { class: 'fstatus' }, f.status) : null,
+        h('span', { class: 'add' }, `+${f.add}`), h('span', { class: 'del' }, `−${f.del}`)),
+      f.binary ? h('div', { class: 'binary' }, 'Binary file; not shown.') : null,
+      folded
+        ? h('button', {
+          class: 'fold', type: 'button', testid: `log-unfold-${i}`,
+          onclick: (e) => { unfoldedFiles.add(key); e.currentTarget.replaceWith(...hunks()) }
+        }, `Show ${plural(n, 'line')}`, h('span', null, n > BIG_FILE ? ' · a large file, folded to keep the log quick' : ' · folded to keep the log quick'))
+        : hunks())
+  }))
 }
 
 function planBar (d, dr, ctx, groups) {
@@ -187,7 +212,7 @@ function planBar (d, dr, ctx, groups) {
     h('span', { class: 'pl', testid: 'log-plan-line' }, line),
     dr.confirming && p?.pushed ? h('div', { class: 'force', testid: 'log-confirm' },
       h('span', null, 'The remote already has commits this replaces. gummi will not push; afterwards you run:'),
-      h('div', { class: 'cmd' }, h('span', null, p.pushCommand || d.pushCommand || ''))) : null,
+      h('div', { class: 'cmd' }, h('span', { testid: 'log-confirm-cmd' }, p.pushCommand || d.pushCommand || ''), copyButton(p.pushCommand || d.pushCommand || '', 'log-confirm-copy'))) : null,
     h('div', { class: 'row' },
       h('button', { class: 'btn', type: 'button', testid: 'log-reset', disabled: !changed, onclick: () => { drafts.delete(ctx.id); ctx.rerender() } }, 'Reset'),
       h('button', { class: 'btn pri', type: 'button', testid: 'log-apply', disabled: !changed || !p || !!p.error || p.noop, onclick: () => apply(d, dr, ctx, groups, p) },
@@ -227,9 +252,14 @@ function pushBox (cmd, ctx) {
   return h('div', { class: 'push', testid: 'log-push' },
     h('span', null, 'gummi does not push. The remote still has the old commits; to replace them, run:'),
     h('div', { class: 'cmd' }, h('span', { testid: 'log-push-cmd' }, cmd),
-      h('button', {
-        type: 'button',
-        onclick: () => (navigator.clipboard?.writeText(cmd) ?? Promise.reject(new Error('no clipboard'))).then(() => toast('Copied'), () => toast('Select the command to copy it'))
-      }, 'Copy'),
+      copyButton(cmd, 'log-push-copy'),
       h('button', { type: 'button', onclick: () => { pushes.delete(ctx.id); ctx.rerender() } }, 'Dismiss')))
+}
+
+function copyButton (cmd, testid) {
+  return h('button', {
+    type: 'button',
+    testid,
+    onclick: () => (navigator.clipboard?.writeText(cmd) ?? Promise.reject(new Error('no clipboard'))).then(() => toast('Copied'), () => toast('Select the command to copy it'))
+  }, 'Copy')
 }

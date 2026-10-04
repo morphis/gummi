@@ -199,11 +199,22 @@ function tabKeys (e) {
 function renderPane (keepScroll) {
   const pane = $('#pane')
   const top = pane.scrollTop
+  // a box being written in (a spec note, a diff comment) is redrawn by
+  // its tab from the draft it keeps; the caret goes back where it was
+  const a = document.activeElement
+  const typing = pane.contains(a) && a.closest?.('[data-draft]') ? { key: a.closest('[data-draft]').dataset.draft, from: a.selectionStart, to: a.selectionEnd } : null
   clear(pane)
   pane.dataset.tab = state.tab
   const tab = byName[state.tab]
   const e = entry(state.tab)
-  if (!state.sel) return
+  if (!state.sel) {
+    // a new session's draft: nothing exists yet to have documents
+    if (state.sessionDraft) {
+      pane.append(h('div', { class: 'empty', testid: 'panel-draft' }, h('b', null, 'Nothing here yet'),
+        'A session has no documents until it starts. Its memory, diff and log appear here after the first message.'))
+    }
+    return
+  }
   if (e.err) {
     pane.append(e.err.notBuilt
       ? h('div', { class: 'empty', testid: 'panel-unavailable' }, h('b', null, `The ${tab.label} tab is not available yet`), 'This board’s server does not serve it yet.')
@@ -215,6 +226,9 @@ function renderPane (keepScroll) {
     const tctx = {
       id: state.sel,
       card: state.card,
+      // a landed (or otherwise finished) card takes no more review input:
+      // its notes and comments have no one left to go to
+      closed: state.card?.stage === 'done' || !!state.card?.landed,
       person: state.session?.person,
       setTab,
       select: ctx.select,
@@ -230,6 +244,13 @@ function renderPane (keepScroll) {
     }
   }
   pane.scrollTop = keepScroll ? top : 0
+  if (typing) {
+    const ta = [...pane.querySelectorAll('[data-draft]')].find(el => el.dataset.draft === typing.key)?.querySelector('textarea')
+    if (ta) {
+      ta.focus({ preventScroll: true })
+      try { ta.setSelectionRange(typing.from, typing.to) } catch {}
+    }
+  }
 }
 
 // ---- the resizer: the conversation keeps 360px, the panel 320px ----

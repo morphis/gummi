@@ -31,7 +31,7 @@ test.use({
 test('the log lists the branch, and squash and reword rewrite it without changing content', async ({ pairedPage: page, workspace }, info) => {
   await page.getByTestId('tab-log').click();
   const rows = page.locator('[data-testid^="log-commit-"]');
-  await expect(page.getByTestId('log-head')).toContainText('commits on');
+  await expect(page.getByTestId('log-head')).toContainText('commits ahead of');
   const before = await rows.count();
   expect(before).toBeGreaterThanOrEqual(3);
   await expect(rows.last()).toContainText('wip: two');

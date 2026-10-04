@@ -145,7 +145,7 @@ export const sessionStats = {
   sessions: [],
 };
 
-export async function mockCard(page: Page, id: string, opts: { kind?: string; decision?: any } = {}): Promise<MockHandle> {
+export async function mockCard(page: Page, id: string, opts: { kind?: string; decision?: any; patch?: (card: any) => void } = {}): Promise<MockHandle> {
   const m: MockHandle = { answers: [], annotations: [{ id: 1, file: 'wave.go', idx: 8, excerpt: 'func Wave', comment: 'Name it WaveAt?', by: 'Yuki', source: 'gummi', resolved: false }], nextAnswer: null, diffRev: 'a41c9e2', changes: [] };
   // A request the page gave up on (a reload, or a card change the board
   // pushed while the card's own fetch was in flight) is already settled by
@@ -172,6 +172,7 @@ export async function mockCard(page: Page, id: string, opts: { kind?: string; de
     card.decision = opts.decision ?? decision;
     card.decisionsMore = 0;
     card.composer = { says: 'answers the pinned decision', route: 'answer' };
+    opts.patch?.(card);
     await json(route, card);
   });
   await page.route(`${base}/thread*`, (r) => json(r, thread()));

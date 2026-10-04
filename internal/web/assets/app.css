@@ -558,6 +558,24 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .fresh .btn{margin-left:auto;height:26px}
 .fresh .spinner{animation:none}
 .pending{margin:10px 12px 0;font-size:12.5px;color:var(--accent);display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px}
+/* the diff's head, branch-moved banner and open comments' bar, and the
+   spec's bar, stay in view while the document scrolls under them */
+.dtop{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line)}
+.dtop:has(> .fresh,> .pending){padding-bottom:10px}
+.dtop .diffhead{position:static;border-bottom:0}
+.pane > .pending{position:sticky;top:0;z-index:2;background:var(--bg);margin:0;padding:10px 12px;border-bottom:1px solid var(--line)}
+.file{scroll-margin-top:110px}
+.ln.flash,.file.flash{outline:2px solid var(--accent);outline-offset:-2px}
+.file.loose{border-style:dashed}
+.file.loose .why{margin:0;padding:8px 10px 0;font-size:12.5px;color:var(--fg3)}
+.file.loose .annot{margin:8px 10px 10px;max-width:none}
+.annot .gone{font-size:12px;color:var(--fg3);font-style:italic}
+.annot .hint{font-size:11.5px;color:var(--fg3)}
+.annot .edit{display:flex;flex-direction:column;gap:6px}
+.annot .edit .act{padding:0}
+.ln .ro{cursor:default}
+.ln .ro:hover{color:var(--fg3)}
+.doc .ro{margin:0 0 10px;font-size:12.5px;color:var(--fg3)}
 .add{color:var(--add-fg)} .del{color:var(--del-fg)}
 .files{display:flex;flex-direction:column;padding:6px 8px;border-bottom:1px solid var(--line)}
 .files button{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:4px 8px;border-radius:6px;text-align:left;font-family:var(--mono);font-size:12px;color:var(--fg2)}
@@ -566,7 +584,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .files button .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .files .dot{color:var(--accent)}
 .file{margin:12px 12px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
-.file .fh{display:flex;align-items:center;gap:10px;padding:6px 10px;font-family:var(--mono);font-size:12px;background:var(--sunk);border-bottom:1px solid var(--line);scroll-margin-top:52px}
+.file .fh{display:flex;align-items:center;gap:10px;padding:6px 10px;font-family:var(--mono);font-size:12px;background:var(--sunk);border-bottom:1px solid var(--line)}
 .file .fh .p{color:var(--fg);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .file .fh label{display:flex;align-items:center;gap:5px;font-family:var(--ui);color:var(--fg3);cursor:pointer;white-space:nowrap}
 .file.viewed .fh{border-bottom:0}
@@ -624,6 +642,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .push{border:1px dashed var(--line2);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--fg3);display:flex;flex-direction:column;gap:6px}
 .push .cmd{display:flex;gap:8px;align-items:center;background:var(--sunk);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow-x:auto;white-space:nowrap}
 .push .cmd button{margin-left:auto;color:var(--accent);font-family:var(--ui);font-size:12px;flex-shrink:0}
+p.push.none{margin:0}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
 .tile{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px}
 .tile .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
@@ -633,10 +652,12 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .passes th{text-align:left;font-weight:500;color:var(--fg3);font-size:11.5px;padding:6px 8px;border-bottom:1px solid var(--line)}
 .passes td{padding:6px 8px;border-bottom:1px solid var(--line);color:var(--fg2);white-space:nowrap}
 .passes td.num,.passes th.num{text-align:right;font-family:var(--mono);font-size:12px}
-.passes .barc{width:30%;min-width:60px}
+.passes .barc{width:18%;min-width:48px}
 .passes .b{height:6px;border-radius:3px;background:var(--sc,var(--fg4));width:var(--w,0%)}
 .passes tr.rework td:first-child::after{content:" rework";font-size:10.5px;color:var(--warn);font-weight:600;margin-left:4px}
-.tablewrap{position:relative;overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);min-width:0;max-width:100%}
+.tablewrap{position:relative;overflow-x:auto;border:1px solid var(--line);border-radius:10px;min-width:0;max-width:100%;
+  /* an edge shadow says the table scrolls on, where it is cut off */
+  background:linear-gradient(to right,var(--panel) 30%,transparent) left/32px 100% no-repeat local,linear-gradient(to left,var(--panel) 30%,transparent) right/32px 100% no-repeat local,radial-gradient(farthest-side at 0 50%,color-mix(in srgb,var(--fg) 30%,transparent),transparent) left/14px 100% no-repeat scroll,radial-gradient(farthest-side at 100% 50%,color-mix(in srgb,var(--fg) 30%,transparent),transparent) right/14px 100% no-repeat scroll,var(--panel)}
 .sect > *{min-width:0}
 .foot-note{margin:0;font-size:12px;color:var(--fg3)}
 .foot-note.warn{color:var(--warn)}
@@ -927,5 +948,6 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .plan .pl{font-size:12.5px;color:var(--fg2)}
 .plan.bad .pl{color:var(--err)}
 .plan .force{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--warn)}
-.plan .force .cmd{display:flex;background:var(--sunk);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow-x:auto;white-space:nowrap}
+.plan .force .cmd{display:flex;gap:8px;align-items:center;background:var(--sunk);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow-x:auto;white-space:nowrap}
+.plan .force .cmd button{margin-left:auto;color:var(--accent);font-family:var(--ui);font-size:12px;flex-shrink:0}
 .plan .btn[disabled]{opacity:.5;cursor:default}

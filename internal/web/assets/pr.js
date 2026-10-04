@@ -3,11 +3,12 @@
 // to the file in the diff), top-level comments, and the push command a
 // person runs themselves.
 
-import { h, clock } from './dom.js?v=__ASSET_V__'
+import { h, clock, plural } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
+import { reveal } from './diff.js?v=__ASSET_V__'
 
 export const prTab = {
   name: 'pr',
@@ -28,7 +29,7 @@ function render (pane, entry, ctx) {
       link
         ? h('button', { class: 'btn', type: 'button', testid: 'pr-link', onclick: () => runAction(ctx.card, link) }, 'Link a pull request')
         : null,
-      p?.pushCommand ? pushBox(p.pushCommand, ctx) : null))
+      pushBox(p?.pushCommand, ctx)))
     return
   }
   const threads = p.threads || []
@@ -37,7 +38,7 @@ function render (pane, entry, ctx) {
       h('div', { class: 't' }, ctx.card?.title || 'Pull request', ' ', h('span', null, p.ref || '')),
       h('div', { class: 'kv' },
         p.state ? h('span', { class: ['state', /closed/i.test(p.state) && 'closed', /merged/i.test(p.state) && 'merged'], testid: 'pr-state' }, `● ${p.state.toLowerCase()}`) : null,
-        h('span', null, h('b', null, String(threads.filter(t => !t.resolved).length)), ' open threads'),
+        h('span', { testid: 'pr-open' }, plural(threads.filter(t => !t.resolved).length, 'open thread')),
         p.url ? h('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener noreferrer' }, 'open on GitHub') : null),
       p.error ? h('div', { class: 'badc' }, p.error) : null,
       h('div', { class: 'prmeta' },
@@ -51,14 +52,14 @@ function render (pane, entry, ctx) {
       h('div', { class: 'rh' }, `${t.path || 'conversation'}${t.line ? ':' + t.line : ''}`,
         t.resolved ? h('span', { class: 'okc' }, 'resolved') : null,
         t.outdated ? h('span', null, 'outdated') : null,
-        t.path ? h('button', { class: 'link go', type: 'button', onclick: () => ctx.setTab('diff') }, 'show in diff') : null),
+        t.path ? h('button', { class: 'link go', type: 'button', testid: `pr-thread-show-${i}`, onclick: () => { reveal(ctx.id, t.path, t.line); ctx.setTab('diff') } }, 'show in diff') : null),
       (t.notes || []).map(n => note(n)))))
   }
   if (p.comments?.length) {
     sect.append(h('p', { class: 'label' }, 'Comments'))
     sect.append(h('div', { class: 'rthread' }, p.comments.map(n => note(n))))
   }
-  if (p.pushCommand) sect.append(pushBox(p.pushCommand, ctx))
+  sect.append(pushBox(p.pushCommand, ctx))
   pane.append(sect)
 }
 
@@ -66,11 +67,30 @@ function note (n) {
   return h('div', { class: 'c1' }, h('div', { class: 'who' }, h('b', null, n.author || 'someone'), n.at ? ` · ${clock(n.at)}` : ''), markdown(n.body))
 }
 
-function pushBox (cmd, ctx) {
+// pushAdvice is what the push box says about when to push, for the card
+// as it stands; null when there is nothing to push at all.
+function pushAdvice (c, cmd) {
+  if (c?.landed) return { text: 'This card has landed: its work is on its base. gummi does not push; there is nothing left that needs pushing.', cmd: null }
+  if (c?.scratch || c?.kind === 'research') return { text: 'A research card works in a scratch tree and never gets a branch: there is nothing to push.', cmd: null }
+  if (!cmd) return c?.stage === 'todo' ? { text: 'This card has no branch yet: it is cut when the card starts. gummi never pushes it for you.', cmd: null } : null
+  const forced = /--force-with-lease/.test(cmd)
+  const lead = forced
+    ? 'gummi does not push. The branch was rewritten after it was pushed, so the remote needs a force push:'
+    : 'gummi does not push.'
+  if (forced) return { text: lead, cmd }
+  // a session is never verified: it lands on a person's read of its diff
+  if (c?.kind === 'freeform' || c?.stage === 'open') return { text: `${lead} A session has no verify; when its diff reads right to you, push it yourself:`, cmd }
+  if (c?.adopted) return { text: `${lead} This branch is adopted, so gummi will not rebase it either. When verify passes, push it yourself:`, cmd }
+  return { text: `${lead} When the card is verified, push it yourself:`, cmd }
+}
+
+function pushBox (command, ctx) {
+  const say = pushAdvice(ctx.card, command)
+  if (!say) return null
+  if (!say.cmd) return h('p', { class: 'push none', testid: 'pr-push' }, say.text)
+  const cmd = say.cmd
   return h('div', { class: 'push', testid: 'pr-push' },
-    h('span', null, ctx.card?.adopted
-      ? 'gummi does not push. This branch is adopted, so gummi will not rebase it either. When verify passes, push it yourself:'
-      : 'gummi does not push. When the card is verified, push it yourself:'),
+    h('span', null, say.text),
     h('div', { class: 'cmd' }, h('span', { testid: 'pr-push-cmd' }, cmd),
       h('button', {
         type: 'button',
