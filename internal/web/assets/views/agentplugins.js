@@ -160,14 +160,12 @@ registerView('agentplugins', {
     }
 
     function itemCard (item) {
-      const source = item.sourcePath
-        ? h('div', { class: 'psource', title: item.sourcePath }, item.linked ? 'Linked from ' : 'Imported from ', item.sourcePath)
-        : h('div', { class: 'psource' }, 'Created in the workspace')
+      const titleOnly = h('strong', null, item.name)
+      const tooltip = item.description || scopeSummary(item) || item.sourcePath || ''
+      const title = tooltip ? h('abbr', { title: tooltip }, titleOnly) : titleOnly
       return h('article', { class: 'pitem', testid: `plugins-item-${item.id}` },
         h('div', { class: 'pitemmain' },
-          h('div', { class: 'pitemtitle' }, h('strong', null, item.name), item.linked ? h('span', { class: 'ptag' }, 'linked') : null),
-          h('div', { class: 'pscope-summary' }, scopeSummary(item)),
-          source),
+          h('div', { class: 'pitemtitle' }, title, item.linked ? h('span', { class: 'ptag' }, 'linked') : null)),
         v.tab === 'skills' ? providerBadges(item) : null,
         h('div', { class: 'pitemactions' },
           h('button', { class: 'btn', type: 'button', testid: `plugins-edit-${item.id}`, disabled: v.busy, onclick: () => beginEdit(item) }, 'Edit'),
@@ -265,11 +263,20 @@ registerView('agentplugins', {
       const pathImport = h('button', {
         class: 'btn', type: 'button', testid: 'plugins-import-path-button',
         disabled: v.busy,
-        onclick: () => {
+        onclick: async () => {
           if (!path.value.trim()) { path.focus(); return }
-          importSources([{ kind: kindAPI(), path: path.value.trim(), repo: repo.value }])
+          try {
+            v.scanning = true
+            draw()
+            const data = await ctx.api.post('/api/plugins/discover', { path: path.value.trim(), repo: repo.value })
+            v.candidates = data.candidates || []
+            v.selected.clear()
+            v.err = null
+          } catch (err) { v.err = err }
+          v.scanning = false
+          draw()
         }
-      }, 'Import path')
+      }, 'Scan path')
       const rows = candidates.map(c => {
         const key = candidateKey(c)
         return h('label', { class: 'pcandidate', testid: `plugins-candidate-${c.kind}-${c.repo}-${c.name}` },

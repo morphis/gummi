@@ -31,14 +31,15 @@ var (
 )
 
 type Item struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Name       string   `json:"name"`
-	Entry      string   `json:"entry"`
-	SourcePath string   `json:"sourcePath,omitempty"`
-	Linked     bool     `json:"linked"`
-	Global     bool     `json:"global"`
-	Repos      []string `json:"repos,omitempty"`
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Name        string   `json:"name"`
+	Entry       string   `json:"entry"`
+	SourcePath  string   `json:"sourcePath,omitempty"`
+	Linked      bool     `json:"linked"`
+	Global      bool     `json:"global"`
+	Description string   `json:"description,omitempty"`
+	Repos       []string `json:"repos,omitempty"`
 }
 
 func validateSourceTree(root string) error {
@@ -65,15 +66,47 @@ type Detail struct {
 }
 
 type Candidate struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
-	Repo string `json:"repo"`
-	Path string `json:"path"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Repo        string `json:"repo"`
+	Path        string `json:"path"`
+	Description string `json:"description,omitempty"`
 }
 
 type Repo struct {
 	Name string
 	Root string
+}
+
+// parseDescriptionFromText scans the leading YAML frontmatter in text and
+// returns the value of the `description:` key if present, otherwise "".
+func parseDescriptionFromText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if strings.HasPrefix(text, "---") {
+		// find the closing frontmatter marker
+		rest := text[3:]
+		if i := strings.Index(rest, "---"); i >= 0 {
+			block := rest[:i]
+			for _, line := range strings.Split(block, "\n") {
+				lower := strings.ToLower(strings.TrimSpace(line))
+				if strings.HasPrefix(lower, "description:") {
+					// preserve the original trimmed suffix after the key
+					val := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "description:"))
+					return strings.Trim(val, " \t\"')(")
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// readDescription reads a file and returns the frontmatter description, if any.
+func readDescription(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return parseDescriptionFromText(string(raw))
 }
 
 type manifest struct {
@@ -235,7 +268,7 @@ func (s *Store) create(kind, name, content string, global bool, repos []string) 
 		_ = os.RemoveAll(itemDir)
 		return Item{}, fmt.Errorf("write item: %w", err)
 	}
-	item := Item{ID: id, Kind: kind, Name: name, Entry: entry, Global: global, Repos: repos}
+	item := Item{ID: id, Kind: kind, Name: name, Entry: entry, Global: global, Repos: repos, Description: parseDescriptionFromText(content)}
 	m.Items = append(m.Items, item)
 	if err := s.writeManifest(m); err != nil {
 		_ = os.RemoveAll(itemDir)
@@ -273,6 +306,7 @@ func (s *Store) Update(id, name, content string, global bool, repos []string) (I
 			return Item{}, fmt.Errorf("write item: %w", err)
 		}
 		item.Name, item.Global, item.Repos, item.Linked = name, global, repos, false
+		item.Description = parseDescriptionFromText(content)
 		m.Items[i] = item
 		if err := s.writeManifest(m); err != nil {
 			return Item{}, err
@@ -360,6 +394,12 @@ func (s *Store) ImportMany(sources []Candidate, global bool, repos []string) ([]
 			SourcePath: sourcePath, Linked: linked, Global: global,
 			Repos: append([]string(nil), targetRepos...),
 		}
+		// populate description from the source/copy's entry file
+		if linked {
+			item.Description = readDescription(filepath.Join(resolved, entry))
+		} else {
+			item.Description = readDescription(filepath.Join(dst, entry))
+		}
 		items = append(items, item)
 	}
 	m.Items = append(m.Items, items...)
@@ -395,75 +435,14 @@ func (s *Store) Delete(id string) error {
 
 func (s *Store) Discover() ([]Candidate, error) {
 	var found []Candidate
-	seen := make(map[string]bool)
 	repoNames := s.Repos()
 	for _, repoName := range repoNames {
 		root := s.repos[repoName]
-		locations := []struct {
-			kind string
-			path string
-		}{
-			{KindSkill, filepath.Join(root, ".claude", "skills")},
-			{KindSkill, filepath.Join(root, ".agents", "skills")},
-			{KindSkill, filepath.Join(root, ".github", "skills")},
-			{KindAgent, filepath.Join(root, ".claude", "agents")},
-			{KindAgent, filepath.Join(root, ".agents", "agents")},
-			{KindAgent, filepath.Join(root, ".github", "agents")},
-			{"any", filepath.Join(root, "plugins")},
+		cands, err := s.scanRoot(root, repoName)
+		if err != nil {
+			return nil, fmt.Errorf("scan %s: %w", repoName, err)
 		}
-		for _, location := range locations {
-			resolved, err := filepath.EvalSymlinks(location.path)
-			if err == nil && !within(root, resolved) {
-				continue
-			}
-			if err := walkCandidates(location.path, func(path string, d fs.DirEntry) {
-				if d.IsDir() {
-					return
-				}
-				name := d.Name()
-				kind := location.kind
-				switch {
-				case strings.EqualFold(name, "SKILL.md"):
-					kind = KindSkill
-				case strings.HasSuffix(strings.ToLower(name), ".agent.md"), strings.EqualFold(name, "AGENTS.md"):
-					kind = KindAgent
-				default:
-					return
-				}
-				if location.kind != "any" && kind != location.kind {
-					return
-				}
-				rel, err := filepath.Rel(root, path)
-				if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-					return
-				}
-				key := kind + ":" + filepath.Clean(path)
-				if seen[key] {
-					return
-				}
-				seen[key] = true
-				base := filepath.Base(path)
-				switch {
-				case kind == KindSkill:
-					base = filepath.Base(filepath.Dir(path))
-				case strings.EqualFold(base, "AGENTS.md"):
-					base = filepath.Base(filepath.Dir(path))
-				default:
-					base = strings.TrimSuffix(base, filepath.Ext(base))
-					base = strings.TrimSuffix(base, ".agent")
-				}
-				found = append(found, Candidate{Kind: kind, Name: base, Repo: repoName, Path: rel})
-			}); err != nil {
-				return nil, fmt.Errorf("scan %s: %w", repoName, err)
-			}
-		}
-		agentsFile := filepath.Join(root, "AGENTS.md")
-		if info, err := os.Lstat(agentsFile); err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
-			rel, err := filepath.Rel(root, agentsFile)
-			if err == nil {
-				found = append(found, Candidate{Kind: KindAgent, Name: filepath.Base(root), Repo: repoName, Path: rel})
-			}
-		}
+		found = append(found, cands...)
 	}
 	sort.Slice(found, func(i, j int) bool {
 		if found[i].Repo != found[j].Repo {
@@ -477,6 +456,194 @@ func (s *Store) Discover() ([]Candidate, error) {
 	return found, nil
 }
 
+// scanRoot walks known candidate locations under a repository root and
+// returns discovered candidates using the same matching rules as Discover.
+func (s *Store) scanRoot(root, repoName string) ([]Candidate, error) {
+	var found []Candidate
+	seen := make(map[string]bool)
+	locations := []struct{ kind, path string }{
+		{KindSkill, filepath.Join(root, ".claude", "skills")},
+		{KindSkill, filepath.Join(root, ".agents", "skills")},
+		{KindSkill, filepath.Join(root, ".github", "skills")},
+		{KindAgent, filepath.Join(root, ".claude", "agents")},
+		{KindAgent, filepath.Join(root, ".agents", "agents")},
+		{KindAgent, filepath.Join(root, ".github", "agents")},
+		{"any", filepath.Join(root, "plugins")},
+	}
+	for _, location := range locations {
+		resolved, err := filepath.EvalSymlinks(location.path)
+		if err == nil && !within(root, resolved) {
+			continue
+		}
+		if err := walkCandidates(location.path, func(path string, d fs.DirEntry) {
+			if d.IsDir() {
+				return
+			}
+			name := d.Name()
+			kind := location.kind
+			switch {
+			case strings.EqualFold(name, "SKILL.md"):
+				kind = KindSkill
+			case strings.HasSuffix(strings.ToLower(name), ".agent.md"), strings.EqualFold(name, "AGENTS.md"):
+				kind = KindAgent
+			default:
+				return
+			}
+			if location.kind != "any" && kind != location.kind {
+				return
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return
+			}
+			key := kind + ":" + filepath.Clean(path)
+			if seen[key] {
+				return
+			}
+			seen[key] = true
+			base := filepath.Base(path)
+			switch {
+			case kind == KindSkill:
+				base = filepath.Base(filepath.Dir(path))
+			case strings.EqualFold(base, "AGENTS.md"):
+				base = filepath.Base(filepath.Dir(path))
+			default:
+				base = strings.TrimSuffix(base, filepath.Ext(base))
+				base = strings.TrimSuffix(base, ".agent")
+			}
+			desc := readDescription(path)
+			found = append(found, Candidate{Kind: kind, Name: base, Repo: repoName, Path: filepath.ToSlash(rel), Description: desc})
+		}); err != nil {
+			return nil, fmt.Errorf("scan %s: %w", repoName, err)
+		}
+	}
+	// also consider AGENTS.md at repo root
+	agentsFile := filepath.Join(root, "AGENTS.md")
+	if info, err := os.Lstat(agentsFile); err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+		rel, err := filepath.Rel(root, agentsFile)
+		if err == nil {
+			found = append(found, Candidate{Kind: KindAgent, Name: filepath.Base(root), Repo: repoName, Path: filepath.ToSlash(rel), Description: readDescription(agentsFile)})
+		}
+	}
+	return found, nil
+}
+
+// DiscoverAt scans the provided path (file or directory) within the given
+// repository (or workspace if repo is empty) and returns candidates found
+// under that root.
+func (s *Store) DiscoverAt(path, repo string) ([]Candidate, error) {
+	base := s.workspace
+	if repo != "" {
+		var ok bool
+		base, ok = s.repos[repo]
+		if !ok {
+			return nil, fmt.Errorf("%w: unknown repository %q", ErrInvalid, repo)
+		}
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, filepath.FromSlash(path))
+	}
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: discover path does not exist", ErrInvalid)
+		}
+		return nil, fmt.Errorf("resolve discover path: %w", err)
+	}
+	if !within(base, path) {
+		return nil, fmt.Errorf("%w: discover path must stay within the selected repository or workspace", ErrInvalid)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect discover path: %w", err)
+	}
+	var found []Candidate
+	if info.IsDir() {
+		err := filepath.WalkDir(path, func(p string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			if d.IsDir() {
+				// skip common vendor/build folders
+				switch d.Name() {
+				case ".git", ".gummi", "node_modules", "vendor", "target", "dist", ".venv":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			name := d.Name()
+			var kind string
+			switch {
+			case strings.EqualFold(name, "SKILL.md"):
+				kind = KindSkill
+			case strings.HasSuffix(strings.ToLower(name), ".agent.md"), strings.EqualFold(name, "AGENTS.md"):
+				kind = KindAgent
+			default:
+				return nil
+			}
+			rel, err := filepath.Rel(base, p)
+			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil
+			}
+			nameBase := filepath.Base(p)
+			switch {
+			case kind == KindSkill:
+				nameBase = filepath.Base(filepath.Dir(p))
+			case strings.EqualFold(nameBase, "AGENTS.md"):
+				nameBase = filepath.Base(filepath.Dir(p))
+			default:
+				nameBase = strings.TrimSuffix(nameBase, filepath.Ext(nameBase))
+				nameBase = strings.TrimSuffix(nameBase, ".agent")
+			}
+			found = append(found, Candidate{Kind: kind, Name: nameBase, Repo: repoOrDefault(repo), Path: filepath.ToSlash(rel), Description: readDescription(p)})
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		name := filepath.Base(path)
+		var kind string
+		switch {
+		case strings.EqualFold(name, "SKILL.md"):
+			kind = KindSkill
+		case strings.HasSuffix(strings.ToLower(name), ".agent.md"), strings.EqualFold(name, "AGENTS.md"):
+			kind = KindAgent
+		default:
+			return nil, nil
+		}
+		rel, err := filepath.Rel(base, path)
+		if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, nil
+		}
+		nameBase := filepath.Base(path)
+		switch {
+		case kind == KindSkill:
+			nameBase = filepath.Base(filepath.Dir(path))
+		case strings.EqualFold(nameBase, "AGENTS.md"):
+			nameBase = filepath.Base(filepath.Dir(path))
+		default:
+			nameBase = strings.TrimSuffix(nameBase, filepath.Ext(nameBase))
+			nameBase = strings.TrimSuffix(nameBase, ".agent")
+		}
+		found = append(found, Candidate{Kind: kind, Name: nameBase, Repo: repoOrDefault(repo), Path: filepath.ToSlash(rel), Description: readDescription(path)})
+	}
+	return found, nil
+}
+
+func repoOrDefault(r string) string {
+	if r == "" {
+		return "default"
+	}
+	return r
+}
 func (s *Store) Export(id string) ([]byte, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -55,6 +55,25 @@ func (s *Server) handleAgentPluginDiscover(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	// accept an optional JSON body that narrows discovery to a specific repo/path
+	var req struct {
+		Repo string `json:"repo"`
+		Path string `json:"path"`
+	}
+	_ = readJSON(w, r, &req) // ignore error — empty body is fine
+	if req.Path != "" {
+		cands, err := store.DiscoverAt(req.Path, req.Repo)
+		if err != nil {
+			if errors.Is(err, agentplugins.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, webapi.AgentPluginDiscover{Candidates: cands})
+		return
+	}
 	candidates, err := store.Discover()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
