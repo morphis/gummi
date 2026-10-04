@@ -1048,9 +1048,20 @@ func (s *claudeSession) mapResult(l *ccLine) []Event {
 			}
 			detail = strings.Join(parts, "; ")
 		}
+		// An API-level failure (a refused model, an overload) arrives as
+		// subtype "success" with is_error set: the subtype names how the
+		// turn ended, not what went wrong, so the error carries the
+		// CLI's own first line instead of "turn failed (success)".
+		cause := fmt.Errorf("turn failed (%s)", l.Subtype)
+		if l.Subtype == "success" || l.Subtype == "" {
+			cause = errors.New("turn failed")
+			if first, _, _ := strings.Cut(detail, "\n"); first != "" {
+				cause = fmt.Errorf("turn failed: %s", first)
+			}
+		}
 		return append(out, Event{Kind: EventError, Err: &RunFailure{
 			Backend: "claude", Diagnostic: boundTail(detail, false),
-			FirstTurn: !s.hadIdleValue(), Err: fmt.Errorf("turn failed (%s)", l.Subtype),
+			FirstTurn: !s.hadIdleValue(), Err: cause,
 		}})
 	}
 	s.markHadIdle()

@@ -116,3 +116,25 @@ func TestClaudeResumedSessionDoesNotRebookPriorSpend(t *testing.T) {
 		t.Errorf("second turn = %+v, want a plain 1.5-credit delta", us)
 	}
 }
+
+// An API failure comes back as subtype "success" with is_error set; the
+// error names the CLI's message, not "(success)".
+func TestClaudeErrorResultNamesTheFailure(t *testing.T) {
+	s := newMeteringSession()
+	evs := s.mapLine([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"There's an issue with the selected model (claude-opus-4.8).\nRun --model to pick another."}`))
+	if len(evs) != 1 || evs[0].Kind != EventError {
+		t.Fatalf("events = %+v, want one error", evs)
+	}
+	rf, ok := evs[0].Err.(*RunFailure)
+	if !ok {
+		t.Fatalf("err = %T, want *RunFailure", evs[0].Err)
+	}
+	if got, want := rf.Err.Error(), "turn failed: There's an issue with the selected model (claude-opus-4.8)."; got != want {
+		t.Errorf("cause = %q, want %q", got, want)
+	}
+	// a subtype that does say what happened is kept
+	evs = s.mapLine([]byte(`{"type":"result","subtype":"error_max_turns","is_error":true}`))
+	if rf, ok := evs[0].Err.(*RunFailure); !ok || rf.Err.Error() != "turn failed (error_max_turns)" {
+		t.Errorf("max-turns error = %v", evs[0].Err)
+	}
+}
