@@ -159,22 +159,33 @@ registerView('fleet', {
       const lanes = r.lanes || []
       const to = +new Date(r.to)
       let from = +new Date(r.from)
+      let zoomed = false
       if (v.win === 'all') {
         // the whole history starts at its first activity (the server's
         // from); leave a little air before it, and an hour when empty
         if (from >= to) from = to - 3600e3
         from -= Math.max((to - from) * 0.02, 60e3)
+      } else {
+        // a window longer than what ran in it would squeeze every mark
+        // into its right edge: the track starts at the first activity
+        // instead, with the same air, and never spans under an hour
+        const first = firstMark(lanes)
+        if (first && first > from) {
+          const start = Math.max(from, Math.min(first - Math.max((to - first) * 0.02, 60e3), to - 3600e3))
+          zoomed = start > from
+          from = start
+        }
       }
       const span = Math.max(to - from, 1)
       const x = (t) => Math.max(0, Math.min(100, (+new Date(t) - from) / span * 100))
-      const flags = { stages: new Set(), wait: false, gate: false, landed: false, running: false }
+      const flags = { stages: new Set(), wait: false, gate: false, endings: new Set(), running: false }
       const rows = lanes.map(l => lane(l, x, to, flags))
       if (!rows.length) {
         return h('section', { class: 'fsec', testid: 'fleet-timeline' }, h('h3', null, 'Timeline'), h('div', { class: 'vnote' }, 'Nothing ran in this window.'))
       }
       const ticks = tickTimes(from, to)
       return h('section', { class: 'fsec', testid: 'fleet-timeline', 'aria-label': 'Timeline, one lane per card' },
-        h('h3', null, 'Timeline', h('span', null, plural(lanes.length, 'card'))),
+        h('h3', null, 'Timeline', h('span', null, plural(lanes.length, 'card') + (zoomed ? ` · from ${when(from)}, the first activity in this window` : ''))),
         legend(flags),
         h('div', { class: 'tlwrap', testid: 'fleet-timeline-scroll' },
           h('div', { class: 'tl' },
@@ -189,9 +200,16 @@ registerView('fleet', {
 
     function lane (l, x, to, flags) {
       const marks = []
+      const openFrom = l.openWaitFrom ? +new Date(l.openWaitFrom) : 0
       for (const w of l.waits || []) {
+        // the wait still open is in waits too, cut at the window's edge;
+        // it is drawn once, as the open span below, so end any wait that
+        // runs into it where the open one begins
+        let stop = w.to ? +new Date(w.to) : to
+        if (openFrom && stop >= to - 1000) stop = Math.min(stop, openFrom)
+        if (stop <= +new Date(w.from)) continue
         flags.wait = true
-        marks.push(span('wait', x(w.from), x(w.to || to), `waiting on you\n${when(w.from)} – ${when(w.to)} · ${dur(+new Date(w.to || to) - +new Date(w.from))}`))
+        marks.push(span('wait', x(w.from), x(stop), `waiting on you\n${when(w.from)} – ${when(stop)} · ${dur(stop - +new Date(w.from))}`))
       }
       if (l.openWaitFrom) {
         flags.wait = true
@@ -209,12 +227,13 @@ registerView('fleet', {
         flags.gate = true
         marks.push(h('span', { class: 'gate', style: { '--x': x(g).toFixed(3) + '%' }, data: { tip: `gate crossed\n${when(g)}` } }))
       }
-      if (l.landedAt) {
-        flags.landed = true
-        marks.push(h('span', { class: 'land', style: { '--x': x(l.landedAt).toFixed(3) + '%' }, data: { tip: `landed\n${when(l.landedAt)}` } }, '✔'))
+      const end = ENDINGS[l.ending] || (l.landedAt ? ENDINGS.landed : null)
+      if (l.landedAt && end) {
+        flags.endings.add(end)
+        marks.push(h('span', { class: ['land', end.cls], style: { '--x': x(l.landedAt).toFixed(3) + '%' }, data: { tip: `${end.label}\n${when(l.landedAt)}` } }, end.glyph))
       }
       const summary = [`${l.id} ${l.title}`, `${cr(l.credits)} credits`, l.redo ? `${cr(l.redo)} rework` : null, l.running ? 'running' : null,
-        l.openWaitFrom ? `waiting on you since ${when(l.openWaitFrom)}` : null, l.landedAt ? `landed ${when(l.landedAt)}` : null,
+        l.openWaitFrom ? `waiting on you since ${when(l.openWaitFrom)}` : null, l.landedAt && end ? `${end.label} ${when(l.landedAt)}` : null,
         tokenTotal(l.tokens) ? tokenText(l.tokens) : null, l.note || null].filter(Boolean).join(', ')
       return h('div', { class: ['lane', l.running && 'running'], testid: `fleet-lane-${l.id}`, tabindex: '0', role: 'group', 'aria-label': summary },
         h('div', { class: 'lab' },
@@ -236,7 +255,7 @@ registerView('fleet', {
         f.running ? h('li', null, h('i', { class: 'sw run', 'aria-hidden': 'true' }), 'still running') : null,
         f.wait ? h('li', null, h('i', { class: 'sw c-you hatch', 'aria-hidden': 'true' }), 'waiting on you') : null,
         f.gate ? h('li', null, h('i', { class: 'dia', 'aria-hidden': 'true' }), 'gate crossed') : null,
-        f.landed ? h('li', null, h('i', { class: 'ck', 'aria-hidden': 'true' }, '✔'), 'landed') : null)
+        Object.values(ENDINGS).filter(e => f.endings.has(e)).map(e => h('li', null, h('i', { class: ['ck', e.cls], 'aria-hidden': 'true' }, e.glyph), e.label)))
     }
 
     // ---- the one tooltip: marks carry data-tip; hover or focus shows it ----
@@ -272,6 +291,29 @@ registerView('fleet', {
     return () => { v.alive = false; clearInterval(timer) }
   }
 })
+
+// ENDINGS is how a lane's closing mark reads, by the card's ending: only
+// a landing is the green check; a session continued as a spec, or a goal
+// card dropped, closed without its work reaching the base.
+const ENDINGS = {
+  landed: { label: 'landed', glyph: '✔', cls: null },
+  handed_off: { label: 'handed off', glyph: '↗', cls: 'off' },
+  dropped: { label: 'dropped', glyph: '✕', cls: 'off' }
+}
+
+// firstMark is the earliest instant any lane draws, or 0 for none.
+function firstMark (lanes) {
+  let first = 0
+  const see = (t) => { const n = t ? +new Date(t) : 0; if (n && (!first || n < first)) first = n }
+  for (const l of lanes) {
+    for (const b of l.blocks || []) see(b.from)
+    for (const w of l.waits || []) see(w.from)
+    for (const g of l.gates || []) see(g)
+    see(l.openWaitFrom)
+    see(l.landedAt)
+  }
+  return first
+}
 
 function rank (stage) { const i = STAGE_ORDER.indexOf(stage); return i < 0 ? 99 : i }
 function lanesWithSpend (r) { return (r.lanes || []).filter(l => l.credits > 0).length }

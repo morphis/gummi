@@ -81,6 +81,7 @@
 .track .wait{width:var(--w);min-width:2px;top:3px;height:8px;border-radius:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--warn) 70%,transparent) 0 2px,color-mix(in srgb,var(--warn) 22%,transparent) 2px 5px)}
 .track .gate{width:8px;height:8px;top:3px;margin-left:-4px;background:var(--fg2);transform:rotate(45deg);box-shadow:0 0 0 2px var(--panel);border-radius:1px}
 .track .land{width:14px;margin-left:-7px;top:-1px;height:16px;font-size:11px;line-height:16px;text-align:center;color:var(--ok);font-weight:700;text-shadow:0 0 2px var(--panel)}
+.track .land.off,.keyrow .ck.off{color:var(--fg2)}
 .track > span:hover{filter:brightness(1.12)}
 .axis{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:12px;height:24px;border-top:1px solid var(--line);margin-top:4px;padding-right:40px;position:relative}
 .axis .lab{position:sticky;left:0;background:var(--panel);z-index:2}
