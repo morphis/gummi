@@ -9,7 +9,9 @@ const VIEWER_TINTS = ['var(--accent)', 'var(--s-verify)', 'var(--s-plan)', 'var(
 export function initTop ({ nextNeeding, palette, keysHelp, toggleRail }) {
   $('#rail-toggle').append(icon('rail'))
   $('#rail-toggle').addEventListener('click', toggleRail)
-  $('#btn-palette').append(icon('search'), h('kbd', null, navigator.platform?.startsWith('Mac') ? '⌘K' : 'Ctrl K'))
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || '')
+  $('#btn-palette').append(icon('search'), h('kbd', null, mac ? '⌘K' : 'Ctrl K'))
+  if (!mac) $('#btn-palette').title = 'Jump to a card, or open a view (Ctrl K)'
   $('#btn-palette').addEventListener('click', palette)
   $('#btn-keys').addEventListener('click', keysHelp)
   $('#p-next').addEventListener('click', nextNeeding)
@@ -38,12 +40,12 @@ function renderConn () {
   pill.dataset.state = state.conn
   pill.classList.toggle('off', state.conn === 'reconnecting')
   clear(pill)
-  if (live) {
-    pill.append(h('span', { class: 'dot ok' }), h('span', null, 'live'))
-  } else {
-    pill.append(h('span', { class: 'spinner' }),
-      h('span', null, state.conn === 'reconnecting' ? 'reconnecting · answers paused' : 'connecting'))
-  }
+  const words = live ? 'live' : state.conn === 'reconnecting' ? 'reconnecting · answers paused' : 'connecting'
+  // the words fold away on a narrow window, where the dot alone is shown:
+  // they stay its name and its tooltip
+  pill.title = `Connection: ${words}`
+  pill.setAttribute('aria-label', `Connection: ${words}`)
+  pill.append(live ? h('span', { class: 'dot ok' }) : h('span', { class: 'spinner' }), h('span', { class: 'ct' }, words))
 }
 
 function renderPresence () {

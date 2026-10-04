@@ -102,17 +102,36 @@ function renderRail () {
     box.append(h('div', { class: 'empty' }, h('span', { class: 'spinner' })))
     return
   }
+  // the compact rail has no room for the filter and the chips: a filter
+  // still applying says so at its top, and opens the full rail to change it
+  const filtered = [state.filter && `“${state.filter}”`, state.kind !== 'all' && state.kind, spread && state.repo !== 'all' && (state.repo || 'default')].filter(Boolean)
+  if (filtered.length) {
+    box.append(h('button', {
+      class: 'rail-filtered', type: 'button', testid: 'rail-filtered',
+      title: `Filtered: ${filtered.join(' · ')} — show the filters`,
+      'aria-label': `Cards filtered by ${filtered.join(', ')}. Show the filters`,
+      onclick: () => { set({ railManual: false }); storage.set('railManual', false) }
+    }, icon('search'), h('span', null, state.kind !== 'all' ? state.kind : '…')))
+  }
   for (const [k, label] of GROUPS) {
     let list = vis.filter(r => r.status === k)
     if (!list.length) continue
     const total = list.length
     const fold = k === 'done' && !state.doneAll && !state.filter && total > DONE_SHOWN
-    if (fold) list = list.slice(0, DONE_SHOWN)
+    if (fold) {
+      // a folded card that is open (from the palette, a link) still shows,
+      // highlighted, under the ones the fold keeps: j and k walk on from it
+      const open = list.slice(DONE_SHOWN).find(r => r.id === state.sel)
+      list = list.slice(0, DONE_SHOWN)
+      if (open) list.push(open)
+    }
+    const more = state.doneAll ? 'Show fewer' : `Show all ${total}`
     box.append(h('section', { class: ['group', k], testid: `rail-group-${k}`, 'aria-label': label },
       h('h3', null, label, h('span', null, String(total))),
       list.map(r => rowEl(r, spread)),
       k === 'done' && total > DONE_SHOWN && !state.filter
-        ? h('button', { class: 'more-done', testid: 'rail-more-done', type: 'button' }, state.doneAll ? 'Show fewer' : `Show all ${total}`)
+        ? h('button', { class: 'more-done', testid: 'rail-more-done', type: 'button', 'aria-label': more, title: more },
+          h('span', { class: 'lbl' }, more), h('span', { class: 'cmp', 'aria-hidden': 'true' }, state.doneAll ? '−' : `+${total - DONE_SHOWN}`))
         : null))
   }
   if (!box.children.length) {
@@ -165,7 +184,8 @@ function rowEl (r, spread) {
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.join(', ')}`) : null,
     r.stack ? h('span', { class: ['badge stack', r.stack.stale && 'stale'], title: r.stack.name }, `stack ${r.stack.pos + 1} of ${r.stack.of}`) : null,
     r.elsewhere ? h('span', { class: 'badge else', title: 'Another gummi is driving this card' }, 'elsewhere') : null,
-    h('span', { class: 'meter' }, `${r.spend ? cr(r.spend) : '—'}/${r.envelope || '∞'}`)))
+    // the same figures as the card's head: spent / budget
+    h('span', { class: 'meter' }, `${cr(r.spend)} / ${r.envelope || '∞'}`)))
 }
 
 function strip (stage) {

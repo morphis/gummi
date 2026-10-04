@@ -2,7 +2,7 @@
 // strip (a past stage jumps to that stage in the thread), branch, waits,
 // and the spend bar against its envelope.
 
-import { $, h, icon, clear, append, kindTag, STAGES, cr, ctxMeter } from './dom.js?v=__ASSET_V__'
+import { $, h, icon, clear, append, kindTag, STAGES, cr, ctxMeter, isMobile } from './dom.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
@@ -13,6 +13,30 @@ let ctx = {}
 export function initHead (c) {
   ctx = c
   on(['card', 'sel', 'board', 'cardErr', 'rightHidden', 'view', 'sessionDraft'], render)
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fit).observe($('#head'))
+}
+
+// TITLE_KEEPS is how much of a title (px) the head keeps on screen before its
+// buttons give way: below it, they fold one by one into the card's menu
+// ("⋯", which offers every one of them too), the least needed first.
+const TITLE_KEEPS = 240
+
+// fit folds the head's buttons until the title has its room — or no
+// button is left to fold. Each button names its rank (data-fold, lowest
+// folds first); a button folded is still the card's menu entry.
+function fit () {
+  const el = $('#head')
+  const t = el?.querySelector('.head-row h1')
+  if (!t) return
+  const btns = [...el.querySelectorAll('.head-actions [data-fold]')].sort((a, b) => a.dataset.fold - b.dataset.fold)
+  for (const b of btns) b.classList.remove('folded')
+  // a phone's head already keeps only what a thumb needs (the others are
+  // hide-s): what is left there stays
+  if (isMobile()) return
+  for (const b of btns) {
+    if (t.clientWidth >= Math.min(t.scrollWidth, TITLE_KEEPS)) break
+    b.classList.add('folded')
+  }
 }
 
 function render () {
@@ -43,10 +67,10 @@ function render () {
       h('span', { class: 'cid', testid: 'card-id' }, c.id),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
-        commitButton(c, actions),
-        landButton(c, actions),
-        writeSpecButton(state.card),
-        prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
+        foldAt(1, commitButton(c, actions)),
+        foldAt(3, landButton(c, actions)),
+        foldAt(0, writeSpecButton(state.card)),
+        prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn,
         h('button', { class: ['iconbtn', panelOpen && 'on'], testid: 'toggle-panel', title: 'Show or hide the document panel (])', 'aria-label': 'Toggle document panel', 'aria-pressed': String(panelOpen), type: 'button', onclick: ctx.togglePanel }, icon('panel')))),
     h('div', { class: 'subline' },
@@ -63,6 +87,13 @@ function render () {
       spend(c),
       ctxMeter(c.context, 'card-context')),
     state.cardErr && !state.card ? h('div', { class: 'subline badc', testid: 'card-error' }, state.cardErr.message) : null])
+  fit()
+}
+
+// foldAt ranks a head button for fit: the lower, the sooner it folds.
+function foldAt (rank, btn) {
+  if (btn) btn.dataset.fold = String(rank)
+  return btn
 }
 
 // landButton is an open session's landing, in its head: a session pins no

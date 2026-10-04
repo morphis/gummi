@@ -14,7 +14,7 @@ in `internal/web/assets/*.js`; keep this list in step when adding one.
 | `workspace`, `ws-repo`, `ws-head` | repo and head branch in the header |
 | `pill-needs` | "N need you" — click opens the next card that needs you (`n`) |
 | `pill-running`, `pill-today` | running count, today's spend |
-| `conn` | connection pill; `data-state` = `connecting` \| `live` \| `reconnecting` |
+| `conn` | connection pill; `data-state` = `connecting` \| `live` \| `reconnecting` (a dot alone at ≤ 1100px and on a phone, its words in its label) |
 | `presence`, `viewer` | who is viewing; one `viewer` per person |
 | `btn-palette`, `btn-keys`, `btn-theme` | ⌘K palette, `?` sheet, theme toggle (`data-theme` = current) |
 | `rail-toggle` | compact/full rail (`[`), `aria-pressed` = full |
@@ -23,7 +23,7 @@ in `internal/web/assets/*.js`; keep this list in step when adding one.
 
 ## Pairing
 
-`pair`, `pair-form`, `pair-name`, `pair-code`, `pair-submit`, `pair-error`
+`pair`, `pair-form`, `pair-name` (`pair-name-hint` under it), `pair-code`, `pair-submit`, `pair-error`
 (wrong code, with "N tries left"), `pair-note`, `pair-new` (print a new code),
 `pair-refused` (the form shown again after a request was rejected or lapsed).
 
@@ -51,7 +51,8 @@ request once).
 | `rail-cards` | the scrolling list |
 | `rail-group-<status>` | `needs`, `running`, `paused`, `idle`, `todo`, `done` |
 | `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open |
-| `rail-more-done`, `rail-empty` | "Show all N" landed; no cards / no match |
+| `rail-more-done`, `rail-empty` | "Show all N" landed ("+N" on the compact rail); no cards / no match |
+| `rail-filtered` | compact rail only: a filter still applies; opens the full rail |
 | `rail-foot`, `rail-new-session`, `rail-new`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new` the new-card form) |
 | `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
@@ -93,7 +94,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `thread-items` | the polite live region holding items |
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
-| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `tool-group`, `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
+| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `activity` (a run of tool calls, folded), `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
 | `verify-no-checks` | a verify item's head when gummi had no gummi-checks to run (never "all passed") |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
@@ -209,7 +210,7 @@ cards), `mobile-decision` (docked decision bar), `mdec-toggle`,
 | id | what |
 |---|---|
 | `scrim` | any overlay's backdrop |
-| `palette`, `palette-input`, `palette-results`, `palette-row-<ID>`, `palette-view-<name>` | ⌘K |
+| `palette`, `palette-input`, `palette-results`, `palette-row-<ID>`, `palette-view-<name>` (a view, or `newsession`, `push`) | ⌘K |
 | `keys-help` | the `?` sheet |
 | `menu` | a popup menu opened with `openMenu` (its `testid` option overrides `menu`, e.g. `rail-more-menu`, `card-actions-menu`) |
 | `modal`, `modal-close` | a dialog opened with `openModal` (its `testid` option overrides `modal`) |

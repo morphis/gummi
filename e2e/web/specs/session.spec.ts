@@ -128,6 +128,10 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
     await page.getByTestId('card-actions').click();
     await page.getByTestId('action-writespec').click();
   } else {
+    // beside the open panel the title keeps its room and the button folds
+    // into the card's menu; with the panel hidden it is back in the head
+    await page.getByTestId('toggle-panel').click();
+    await expect(page.getByTestId('write-spec')).toBeVisible();
     await page.getByTestId('write-spec').click();
   }
   await expect(page.getByTestId('write-spec-dialog')).toBeVisible();

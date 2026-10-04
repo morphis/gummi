@@ -192,7 +192,14 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 /* compact rail: glyph + id, a dot for what needs you */
 .app.rail-compact{--rail-w:76px}
 .app.rail-compact .rail-head,.app.rail-compact .group h3,.app.rail-compact .row .t,.app.rail-compact .row .meta,
-.app.rail-compact .rail-foot .lbl,.app.rail-compact .rail-foot .sub,.app.rail-compact .more-done{display:none}
+.app.rail-compact .rail-foot .lbl,.app.rail-compact .rail-foot .sub,.app.rail-compact .more-done .lbl{display:none}
+/* what the compact rail keeps of the full one: the fold of the landed
+   cards as "+N", and a mark that a filter still applies */
+.more-done .cmp,.rail-filtered{display:none}
+.app.rail-compact .more-done{text-align:center;padding:6px 0;font-family:var(--mono)}
+.app.rail-compact .more-done .cmp{display:inline}
+.app.rail-compact .rail-filtered{display:flex;align-items:center;justify-content:center;gap:3px;width:100%;margin-bottom:4px;padding:5px 0;border-radius:7px;border:1px dashed var(--accent);color:var(--accent);font-family:var(--mono);font-size:10.5px}
+.app.rail-compact .rail-filtered svg.i{width:12px;height:12px}
 .app.rail-compact .cards{padding:6px 6px 8px}
 .app.rail-compact .group{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
 .app.rail-compact .group:first-child{border-top:0;margin-top:0}
@@ -209,6 +216,8 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .head h1{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .head .cid{font-family:var(--mono);color:var(--fg3);font-size:13px;white-space:nowrap}
 .head-actions{margin-left:auto;display:flex;gap:4px;flex-shrink:0;align-items:center;position:relative}
+/* a button the title needed the room of (head.js fit): it is in the ⋯ menu */
+.head-actions .folded{display:none}
 .btn{height:28px;padding:0 12px;border-radius:7px;font-size:12.5px;font-weight:500;border:1px solid var(--line2);background:var(--panel);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
 .btn:hover{border-color:var(--fg4)}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
@@ -451,6 +460,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .spop .presets{display:flex;flex-wrap:wrap;gap:6px}
 .spop .row{display:flex;gap:6px}
 .spop .fh{margin:0;font-size:12px;color:var(--fg3)}
+.spop .ferr{margin:0;font-size:12px;color:var(--err)}
 /* on a phone the model beats the enter hint for the bar's width */
 @media (max-width:760px){.composer .bar:has(.mbtn) .enter{display:none}.mbtn{max-width:none;flex:1;justify-content:flex-start}}
 .link-spend{border-radius:6px;padding:2px 6px;margin:-2px -6px}
@@ -799,8 +809,12 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .mcard,.mdec{display:none}
 
 @media (max-width:1100px){
-  .pills .pill.hide-m{display:none}
+  .pills .pill.hide-m:not(#p-conn){display:none}
   .ws .branch{display:none}
+  /* the connection keeps a dot where there is no room for its words:
+     answers pause while it is down, and that must stay visible */
+  #p-conn{padding:0;width:26px;justify-content:center}
+  #p-conn .ct{display:none}
 }
 @media (max-width:760px){
   .app{grid-template-rows:44px auto auto minmax(0,1fr) auto;padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -814,9 +828,9 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .app[data-view="cards"] .rail{display:flex}
   .app[data-view="thread"] .center{display:flex}
   .app[data-view="panel"] .right,.app.no-right[data-view="panel"] .right{display:flex}
-  .pills,.ws,.top .hide-s{display:none}
+  .pills .pill:not(#p-conn),.ws,.top .hide-s{display:none}
   .top{padding:0 12px}
-  .top .theme-btn{margin-left:auto}
+  #btn-palette kbd{display:none}
   /* a card's screen: back to the cards, the card's head, then one row of
      tabs — its thread and its documents (mobile.js moves the head and tabs in) */
   .mcard{display:grid;grid-template-columns:auto minmax(0,1fr);background:var(--bg);border-bottom:1px solid var(--line)}

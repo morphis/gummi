@@ -172,3 +172,38 @@ test('a surface that is not built yet says so', async ({ pairedPage: page }) => 
   await page.getByTestId('menu-doctor').click();
   await expect(page.getByTestId('view-doctor')).toBeVisible();
 });
+
+// The compact rail (a laptop's default) keeps what the full one would
+// tell: the landed cards past the fold, as "+N", a folded card that is
+// open, highlighted, and a filter still applying, with a way to change it.
+test.describe('the compact rail', () => {
+  let landed: string[];
+  test.use({ seed: { run: async (ws) => {
+    landed = [];
+    for (const t of ['Add a one helper', 'Add a two helper', 'Add a three helper', 'Add a four helper']) landed.push(await ws.seedLanded(t));
+  } } });
+
+  test('keeps the landed overflow, a folded open card and a filter in reach', async ({ pairedPage: page }, info) => {
+    test.skip(info.project.name !== 'laptop', 'the compact rail is the laptop’s default');
+    test.setTimeout(120_000);
+    await expect(page.getByTestId('app')).toHaveClass(/rail-compact/);
+    await expect(page.getByTestId('rail-more-done').locator('.cmp')).toBeVisible();
+    await expect(page.getByTestId('rail-more-done').locator('.cmp')).toHaveText('+1');
+    await expect(page.getByTestId('rail-more-done').locator('.lbl')).toBeHidden();
+    const shown = await page.getByTestId('rail-group-done').locator('.row').evaluateAll((rs) => rs.map((r) => (r as HTMLElement).dataset.id));
+    const folded = landed.find((id) => !shown.includes(id))!;
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type(folded);
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId(`rail-row-${folded}`)).toHaveClass(/\bsel\b/);
+
+    await page.getByTestId('rail-toggle').click();
+    await page.getByTestId('rail-filter').fill('helper');
+    await page.getByTestId('rail-toggle').click();
+    await expect(page.getByTestId('app')).toHaveClass(/rail-compact/);
+    await expect(page.getByTestId('rail-filtered')).toBeVisible();
+    await page.getByTestId('rail-filtered').click();
+    await expect(page.getByTestId('app')).not.toHaveClass(/rail-compact/);
+    await expect(page.getByTestId('rail-filter')).toBeVisible();
+  });
+});
