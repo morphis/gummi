@@ -47,12 +47,20 @@ artifact):
                    waiting for the answer does: the card runs out of budget
                    behind its question.
     [slow]         every stage streams its reply in small text deltas with a
-                   pause between them (GUMMI_E2E_SLOW_SECONDS, default 6s
-                   per stage in total), so a test can watch a live card. An
-                   interrupt frame stops the stream early.
+                    pause between them (GUMMI_E2E_SLOW_SECONDS, default 6s
+                    per stage in total), so a test can watch a live card. An
+                    interrupt frame stops the stream early.
+    [fold]         the plan stage paces a tool call so a test can unfold its
+                    activity row while it runs: `read` stays running for
+                    GUMMI_E2E_FOLD_SECONDS (default 2.5s, real sleeps -- not
+                    FAST beats), settles, pauses briefly, appends `grep`, then
+                    asks its question (as [ask]). After the answer it writes
+                    the chosen approach and holds for the same pause again
+                    before finishing the spec, so a test can assert inside the
+                    still-live session.
     [research]     nothing extra: a research card (RS-*) is recognised by its
-                   kind. Its plan stage writes Questions/Constraints/Direction;
-                   the keyword just makes a test's intent readable.
+                    kind. Its plan stage writes Questions/Constraints/Direction;
+                    the keyword just makes a test's intent readable.
 
 A rebase-resolve pass (the board's "let the agent resolve them") runs
 the command its kickoff names; a conflicted path takes the card's side,
@@ -71,7 +79,8 @@ covers.
 Any other message sent to a live session (a steer, a consult, a freeform
 turn) gets a short acknowledgement quoting it; a freeform card's turn
 also edits a file so its diff is non-empty. A freeform turn
-containing [watch] starts a Monitor watch it leaves open. A message opening
+containing [watch] starts a Monitor watch it leaves open, and one
+containing [tasks-done] completes its checklist. A message opening
 with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
@@ -94,6 +103,7 @@ FAST = os.environ.get("GUMMI_E2E_FAST") == "1"
 SLOW_SECONDS = float(os.environ.get("GUMMI_E2E_SLOW_SECONDS") or "6")
 ASK_TIMEOUT = float(os.environ.get("GUMMI_E2E_ASK_TIMEOUT") or "2")
 ASK_SPEND = float(os.environ.get("GUMMI_E2E_ASK_SPEND") or "5000")
+FOLD_PAUSE = float(os.environ.get("GUMMI_E2E_FOLD_SECONDS") or "2.5")
 LOG = os.environ.get("GUMMI_E2E_AGENT_LOG")
 CREDITS = 12  # per turn; small enough that no envelope in the suite runs dry
 
@@ -438,6 +448,63 @@ def plan_feature(turn, answer=None):
              "verification plan are in the spec.")
 
 
+# The [fold] scenario's pacing is a real sleep, never a FAST beat: the row a
+# fold test unfolds between two paced calls exists only while they are.
+def plan_fold(turn, answer=None):
+    """[fold]: a paced tool pair a fold test can unfold between.
+
+    `read` stays running through one pause, so the test opens its activity
+    row while it runs; settling it and appending `grep` each redraw the row.
+    After the person answers the ask, writing the chosen approach starts a
+    second activity row and the turn holds one more pause before the spec is
+    finished, so the test asserts inside the still-live session -- once the
+    stage ends, the live block is replaced and its folds are not carried
+    across.
+    """
+    ctx = turn.ctx
+    name = ident(ctx)
+    call_id = "fold-read-%d" % os.getpid()
+    turn.think("reading the module to see where the change belongs")
+    emit({"type": "tool", "name": "read", "detail": "greet.go", "id": call_id})
+    time.sleep(FOLD_PAUSE)
+    turn.tool_result(call_id, "read")
+    time.sleep(FOLD_PAUSE / 2)
+    turn.tool("grep", "func Greet")
+    problem = ("%s: %s\n\nThe tiny module has one greeting; this card adds a second "
+               "exported helper next to it, with a test." % (ctx["card"], ctx["title"]))
+    considered = ("1. **A new file** -- `%s.go` beside `greet.go`, one function and "
+                  "its test.\n2. **Extend the existing file** -- fewer files, noisier diff." % name.lower())
+    write_sections(turn, [
+        ("Problem", problem),
+        ("Out of scope", "- changing `Greet` or the command"),
+        ("Considered approaches", considered),
+    ])
+    turn.say("Two ways to do this are written up under Considered approaches. "
+             "I need you to pick one.")
+    if answer is None:
+        answer = call_tool("ask_user", args={
+            "question": "Where should %s's helper live?" % ctx["card"],
+            "options": [
+                {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
+                {"label": "Extend the existing file", "detail": "fewer files, noisier diff"},
+            ],
+            "changes_section": "Chosen approach",
+            "spec_anchor": "Chosen approach",
+        })
+    chosen = "Decided with the user: %s" % answer.strip().splitlines()[0]
+    write_sections(turn, [("Chosen approach", chosen)])
+    time.sleep(FOLD_PAUSE)
+    write_sections(turn, [
+        ("Implementation notes",
+         "1. Add `func %s() string` in `%s.go`.\n"
+         "2. Add `Test%s` in `%s_test.go`.\n\n"
+         "### Plan claims\n\n- `the change is confined to two new files`" % (name, name.lower(), name, name.lower())),
+        ("Verification plan", CHECKS + "\n\n- the module builds and its tests pass"),
+    ])
+    turn.say("Converged on the chosen approach; the implementation notes and the "
+             "verification plan are in the spec.")
+
+
 def plan_bug(turn):
     write_sections(turn, [
         ("Root cause", "The helper returns the wrong string for an empty name."),
@@ -473,6 +540,8 @@ def stage_plan(turn, answer=None):
         plan_research(turn)
     elif kind == "BG":
         plan_bug(turn)
+    elif "[fold]" in turn.ctx["keywords"]:
+        plan_fold(turn, answer)
     else:
         plan_feature(turn, answer)
 
@@ -598,7 +667,8 @@ def freeform_turn(turn, text):
     turn.tool("edit", "NOTES.md", "ff-edit")
     git(wd, "add", "--", "NOTES.md")
     turn.tool_result("ff-edit", "edit")
-    turn.tasks(("Note the fix", "completed"), ("Say what was done", "in_progress"))
+    second = "completed" if "[tasks-done]" in text else "in_progress"
+    turn.tasks(("Note the fix", "completed"), ("Say what was done", second))
     turn.say("Done: noted it in NOTES.md.")
 
 
@@ -679,7 +749,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[slow]", "[research]")
+KEYWORDS = ("[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[fold]", "[slow]", "[research]")
 
 
 def detect(frame):

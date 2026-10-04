@@ -3,9 +3,12 @@
 // (a tool group gaining calls, a stage divider getting its verdict) is
 // redrawn in place rather than appended twice. Items group under the stage
 // divider before them; earlier stages fold into one line each and the
-// current one stays open. The live block (streaming text, the tool in
-// flight) sits under the items, outside the polite live region, so a screen
-// reader hears new items and not every streamed token.
+// current one stays open. A foldable row a person has toggled keeps their
+// open state across those redraws: the toggle is remembered per card and
+// each builder re-applies it, for the page session only. The live block
+// (streaming text, the tool in flight) sits under the items, outside the
+// polite live region, so a screen reader hears new items and not every
+// streamed token.
 
 import { $, h, clear, clock, dur, cr, initials, ROLE, decisionWord, decisionColor, plural } from './dom.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
@@ -17,18 +20,51 @@ import { toast } from './toast.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
-const openGroups = new Set() // folded groups a person opened, by key
+const folds = new Map() // '<card id> <row key>' -> the person's last-set open state
+const foldSet = new WeakMap() // details element -> the open state the page last set on it
 let shownFor = null
 
 export function initThread () {
   on(['thread', 'sel', 'card', 'sessionDraft'], render)
   on(['live'], () => { if (state.thread && !state.thread.items.length) render() })
   on(['live', 'card', 'board'], renderLive)
-  $('#thread-items').addEventListener('toggle', (e) => {
-    const d = e.target
-    if (!d.classList?.contains('sg') || d.classList.contains('cur')) return
-    if (d.open) openGroups.add(d.dataset.key); else openGroups.delete(d.dataset.key)
-  }, true)
+  $('#thread').addEventListener('toggle', (e) => recordFold(e.target), true)
+}
+
+// ---- the person's folds ----
+// Once a person toggles a foldable row of the thread, the row keeps their
+// open state across every later redraw for the rest of the page session:
+// rows are rebuilt wholesale when their content changes, and a rebuilt
+// <details> starts closed, so each builder re-applies the remembered state.
+// The memory is scoped per card and lives only in this page — a reload
+// forgets.
+function foldKey (key) { return `${state.sel} ${key}` }
+
+// applyFold marks a foldable row with its identity and applies its open
+// state: the person's last-set one when they have touched the row, the
+// builder's default otherwise. Rows the person never touched keep the
+// defaults the page computes today.
+function applyFold (el, key, def) {
+  if (!key) return
+  el.dataset.fold = key
+  const open = folds.get(foldKey(key))
+  const next = open === undefined ? !!def : open
+  foldSet.set(el, next)
+  el.open = next
+}
+
+// recordFold is the toggle listener's writer. The page sets rows' open
+// state itself wherever it renders — a builder re-applying the memory, the
+// running stage's divider pinned open, a task list open while anything is
+// left — and notes what it set (foldSet): a toggle that matches it is the
+// page's own doing, not the person's, and is never recorded as their
+// choice.
+function recordFold (d) {
+  if (!d?.dataset?.fold) return
+  if (d.classList.contains('sg') && d.classList.contains('cur')) return // pinned open by rule
+  if (foldSet.get(d) === d.open) return
+  foldSet.delete(d)
+  folds.set(foldKey(d.dataset.fold), d.open)
 }
 
 function atBottom (sc) { return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80 }
@@ -163,7 +199,12 @@ function groupNode (grp, last) {
     h('span', { class: 'sum' }, bits.join(' · '))))
   g.summary.setAttribute('aria-label', `${name} stage${last ? '' : ', folded'}: ${bits.join(', ')}`)
   g.el.classList.toggle('cur', last)
-  g.el.open = last || openGroups.has(grp.key)
+  if (last) {
+    g.el.open = true // the running stage's divider is pinned open by rule
+    foldSet.set(g.el, true)
+  } else {
+    applyFold(g.el, grp.key, false)
+  }
   if (last) g.summary.tabIndex = -1; else g.summary.removeAttribute('tabindex')
   return g
 }
@@ -186,7 +227,7 @@ export function itemEl (it) {
   switch (it.t) {
     case 'message': return message(it)
     case 'you': return you(it)
-    case 'activity': return activity(it.items || [])
+    case 'activity': return activity(it.items || [], it.key)
     case 'receipt': return receipt(it)
     case 'verify': return verify(it)
     case 'decision': return decision(it)
@@ -210,11 +251,13 @@ function avatarFor (role) { return (role || 'ag').slice(0, 2).toUpperCase() }
 
 function message (it) {
   if (it.author === 'gummi') {
+    const body = h('details', { class: 'body prompt' }, h('summary', null, firstLine(it.text)), md(it.text))
+    applyFold(body, it.key, false)
     return h('div', { class: 'msg gummi' },
       h('div', { class: 'av you', 'aria-hidden': 'true' }, 'g'),
       h('div', null,
         h('div', { class: 'who' }, h('b', null, 'gummi'), h('span', { class: 'mono' }, clock(it.time))),
-        h('details', { class: 'body prompt' }, h('summary', null, firstLine(it.text)), md(it.text))))
+        body))
   }
   if (it.author === 'you') return you(it)
   const role = it.author || it.role || ROLE[it.stage] || 'agent'
@@ -270,7 +313,8 @@ function toolRows (list) {
 
 // activity is everything the agent did between two messages — its tool calls
 // and thoughts, in order — folded into one row that says what it came to.
-export function activity (items) {
+// fold is the row's identity, what the person's fold is remembered by.
+export function activity (items, fold) {
   const calls = items.flatMap(i => i.tools || [])
   const thoughts = items.filter(i => i.t === 'message').length
   const fails = calls.filter(t => t.status === 'fail').length
@@ -286,12 +330,13 @@ export function activity (items) {
   if (thoughts) parts.push(plural(thoughts, 'thought'))
   if (watching) parts.push(h('span', { class: 'watching' }, 'watching'))
   else if (inFlight) parts.push(h('span', { class: 'shimmer' }, String(inFlight.label || inFlight.tool).replace(/\s+/g, ' ').trim()))
-  return h('div', { class: 'indent' },
-    h('details', { class: 'tools activity', testid: 'activity' },
-      h('summary', null, parts.flatMap((p, i) => i ? [' · ', p] : [p])),
-      h('div', { class: 'body' }, items.map(it => it.t === 'tools'
-        ? toolRows(it.tools || [])
-        : h('div', { class: 'thought' }, md(it.text))))))
+  const el = h('details', { class: 'tools activity', testid: 'activity' },
+    h('summary', null, parts.flatMap((p, i) => i ? [' · ', p] : [p])),
+    h('div', { class: 'body' }, items.map(it => it.t === 'tools'
+      ? toolRows(it.tools || [])
+      : h('div', { class: 'thought' }, md(it.text)))))
+  applyFold(el, fold, false)
+  return h('div', { class: 'indent' }, el)
 }
 
 function receipt (it) {
@@ -381,7 +426,7 @@ function renderLive () {
           k === 'freeform' ? h('span', { class: 'sum' }, c.role || 'implementer') : null))
         parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
         if (c.sending) parts.push(you({ text: c.sending, via: 'sending' }))
-        if (c.tasks?.length) parts.push(tasks(c.tasks))
+        if (c.tasks?.length) parts.push(tasks(c.tasks, k))
         if (k === 'freeform' && c.watches?.length) parts.push(watches(c.watches))
         if (k === 'freeform' && c.queued?.length) parts.push(queued(state.sel, c.queued))
         if (c.busy) {
@@ -440,15 +485,18 @@ function watches (lines) {
 }
 
 // tasks is the agent's own checklist, pinned under the conversation: open
-// while anything is left, folded to its count once all of it is done.
+// while anything is left, folded to its count once all of it is done. Its
+// fold is remembered by the conversation's kind — tasks render only for a
+// consult and a freeform session, one of each per card.
 const TASK_MARK = { completed: '✓', in_progress: '▸', pending: '○' }
-function tasks (list) {
+function tasks (list, kind) {
   const done = list.filter(t => t.status === 'completed').length
-  return h('div', { class: 'indent' },
-    h('details', { class: 'tools tasks', open: done < list.length, testid: 'tasks' },
-      h('summary', null, `tasks ${done}/${list.length}`),
-      h('ul', { class: 'body' }, ...list.map(t =>
-        h('li', { class: ['task', t.status] }, `${TASK_MARK[t.status] || '○'} ${t.text}`)))))
+  const el = h('details', { class: 'tools tasks', testid: 'tasks' },
+    h('summary', null, `tasks ${done}/${list.length}`),
+    h('ul', { class: 'body' }, ...list.map(t =>
+      h('li', { class: ['task', t.status] }, `${TASK_MARK[t.status] || '○'} ${t.text}`))))
+  applyFold(el, kind, done < list.length)
+  return h('div', { class: 'indent' }, el)
 }
 
 // activityItems shapes a live run of tool and thinking turns the way the
@@ -474,7 +522,8 @@ function conversation (kind, c, role, stage) {
   const flush = () => {
     if (!run.length) return
     const sig = run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}` : `k|${(t.text || '').length}`).join(';')
-    out.push(cached(`${kind}:act:${start}`, sig, () => activity(activityItems(run))))
+    const key = `${kind}:act:${start}`
+    out.push(cached(key, sig, () => activity(activityItems(run), key)))
     run = []
   }
   turns.forEach((t, i) => {
@@ -490,9 +539,10 @@ function conversation (kind, c, role, stage) {
       ? turns.slice(i).filter(x => x.author === 'you').length
       : 0
     const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${back}`
-    out.push(cached(`${kind}:${i}`, sig, () => t.author === 'you'
+    const mkey = `${kind}:${i}`
+    out.push(cached(mkey, sig, () => t.author === 'you'
       ? you({ text: t.text, by: t.by, rewind: back ? () => rewind(state.sel, back) : null })
-      : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text })))
+      : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey })))
   })
   flush()
   if (c.streaming) {
@@ -516,7 +566,8 @@ export function jumpToStage (stage) {
   const all = [...document.querySelectorAll(`#thread-items .sg[data-stage="${CSS.escape(stage)}"]`)]
   const d = all.pop()
   if (!d) return
+  foldSet.set(d, true)
   d.open = true
-  openGroups.add(d.dataset.key)
+  if (d.dataset.fold) folds.set(foldKey(d.dataset.fold), true)
   d.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })
 }
