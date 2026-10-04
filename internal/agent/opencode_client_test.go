@@ -40,6 +40,7 @@ type ocFake struct {
 	aborts    []string      // aborted session ids
 	responds  []ocFakeReply // permission rulings received
 	summaries []string      // summarized session ids
+	rejected  []string      // question request ids refused
 	spawns    []ocSpawn     // what serveOpencode was asked for
 	cur       string        // the session id parts are addressed with: the last created one, or a resumed one
 	sseTaken  int           // bus events the SSE handler has handed off (debug aid)
@@ -80,6 +81,12 @@ func newOcFake(t *testing.T) *ocFake {
 	mux.HandleFunc("POST /session/{id}/abort", f.abort)
 	mux.HandleFunc("POST /session/{id}/summarize", f.summarize)
 	mux.HandleFunc("POST /session/{id}/permissions/{pid}", f.respond)
+	mux.HandleFunc("POST /question/{qid}/reject", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.rejected = append(f.rejected, r.PathValue("qid"))
+		f.mu.Unlock()
+		_, _ = w.Write([]byte("true"))
+	})
 	mux.HandleFunc("GET /config/providers", f.providers)
 	f.srv = httptest.NewServer(mux)
 	f.base = f.srv.URL
@@ -826,6 +833,37 @@ func TestOpencodeServerPermissionFromChildSession(t *testing.T) {
 		t.Errorf("responds = %+v, want perm_child approved against ses_child", responds)
 	}
 	f.push(f.partEvent("text", "p", "done"))
+	f.releaseTurn()
+	waitTurnEnd(t, sess)
+}
+
+// TestOpencodeServerRejectsTheQuestionTool: a question opencode's own
+// question tool raises is refused at once, so the turn carries on instead
+// of holding on an answer gummi never gives.
+func TestOpencodeServerRejectsTheQuestionTool(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "pick one"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	f.push(`{"type":"question.asked","properties":{"id":"que_1","sessionID":"` + f.lastSession() +
+		`","questions":[{"question":"tea or coffee?","header":"drink","options":[{"label":"tea"}]}]}}`)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.mu.Lock()
+		got := append([]string(nil), f.rejected...)
+		f.mu.Unlock()
+		if len(got) == 1 && got[0] == "que_1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rejected questions = %v, want [que_1]", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.push(f.partEvent("text", "p", "went with tea"))
 	f.releaseTurn()
 	waitTurnEnd(t, sess)
 }

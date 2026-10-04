@@ -933,6 +933,21 @@ func (s *opencodeSession) dispatch(data []byte) {
 			Detail: strings.Join(ev.Properties.Patterns, ", "),
 			CallID: ev.Properties.ID,
 		})
+	case "question.asked":
+		// opencode's question tool is denied in the session config; one
+		// that is asked anyway (an operator config that re-enables it)
+		// would hold the turn on an answer gummi never gives. Refuse it,
+		// so the model sees the call fail and carries on. Like a held
+		// permission, a task child's question holds this session's turn
+		// too, so the session id is not checked.
+		if ev.Properties.ID == "" {
+			return
+		}
+		go func(id string) {
+			rctx, cancel := context.WithTimeout(s.sctx, 5*time.Second)
+			defer cancel()
+			_ = s.srv.rejectQuestion(rctx, id)
+		}(ev.Properties.ID)
 	}
 }
 

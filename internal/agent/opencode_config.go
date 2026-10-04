@@ -25,7 +25,15 @@ import "encoding/json"
 // other tool (what `opencode run --auto` used to do), guarded asks — the
 // server surfaces each unmatched call as a permission request the session
 // answers. The cage itself is identical between the two: guarded only
-// adds surfaced approvals on top of it.
+// adds surfaced approvals on top of it. That has a consequence worth
+// stating: an edit or write inside the worktree matches the cage's allow,
+// not the catch-all, so guarded never asks for one — it asks for the
+// shell, the web and every other tool the cage leaves unnamed.
+//
+// opencode's own `question` tool is denied outright, in both modes. It
+// holds the turn until someone answers through opencode's question API,
+// which gummi does not drive: a model that reached for it stalled its
+// card with nothing raised. gummi's ask_user is the question channel.
 //
 // Note that opencode's shell (`bash`) tool is deliberately NOT caged here:
 // its policy is command-string based rather than path based, so a real cage
@@ -86,6 +94,7 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	} else {
 		perm["*"] = "allow"
 	}
+	perm["question"] = "deny"
 
 	out := map[string]any{"permission": perm}
 	// Skills forwarded from the workspace root. opencode's own discovery

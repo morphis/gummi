@@ -50,7 +50,11 @@ review.
   (`opencode auth`, `opencode.json`). Conversations carry across gummi
   processes through `run --session`, with the same fallback codex has: a
   session opencode cannot find is dropped and the turn re-runs on a fresh
-  one.
+  one. Under `permissions: guarded`, edits and writes inside the card's
+  worktree are not asked for: the worktree cage allows them outright, and
+  guarded asks only for what the cage does not name (the shell, web
+  fetches, everything outside the worktree). opencode's own `question`
+  tool is always denied; agents ask through gummi's `ask_user`.
 - **pi**: the pi coding agent in RPC mode (`GUMMI_PI_BIN` overrides the
   binary): one `pi --mode rpc` child per session, speaking JSON lines on
   stdio. Provider and model config is owned by pi itself (`pi` →

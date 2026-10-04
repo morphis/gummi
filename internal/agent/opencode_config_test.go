@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -284,6 +285,30 @@ func TestBuildOpencodeConfigGuardedOnlyAsksOnTopOfTheCage(t *testing.T) {
 	}
 	if len(permAllow) != len(permGuarded) {
 		t.Errorf("permission keys %v vs %v — the modes must differ in the catch-all alone", keys(permAllow), keys(permGuarded))
+	}
+}
+
+// opencode's question tool holds a turn until an answer comes through an
+// API gummi does not drive, so it is denied in both modes — after the
+// catch-all, since the last matching rule wins and guarded's "*": "ask"
+// would otherwise reach it.
+func TestBuildOpencodeConfigDeniesTheQuestionTool(t *testing.T) {
+	for _, mode := range []Permission{PermissionAllowAll, PermissionGuarded} {
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "", "/opt/gummi", nil, false, nil, "", mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if got := m["permission"]["question"]; got != "deny" {
+			t.Errorf("%s: permission.question = %v, want deny", mode, got)
+		}
+		s := string(raw)
+		if strings.Index(s, `"question"`) < strings.Index(s, `"*":`) {
+			t.Errorf("%s: question rule precedes the catch-all, which would override it: %s", mode, s)
+		}
 	}
 }
 

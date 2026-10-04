@@ -215,6 +215,22 @@ func (o opencodeServer) respond(ctx context.Context, sessionID, requestID, reply
 	return nil
 }
 
+// rejectQuestion refuses a question opencode's own question tool raised:
+// the tool call fails and the turn carries on, instead of holding until
+// an answer gummi has no way to give.
+func (o opencodeServer) rejectQuestion(ctx context.Context, requestID string) error {
+	resp, err := o.do(ctx, http.MethodPost, "/question/"+url.PathEscape(requestID)+"/reject", map[string]any{})
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("rejecting the question: %s", resp.Status)
+	}
+	return nil
+}
+
 // providers returns the model ids the server's own catalog offers — the
 // full provider/model pairs under /config/providers, one per model,
 // sorted for a stable picker.
