@@ -69,6 +69,7 @@ type Candidate struct {
 	Repo        string `json:"repo"`
 	Path        string `json:"path"`
 	Description string `json:"description,omitempty"`
+	Imported    bool   `json:"imported,omitempty"`
 }
 
 type Repo struct {
@@ -439,6 +440,31 @@ func (s *Store) Discover() ([]Candidate, error) {
 		}
 		return found[i].Path < found[j].Path
 	})
+	return s.markImported(found)
+}
+
+// markImported flags each candidate whose resolved source is already in the
+// library, matching on the same kind+sourcePath key ImportMany refuses as a
+// duplicate. Candidates that no longer resolve are left unflagged.
+func (s *Store) markImported(found []Candidate) ([]Candidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, err := s.readManifest()
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(m.Items))
+	for _, it := range m.Items {
+		if it.SourcePath != "" {
+			have[it.Kind+":"+it.SourcePath] = true
+		}
+	}
+	for i := range found {
+		_, _, _, sourcePath, err := s.resolveSource(found[i])
+		if err == nil && have[found[i].Kind+":"+sourcePath] {
+			found[i].Imported = true
+		}
+	}
 	return found, nil
 }
 
@@ -621,7 +647,7 @@ func (s *Store) DiscoverAt(path, repo string) ([]Candidate, error) {
 		}
 		found = append(found, Candidate{Kind: kind, Name: nameBase, Repo: repoOrDefault(repo), Path: filepath.ToSlash(rel), Description: readDescription(path)})
 	}
-	return found, nil
+	return s.markImported(found)
 }
 
 func repoOrDefault(r string) string {

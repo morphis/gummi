@@ -6,6 +6,10 @@ import { errorBox, field, choose, confirmStrip } from './kit.js?v=__ASSET_V__'
 const SKILL_STARTER = '---\nname: new-skill\ndescription: Describe when this skill should be used.\n---\n\n# Skill instructions\n'
 const AGENT_STARTER = '---\nname: new-agent\ndescription: Describe this agent and when to use it.\n---\n\n# Agent instructions\n'
 
+function emptyScan () {
+  return { candidates: [], selected: new Set(), filter: '', req: null, scanning: false }
+}
+
 function slug (value) {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
@@ -19,16 +23,13 @@ registerView('agentplugins', {
       tab: 'agents',
       items: [],
       providers: [],
-      candidates: [],
-      selected: new Set(),
+      // scan results, selection and search text, kept per tab so switching
+      // between agents and skills never throws a scan away
+      scans: { agents: emptyScan(), skills: emptyScan() },
       editor: null,
       confirmDelete: null,
       err: null,
-      scanning: false,
       busy: false,
-      // UI filters for the candidate list
-      candidateFilter: '',
-      candidateRepo: '',
       alive: true
     }
     body.classList.add('vplugins')
@@ -42,6 +43,8 @@ registerView('agentplugins', {
       } catch (err) { v.err = err }
       if (v.alive) draw()
     }
+
+    function S () { return v.scans[v.tab] }
 
     function kindTitle () { return v.tab === 'skills' ? 'skill' : 'agent' }
     function kindAPI () { return v.tab === 'skills' ? 'skill' : 'agent' }
@@ -167,35 +170,54 @@ registerView('agentplugins', {
 
     function candidatesForTab () {
       const kind = v.tab === 'skills' ? 'skill' : 'agent'
-      return v.candidates.filter(candidate => candidate.kind === kind)
+      return S().candidates.filter(candidate => candidate.kind === kind)
     }
 
-    async function scan () {
-      v.scanning = true
-      draw()
+    // A scan belongs to the tab that started it, even if the user has
+    // switched tabs by the time it answers. quiet re-runs a tab's last scan
+    // (after an import or removal) to refresh its imported markers while
+    // keeping its results, search text and still-valid selection on screen.
+    async function runScan (tab, req, { quiet = false } = {}) {
+      const s = v.scans[tab]
+      s.scanning = true
+      if (!quiet) draw()
       try {
-        const data = await ctx.api.post('/api/plugins/discover', { kind: kindAPI() })
-        v.candidates = data.candidates || []
-        v.selected.clear()
+        const data = await ctx.api.post('/api/plugins/discover', req)
+        s.candidates = data.candidates || []
+        s.req = req
+        if (quiet) {
+          const keep = new Set(s.candidates.filter(c => !c.imported).map(candidateKey))
+          for (const k of [...s.selected]) if (!keep.has(k)) s.selected.delete(k)
+        } else {
+          s.filter = ''
+          s.selected.clear()
+        }
         v.err = null
       } catch (err) { v.err = err }
-      v.scanning = false
-      draw()
+      s.scanning = false
+      if (v.alive) draw()
+    }
+
+    function scan () { return runScan(v.tab, { kind: kindAPI() }) }
+
+    function rescan (tab) {
+      const s = v.scans[tab]
+      if (s.req) return runScan(tab, s.req, { quiet: true })
     }
 
     function candidateKey (c) { return `${c.repo}:${c.path}:${c.kind}` }
 
     async function importSources (sources) {
       if (!sources.length) { ctx.toast('Select at least one item to import', { err: true }); return }
+      const tab = v.tab
       v.busy = true
       draw()
       try {
         await ctx.api.post('/api/plugins/import', { sources })
-        v.candidates = []
-        v.selected.clear()
         v.err = null
         v.busy = false
         await refresh()
+        await rescan(tab)
         ctx.toast(`Imported ${sources.length} ${sources.length === 1 ? 'item' : 'items'} into the workspace`)
       } catch (err) {
         v.err = err
@@ -205,71 +227,85 @@ registerView('agentplugins', {
     }
 
     function importPanel () {
+      const s = S()
       const candidates = candidatesForTab()
-      // repo picker for targeted path scans
-      const sourceRepos = [{ value: '', label: 'Workspace-relative path' }, ...Array.from(new Set(v.candidates.map(c => c.repo))).map(name => ({ value: name, label: name }))]
+      // repo picker for targeted path scans: every repo either tab has seen
+      const seenRepos = new Set([...v.scans.agents.candidates, ...v.scans.skills.candidates].map(c => c.repo))
+      const sourceRepos = [{ value: '', label: 'Workspace-relative path' }, ...Array.from(seenRepos).map(name => ({ value: name, label: name }))]
       const repo = choose(sourceRepos, { value: '', testid: 'plugins-import-repo' })
       const path = h('input', { placeholder: 'git/anbox-agent-plugins/**', testid: 'plugins-import-path' })
       const pathImport = h('button', {
         class: 'btn', type: 'button', testid: 'plugins-import-path-button',
-        disabled: v.busy,
-        onclick: async () => {
+        disabled: v.busy || s.scanning,
+        onclick: () => {
           if (!path.value.trim()) { path.focus(); return }
-          try {
-            v.scanning = true
-            draw()
-            const data = await ctx.api.post('/api/plugins/discover', { path: path.value.trim(), repo: repo.value, kind: kindAPI() })
-            v.candidates = data.candidates || []
-            v.selected.clear()
-            v.err = null
-          } catch (err) { v.err = err }
-          v.scanning = false
-          draw()
+          runScan(v.tab, { path: path.value.trim(), repo: repo.value, kind: kindAPI() })
         }
       }, 'Scan path')
-      // apply repo and text filters to candidates
-      const visibleCandidates = candidates.filter(c => {
-      if (v.candidateRepo && v.candidateRepo !== '' && c.repo !== v.candidateRepo) return false
-      if (v.candidateFilter && v.candidateFilter.trim() !== '') {
-        const q = v.candidateFilter.trim().toLowerCase()
-        return c.name.toLowerCase().includes(q) || c.path.toLowerCase().includes(q) || c.repo.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q)
+      function visibleCandidates () {
+        const q = s.filter.trim().toLowerCase()
+        if (!q) return candidates
+        return candidates.filter(c => [c.name, c.path, c.repo, c.description || ''].some(t => t.toLowerCase().includes(q)))
       }
-      return true
-      })
-      const rows = visibleCandidates.map(c => {
-        const key = candidateKey(c)
-        return h('label', { class: 'pcandidate', testid: `plugins-candidate-${c.kind}-${c.repo}-${c.name}` },
-          h('input', {
-            type: 'checkbox',
-            checked: v.selected.has(key),
-            onchange: (e) => {
-              if (e.target.checked) v.selected.add(key)
-              else v.selected.delete(key)
-              // re-render so the Import-selected button's disabled state
-              // reflects the selection immediately, instead of staying
-              // stuck until some unrelated redraw (e.g. a tab switch).
-              draw()
-            }
-          }),
-          h('span', { class: 'pcandname' }, c.name),
-          h('span', { class: 'pcandrepo' }, c.repo),
-          h('code', { class: 'pcandpath' }, c.path))
+      const list = h('div', { class: 'pcandlist' })
+      const importSelected = h('button', {
+        class: 'btn pri', type: 'button', testid: 'plugins-import-selected',
+        onclick: () => importSources(visibleCandidates().filter(c => s.selected.has(candidateKey(c))))
+      }, 'Import selected')
+      function syncImport () {
+        const shown = visibleCandidates()
+        importSelected.disabled = v.busy || !shown.some(c => s.selected.has(candidateKey(c)))
+      }
+      // Filtering re-renders only the list, so the search field keeps focus.
+      function fillList () {
+        clear(list)
+        const shown = visibleCandidates()
+        if (!shown.length) {
+          list.append(h('div', { class: 'pempty' }, candidates.length
+            ? `No ${kindTitle()}s match “${s.filter.trim()}”.`
+            : `No ${kindTitle()} definitions found in the scan.`))
+        }
+        for (const c of shown) {
+          const key = candidateKey(c)
+          list.append(h('label', { class: ['pcandidate', c.imported && 'imported'], testid: `plugins-candidate-${c.kind}-${c.repo}-${c.name}`, title: c.imported ? 'Already in the workspace library' : null },
+            h('input', {
+              type: 'checkbox',
+              checked: c.imported || s.selected.has(key),
+              disabled: c.imported,
+              onchange: (e) => {
+                if (e.target.checked) s.selected.add(key)
+                else s.selected.delete(key)
+                syncImport()
+              }
+            }),
+            h('span', { class: 'pcandname' }, c.name, c.imported ? h('span', { class: 'ptag' }, 'imported') : null),
+            h('span', { class: 'pcandrepo' }, c.repo),
+            h('code', { class: 'pcandpath' }, c.path)))
+        }
+        syncImport()
+      }
+      fillList()
+      const search = h('input', {
+        type: 'search',
+        class: 'psearch',
+        placeholder: `Search found ${kindTitle()}s by name, repository or path`,
+        'aria-label': `Filter found ${kindTitle()}s`,
+        value: s.filter,
+        testid: 'plugins-candidate-filter',
+        oninput: (e) => { s.filter = e.target.value; fillList() }
       })
       return h('section', { class: 'pimport', testid: 'plugins-import' },
-        h('div', { class: 'psectionhead' },
-          h('h3', null, `Add ${kindTitle()}s`),
-          h('div', { style: 'display:flex;gap:8px;align-items:center' },
-          h('input', { type: 'search', placeholder: 'Filter candidates', value: v.candidateFilter, testid: 'plugins-candidate-filter', oninput: (e) => { v.candidateFilter = e.target.value; draw() } }),
-          choose([{ value: '', label: 'All repos' }, ...Array.from(new Set(v.candidates.map(c => c.repo))).map(name => ({ value: name, label: name }))], { value: v.candidateRepo, testid: 'plugins-candidate-repo', onchange: (e) => { v.candidateRepo = e.target.value; draw() } }),
-          h('button', { class: 'btn', type: 'button', testid: 'plugins-discover', disabled: v.scanning || v.busy, onclick: scan }, v.scanning ? 'Scanning…' : 'Scan repositories'))),
-        h('p', { class: 'pquiet' }, v.tab === 'skills'
-          ? 'Discovered skills are shown with their repository and path. Import links them into .gummi; editing later creates a private copy.'
-          : 'Discovered agent Markdown files are shown with their repository and path, then copied into .gummi.'),
-        v.candidates.length ? h('div', { class: 'pcandidates', testid: 'plugins-candidates' },
-          visibleCandidates.length ? rows : h('div', { class: 'pempty' }, `No ${kindTitle()} definitions found in the scan.`),
-          h('div', { class: 'pimportactions' },
-          h('button', { class: 'btn pri', type: 'button', testid: 'plugins-import-selected', disabled: v.busy || visibleCandidates.length === 0 || !Array.from(v.selected).some(k => visibleCandidates.some(c => candidateKey(c) === k)),
-            onclick: () => importSources(visibleCandidates.filter(c => v.selected.has(candidateKey(c)))) }, 'Import selected')))
+        h('div', { class: 'pimporthead' },
+          h('div', { class: 'pimporttext' },
+            h('h3', null, `Add ${kindTitle()}s`),
+            h('p', { class: 'pquiet' }, v.tab === 'skills'
+              ? 'Discovered skills are shown with their repository and path. Import links them into .gummi; editing later creates a private copy.'
+              : 'Discovered agent Markdown files are shown with their repository and path, then copied into .gummi.')),
+          h('button', { class: 'btn', type: 'button', testid: 'plugins-discover', disabled: s.scanning || v.busy, onclick: scan }, s.scanning ? 'Scanning…' : 'Scan repositories')),
+        s.req ? h('div', { class: 'pcandidates', testid: 'plugins-candidates' },
+          search,
+          list,
+          h('div', { class: 'pimportactions' }, importSelected))
           : null,
         h('div', { class: 'pexplicit' },
           h('h4', null, 'Import a path'),
@@ -301,6 +337,7 @@ registerView('agentplugins', {
         await ctx.api.del(`/api/plugins/${encodeURIComponent(item.id)}`)
         v.confirmDelete = null
         await refresh()
+        rescan(item.kind === 'skill' ? 'skills' : 'agents')
         ctx.toast(`Removed ${item.name}`)
       } catch (err) { v.err = err; draw() }
     }
@@ -308,10 +345,6 @@ registerView('agentplugins', {
     function switchTab (id) {
       v.tab = id
       v.editor = null
-      // candidates and their selection are tab-scoped: a scan started on
-      // one tab must not leave the other tab showing stale results.
-      v.candidates = []
-      v.selected.clear()
       draw()
     }
 
