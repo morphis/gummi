@@ -89,7 +89,9 @@ test.describe('a design gate', () => {
     if (isPhone(info)) await page.getByTestId('tab-thread').click();
     await page.getByTestId('composer-input').fill('Cover an empty name too');
     await expect(page.getByTestId('decision-option-run')).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('composer-says')).toHaveText('start the architect with your words');
+    // the words are read before they go: the enter line says so rather
+    // than promising the architect starts on them
+    await expect(page.getByTestId('composer-says')).toContainText('read first');
     await page.getByTestId('composer-send').click();
     await expect(page.getByTestId('composer-input')).toHaveValue('');
     // a line at a gate is read first, and the reading is put to you
@@ -144,7 +146,7 @@ test.describe('a design gate', () => {
     const says = page.getByTestId('composer-says');
     await expect(says).toHaveText('approve');
     await page.getByTestId('composer-input').fill('the plan misses the empty name');
-    await expect(says).toHaveText('start the architect with your words');
+    await expect(says).toContainText('read first');
     // a command that is in the card's menu, not one of the answers
     await page.getByTestId('composer-input').fill('/rebase');
     await expect(says).toContainText('menu');
@@ -175,14 +177,56 @@ test.describe('a design gate', () => {
       const [a, b] = [await go(page), await go(page2)];
       // both give it at once
       await Promise.all([a.click(), b.click()]);
-      // the loser is told: who answered, when its answer reached the board
-      // second; or that the card moved, when the winner's answer reached
-      // its page before its own press did
-      const told = (p: Page) => p.getByTestId(phone ? 'mdec-note' : 'decision-answered').or(p.getByTestId('decision-moved'));
+      // the loser is told who answered — and that note stays: the card
+      // moving under its press a moment later does not replace it with a
+      // vaguer "moved while you were choosing"
+      const told = (p: Page) => p.getByTestId(phone ? 'mdec-note' : 'decision-answered');
       await expect.poll(async () => (await told(page).count()) + (await told(page2).count())).toBe(1);
       const [loser, winner] = (await told(page).count()) ? [page, 'Yuki'] : [page2, 'Tester'];
-      await expect(told(loser)).toContainText(new RegExp(`Answered by ${winner}|moved`));
+      await expect(told(loser)).toContainText(`Answered by ${winner}`);
+      await loser.waitForTimeout(1500);
+      await expect(told(loser)).toContainText(`Answered by ${winner}`);
+      if (!phone) await expect(loser.getByTestId('decision-moved')).toHaveCount(0);
       await shot(loser, info, 'answered-first');
+    } finally {
+      await other.close();
+    }
+  });
+
+  // "stop here" at a gate parks the run and leaves the gate pinned: the
+  // same ref, a new answer set. A row chosen on another device before
+  // that is not carried onto whatever answer now sits in its place, and
+  // enter does not give the first answer in its stead.
+  test('another viewer’s answer does not move your choice onto a different answer', async ({ pairedPage: page, server, browser, api }, info) => {
+    test.skip(isPhone(info), 'the keyboard chooses from the pinned block');
+    const u = info.project.use as any;
+    const other = await browser.newContext({ viewport: u.viewport, userAgent: u.userAgent });
+    const page2 = await other.newPage();
+    try {
+      await pair(page2, server, 'Yuki');
+      await open(page, server, id);
+      await open(page2, server, id);
+      const before = (await api('GET', `/api/cards/${id}`)).json.decision;
+      // this page chooses "stop here" with the keyboard, and has not sent it
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press('3');
+      await expect(page.getByTestId('decision-option-pause')).toHaveAttribute('aria-pressed', 'true');
+      // the other device answers "stop here" first
+      await page2.getByTestId('decision-option-pause').click();
+      await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.against?.token).not.toBe(before.against.token);
+      // the page says so, and highlights nothing it was not told to
+      await expect(page.getByTestId('decision-moved')).toContainText('moved while you were choosing');
+      await expect(page.getByTestId('decision').locator('.opt.hi')).toHaveCount(0);
+      await expect(page.getByTestId('composer-says')).toHaveText('pick an answer first');
+      await shot(page, info, 'moved-while-choosing');
+      // enter gives nothing: it asks for an answer instead of approving
+      // (past the moment a just-changed decision holds a bare enter anyway)
+      await page.waitForTimeout(900);
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId('decision-pick')).toBeVisible();
+      await page.waitForTimeout(300);
+      await expect(page.getByTestId('stage-plan')).toHaveAttribute('aria-current', 'step');
+      expect((await api('GET', `/api/cards/${id}`)).json.stage).toBe('plan');
     } finally {
       await other.close();
     }
@@ -240,6 +284,56 @@ test.describe('a failed verify', () => {
       await expect(page.getByTestId('rail-row-' + id)).toHaveAttribute('data-status', /paused|idle|needs/);
       await expect(page.getByTestId('decision-moved')).toHaveCount(0);
     }
+  });
+});
+
+test.describe('two cards at their design gates', () => {
+  let ids: string[];
+  test.use({ seed: { run: async (ws) => { ids = [await ws.seedDesignGate('Add a wave helper'), await ws.seedDesignGate('Add a nod helper')]; } } });
+
+  // the chip names the next card's stop in the rail's words, never a
+  // run's CLI line, and a phone answering from a document tab sees it in
+  // the docked bar — the dock's own chip sits out of sight there
+  test('the next card waiting is offered where the answer was given', async ({ pairedPage: page, server }, info) => {
+    const [a, b] = ids;
+    await open(page, server, a);
+    if (isPhone(info)) {
+      await page.getByTestId('tab-spec').click();
+      await page.getByTestId('mdec-toggle').click();
+      await page.getByTestId('mdec-option-advance').click();
+    } else {
+      await page.getByTestId('decision-option-advance').click();
+    }
+    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
+    const chip = (isPhone(info) ? page.getByTestId('mobile-decision') : page.getByTestId('nextup-slot')).getByTestId('nextup');
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText(`${b} also needs you · design gate · Add a nod helper`);
+    await expect(chip).not.toContainText('--until');
+    await shot(page, info, 'nextup');
+    await chip.click();
+    await expect(page.getByTestId('card-id')).toHaveText(b);
+  });
+});
+
+test.describe('a verified card linked to a pull request', () => {
+  let id: string;
+  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); await ws.linkPR(id); } } });
+
+  // its gate's advance is "merge the PR", which lands on GitHub: no local
+  // landing dialog opens for it, and the board's answer is said beside
+  // the decision
+  test('merge the PR opens no landing message', async ({ pairedPage: page, server }, info) => {
+    await open(page, server, id);
+    const phone = isPhone(info);
+    if (phone) await page.getByTestId('tab-thread').click();
+    await expect(page.getByTestId('decision-option-advance')).toContainText('merge the PR');
+    await page.getByTestId('decision-option-advance').click();
+    await expect(page.getByTestId('decision-error')).toContainText('linked to');
+    // the way to land it here anyway is the menu's, not a terminal command
+    await expect(page.getByTestId('decision-error')).toContainText('“unlink PR” in the card’s menu');
+    await expect(page.getByTestId('decision-error')).not.toContainText('gummi pr unlink');
+    await expect(page.getByTestId('landing-dialog')).toHaveCount(0);
+    await shot(page, info, 'pr-merge-refused');
   });
 });
 

@@ -96,7 +96,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `verify-no-checks` | a verify item's head when gummi had no gummi-checks to run (never "all passed") |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
-| `live`, `live-streaming`, `live-elsewhere`, `live-error`, `live-consult`, `live-consult-head`, `live-consult-notice` (the consult runs on a backend that cannot confine it), `live-freeform`, `live-freeform-head` | live block parts |
+| `live`, `live-streaming` (its `live-interrupted` mark when the session stopped mid-message), `live-elsewhere`, `live-error`, `live-consult`, `live-consult-head`, `live-consult-notice` (the consult runs on a backend that cannot confine it), `live-freeform`, `live-freeform-head` | live block parts |
 | `thinking`, `tasks` | the agent's reasoning, folded; its pinned checklist |
 
 ## Decision and composer
@@ -106,10 +106,10 @@ dialog), `action-confirm`, `action-cancel`.
 | `decision-slot`, `decision` | the pinned decision (`data-kind`, `data-ref`) |
 | `decision-question`, `decision-against`, `decision-more`, `decision-jump` | its parts |
 | `decision-option-<optionId>` | a numbered answer (`aria-pressed` = highlighted; on a multi-pick question, picked) |
-| `decision-note` and its kinds `decision-answered`, `decision-moved`, `decision-needs`, `decision-busy`, `decision-newcard`, `decision-error` | what happened to the last answer (a 409 said who got there first or that the card moved; a 202 question what it still needs) |
+| `decision-note` and its kinds `decision-answered`, `decision-moved`, `decision-needs`, `decision-busy`, `decision-newcard`, `decision-error`, `decision-pick` | what happened to the last answer (a 409 said who got there first or that the card moved; a 202 question what it still needs; enter with nothing highlighted) |
 | `decision-confirm`, `decision-confirm-question`, `decision-confirm-yes`, `decision-confirm-no` | a confirmation an answer's flow asked for (a 202 `confirm` question), drawn beside the decision (never inside its capped box) and focused when it appears; the question is the server's, verbatim (line breaks kept); yes sends the answer again with the token it came with as `confirm` |
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
-| `nextup-slot`, `nextup` | "X also needs you" chip after an answer |
+| `nextup-slot`, `nextup` | "X also needs you" chip after an answer (on a phone's document tab, in the docked bar) |
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
 | `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card in the workflow |
 | `model-picker`, `model-search`, `model-<agent>-<model>`, `model-typed-<agent>`, `model-recent-<agent>-<model>` | the picker: search or type an id; a suggested model (`default` for the agent's own), a typed id, a recent pair |

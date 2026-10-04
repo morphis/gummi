@@ -324,6 +324,8 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 @keyframes sh{to{background-position:-200% 0}}
 .spinner{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:spin .8s linear infinite;flex-shrink:0}
 .spinner.still{animation:none}
+/* a watched run with nothing in flight: a mark that does not read as a stuck spinner */
+.live > .idle{width:14px;margin:0 7px;text-align:center;color:var(--fg3);flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* a running tool call, inside a group a busy session's own spinner already
    heads — its own mark so the two in-flight things on screen don't read
@@ -379,6 +381,8 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .decision header{display:flex;align-items:center;gap:8px;padding:10px 14px 2px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc) var(--t-keep),#000);flex-wrap:wrap}
 .decision header .more{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg3);display:flex;gap:10px}
 .decision .q{padding:0 14px 2px;font-size:14.5px;font-weight:500;overflow-wrap:anywhere;white-space:pre-line}
+/* a question cut off by the cap fades at its foot: there is more to scroll to */
+.decision > .q.clip{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 1.4em),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 1.4em),transparent)}
 .decision .against{padding:0 14px 6px;font-size:11.5px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .decision .against .mono{font-size:11px}
 .opts{display:flex;flex-direction:column;padding:0 6px 6px}
@@ -395,6 +399,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .nextup:hover{border-color:var(--accent)}
 .nextup .dotc{width:8px;height:8px;border-radius:50%;background:var(--dc);flex-shrink:0}
 .nextup .go{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--accent);font-weight:500;white-space:nowrap}
+.nextup .nl{min-width:0;overflow-wrap:anywhere}
 .composer{border:1px solid var(--line2);border-radius:12px;background:var(--panel)}
 .composer:focus-within{border-color:var(--accent)}
 .composer textarea{display:block;width:100%;border:0;outline:0;background:transparent;resize:none;padding:10px 14px 4px;min-height:44px;max-height:min(160px,22vh);font-size:14px;line-height:1.5}
@@ -834,6 +839,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .mdec.open .sum .chev{transform:rotate(180deg)}
   .mdec .opts{padding:0 10px 10px;max-height:40vh;overflow:auto}
   .mdec .msend{display:block;width:calc(100% - 20px);margin:0 10px 10px}
+  .mdec .mnext{padding:8px 10px}
   /* a phone is too narrow for an answer's detail beside its label: it goes under it */
   .opt{grid-template-columns:22px minmax(0,1fr);gap:2px 10px}
   .opt .d{grid-column:2;text-align:left}

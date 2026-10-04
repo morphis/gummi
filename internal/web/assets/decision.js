@@ -57,22 +57,34 @@ let pressed = { busy: false, done: 0 }
 // held: the decision changed under words typed for the one before it.
 // The next enter only says so; the one after sends them to the new one.
 let held = false
+// explained: a refusal just said why the decision changed under this
+// page's answer (answered first, moved). The change itself, arriving a
+// moment later, keeps that note rather than replacing it.
+let explained = null
+const EXPLAINED_MS = 10000
 
 export function initDecision (c) {
   ctx = c
   on(['card', 'hi', 'conn', 'diffPending', 'sel', 'picked', 'decNote', 'decConfirm'], renderDecision)
   on(['showNext', 'board', 'sel'], renderNext)
-  on(['card', 'hi', 'conn', 'view', 'mdecOpen', 'sel', 'diffPending', 'picked', 'decNote', 'decConfirm'], renderMdec)
+  on(['card', 'hi', 'conn', 'view', 'mdecOpen', 'sel', 'diffPending', 'picked', 'decNote', 'decConfirm', 'showNext', 'board'], renderMdec)
   // a note is about the card it was said on
-  on(['sel'], () => set({ decNote: null, decConfirm: null, picked: [], hiUser: false }))
+  on(['sel'], () => { explained = null; set({ decNote: null, decConfirm: null, picked: [], hiUser: false }) })
   // a different decision (or none) drops what was picked for the last one,
   // and the highlight goes back to its first answer as the TUI's cursor
-  // does: a row chosen for one question is never enter's answer to the next
+  // does: a row chosen for one question is never enter's answer to the next.
+  // A decision is a different one when its ref changes, and also when its
+  // against token does: a gate keeps its ref while another viewer's answer
+  // ("stop here" parks it) swaps its answer set and revision under the
+  // page, and the token names both
   let ref = null
+  let token = null
   let refCard = null
   on(['card'], () => {
-    const r = openDecision()?.ref || null
-    if (r !== ref) {
+    const d = openDecision()
+    const r = d?.ref || null
+    const t = d?.against?.token || null
+    if (r !== ref || (r !== null && t !== token)) {
       // a decision that changed under an answer the person had chosen is
       // said, not silently swapped: what they chose was for the old one
       const sameCard = refCard === state.sel
@@ -84,11 +96,19 @@ export function initDecision (c) {
       const wrote = same && !chose && !!state.draft.trim()
       replacedAt = ref !== null && sameCard && (pressed.busy || Date.now() - pressed.done < SETTLE_MS) ? Date.now() : 0
       ref = r
+      token = t
       refCard = state.sel
       shownAt = Date.now()
-      set({ picked: [], decConfirm: null, hi: 0, hiUser: false })
-      if (chose) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
-      else if (wrote) note(`${state.sel} moved while you were writing — read it again; your words are still here.`, { tone: 'warn', testid: 'decision-moved' })
+      // a refusal that already said what happened (who answered first, or
+      // that the card moved) is not covered by a second, vaguer note
+      const told = !!explained && explained.card === state.sel && Date.now() - explained.at < EXPLAINED_MS
+      // the row the person chose is not moved onto another answer of the
+      // new set (the same place in a new list is a different answer):
+      // nothing is highlighted until they choose again, so enter cannot
+      // give an answer they never picked
+      set({ picked: [], decConfirm: null, hi: chose || told ? -1 : 0, hiUser: false })
+      if (chose && !told) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
+      else if (wrote && !told) note(`${state.sel} moved while you were writing — read it again; your words are still here.`, { tone: 'warn', testid: 'decision-moved' })
       // kept across the card's next moves (it may run a while before its
       // next decision), dropped with the card
       held = wrote || (held && sameCard)
@@ -170,8 +190,14 @@ const SURFACES = {
 // nothing (msgs.go advanceLands), so its advance settles without a
 // landing stop and no dialog is wanted. Such an answer stops on the
 // landing message, and its dialog opens for it on the press.
+//
+// A card linked to a pull request is out too: its verify gate's advance
+// is "merge the PR", which lands on GitHub, and the board refuses a local
+// landing for it (merge.go) before any message is asked for — so the
+// answer goes as any other, and the refusal is said beside the decision
+// rather than over a message box nobody can use.
 function isLanding (o) {
-  if (state.card?.kind === 'research') return false
+  if (state.card?.kind === 'research' || state.card?.pr) return false
   return (o.id === 'advance' && state.card?.stage === 'verify') || o.id === 'merge'
 }
 
@@ -272,6 +298,16 @@ function jumpFor (d, card) {
   return null
 }
 
+// clipHint fades the foot of a question longer than the space the
+// decision gives it, so a line cut off mid-sentence reads as "scroll for
+// more" rather than as the end of the question; the fade goes once the
+// rest is scrolled into view. The question's box changes height with the
+// window and the dock, so the one on screen is watched (qResize).
+function clipHint (q) {
+  q.classList.toggle('clip', q.scrollHeight - q.scrollTop - q.clientHeight > 2)
+}
+const qResize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(es => { for (const e of es) clipHint(e.target) })
+
 let shownHi = -1
 function renderDecision () {
   const box = $('#decision')
@@ -313,24 +349,51 @@ function drawDecision (box) {
   const opts = box.querySelector('.decision > .opts')
   if (opts) opts.scrollTop = was
   const q = box.querySelector('.decision > .q')
-  if (q) q.scrollTop = wasQ
+  if (q) {
+    q.scrollTop = wasQ
+    clipHint(q)
+    q.addEventListener('scroll', () => clipHint(q), { passive: true })
+    qResize?.disconnect()
+    qResize?.observe(q)
+  }
   if (state.hi !== shownHi) {
     shownHi = state.hi
     opts?.querySelector('.opt.hi')?.scrollIntoView({ block: 'nearest' })
   }
 }
 
-function renderNext () {
-  const box = $('#nextup')
-  clear(box)
+// nextRow is the card the "also needs you" chip offers, while it still
+// does.
+function nextRow () {
   const nx = state.showNext && row(state.showNext)
-  if (!nx || nx.status !== 'needs' || nx.id === state.sel) return
-  box.append(h('button', {
+  return nx && nx.status === 'needs' && nx.id !== state.sel ? nx : null
+}
+
+// needsLine is what the chip says the next card waits on, worded the way
+// the rail heads it: a question is quoted (its "asks:" prefix, which only
+// some of the board's stops carry, dropped — the word already says it is
+// one), and any other stop is named by its word and the card's title, not
+// the stop's raw park line, which can be a run's CLI wording.
+function needsLine (nx) {
+  const n = nx.needs || {}
+  if (n.kind === 'question' && n.question) return `${n.word || 'question'}: ${n.question.replace(/^asks:\s*/i, '')}`
+  return [n.word, nx.title].filter(Boolean).join(' · ')
+}
+
+function nextChip (nx) {
+  return h('button', {
     class: 'nextup', type: 'button', testid: 'nextup',
     style: { '--dc': needsColor(nx.needs, nx.stage) },
     onclick: () => ctx.select(nx.id)
-  }, h('span', { class: 'dotc' }), h('span', null, h('b', null, nx.id), ` also needs you · ${nx.needs?.question || nx.title}`),
-  h('span', { class: 'go' }, 'Open ', h('kbd', null, 'n'))))
+  }, h('span', { class: 'dotc' }), h('span', { class: 'nl' }, h('b', null, nx.id), ` also needs you · ${needsLine(nx)}`),
+  h('span', { class: 'go' }, 'Open ', h('kbd', null, 'n')))
+}
+
+function renderNext () {
+  const box = $('#nextup')
+  clear(box)
+  const nx = nextRow()
+  if (nx) box.append(nextChip(nx))
 }
 
 function renderMdec () {
@@ -340,11 +403,21 @@ function renderMdec () {
 
 function drawMdec (box) {
   const d = openDecision()
-  const show = isMobile() && (!!d || !!state.decNote) && state.view !== 'thread'
+  // the bar also carries the next card waiting after an answer — the
+  // chip in the dock sits with the composer, out of sight from a document
+  // tab (over the cards the list already shows it) — and, with no
+  // decision left, what the answer left to say
+  const nx = state.view !== 'panel' ? null : nextRow()
+  const show = isMobile() && (!!d || !!state.decNote || !!nx) && state.view !== 'thread'
   box.hidden = !show
   clear(box)
   if (!show) return
-  if (!d) { box.append(noteEl(true)); return }
+  if (!d) {
+    if (nx) box.style.setProperty('--dc', needsColor(nx.needs, nx.stage))
+    box.classList.remove('open')
+    box.append(noteEl(true) || '', nx ? h('div', { class: 'mnext' }, nextChip(nx)) : '')
+    return
+  }
   box.style.setProperty('--dc', decisionColor(d, state.card.stage))
   box.classList.toggle('open', state.mdecOpen)
   box.append(h('button', { class: 'sum', type: 'button', testid: 'mdec-toggle', 'aria-expanded': String(state.mdecOpen), onclick: () => set({ mdecOpen: !state.mdecOpen }) },
@@ -367,28 +440,35 @@ function drawMdec (box) {
     }
     box.append(confirmEl(true) || '')
   }
+  if (nx) box.append(h('div', { class: 'mnext' }, nextChip(nx)))
 }
 
 // chosen is what enter would answer: the picked options of a multi-pick
-// question, else the highlighted one.
+// question, else the highlighted one — or null when nothing is
+// highlighted (the decision changed under the person's choice), never a
+// stand-in for it.
 function chosen (d) {
-  const o = d.options[state.hi] || d.options[0]
+  const o = d.options[state.hi] || null
   const picked = (state.picked || []).filter(id => d.options.some(x => x.id === id && !x.chat))
-  if (d.multi && picked.length && !(o.chat && state.draft.trim())) {
+  if (d.multi && picked.length && !(o?.chat && state.draft.trim())) {
     const labels = d.options.filter(x => picked.includes(x.id)).map(x => x.label)
     return { id: d.options.filter(x => picked.includes(x.id)).map(x => x.id).join(','), label: labels.join(', '), words: false }
   }
   return o
 }
 
+// NONE is what enter says, and does, with nothing highlighted.
+const NONE = 'pick an answer first'
+
 // enterSays is what the composer's enter line reads with a decision pinned.
 export function enterSays (d) {
   const o = chosen(d)
   const text = state.draft.trim()
-  if (text && !o.words) {
+  if (text && !o?.words) {
     const w = wordsOption()
     if (w >= 0) return d.options[w].relabel || d.options[w].label
   }
+  if (!o) return NONE
   return text && o.words ? (o.relabel || o.label) : o.label
 }
 
@@ -414,10 +494,14 @@ export async function answer ({ picked = false } = {}) {
   }
   let o = chosen(d)
   const text = state.draft.trim()
-  if (text && !o.words && !picked && !(d.multi && state.picked?.length)) {
+  if (text && !o?.words && !picked && !(d.multi && state.picked?.length)) {
     const w = wordsOption()
     if (w < 0) { ctx.submitLine?.(); return }
     o = d.options[w]
+  }
+  if (!o) {
+    note(`Nothing is highlighted on ${state.sel}'s decision — ${isMobile() ? 'tap an answer' : 'pick one with ↑↓ or its number, then press enter'}.`, { testid: 'decision-pick' })
+    return
   }
   if (SURFACES[o.id] && !text) {
     if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
@@ -509,11 +593,13 @@ function refused (id, err, body, label, tookWords, danger) {
       // the dialog was about a card that is no longer the one it was:
       // close it, and say what happened where the decision is
       landing?.close()
+      unchoose(id)
       note(`Answered by ${e.by || 'someone else'}${e.receipt ? ` — ${e.by && e.receipt.startsWith(e.by + ' ') ? e.receipt.slice(e.by.length + 1) : e.receipt}` : ''}. Here is the card as it stands now.`, { tone: 'warn', testid: 'decision-answered' })
       ctx.refresh(id)
       return
     case 'moved':
       landing?.close()
+      unchoose(id)
       note(`${id} moved since you read it${e.text ? ` (${e.text.replace(/^the card moved since you read it\s*[—-]\s*/, '')})` : ''}. Read it again, then answer if it still holds.`, { tone: 'warn', testid: 'decision-moved' })
       ctx.refresh(id)
       return
@@ -521,7 +607,7 @@ function refused (id, err, body, label, tookWords, danger) {
       landing?.close()
       landingDismissed = false // the close was the flow's, not the person's
       // the server's question, verbatim; the yes sent back is its token
-      set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: label, danger, go: () => send(id, { ...body, confirm: [body.confirm, e.confirm].filter(Boolean).join(' ') }, label, tookWords, danger) } })
+      set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: `Yes, ${label}`, danger, go: () => send(id, { ...body, confirm: [body.confirm, e.confirm].filter(Boolean).join(' ') }, label, tookWords, danger) } })
       reveal = true
       return
     case 'needs':
@@ -573,8 +659,26 @@ function refused (id, err, body, label, tookWords, danger) {
   // note behind it is a note nobody sees, and the dialog is the way to
   // retry (send bare again) or land on a message written here.
   if (landing) { landing.failed(err.message); ctx.refresh(id); return }
-  note(err.message, { tone: 'err', testid: 'decision-error' })
+  note(pageWords(err.message), { tone: 'err', testid: 'decision-error' })
   ctx.refresh(id)
+}
+
+// pageWords points a refusal's terminal command at the page's own way to
+// do the same, where the card's menu has it: a PR-linked card's landing
+// refusal names `gummi pr unlink`, which is the menu's "unlink PR" here.
+function pageWords (text) {
+  const unlink = state.card?.actions?.find(a => a.id === 'prunlink')
+  if (!unlink) return text
+  return String(text).replace(/\(?`gummi pr unlink [^`]+` to land it locally instead\)?/, `(“${unlink.label}” in the card’s menu lands it locally instead)`)
+}
+
+// unchoose drops the highlight after an answer the board refused because
+// the decision changed under it: the row pressed was for the old one, and
+// whatever now sits in its place is not the person's choice. The change
+// arriving after this keeps the refusal's note (explained).
+function unchoose (id) {
+  explained = { card: id, at: Date.now() }
+  if (state.sel === id) set({ hi: -1, hiUser: false, picked: [] })
 }
 
 // sentence capitalises the server's lower-case line for a page.
