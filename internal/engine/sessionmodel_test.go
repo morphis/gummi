@@ -454,6 +454,15 @@ func TestSessionModelCatalogAsksAntigravityWithoutStartingIt(t *testing.T) {
 	if err := CheckSessionModel("antigravity", ""); err != nil {
 		t.Errorf("empty model refused: %v", err)
 	}
+	// opencode's rule is enforced here, not only by the picker's pattern
+	for _, bad := range []string{"", "claude-sonnet-5", "opencode/"} {
+		if err := CheckSessionModel("opencode", bad); err == nil {
+			t.Errorf("opencode model %q accepted, want refused", bad)
+		}
+	}
+	if err := CheckSessionModel("opencode", "opencode/big-pickle"); err != nil {
+		t.Errorf("opencode/big-pickle refused: %v", err)
+	}
 	if err := CheckSessionModel("antigravity", "gemini-3.1-pro-high"); err != nil {
 		t.Errorf("an agy id refused: %v", err)
 	}

@@ -210,7 +210,7 @@ func TestOpencodeRequiresModel(t *testing.T) {
 func TestOpencodeGuardedAccepted(t *testing.T) {
 	_, spawns := stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
-	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x", Permission: PermissionGuarded})
+	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x", Permission: PermissionGuarded})
 	if err != nil {
 		t.Fatalf("guarded NewSession should succeed: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestOpencodeNewSessionMaterializesConfig(t *testing.T) {
 	o := &Opencode{bin: "opencode"}
 	wt := t.TempDir()
 	sess, err := o.NewSession(context.Background(), SessionOpts{
-		WorkDir: wt, Model: "x", MCPSockPath: "/tmp/mcp/FD-011.sock", FeatureID: "FD-011",
+		WorkDir: wt, Model: "opencode/x", MCPSockPath: "/tmp/mcp/FD-011.sock", FeatureID: "FD-011",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestOpencodeNewSessionMaterializesConfig(t *testing.T) {
 func TestOpencodeNewSessionOmitsMCPWhenUnbound(t *testing.T) {
 	_, _ = stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
-	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestOpencodeSpawnInjectsOutputTokenMax(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, spawns := stubServeOpencode(t)
 			sess, err := (&Opencode{bin: "opencode"}).NewSession(context.Background(),
-				SessionOpts{WorkDir: t.TempDir(), Model: "x", OutputTokenMax: tc.otm})
+				SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x", OutputTokenMax: tc.otm})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -349,7 +349,7 @@ func TestOpencodeSpawnInjectsOutputTokenMax(t *testing.T) {
 func TestOpencodeCloseRemovesConfig(t *testing.T) {
 	_, _ = stubServeOpencode(t)
 	o := &Opencode{bin: "opencode"}
-	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	sess, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestOpencodeCloseRemovesConfig(t *testing.T) {
 // has to publish the id, or the engine can never persist one to hand back.
 func TestOpencodeResumesAHandedInSession(t *testing.T) {
 	f, _ := stubServeOpencode(t)
-	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "x", ResumeID: "ses_prior"})
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x", ResumeID: "ses_prior"})
 	f.mu.Lock()
 	f.cur = "ses_prior" // the conversation the session continues
 	f.mu.Unlock()
@@ -398,7 +398,7 @@ func TestOpencodeResumesAHandedInSession(t *testing.T) {
 // crash.
 func TestOpencodeRunFailureFirstTurnFalseAfterASuccess(t *testing.T) {
 	f, _ := stubServeOpencode(t)
-	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "x"})
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
 	runCleanTurn(t, f, sess)
 
 	f.failNext.Store(true)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // Compact implements Compactor. The session's server compacts: one
@@ -27,9 +26,9 @@ func (s *opencodeSession) Compact(context.Context) error {
 		}()
 		return nil
 	}
-	provider, model, ok := strings.Cut(s.model, "/")
-	if !ok {
-		return fmt.Errorf("opencode model %q is not provider/model", s.model)
+	provider, model, err := SplitOpencodeModel(s.model)
+	if err != nil {
+		return err
 	}
 	cctx, cancel := context.WithCancel(s.sctx)
 	s.cancel = cancel

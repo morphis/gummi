@@ -152,12 +152,12 @@ func (f *ocFake) message(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"name":"NotFound","data":{"message":"Session not found"}}`, http.StatusNotFound)
 		return
 	}
-	if f.failNext.Load() {
-		http.Error(w, `{"name":"UnknownError","data":{"message":"provider not authenticated"}}`, http.StatusInternalServerError)
-		return
-	}
 	select {
 	case <-gate:
+		if f.failNext.Load() {
+			http.Error(w, `{"name":"UnknownError","data":{"message":"provider not authenticated"}}`, http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"info":{"id":"msg_out"},"parts":[]}`))
@@ -962,6 +962,69 @@ func TestOpencodeServerTurnFailureCarriesDiagnostic(t *testing.T) {
 	rf := waitTurnFailure(t, sess)
 	if !strings.Contains(rf.Error(), "provider not authenticated") {
 		t.Errorf("failure = %q, want the server's own reason", rf.Error())
+	}
+}
+
+// TestOpencodeServerSessionErrorIsTheTurnsOneFailure: opencode publishes
+// a failed turn's cause on the bus ("Model not found: …") and answers the
+// POST with an opaque 500. The turn ends on one failure carrying the
+// bus's cause — not the cause and then the 500 as a second error that
+// overwrites it.
+func TestOpencodeServerSessionErrorIsTheTurnsOneFailure(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/nope"})
+	f.holdTurns()
+	f.failNext.Store(true)
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	f.push(`{"type":"session.error","properties":{"sessionID":"` + f.lastSession() +
+		`","error":{"name":"UnknownError","data":{"message":"Model not found: opencode/nope."}}}}`)
+	// the bus event must land before the POST answers, as on the real server
+	time.Sleep(100 * time.Millisecond)
+	f.releaseTurn()
+	var errs []error
+	deadline := time.After(5 * time.Second)
+collect:
+	for {
+		select {
+		case e := <-sess.Events():
+			if e.Kind == EventIdle {
+				t.Fatal("turn ended idle; want a failure")
+			}
+			if e.Kind == EventError {
+				errs = append(errs, e.Err)
+			}
+		case <-time.After(500 * time.Millisecond):
+			if len(errs) > 0 {
+				break collect
+			}
+		case <-deadline:
+			t.Fatal("no failure within the window")
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("errors = %v, want exactly one", errs)
+	}
+	var rf *RunFailure
+	if !errors.As(errs[0], &rf) || !strings.Contains(rf.Error(), "Model not found: opencode/nope.") {
+		t.Errorf("failure = %v, want a RunFailure carrying the bus's cause", errs[0])
+	}
+}
+
+// A model id without its provider is refused when the session opens, not
+// sent to the server as a provider with no model.
+func TestOpencodeRejectsAModelWithoutAProvider(t *testing.T) {
+	stubServeOpencode(t)
+	o := &Opencode{bin: "opencode"}
+	for _, m := range []string{"", "claude-sonnet-5", "opencode/", "/x"} {
+		if _, err := o.NewSession(context.Background(), SessionOpts{WorkDir: t.TempDir(), Model: m}); err == nil {
+			t.Errorf("model %q accepted, want refused", m)
+		}
+	}
+	if p, id, err := SplitOpencodeModel("openrouter/z-ai/glm-5.3-flash"); err != nil || p != "openrouter" || id != "z-ai/glm-5.3-flash" {
+		t.Errorf("split = %q %q %v, want openrouter + z-ai/glm-5.3-flash", p, id, err)
 	}
 }
 

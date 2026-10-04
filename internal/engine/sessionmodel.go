@@ -141,7 +141,14 @@ func CheckSessionModel(backend, model string) error {
 		return fmt.Errorf("unknown agent %q (one of %s)", backend, strings.Join(SessionBackends, ", "))
 	}
 	switch backend {
-	case "opencode", "pi":
+	case "opencode":
+		if model == "" {
+			return errors.New("opencode needs a model spelled provider/model")
+		}
+		if _, _, err := agent.SplitOpencodeModel(model); err != nil {
+			return fmt.Errorf("opencode needs a model spelled provider/model, not %q", model)
+		}
+	case "pi":
 		if model == "" {
 			return fmt.Errorf("%s needs a model spelled provider/model", backend)
 		}

@@ -92,8 +92,8 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if o.closed {
 		return nil, errors.New("opencode agent is closed")
 	}
-	if opts.Model == "" {
-		return nil, errors.New("opencode requires a model (provider/model, e.g. opencode/deepseek-v4-flash-free)")
+	if _, _, err := SplitOpencodeModel(opts.Model); err != nil {
+		return nil, err
 	}
 	// Resolve gummi's own executable and materialize the session config
 	// before anything starts, so a failure here is terminal rather than
@@ -170,6 +170,22 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	go s.forward()
 	o.sessions = append(o.sessions, s)
 	return s, nil
+}
+
+// SplitOpencodeModel splits an opencode model id into the provider and
+// model halves its server addresses a model by. An id without both — a
+// bare "claude-sonnet-5" from a profile written for another backend — is
+// refused here, at session start: the server would take it as a provider
+// with no model and fail every turn with an opaque 500.
+func SplitOpencodeModel(model string) (provider, id string, err error) {
+	provider, id, ok := strings.Cut(strings.TrimSpace(model), "/")
+	if !ok || provider == "" || id == "" || strings.ContainsAny(provider, " \t") {
+		if model == "" {
+			return "", "", errors.New("opencode requires a model (provider/model, e.g. opencode/deepseek-v4-flash-free)")
+		}
+		return "", "", fmt.Errorf("opencode model %q is not provider/model (e.g. opencode/deepseek-v4-flash-free)", model)
+	}
+	return provider, id, nil
 }
 
 // Close implements Agent.
@@ -288,6 +304,11 @@ type ocTurn struct {
 	// turn's own final emission.
 	finishing bool
 	msg       ocMsg
+	// errDetail is the first session.error the bus reported during the
+	// turn (under the session's mutex). opencode publishes the real cause
+	// there — "Model not found: …" — and answers the message POST with an
+	// opaque 500, so the turn's one failure carries this, not the POST's.
+	errDetail string
 }
 
 // ocMsg is the per-turn text accumulator: the event relay writes into it
@@ -460,6 +481,7 @@ func (s *opencodeSession) runTurn(t *ocTurn, msg string, imgs []Image) {
 				// died silently, not a real empty pass. A resumed first
 				// turn retries fresh, once.
 				s.dropResume()
+				s.clearTurnErr(t)
 				continue
 			}
 			break
@@ -468,6 +490,7 @@ func (s *opencodeSession) runTurn(t *ocTurn, msg string, imgs []Image) {
 			// the handed-in session id is one the server no longer knows:
 			// a fresh conversation, stage hints back on the wire
 			s.dropResume()
+			s.clearTurnErr(t)
 			continue
 		}
 		if t.ctx.Err() != nil {
@@ -475,6 +498,13 @@ func (s *opencodeSession) runTurn(t *ocTurn, msg string, imgs []Image) {
 			// closed under it: a clean idle, never a failure
 			s.endTurn(t, nil)
 		} else {
+			// the server publishes the failure's cause on the bus around
+			// the time it answers the POST; give it the same tail a clean
+			// turn's last events get, so the failure carries it
+			select {
+			case <-s.stop:
+			case <-time.After(ocTurnTail):
+			}
 			s.failTurn(t, err)
 		}
 		return
@@ -614,7 +644,25 @@ func (s *opencodeSession) failTurn(t *ocTurn, err error) {
 	if !ok {
 		rf = &RunFailure{Backend: "opencode", FirstTurn: !s.hadIdleValue(), Err: err}
 	}
+	if rf.Diagnostic == "" {
+		rf.Diagnostic = s.turnErrDetail(t)
+	}
 	s.endTurn(t, rf)
+}
+
+// turnErrDetail is the session.error the bus reported during t, if any.
+func (s *opencodeSession) turnErrDetail(t *ocTurn) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return t.errDetail
+}
+
+// clearTurnErr forgets a session.error before t is run again on a fresh
+// conversation: it belonged to the attempt that is being dropped.
+func (s *opencodeSession) clearTurnErr(t *ocTurn) {
+	s.mu.Lock()
+	t.errDetail = ""
+	s.mu.Unlock()
 }
 
 // endTurn ends the in-flight turn exactly once, emitting its trailing
@@ -653,6 +701,13 @@ func (s *opencodeSession) endTurn(t *ocTurn, failure error) {
 	}
 	if failure != nil {
 		s.emit(Event{Kind: EventError, Err: failure})
+		return
+	}
+	if detail := s.turnErrDetail(t); detail != "" {
+		// the POST resolved, but the server reported the turn failed
+		s.emit(Event{Kind: EventError, Err: &RunFailure{
+			Backend: "opencode", FirstTurn: !s.hadIdleValue(), Err: errors.New(detail),
+		}})
 		return
 	}
 	if !t.msg.sawAnyValue() {
@@ -936,7 +991,19 @@ func (s *opencodeSession) dispatch(data []byte) {
 		if detail == "" {
 			detail = "opencode reported an error"
 		}
-		s.emit(Event{Kind: EventError, Err: errors.New(detail)})
+		// During a turn the error becomes part of that turn's one failure
+		// (failTurn/endTurn): emitting it here as well failed the run twice,
+		// and the POST's opaque 500 that followed overwrote the real cause.
+		s.mu.Lock()
+		t := s.turn
+		folded := t != nil && !t.finishing
+		if folded && t.errDetail == "" {
+			t.errDetail = detail
+		}
+		s.mu.Unlock()
+		if !folded {
+			s.emit(Event{Kind: EventError, Err: errors.New(detail)})
+		}
 	case "permission.asked":
 		// A guarded board's tool-call approval, held server-side until it
 		// is answered. The request id is what the answer names, and the
