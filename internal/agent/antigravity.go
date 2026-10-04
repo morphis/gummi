@@ -899,6 +899,7 @@ func (s *antigravitySession) mapResult(l *agyLine) []Event {
 	s.mu.Unlock()
 
 	if strings.EqualFold(status, "ERROR") {
+		s.stderr.settle(20*time.Millisecond, 200*time.Millisecond)
 		detail := strings.TrimSpace(rawMessageText(errRaw))
 		if tail := strings.TrimSpace(s.stderr.String()); tail != "" {
 			if detail != "" {

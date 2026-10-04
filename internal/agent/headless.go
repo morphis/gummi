@@ -282,19 +282,48 @@ func (s *headlessSession) stopping() bool {
 // subprocess's stderr, enough to carry a panic/exit message without letting
 // a chatty child grow memory without bound.
 type capWriter struct {
-	mu  sync.Mutex
-	buf []byte
-	max int
+	mu     sync.Mutex
+	buf    []byte
+	max    int
+	writes int // total Write calls, so settle can tell the stream moved
 }
 
 func (w *capWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
+	w.writes++
 	if len(w.buf) > w.max {
 		w.buf = append([]byte(nil), w.buf[len(w.buf)-w.max:]...)
 	}
 	return len(p), nil
+}
+
+// settle gives a stream exec copies on its own goroutine a moment to
+// land. A child that writes its stderr line and then its stdout result
+// has both in the kernel already, but the stdout reader can win the race
+// to them, and a failure read off stdout would then go out without the
+// stderr tail that explains it. settle returns once no write has arrived
+// for quiet, or after limit — failure paths only, so the wait is cheap.
+func (w *capWriter) settle(quiet, limit time.Duration) {
+	deadline := time.Now().Add(limit)
+	w.mu.Lock()
+	seen := w.writes
+	w.mu.Unlock()
+	still := time.Now()
+	for time.Now().Before(deadline) {
+		time.Sleep(quiet / 4)
+		w.mu.Lock()
+		n, empty := w.writes, len(w.buf) == 0
+		w.mu.Unlock()
+		if n != seen {
+			seen, still = n, time.Now()
+			continue
+		}
+		if !empty && time.Since(still) >= quiet {
+			return
+		}
+	}
 }
 
 func (w *capWriter) String() string {
