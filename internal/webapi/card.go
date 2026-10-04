@@ -217,6 +217,12 @@ type Composer struct {
 	// will do ("steers the implementer mid-turn").
 	Says  string `json:"says"`
 	Route Route  `json:"route"`
+	// Read marks an answer line the board reads before it goes anywhere:
+	// words typed at a stop are placed first, and the reading is put to
+	// the person as a question of its own, so enter does not yet give the
+	// answer they go with. Says says so; the page shows it in place of the
+	// answer's own label.
+	Read bool `json:"read,omitempty"`
 	// Images is whether the card's current agent (its backend and,
 	// where knowable, its model) can take images with a turn. The page
 	// offers the composer's attach control only when this is true.

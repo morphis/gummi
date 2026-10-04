@@ -64,7 +64,8 @@ test('a slash command completes and runs', async ({ pairedPage: page, server, ap
 });
 
 // A word naming nothing still opens the menu — and never strands the line
-// in the composer.
+// in the composer — but says the word named nothing, rather than passing
+// the menu off as its answer.
 test('a slash word naming nothing hands the line to the menu', async ({ pairedPage: page, server }, info) => {
   test.setTimeout(120_000);
   await page.goto(`${server.url}/#${id}`);
@@ -78,4 +79,24 @@ test('a slash word naming nothing hands the line to the menu', async ({ pairedPa
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('card-actions-menu')).toBeVisible();
   await expect(input).toHaveValue('');
+  await expect(page.getByTestId('composer-note')).toContainText('/nosuch is not a command');
+});
+
+// With a decision pinned, a half-typed command is still a command: each
+// keystroke redraws the enter line without an error, before the server
+// has classified the line and after.
+test('typing a slash command under a pinned decision raises no error', async ({ pairedPage: page, server }, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) });
+  await page.goto(`${server.url}/#${id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
+  await expect(page.getByTestId('decision')).toBeVisible();
+  const input = page.getByTestId('composer-input');
+  await input.click();
+  await input.pressSequentially('/reb', { delay: 20 });
+  await expect(page.getByTestId('composer-send')).toHaveText('Send');
+  await expect(page.getByTestId('composer-says')).not.toHaveText('approve');
+  expect(errors).toEqual([]);
 });

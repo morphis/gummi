@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -100,5 +101,35 @@ func TestTheMenuOffersNoOtherAnswerItWouldRefuse(t *testing.T) {
 	vrow.F.PullRequest = domain.PullRequestRef{Repo: "o/r", Number: 7, URL: "https://github.com/o/r/pull/7"}
 	if has(cardActionsFor(verified, vrow), "merge") {
 		t.Error("a card linked to a pull request lists a local merge, which is refused")
+	}
+}
+
+// TestTheWebMenusLandingSaysItLands: on the web menu, "next stage" out of
+// verify is worded as the landing it is — the decision's own answer, "land
+// anyway" over a failed verify — and marked dangerous, so a plain step
+// forward never lands on the trunk unannounced.
+func TestTheWebMenusLandingSaysItLands(t *testing.T) {
+	advance := func(m *Shell) (string, bool) {
+		for _, a := range m.webActions(m.rows[0]) {
+			if a.ID == "advance" {
+				return a.Label, a.Danger
+			}
+		}
+		t.Fatal("the menu lists no advance")
+		return "", false
+	}
+
+	m, _, _ := mergeFixture(t)
+	m.sel = 0
+	if label, danger := advance(m); !strings.HasPrefix(label, "land on ") || !danger {
+		t.Errorf("verified: advance reads %q (danger %v), want the landing, marked dangerous", label, danger)
+	}
+
+	f, _, _ := unverifiedFixture(t)
+	f.sel = 0
+	f.rows[0].Exited, f.rows[0].ExitVerdict = true, verdictFail
+	f.inbox.addEscalated(f.rows[0].F.ID, attnGate, "verify FAILED — read the evidence and bounce or overrule")
+	if label, danger := advance(f); label != "land anyway" || !danger {
+		t.Errorf("failed verify: advance reads %q (danger %v), want \"land anyway\", marked dangerous", label, danger)
 	}
 }

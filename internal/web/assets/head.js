@@ -28,7 +28,10 @@ function render () {
     return
   }
   const actions = state.card?.actions || []
-  const prominent = actions.find(a => /^(pause|resume)$/.test(a.id))
+  // pause earns the head only while there is a run to pause: on a settled
+  // session the same entry is "park", which changes nothing on screen
+  // and stays in the menu
+  const prominent = actions.find(a => a.id === 'resume' || (a.id === 'pause' && (c.status === 'running' || !!c.running)))
   const menuBtn = actions.length
     ? h('button', { class: 'iconbtn', id: 'card-actions', testid: 'card-actions', title: 'Card actions', 'aria-label': 'Card actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'))
     : null

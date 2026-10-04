@@ -449,8 +449,9 @@ func (m *Shell) webDropCleanCommit(ctx context.Context, f domain.Feature, acts [
 }
 
 // webLandingEmpty is what a landing entry says when no message has been
-// drafted for it yet.
-const webLandingEmpty = " — leave the message empty to use the drafted one"
+// drafted for it yet: there is no drafted one to use, so an empty message
+// has gummi draft one, which the dialog then stops to have read.
+const webLandingEmpty = " — leave the message empty and gummi drafts one for you to read first"
 
 // webActionDefaults fills the inputs whose suggested value is a read of
 // the store or the repository, which the loop must not make: the landing
@@ -601,6 +602,21 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 			continue
 		}
 		act := webapi.Action{ID: a.id, Label: strings.TrimSuffix(a.label, "…"), Key: a.key, Danger: a.danger, Detail: a.why}
+		if a.id == "advance" && advanceLands(r.F, r.Landed) {
+			// "next stage" out of verify is the landing (advanceStageAs):
+			// the menu says it as the decision's own answer does ("land on
+			// main", "land anyway" over a failed verify) and marks it as
+			// the line it crosses, rather than as a plain step forward
+			// (a card with no stop raised yet lands all the same)
+			act.Label = "land on " + r.baseBranch()
+			for _, s := range stageActions(in) {
+				if s.id == "advance" {
+					act.Label, act.Detail = s.label, s.why
+					break
+				}
+			}
+			act.Danger = true
+		}
 		m.webActionInput(r, &act)
 		out = append(out, act)
 	}
@@ -690,7 +706,9 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	c := m.classifyThreadLine(r, line, func() *threadDecision { return m.openDecision(r) })
 	route, says := m.webLineRoute(r, line, c)
 	images := m.engine != nil && m.engine.SessionTakesImages(context.Background(), r.F.ID)
-	out := webapi.Composer{Route: route, Says: says, Images: images}
+	// an answer route is either an ask's reply, which answers at once, or
+	// words going with a stop's answer, which are read first (webLineRoute)
+	out := webapi.Composer{Route: route, Says: says, Images: images, Read: route == webapi.RouteAnswer && c.route != lineAskAnswer}
 	// the line as typed: "/review " is a command awaiting its arguments,
 	// not a word still being completed
 	if word, ok := strings.CutPrefix(strings.TrimLeft(text, " \t\n"), "/"); ok {

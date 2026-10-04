@@ -19,13 +19,27 @@
 import { h, clear, isMobile } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal } from './views.js?v=__ASSET_V__'
-import { toast } from './toast.js?v=__ASSET_V__'
+import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { state, set, rows } from './store.js?v=__ASSET_V__'
 import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
 
 const NOUN = { message: 'Message', number: 'Credits', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
 
+// GO is the confirm button of an entry whose label is a noun (the menu
+// row names what it sets): the button says what pressing it does.
+const GO = { envelope: 'Set budget', profile: 'Switch profile', repo: 'Set repository', deps: 'Save dependencies' }
+
 function cap (s) { s = String(s || ''); return s ? s[0].toUpperCase() + s.slice(1) : s }
+
+// goLabel is the dialog's confirm button for an action.
+function goLabel (a) { return GO[a.id] || cap(a.label) }
+
+// isLandingEntry: the entries whose message is a landing's (or a squash's)
+// — the merge, and "next stage" where it lands (the server words that row
+// as the landing and marks it dangerous).
+function isLandingEntry (card, a) {
+  return a.id === 'merge' || a.id === 'squash' || (a.id === 'advance' && card.stage === 'verify' && !!a.danger)
+}
 
 export async function runAction (card, a) {
   // a session's model and its spec have surfaces of their own (session.js):
@@ -87,7 +101,7 @@ function dialog (card, a, { ask = null } = {}) {
         const ta = f?.el.querySelector('textarea')
         if (ta && !ta.value.trim() && e.draft.trim()) {
           ta.value = e.draft
-          f.drafted?.()
+          f.drafted?.(e.draft)
           ta.focus(); ta.setSelectionRange(0, 0); ta.scrollTop = 0
         }
       }
@@ -103,15 +117,24 @@ function dialog (card, a, { ask = null } = {}) {
     actions: [
       { label: 'Cancel', testid: 'action-cancel' },
       {
-        label: cap(a.label),
+        label: goLabel(a),
         primary: true,
-        danger: a.danger,
+        // a landing is pressed as the line it crosses, as the answer
+        // block's landing dialog presses it
+        danger: a.danger || a.id === 'merge',
         testid: 'action-confirm',
         onClick: async () => {
           const req = {}
           for (const [need, f] of fields) {
             const v = f.value()
-            if (v === undefined) { f.focus?.(); return false }
+            if (v === undefined) {
+              // a field that cannot be sent as it stands says why, here,
+              // before the board is asked
+              const why = f.problem?.()
+              if (why) { clear(error).append(why); error.hidden = false }
+              f.focus?.()
+              return false
+            }
             Object.assign(req, v)
             void need
           }
@@ -132,6 +155,9 @@ function dialog (card, a, { ask = null } = {}) {
             if (err.status === 409 && (e.error === 'needs' || e.error === 'confirm')) {
               takeAsk(e)
             } else {
+              // said here, where it was asked; the board's broadcast of
+              // the same refusal is not repeated over the dialog as a toast
+              hush(err.message)
               clear(error).append(sentence(err.message))
               error.hidden = false
             }
@@ -140,7 +166,7 @@ function dialog (card, a, { ask = null } = {}) {
             go.disabled = false
             if (drafting) {
               msg.drafting(false)
-              if (!asked) go.textContent = cap(a.label)
+              if (!asked) go.textContent = goLabel(a)
             }
           }
         }
@@ -159,7 +185,7 @@ function fieldFor (card, a, need) {
   const label = h('span', { class: 'fl' }, NOUN[need] || 'Value')
   const def = a.needs === need ? (a.default || '') : ''
   if (need === 'message') {
-    const landing = /^(merge|squash)$/.test(a.id)
+    const landing = isLandingEntry(card, a)
     const ta = h('textarea', { id: 'action-input', testid: 'action-input', value: def, rows: landing ? 8 : 4, spellcheck: 'true' })
     const squash = a.id === 'squash'
     const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(squash, def ? 'default' : 'none')) : null
@@ -171,8 +197,10 @@ function fieldFor (card, a, need) {
       value: () => ({ message: ta.value.trim() }),
       focus: () => ta.focus(),
       // the draft the server stopped to have read is in the box now: the
-      // hint says so rather than that nothing was drafted
-      drafted: () => { if (aff) aff.drafted(messageHint(squash, 'drafted')) },
+      // hint says so rather than that nothing was drafted, and where it
+      // came from — the one stored when verify passed reads as that, not
+      // as one gummi drafted just now
+      drafted: (draft) => { if (aff) aff.drafted(messageHint(squash, draftOrigin(card, a, draft))) },
       // while gummi drafts the message the box is not for typing and the
       // hint says what is being waited on; a reply that brought no draft
       // puts the hint back as it was
@@ -183,7 +211,10 @@ function fieldFor (card, a, need) {
     const inp = h('input', { id: 'action-input', testid: 'action-input', type: 'number', min: '0', inputmode: 'numeric', value: def })
     return {
       el: h('label', { class: 'field' }, label, inp, a.id === 'envelope' ? h('span', { class: 'fh' }, '0 means uncapped.') : null),
-      value: () => inp.value === '' ? undefined : { number: Number(inp.value) },
+      // credits are whole and never negative: anything else is said here,
+      // not sent for the board to refuse as malformed
+      value: () => /^\d+$/.test(inp.value.trim()) && Number.isSafeInteger(Number(inp.value.trim())) ? { number: Number(inp.value.trim()) } : undefined,
+      problem: () => inp.value.trim() === '' && !inp.validity.badInput ? '' : 'Enter a whole number of credits, 0 or more.',
       focus: () => inp.focus()
     }
   }
@@ -216,6 +247,15 @@ export function messageHint (squash, from) {
   if (from === 'none') return 'Nothing was drafted yet: leave it empty and gummi drafts one for you to read first (this can take a minute), or write it.'
   const where = from === 'drafted' ? 'Drafted by gummi just now.' : squash ? 'Drafted for this branch.' : 'Drafted when verify passed.'
   return `${where} Read it, edit it if you like — ${becomes}.`
+}
+
+// draftOrigin says where a draft the board handed back came from, for
+// messageHint: the stored one (the entry's default, or the merge entry's
+// for the verify gate's landing) when it is exactly that, else one a pass
+// drafted just now.
+function draftOrigin (card, a, draft) {
+  const stored = String(a.default || card.actions?.find(x => x.id === 'merge')?.default || '').trim()
+  return stored && String(draft || '').trim() === stored ? 'default' : 'drafted'
 }
 
 // draftAffordance is the drafting state of a landing message box, shared
@@ -275,7 +315,7 @@ async function send (id, a, body) {
   // what the action changed is read again, documents included
   if (res && res.id === state.sel) set({ card: res, cardRev: (state.cardRev || 0) + 1 })
   if (res?.ok && !res.id) {
-    toast(`${cap(a.label)}: ${id} is gone`)
+    toast(`${cap(a.label)}: ${id} is gone`, { ack: id })
     // the action removed the card this page has open, and it was this
     // page's own doing: on a phone the card's screen covers the cards, so
     // the page goes back the way the screen's back chevron does. A
@@ -284,7 +324,7 @@ async function send (id, a, body) {
     // cards stay beside the open card.
     if (state.sel === id && isMobile()) set({ view: 'cards' })
   } else {
-    toast(`${cap(a.label)} · ${id}`)
+    toast(`${cap(a.label)} · ${id}`, { ack: id })
   }
   return res
 }

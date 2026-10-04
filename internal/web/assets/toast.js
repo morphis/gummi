@@ -73,9 +73,45 @@ function commandLines (text) {
   return text.split('\n').map(l => l.trim()).filter(l => /^git\s/.test(l))
 }
 
+// An acknowledgement (opts.ack: the card it is about) is the page's own
+// "done" for something a person just did on a card — "Rebase · FD-004".
+// The board usually says the outcome itself, in its own words, to every
+// viewer ("FD-004 rebased onto main"); when it does, that is the one
+// notice the action gets. So an acknowledgement waits a moment, is
+// dropped when a notice naming its card has arrived or arrives, and
+// stands only for an action the board says nothing about.
+const ACK_WAIT = 500
+const ACK_MS = 4000
+const named = [] // { text, at }: recent notices that are not acknowledgements
+
+function names (text, id) {
+  const e = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^A-Za-z0-9-])${e}([^A-Za-z0-9-]|$)`).test(text)
+}
+
+function ackSaid (id) {
+  const now = Date.now()
+  while (named.length && now - named[0].at > ACK_MS) named.shift()
+  return named.some(n => names(n.text, id))
+}
+
 export function toast (text, opts = {}) {
+  if (opts.ack) {
+    const { ack, ...rest } = opts
+    setTimeout(() => { if (!ackSaid(ack)) show(text, rest, ack) }, ACK_WAIT)
+    return
+  }
+  show(text, opts, '')
+}
+
+function show (text, opts, ack) {
   const box = document.getElementById('toasts')
   if (!box || !text || isHushed(text)) return
+  if (!ack) {
+    // a notice naming a card stands for any acknowledgement of it
+    named.push({ text, at: Date.now() })
+    for (const el of [...box.children]) if (el.dataset.ack && names(text, el.dataset.ack)) el.remove()
+  }
   // the page's own answer and the server's broadcast of the same outcome
   // often say the same sentence: show it once
   if ([...box.children].some(el => el.dataset.text === text)) return
@@ -87,6 +123,7 @@ export function toast (text, opts = {}) {
   const el = h('div', { class: ['toast', opts.err && 'err', multi && 'multi', sticky && 'sticky'], testid: 'toast', role: opts.err ? 'alert' : null },
     sticky ? h('span', { class: 'toast-text' }, head, detail) : text)
   el.dataset.text = text
+  if (ack) el.dataset.ack = ack
   if (sticky) {
     const show = h('button', {
       class: 'toast-btn', type: 'button', testid: 'toast-show', 'aria-expanded': 'false',

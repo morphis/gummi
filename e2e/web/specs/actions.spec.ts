@@ -47,7 +47,28 @@ test.describe('a backlog', () => {
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-error')).toBeVisible();
     await expect(page.getByTestId('action-dialog')).toBeVisible();
+    // said once, in the dialog: the board's broadcast of the same refusal
+    // does not stand over it as a toast as well
+    // (the dialog capitalises the board's line: compare past its first letter)
+    const said = (await page.getByTestId('action-error').textContent())!.trim().slice(1, 30);
+    await page.waitForTimeout(1000);
+    expect(await page.getByTestId('toast').filter({ hasText: said }).count()).toBe(0);
     await shot(page, info, 'action-refused');
+  });
+
+  test('a budget that is not a whole number is said in the dialog, not sent', async ({ pairedPage: page, server }, info) => {
+    await open(page, server, ids[0], phone(info));
+    const sent: string[] = [];
+    page.on('request', (r) => { if (r.method() === 'POST' && /\/actions\/envelope$/.test(r.url())) sent.push(r.postData() || '') });
+    await menu(page, 'envelope');
+    await expect(page.getByTestId('action-confirm')).toHaveText('Set budget');
+    for (const v of ['1.5', '1e20', '-3']) {
+      await page.getByTestId('action-input').fill(v);
+      await page.getByTestId('action-confirm').click();
+      await expect(page.getByTestId('action-error')).toContainText('whole number');
+      await expect(page.getByTestId('action-dialog')).toBeVisible();
+    }
+    expect(sent).toEqual([]);
   });
 
   test('handing a card to autopilot asks first, in the overlay\'s words', async ({ pairedPage: page, server, api }, info) => {
@@ -157,7 +178,9 @@ test.describe('a verified card', () => {
     await shot(page, info, 'action-drafting');
     release();
     await expect(page.getByTestId('action-input')).toHaveValue(/^feat: land /);
-    await expect(page.getByTestId('action-hint')).toContainText('Drafted by gummi just now');
+    // what came back is the draft stored for the branch, and the hint
+    // says that — not that gummi drafted it just now
+    await expect(page.getByTestId('action-hint')).toContainText('Drafted for this branch');
     await expect(page.getByTestId('action-confirm')).toHaveText('Squash');
     await expect(page.getByTestId('action-input')).toBeEditable();
     await page.unroute(`**/api/cards/${id}/actions/squash`);
@@ -173,6 +196,29 @@ test.describe('a verified card', () => {
     await expect(page.getByTestId('rail-group-done')).not.toContainText('Landed');
     expect(await workspace.git('log', '-1', '--format=%s', 'main')).toMatch(/^feat: land /);
     await shot(page, info, 'landed');
+  });
+});
+
+test.describe('a verified card’s menu', () => {
+  let id: string;
+  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a farewell helper'); } } });
+
+  // "next stage" out of verify lands the branch: the menu says so in the
+  // decision's own words, and presses it as the line it crosses
+  test('next stage at verify reads as the landing it is', async ({ pairedPage: page, server }, info) => {
+    await open(page, server, id, phone(info));
+    await page.getByTestId('card-actions').click();
+    const entry = page.getByTestId('action-advance');
+    await expect(entry).toContainText('land on main');
+    await expect(entry).toHaveClass(/\bdanger\b/);
+    await entry.click();
+    const dlg = page.getByTestId('action-dialog');
+    await expect(dlg).toBeVisible({ timeout: 30_000 });
+    await expect(dlg).toContainText('Land on main');
+    await expect(page.getByTestId('action-confirm')).toHaveClass(/\bdanger\b/);
+    await expect(page.getByTestId('action-hint')).toContainText('Drafted when verify passed');
+    await shot(page, info, 'action-next-lands');
+    await page.getByTestId('action-cancel').click();
   });
 });
 

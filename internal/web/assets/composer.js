@@ -71,11 +71,13 @@ export function initComposer (ctx) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault()
         const n = d.options.length
-        highlight((state.hi + (e.key === 'ArrowDown' ? 1 : -1) + n) % n)
+        const down = e.key === 'ArrowDown'
+        // with nothing highlighted, down starts at the top and up at the foot
+        highlight(state.hi < 0 ? (down ? 0 : n - 1) : (state.hi + (down ? 1 : -1) + n) % n)
       } else if (/^[1-9]$/.test(e.key) && +e.key <= d.options.length) {
         e.preventDefault()
         highlight(+e.key - 1)
-      } else if (e.key === ' ' && d.multi && !d.options[state.hi]?.chat) {
+      } else if (e.key === ' ' && d.multi && d.options[state.hi] && !d.options[state.hi].chat) {
         e.preventDefault()
         togglePick(d.options[state.hi].id)
       }
@@ -293,8 +295,12 @@ function renderSays () {
   // slash line never answers (the server refuses a command as an answer),
   // so it keeps the command's own wording even before the server has
   // classified it
-  if (d && (!state.draft.trim() || (!c && !state.draft.trim().startsWith('/')) || c.route === 'answer')) {
-    says.textContent = enterSays(d)
+  if (d && (!state.draft.trim() || (!c && !state.draft.trim().startsWith('/')) || c?.route === 'answer')) {
+    // words the board reads before they go with an answer (a line at a
+    // stop: the reading is put to the person first) are said as the
+    // server says them — "send it back with your words" would promise a
+    // send-back enter does not make
+    says.textContent = c?.read && state.draft.trim() && !(d.multi && state.picked?.length) ? c.says : enterSays(d)
     btn.textContent = 'Answer'
     return
   }
@@ -330,6 +336,22 @@ async function submitDraft (text, atts = []) {
   }
 }
 
+// unknownCommand is the word of a "/word" line that names nothing here:
+// no entry of the card's menu starts with it (by id or label, the match
+// the menu itself ranks by) and the server, asked about the line (c),
+// offered no command it could become — its completions carry the verbs'
+// other names ("/land" for merge) and a session's project commands. ''
+// for a line that names one, is no command at all, or was never asked
+// about: a word is only called unknown on the server's say.
+function unknownCommand (text, c) {
+  const m = /^\/(\S+)$/.exec(String(text).trim())
+  if (!m || !c) return ''
+  const word = m[1].toLowerCase()
+  const menu = (state.card?.actions || []).some(a => a.id.toLowerCase().startsWith(word) || a.label.toLowerCase().startsWith(word))
+  const offered = (c.completions || []).some(o => o.text.trim().toLowerCase().startsWith('/' + word))
+  return menu || offered ? '' : m[1]
+}
+
 async function submit ({ asLine = false } = {}) {
   const d = openDecision()
   const text = state.draft.trim()
@@ -337,7 +359,9 @@ async function submit ({ asLine = false } = {}) {
   if (attachments.some((a) => a.pending)) { setNote('Still uploading an image — wait a moment and send again.', 'info'); return }
   if (attachments.some((a) => a.error)) { setNote('Remove the failed attachment before sending.', 'err'); return }
   if (state.sessionDraft) return submitDraft(text, [...attachments])
-  if (!text || sending || !state.sel) return
+  // the button's own rule: no card on screen (deleted, or not loaded
+  // yet), nothing to send it to — the line stays where it is
+  if (!text || sending || !state.sel || !state.card) return
   if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
   const id = state.sel
   if (d && !asLine) {
@@ -351,6 +375,9 @@ async function submit ({ asLine = false } = {}) {
     }
     if (c.route === 'answer') { answer(); return }
   }
+  // what the server said of a "/word" line, for the word it may not know
+  // (unknownCommand); asked now when enter beat the classification
+  const asked = text.startsWith('/') && classify ? current() || await classifyNow(id, state.draft) : null
   sending = true
   renderSays()
   try {
@@ -366,7 +393,12 @@ async function submit ({ asLine = false } = {}) {
       // line go (the TUI's own "/" does the same), and enter again on the
       // focused entry runs it
       if (r.card && state.sel === id) set({ card: r.card })
-      if (openActions(text)) clearComposer()
+      // a "/word" that names nothing on this card is said: the menu opens
+      // on everything it offers, which is no answer to the word typed
+      const word = unknownCommand(text, asked)
+      if (!openActions(text)) return
+      clearComposer()
+      if (word) setNote(`/${word} is not a command on ${id} — the card's menu shows what is.`, 'info')
       return
     }
     clearComposer()

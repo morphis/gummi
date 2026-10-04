@@ -38,3 +38,40 @@ func TestProseAtAStopNoAnswerTakesWordsIsReadNotAnswered(t *testing.T) {
 		}()
 	}
 }
+
+// Words that go with a stop's answer are read before they go (the
+// reading is put to the person as a chip of its own), so the composer
+// marks them Read and the page says that rather than promising the
+// answer itself; an ask's reply answers at once and is never marked.
+func TestProseGoingWithAStopsAnswerIsMarkedRead(t *testing.T) {
+	m := populatedShell(160, 50)
+	seen := 0
+	for i := range m.rows {
+		r := m.rows[i]
+		func() {
+			leave := m.enterCard(r.F.ID, true)
+			defer leave()
+			od := m.webOpenDecision(r)
+			if od == nil {
+				return
+			}
+			c := m.webComposer(r, "please also handle the empty state")
+			if c.Route != webapi.RouteAnswer {
+				if c.Read {
+					t.Errorf("%s: route %s is marked read; only an answer's words are", r.F.ID, c.Route)
+				}
+				return
+			}
+			ask := od.api.Kind == webapi.DecisionAsk
+			if c.Read == ask {
+				t.Errorf("%s (%s): read=%v says=%q; want read=%v", r.F.ID, od.api.Kind, c.Read, c.Says, !ask)
+			}
+			if !ask {
+				seen++
+			}
+		}()
+	}
+	if seen == 0 {
+		t.Fatal("no stop took the line as an answer's words; the case went untested")
+	}
+}
