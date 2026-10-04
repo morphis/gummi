@@ -117,6 +117,39 @@ CREATE TABLE IF NOT EXISTS stacks (
 	created_at TEXT NOT NULL
 );
 
+-- One row per timed trigger for freeform sessions (DESIGN §19.9): a
+-- schedule that mints a new freeform card on a cron cadence, or a
+-- heartbeat that sends a recurring turn into one existing card. The
+-- cadence is the compiled cron string — presets never survive to here —
+-- and enabled starts at 0: a definition is off until it is explicitly
+-- enabled, and any later change to it forces it off again. next_run is
+-- the fire the board's poll claims (compare-and-set), '' on a disabled
+-- row; last_* is the one outcome of history the row keeps; orphan_card
+-- names a card this schedule minted whose kickoff failed, which the next
+-- fire retries instead of minting a second card beside it.
+CREATE TABLE IF NOT EXISTS schedules (
+	id            TEXT PRIMARY KEY,
+	name          TEXT NOT NULL,
+	kind          TEXT NOT NULL,
+	target        TEXT NOT NULL DEFAULT '',
+	repo          TEXT NOT NULL DEFAULT '',
+	cron          TEXT NOT NULL,
+	timezone      TEXT NOT NULL DEFAULT '',
+	prompt        TEXT NOT NULL DEFAULT '',
+	backend       TEXT NOT NULL DEFAULT '',
+	model         TEXT NOT NULL DEFAULT '',
+	envelope      INTEGER NOT NULL DEFAULT 0,
+	enabled       INTEGER NOT NULL DEFAULT 0,
+	run_requested INTEGER NOT NULL DEFAULT 0,
+	last_run      TEXT NOT NULL DEFAULT '',
+	next_run      TEXT NOT NULL DEFAULT '',
+	last_status   TEXT NOT NULL DEFAULT '',
+	last_detail   TEXT NOT NULL DEFAULT '',
+	last_card     TEXT NOT NULL DEFAULT '',
+	orphan_card   TEXT NOT NULL DEFAULT '',
+	created_at    TEXT NOT NULL
+);
+
 -- One row per (feature, round kind) live loop counter: the collapsed
 -- seam behind internal/rounds, replacing the former plan_rounds and
 -- review_rounds columns above. A missing row reads as 0 (no cycle

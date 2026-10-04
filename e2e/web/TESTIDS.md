@@ -251,6 +251,20 @@ Restack answer: `stack-result`, `stack-result-close`, `stack-replayed`,
 Card head: `card-goal` (opens the goal page — the card's goal, or on a goal's
 own card its page), `card-stack` (opens the stacks view on the card's stack).
 
+## Schedules (`views/schedules.js`)
+`schedules-list`, `schedules-count`, `schedules-new`, `schedules-empty`,
+`schedules-notice`; add form `schedule-form`, `schedule-form-name`,
+`schedule-form-kind-mint`/`-heartbeat`, `schedule-form-target`,
+`schedule-form-repo`, `schedule-form-backend`, `schedule-form-model`,
+`schedule-form-envelope`, `schedule-form-every`, `schedule-form-cron`,
+`schedule-form-tz`, `schedule-form-prompt`, `schedule-form-error`,
+`schedule-form-error-detail`, `schedule-form-cancel`, `schedule-form-submit`.
+One row: `schedule-<id>` (`data-enabled`), `schedule-<id>-state`,
+`schedule-<id>-next`, `schedule-<id>-status`, `schedule-<id>-orphan`,
+`schedule-<id>-toggle`, `schedule-<id>-run`, `schedule-<id>-rm`,
+`schedule-<id>-confirm` (`-yes`/`-no` via the shared strip),
+`schedule-<id>-result`.
+
 ## Tool views
 Shared by the views below: `view-error` (a refusal, as the server said it),
 `<prefix>-confirm`, `<prefix>-confirm-yes`, `<prefix>-confirm-no` (an inline

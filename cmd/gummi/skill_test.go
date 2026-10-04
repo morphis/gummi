@@ -86,9 +86,12 @@ func TestSkillNamesNoFlagTheBinaryLacks(t *testing.T) {
 // foreignSkillFlags are long flags the skill quotes that belong to ANOTHER
 // tool, so gummi is not expected to declare them. This is the only way to
 // opt out of the check above, so every entry carries whose flag it is.
-var foreignSkillFlags = map[string]string{
-	"model": "the Claude CLI's --model, named to explain the cross-model trap in references/setup.md",
-}
+//
+// --model was here once, excusing the Claude CLI's own --model in the
+// setup reference — until `gummi schedule add --model` gave gummi a flag
+// of its own by that name, at which point the excuse became an unused
+// hide and was dropped.
+var foreignSkillFlags = map[string]string{}
 
 // The exit contract in the doc must carry the real exit codes, generated
 // from driver.Status.ExitCode() — so a code change surfaces here too.

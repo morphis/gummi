@@ -1,0 +1,36 @@
+/* views/schedules.css — the schedules view: one row per timed trigger,
+   its cadence, its on/off state and its last outcome. */
+
+.sch{--tc:var(--fg3)}
+.sch .t-ok{--tc:var(--ok)} .sch .t-err{--tc:var(--err)} .sch .t-warn{--tc:var(--warn)}
+.sch .mute{color:var(--fg4)}
+.sch .grow{flex:1;min-width:0}
+.sch-bar{display:flex;align-items:center;gap:10px}
+.sch-count{color:var(--fg3);font-size:12.5px;margin-right:auto}
+.sch-lede{margin:0;font-size:12.5px;color:var(--fg3)}
+.sch-list{display:flex;flex-direction:column;gap:12px}
+.sch-notice{font-size:12.5px;color:var(--fg2);padding:6px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--sunk)}
+
+.sch-form{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line2);border-radius:10px;background:var(--sunk)}
+.sch-form .field input,.sch-form .field select,.sch-form .field textarea{background:var(--panel)}
+.sch-form-row{display:flex;flex-wrap:wrap;gap:10px}
+.sch-form-row .field{min-width:180px}
+.sch-form-foot{display:flex;justify-content:flex-end;gap:8px}
+.sch-form-error:empty{display:none}
+
+.sch-row{border:1px solid var(--line);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+.sch-row[data-enabled="true"]{border-color:color-mix(in srgb,var(--ok) 35%,var(--line))}
+.sch-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px}
+.sch-name{font-size:14px;font-weight:600;color:var(--fg);min-width:0}
+.sch-kind{font-size:12px;color:var(--fg3)}
+.sch-toggle{font-size:10.5px;font-weight:600;padding:0 7px;height:18px;display:inline-flex;align-items:center;border-radius:5px;color:var(--fg3);background:var(--sunk)}
+.sch-toggle.on{color:var(--ok);background:color-mix(in srgb,var(--ok) 13%,transparent)}
+.sch-next{font-size:12px;color:var(--accent);white-space:nowrap}
+.sch-status{font-size:12px;color:color-mix(in srgb,var(--tc,var(--fg3)) var(--t-keep,1),#000);white-space:nowrap}
+.sch-line{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:11.5px;color:var(--fg3)}
+.sch-cron{font-family:var(--mono);font-size:11.5px;color:var(--fg2)}
+.sch-meta{white-space:nowrap}
+.sch-meta.warn{color:var(--warn)}
+.sch-detail{margin:0;font-size:12px;color:var(--fg2);overflow-wrap:anywhere}
+.sch-actions{display:flex;flex-wrap:wrap;gap:6px}
+.sch-result{font-size:12.5px;color:color-mix(in srgb,var(--tc,var(--fg3)) var(--t-keep,1),#000)}

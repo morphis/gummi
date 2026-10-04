@@ -279,6 +279,62 @@ var stackRestackCmd = &cobra.Command{
 	RunE:  func(_ *cobra.Command, args []string) error { return runStackRestack(args) },
 }
 
+// scheduleCmd groups the timed triggers for freeform sessions
+// (DESIGN §19.9): a schedule mints a freeform card on a cron cadence, a
+// heartbeat sends a recurring turn into one session. Store verbs — they
+// run with or without a board; none of them fires a session from this
+// process.
+var scheduleCmd = &cobra.Command{
+	Use:   "schedule",
+	Short: "Schedules and heartbeats — freeform sessions that come back on a clock",
+}
+
+var scheduleListCmd = &cobra.Command{
+	Use:   "list [--json]",
+	Short: "List the schedules and their last outcome",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runScheduleList(cmdFlags(cmd), args)
+	},
+}
+
+var scheduleAddCmd = &cobra.Command{
+	Use:   `add --name <name> (--cron "<cron>"|--every <preset>) --prompt "<prompt>" (--envelope N | --heartbeat <FF-id>)`,
+	Short: "Define a schedule or a heartbeat, stored off until enabled",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runScheduleAdd(cmdFlags(cmd), args)
+	},
+}
+
+var scheduleEnableCmd = &cobra.Command{
+	Use:   "enable <id|name>",
+	Short: "Turn a schedule on; its first fire is computed from now",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runScheduleEnable(cmdFlags(cmd), args)
+	},
+}
+
+var scheduleDisableCmd = &cobra.Command{
+	Use:   "disable <id|name>",
+	Short: "Turn a schedule off",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runScheduleDisable(cmdFlags(cmd), args)
+	},
+}
+
+var scheduleRunNowCmd = &cobra.Command{
+	Use:   "run-now <id|name>",
+	Short: "Ask the running board to fire a schedule once, off-cadence",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runScheduleRunNow(cmdFlags(cmd), args)
+	},
+}
+
+var scheduleRmCmd = &cobra.Command{
+	Use:   "rm <id|name>",
+	Short: "Delete a schedule (the cards it minted stay)",
+	RunE:  func(_ *cobra.Command, args []string) error { return runScheduleRm(args) },
+}
+
 // prCmd groups the outbound-PR operations (link/unlink/status).
 var prCmd = &cobra.Command{
 	Use:   "pr",
@@ -396,6 +452,11 @@ func init() {
 	bindBugsNewFlags(bugsNewCmd.Flags())
 	bindStackNewFlags(stackNewCmd.Flags())
 	bindStackAddFlags(stackAddCmd.Flags())
+	bindScheduleAddFlags(scheduleAddCmd.Flags())
+	bindScheduleEnableFlags(scheduleEnableCmd.Flags())
+	bindScheduleDisableFlags(scheduleDisableCmd.Flags())
+	bindScheduleRunNowFlags(scheduleRunNowCmd.Flags())
+	bindScheduleListFlags(scheduleListCmd.Flags())
 	bindPRLinkFlags(prLinkCmd.Flags())
 	bindPRStatusFlags(prStatusCmd.Flags())
 	bindPRCommentsFlags(prCommentsCmd.Flags())
@@ -408,6 +469,7 @@ func init() {
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
+	scheduleCmd.AddCommand(scheduleListCmd, scheduleAddCmd, scheduleEnableCmd, scheduleDisableCmd, scheduleRunNowCmd, scheduleRmCmd)
 	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 	webCmd.AddCommand(webPairCmd, webDevicesCmd, webUnpairCmd)
@@ -575,6 +637,40 @@ func bindStackNewFlags(fs *pflag.FlagSet) {
 
 func bindStackAddFlags(fs *pflag.FlagSet) {
 	fs.Int("pos", -1, "position in the stack, 0 at the bottom (default: the top)")
+}
+
+// bindScheduleAddFlags declares `gummi schedule add`'s flags. A mint and
+// a heartbeat are the same command's two shapes: the mint takes repo,
+// agent/model and its envelope (the brake); the heartbeat names the one
+// card it sends turns to.
+func bindScheduleAddFlags(fs *pflag.FlagSet) {
+	fs.String("name", "", "the schedule's display name; its id is the slug of it (required)")
+	fs.String("cron", "", "the cadence, as a 5-field cron expression (minute hour day month weekday)")
+	fs.String("every", "", "the cadence, as a preset compiled to cron: 5m, 15m, 1h, 6h, @hourly, @daily, @weekly")
+	fs.String("tz", "", "the cadence's timezone (IANA name; default: this host's)")
+	fs.String("prompt", "", "what fires: a mint's opening turn, or the heartbeat's recurring turn (required)")
+	fs.String("heartbeat", "", "heartbeat: the freeform card (FF-NNN) to send the prompt to, instead of minting")
+	fs.String("repo", "", "mint: managed repository the card is minted in (a configured repos: name; default: the workspace default)")
+	fs.String("agent", "", "mint: the session's backend (default: the profile's implementer)")
+	fs.String("model", "", "mint: the session's model (default: the profile's)")
+	fs.Int("envelope", 0, "mint: the minted card's spend brake, in credits (required; every card mints with one)")
+	jsonFlag(fs, "emit the stored row as JSON (the shape the board's web page reads)")
+}
+
+func bindScheduleEnableFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit the row as JSON (the shape the board's web page reads)")
+}
+
+func bindScheduleDisableFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit the row as JSON (the shape the board's web page reads)")
+}
+
+func bindScheduleRunNowFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit the row as JSON (the shape the board's web page reads)")
+}
+
+func bindScheduleListFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit the rows as JSON (the shape the board's web page reads)")
 }
 
 func bindPRLinkFlags(fs *pflag.FlagSet) {

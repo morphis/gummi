@@ -176,6 +176,7 @@ function renderFoot (unpair, newSession) {
     const items = [
       item('goals', 'Goals', 'goal'),
       item('stacks', 'Stacks', 'stack'),
+      item('schedules', 'Schedules', 'clock'),
       item('ingest', 'Import spec', 'import'),
       item('bugs', 'Import bugs', 'bug'),
       item('doctor', 'Doctor', 'doctor')

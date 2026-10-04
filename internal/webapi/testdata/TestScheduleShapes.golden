@@ -1,0 +1,70 @@
+{
+  "list": {
+    "schedules": [
+      {
+        "id": "nightly",
+        "name": "nightly triage",
+        "kind": "mint",
+        "cron": "0 5 * * *",
+        "timezone": "America/New_York",
+        "prompt": "triage new issues",
+        "backend": "claude",
+        "model": "claude-sonnet",
+        "envelope": 50,
+        "enabled": true,
+        "runRequested": true,
+        "lastRun": "2026-10-03T09:00:00Z",
+        "nextRun": "2026-10-03T10:00:00Z",
+        "lastStatus": "ok",
+        "lastCard": "FF-012",
+        "orphanCard": "FF-014",
+        "createdAt": "2026-10-02T08:00:00Z"
+      },
+      {
+        "id": "hourly",
+        "name": "hourly",
+        "kind": "heartbeat",
+        "target": "FF-007",
+        "cron": "0 * * * *",
+        "prompt": "check CI, keep going",
+        "enabled": false,
+        "createdAt": "0001-01-01T00:00:00Z"
+      }
+    ]
+  },
+  "create": {
+    "name": "nightly triage",
+    "kind": "mint",
+    "repo": "gummi",
+    "every": "1h",
+    "timezone": "America/New_York",
+    "prompt": "triage new issues",
+    "backend": "claude",
+    "model": "claude-sonnet",
+    "envelope": 50
+  },
+  "edit": {
+    "name": "",
+    "cron": "0 6 * * *",
+    "prompt": "triage new issues first"
+  },
+  "run": {
+    "id": "hourly",
+    "name": "hourly",
+    "kind": "heartbeat",
+    "status": "ok",
+    "card": "FF-007",
+    "at": "2026-10-03T10:00:00Z"
+  },
+  "forced": {
+    "id": "nightly",
+    "name": "nightly triage",
+    "kind": "mint",
+    "forced": true,
+    "status": "paused-exhausted",
+    "detail": "FF-012 has spent its envelope of 50 credits; raise it to carry on",
+    "card": "FF-012",
+    "orphan": "FF-012",
+    "at": "2026-10-03T10:00:00Z"
+  }
+}

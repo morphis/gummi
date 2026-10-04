@@ -162,6 +162,14 @@ type Input struct {
 	// goal branch and its budget is carved out of the goal's. Empty mints
 	// an open-board card. A goal cannot be minted into a goal.
 	Goal domain.FeatureID
+	// Unattended marks a mint with nobody present to retitle a colliding
+	// card — a schedule firing on a cadence mints the same description
+	// every fire, and the collision surfaces at the fire, after the
+	// person has gone home. A title that is taken takes the next free
+	// variant silently, exactly as a goal's cards do. A person's mint
+	// never sets it: the fix is a word in the title, and the person
+	// should be the one to type it.
+	Unattended bool
 	// FoundBy records the card that filed this one: a goal that found the
 	// work along the way, or a finished card whose follow-up this is.
 	// Provenance only — it blocks and schedules nothing. Ignored when
@@ -210,7 +218,7 @@ func freeSlug(ctx context.Context, store *state.Store, in Input, slug string) (s
 	if !taken {
 		return slug, nil
 	}
-	if in.Goal == "" {
+	if in.Goal == "" && !in.Unattended {
 		return "", fmt.Errorf(
 			"%s already uses the branch %s — retitle this card so it gets a different one", owner, branchFor(slug))
 	}

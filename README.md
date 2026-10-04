@@ -321,6 +321,55 @@ todo → plan ─────────────▶ implement ────�
   import of one GitHub issue at a time through `gh`. Re-importing skips
   bugs already on the board. `gummi bugs new` adds one by hand.
 
+## Schedules — sessions that come back on a clock
+
+Freeform sessions only move when a person types. Two primitives, sharing
+one cron engine, let work come back on its own; press `L` on the board to
+see them.
+
+- A **schedule** mints a **new** freeform card on a cron cadence and
+  starts it with a stored prompt, its own agent/model and an envelope —
+  the nightly "triage new issues". Every minted card gets its own branch
+  and worktree, like any freeform card.
+- A **heartbeat** sends a recurring turn into **one** freeform session —
+  "check CI, keep going" every hour — so the same conversation
+  reassesses and continues.
+
+How they behave:
+
+- **Cron is canonical.** Presets (`5m`, `15m`, `1h`, `6h`, `@daily`,
+  `@weekly`) compile to a 5-field cron expression, and that is what is
+  stored — what you see and what fires agree. Timezones are per schedule
+  (`--tz`, IANA name). A cadence no month can match is refused at the
+  store, not discovered the first night it should have fired. The clock
+  skips a wall time that does not exist (spring forward); in an hour
+  that happens twice (fall back) a sub-hourly cadence keeps firing —
+  the hour's matched minutes fire at both passes — while a schedule set
+  for the hour itself fires it once, at its first pass.
+- **Off by default, and edits turn it off.** A definition is stored
+  disabled; enabling is explicit and asks, because it is the switch that
+  starts spending. Any change to a definition turns it off again until
+  you re-enable it — a cadence you have not re-approved is not a cadence
+  that fires.
+- **The board is the clock.** Nothing fires while no board is running
+  (the TUI, or `gummi web`); missed fires coalesce into one catch-up
+  fire when a board comes up. A fire against a session that is working
+  right now is skipped, not queued.
+- **The envelope is the brake.** A minted card always carries its
+  schedule's envelope; a heartbeat spends its target's. An exhausted
+  target pauses the schedule and tells you; nothing is ever raised
+  automatically.
+- **A failed kickoff never piles up cards.** If a minted card's session
+  fails to start, the schedule retries that same card next time instead
+  of minting another — until you close or delete the card.
+
+`gummi schedule add --name nightly --every 1h --prompt "triage new
+issues" --envelope 50` defines a mint; `--heartbeat FF-001` (with no
+envelope — the target's own is the brake) defines a heartbeat. `enable`,
+`disable`, `run-now` (the running board fires it off-cadence), `rm` and
+`list --json` round it out. The web page's Schedules view has the same
+verbs.
+
 ## Headless
 
 The same engine runs with nobody at the keyboard. `gummi run` drives one
@@ -360,6 +409,7 @@ it. `gummi status` says by how much when it happens.
 | `log <id>` / `rewrite <id> --plan <file\|->` | list a card's own commits / reword or squash them in place — never reorder or drop, so the content stays verified |
 | `stack new\|add\|rm\|mv\|list` | build and read a stack of cards whose branches fork from one another |
 | `stack restack <stack>` | replay every card in a stack onto its current base now (the board does this on its own) |
+| `schedule list\|add\|enable\|disable\|run-now\|rm` | schedules and heartbeats — freeform sessions that come back on a cron cadence; store verbs, with or without a board |
 | `pr link\|unlink\|status\|comments` | land through a PR you opened; gummi never writes to GitHub |
 | `deps add\|rm\|list` | dependency edges between cards |
 | `ingest`, `bugs ingest\|new` | bring in existing work |

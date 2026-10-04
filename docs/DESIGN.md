@@ -3811,6 +3811,80 @@ that emits `EventPermission` first (none does); and a terminal and a files
 tab, since a shell in the browser is a new surface under §20.5, not a
 restyle.
 
+### 19.9 Schedules and heartbeats
+
+Freeform sessions only move when a person types. Two time-driven
+primitives, sharing one cron engine, put them on a clock:
+
+- A **schedule** mints a NEW freeform card on a cadence and kicks it off
+  with a stored prompt — a nightly "triage new issues".
+- A **heartbeat** sends a recurring turn into ONE existing session —
+  "check CI, keep going" every hour.
+
+Both are store rows (`schedules`), and the board is the clock. The Shell
+arms a 15-second poll beside the stack poll; each poll calls
+`Engine.ScheduleTick(ctx, now)`, which decides from the pure cron policy
+(`internal/schedule` — no clock, no IO of its own) and claims each due
+instant in the store by compare-and-set before acting on it. One due
+instant produces at most one fire even with a CLI write landing at the
+same moment, and nothing fires while no board (TUI or `gummi web`) is
+running: missed fires coalesce into one catch-up fire, because
+`Advance` returns the next run after *now*, never after the missed
+marks.
+
+The cadence is a 5-field cron expression, and **cron is canonical**:
+presets (`5m`, `1h`, `@daily`) compile to cron at the boundary and the
+compiled form is what is stored, so what a face shows and what fires
+agree by construction. Expressions no month can match (`0 0 30 2 *`)
+are refused at the store's write boundary — the one place every face
+must pass through — so a schedule can never silently never-fire. DST
+falls out of a minute-grained walk in the row's zone: a wall time that
+does not exist (spring forward) is skipped; one that repeats (fall back)
+keeps its cadence — every matched minute of the repeated hour fires at
+both of its occurrences — while the repeat of the minute a fire came due
+in is skipped, so a schedule set for the hour fires it once, at its
+first pass.
+
+**Off by default, always.** A definition is inserted disabled; any edit
+to it forces it off again (and clears a pending run-now, so re-enabling
+never fires off-cadence); enabling is explicit, computes the first fire
+from now, and asks at the TUI and the web page — it is the switch that
+starts spending. `run-now` from the CLI is refused on a disabled row;
+the one fire a disabled row may take is `Engine.RunSchedule`, a person
+at the board forcing it once, which leaves the row disabled with no
+cadence.
+
+**The envelope is the brake.** A minted card always carries the
+schedule's non-zero envelope; a heartbeat spends its target's, and an
+exhausted target pauses the schedule (records `paused-exhausted`,
+disables the row, notifies) rather than raising anything. A fire against
+a busy target is skipped, not queued (`skipped-busy`, recorded but never
+notified) — a turn delivered late would land in a conversation that has
+since moved on. Attention slots no longer exist to ration against.
+
+**A failed kickoff never duplicates a card.** A mint whose kickoff fails
+records the card as the row's `orphan_card`; the next fire retries that
+card's kickoff instead of minting a second beside it — until the card is
+closed, deleted (a missing orphan counts as closed), or the refusal
+persists, in which case the row keeps naming the one card rather than
+piling up. A failure *before* the mint names no orphan, so a good fire's
+card never receives a second opening turn. Repeated mints of the same
+prompt collide on branch names with nobody present to retitle; like a
+goal's cards, a scheduled mint takes the next free variant silently.
+
+A schedule only ever mints freeform cards, never crosses a gate, and
+never acts board-wide; an agent cannot schedule itself (no MCP tool —
+schedules are an operator surface, reachable from the TUI's `L` view,
+`gummi schedule list|add|enable|disable|run-now|rm`, and the web page's
+routes, all of which sit behind the same device-token and same-origin
+guards as every other mutating route). What a scheduled session
+produces waits for a person to land, like any freeform card's work.
+
+Deferred: a fresh-process `gummi schedule tick` driven by system cron or
+launchd — there is no headless freeform driver for it to run yet
+(`run`/`resume` refuse freeform, §19.5; `gummi ff` is deferred, §19.7).
+Per-fire history beyond the row's one last outcome is a later need.
+
 ## 20. The web face — the board in a browser
 
 `gummi web` serves the board to a browser as a page of its own: cards on

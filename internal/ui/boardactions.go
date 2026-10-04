@@ -131,6 +131,7 @@ func (m *Shell) globalCommands() []command {
 		{id: "I", name: "ingest", label: "Split a document into cards", key: "I", available: attached && m.engine != nil},
 		{id: "G", name: "import", label: "Import a GitHub issue as a bug", key: "G", available: attached && m.engine != nil},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
+		{id: "L", name: "schedules", label: "Schedules and heartbeats", key: "L", available: attached},
 		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},

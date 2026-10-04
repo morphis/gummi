@@ -1435,6 +1435,9 @@ func (m *Shell) Init() tea.Cmd {
 		// changes gummi cannot hear — a hand-run git command, or a PR
 		// merging and main being pulled.
 		cmds = append(cmds, stackPoll())
+		// The schedules' clock. Nothing announces a cadence coming due;
+		// this is the only thing that fires one.
+		cmds = append(cmds, schedulePoll())
 	}
 	return tea.Batch(cmds...)
 }
@@ -1820,6 +1823,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if cmd, ok := m.updateStack(msg); ok {
+		return m, cmd
+	}
+	if cmd, ok := m.updateSchedule(msg); ok {
 		return m, cmd
 	}
 	if cmd, ok := m.updateWsStats(msg); ok {
@@ -3280,6 +3286,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		// reports and never acts: every key that would change something
 		// belongs on the card it would change.
 		return m.openWeek()
+	case "L":
+		// Schedules and heartbeats: what comes back on a clock without a
+		// person typing. The list is the only place the board shows them,
+		// so the key lives beside W's — another whole-board surface.
+		return m.openSchedules()
 	case "C":
 		// The board-wide counterpart of c: c tidies one landed card, C
 		// closes out the session — walk what is ready to land, then sweep
