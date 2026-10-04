@@ -127,10 +127,10 @@ func skillRootList() string {
 // the backend cannot honor it. The warning is the point: silence here
 // would look exactly like a skill whose instructions the model chose to
 // ignore.
-func (e *Engine) skillDirsFor(ag skillCapable, backend, repo string) []string {
+func (e *Engine) skillDirsFor(ag skillCapable, backend string) []string {
 	dirs := e.forwardedSkillDirs()
 	if e.cfg.Workspace.Root != "" {
-		managed, err := agentplugins.SkillDirs(e.cfg.Workspace.Root, repo)
+		managed, err := agentplugins.SkillDirs(e.cfg.Workspace.Root)
 		if err != nil {
 			e.warn(fmt.Sprintf("agent plugin skills: %v", err))
 		} else {

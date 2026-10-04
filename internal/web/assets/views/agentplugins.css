@@ -2,9 +2,7 @@
 /* views/agentplugins.css — workspace-local agent and skill definitions. */
 
 .vplugins{display:flex;flex-direction:column;gap:14px}
-.vplugins .pintro{display:flex;align-items:flex-start;gap:18px;color:var(--fg2);font-size:13px}
-.vplugins .pintro p{margin:0;flex:1;line-height:1.55}
-.vplugins .pintro .field{max-width:220px;min-width:180px}
+.vplugins .pintro p{margin:0;color:var(--fg2);font-size:13px;line-height:1.55}
 .ptabs{display:flex;gap:6px;border-bottom:1px solid var(--line)}
 .ptabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--fg3);padding:9px 13px;font:inherit;cursor:pointer}
 .ptabs button:hover,.ptabs button.on{color:var(--fg);border-bottom-color:var(--accent)}
@@ -17,7 +15,6 @@
 .pitemtitle strong{font-size:13px}
 .pitemtitle abbr{border-bottom:1px dotted var(--line);cursor:help}
 .ptag,.plinked{font-size:11px;border-radius:10px;padding:2px 7px;color:var(--fg3);background:var(--sunk)}
-.pscope-summary{margin-top:4px;font-size:12px;color:var(--fg2)}
 .psource{margin-top:3px;font-size:11px;color:var(--fg4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pitemactions{display:flex;gap:5px}
 .pitemactions .btn{padding:5px 8px}
@@ -37,11 +34,7 @@
 .peditor .field textarea{font:12px/1.5 var(--mono);min-height:240px;resize:vertical}
 .peditor .psectionhead{margin-bottom:2px}
 .pactions,.pimportactions{display:flex;justify-content:flex-end;gap:7px}
-.pscope{display:flex;flex-direction:column;gap:8px;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
-.pscope legend{padding:0 5px;color:var(--fg2);font-size:12px}
-.pcheck{display:inline-flex;align-items:center;gap:7px;color:var(--fg2);font-size:12px}
-.pcheck input,.pcandidate input{accent-color:var(--accent)}
-.prepos{display:flex;flex-wrap:wrap;gap:8px 16px;padding-left:22px}
+.pcandidate input{accent-color:var(--accent)}
 .pcandidates{display:flex;flex-direction:column;gap:5px}
 .pcandidate{display:grid;grid-template-columns:18px minmax(100px,180px) minmax(75px,100px) minmax(0,1fr);align-items:center;gap:9px;padding:7px 8px;border:1px solid var(--line);border-radius:7px;color:var(--fg2);font-size:12px}
 .pcandname{color:var(--fg);font-weight:600}
@@ -53,8 +46,6 @@
 .pexplicitrow input{min-width:0}
 .pbusy{display:flex;align-items:center;gap:8px;color:var(--fg3);font-size:12px}
 @media(max-width:760px){
-  .vplugins .pintro{display:block}
-  .vplugins .pintro .field{max-width:none;margin-top:10px}
   .pitem{grid-template-columns:1fr}
   .pitemactions{justify-content:flex-end}
   .pcandidate{grid-template-columns:18px minmax(0,1fr) minmax(75px,auto)}

@@ -2039,7 +2039,7 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// Workspace skills the operator forwarded. The worktree is a
 		// sibling of the repository, so nothing the workspace root holds
 		// is in this session's project scope unless it is named here.
-		SkillDirs: e.skillDirsFor(ag, backendLabel(backend), f.Repo),
+		SkillDirs: e.skillDirsFor(ag, backendLabel(backend)),
 	})
 	if specErr != nil {
 		mcpTeardown()

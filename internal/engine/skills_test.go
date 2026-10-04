@@ -144,7 +144,7 @@ func TestForwardingToAnIncapableBackendWarns(t *testing.T) {
 	writeSkill(t, ws, filepath.Join(".agents", "skills"), "container-env")
 	e, notices := newSkillsEngine(t, ws, "container-env")
 
-	got := e.skillDirsFor(stubSkillAgent{}, "codex", "")
+	got := e.skillDirsFor(stubSkillAgent{}, "codex")
 	if len(got) != 0 {
 		t.Fatalf("skillDirsFor handed dirs to a backend that cannot use them: %v", got)
 	}
@@ -154,7 +154,7 @@ func TestForwardingToAnIncapableBackendWarns(t *testing.T) {
 
 	// Once per backend, not once per card: a board runs many cards on the
 	// same backend and must not repeat itself for each of them.
-	e.skillDirsFor(stubSkillAgent{}, "codex", "")
+	e.skillDirsFor(stubSkillAgent{}, "codex")
 	if len(*notices) != 1 {
 		t.Errorf("the notice repeated: %v", *notices)
 	}
@@ -166,7 +166,7 @@ func TestForwardingToACapableBackendPasses(t *testing.T) {
 	want := writeSkill(t, ws, filepath.Join(".agents", "skills"), "container-env")
 	e, notices := newSkillsEngine(t, ws, "container-env")
 
-	got := e.skillDirsFor(stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}, "opencode", "")
+	got := e.skillDirsFor(stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}, "opencode")
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("skillDirsFor() = %v, want [%s]", got, want)
 	}
@@ -179,7 +179,7 @@ func TestForwardingToACapableBackendPasses(t *testing.T) {
 // ordinary board must be untouched by this feature.
 func TestNoForwardingIsSilent(t *testing.T) {
 	e, notices := newSkillsEngine(t, t.TempDir())
-	if got := e.skillDirsFor(stubSkillAgent{}, "codex", ""); got != nil {
+	if got := e.skillDirsFor(stubSkillAgent{}, "codex"); got != nil {
 		t.Errorf("skillDirsFor() = %v, want nil", got)
 	}
 	if len(*notices) != 0 {
@@ -187,7 +187,10 @@ func TestNoForwardingIsSilent(t *testing.T) {
 	}
 }
 
-func TestManagedSkillsAreLimitedToSelectedRepository(t *testing.T) {
+// Managed skills are globally available: a skill created in a workspace
+// with a managed repository reaches every card regardless of which
+// repository it is working in. There is no per-repository scope.
+func TestManagedSkillsAreGloballyAvailable(t *testing.T) {
 	ws := t.TempDir()
 	if err := os.Mkdir(filepath.Join(ws, ".gummi"), 0o700); err != nil {
 		t.Fatal(err)
@@ -200,18 +203,14 @@ func TestManagedSkillsAreLimitedToSelectedRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Create(agentplugins.KindSkill, "Griffin", "# Griffin\n", false, []string{"griffin"}); err != nil {
+	if _, err := store.Create(agentplugins.KindSkill, "Griffin", "# Griffin\n"); err != nil {
 		t.Fatal(err)
 	}
 	e, notices := newSkillsEngine(t, ws)
 	capable := stubSkillAgent{caps: agent.Capabilities{SkillDirs: true}}
-	got := e.skillDirsFor(capable, "copilot", "griffin")
 	want := filepath.Join(ws, ".gummi", "agent-plugins", "items", "skill-griffin")
-	if len(got) != 1 || got[0] != want {
+	if got := e.skillDirsFor(capable, "copilot"); len(got) != 1 || got[0] != want {
 		t.Fatalf("griffin skills = %v, want [%s]", got, want)
-	}
-	if got := e.skillDirsFor(capable, "copilot", "ams"); len(got) != 0 {
-		t.Errorf("ams received Griffin-only skills: %v", got)
 	}
 	if len(*notices) != 0 {
 		t.Errorf("notices = %v, want none", *notices)

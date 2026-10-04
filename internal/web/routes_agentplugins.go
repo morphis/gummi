@@ -46,7 +46,7 @@ func (s *Server) handleAgentPlugins(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, webapi.AgentPlugins{
-		Items: items, Repos: store.Repos(), Providers: providers,
+		Items: items, Providers: providers,
 	})
 }
 
@@ -55,10 +55,13 @@ func (s *Server) handleAgentPluginDiscover(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	// accept an optional JSON body that narrows discovery to a specific repo/path
+	// accept an optional JSON body that narrows discovery to a specific
+	// repo/path and/or a single kind, so a scan started from the skills or
+	// agents tab only returns candidates relevant to that tab.
 	var req struct {
 		Repo string `json:"repo"`
 		Path string `json:"path"`
+		Kind string `json:"kind"`
 	}
 	_ = readJSON(w, r, &req) // ignore error — empty body is fine
 	if req.Path != "" {
@@ -71,7 +74,7 @@ func (s *Server) handleAgentPluginDiscover(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, webapi.AgentPluginDiscover{Candidates: cands})
+		writeJSON(w, http.StatusOK, webapi.AgentPluginDiscover{Candidates: filterCandidatesByKind(cands, req.Kind)})
 		return
 	}
 	candidates, err := store.Discover()
@@ -79,7 +82,22 @@ func (s *Server) handleAgentPluginDiscover(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, webapi.AgentPluginDiscover{Candidates: candidates})
+	writeJSON(w, http.StatusOK, webapi.AgentPluginDiscover{Candidates: filterCandidatesByKind(candidates, req.Kind)})
+}
+
+// filterCandidatesByKind narrows candidates to the requested kind. An empty
+// kind returns every candidate unchanged.
+func filterCandidatesByKind(candidates []agentplugins.Candidate, kind string) []agentplugins.Candidate {
+	if kind == "" {
+		return candidates
+	}
+	out := make([]agentplugins.Candidate, 0, len(candidates))
+	for _, c := range candidates {
+		if c.Kind == kind {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *Server) handleAgentPluginCreate(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +110,7 @@ func (s *Server) handleAgentPluginCreate(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
 		return
 	}
-	item, err := store.Create(req.Kind, req.Name, req.Content, req.Global, req.Repos)
+	item, err := store.Create(req.Kind, req.Name, req.Content)
 	if err != nil {
 		writeAgentPluginError(w, err)
 		return
@@ -110,7 +128,7 @@ func (s *Server) handleAgentPluginImport(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
 		return
 	}
-	items, err := store.ImportMany(req.Sources, req.Global, req.Repos)
+	items, err := store.ImportMany(req.Sources)
 	if err != nil {
 		writeAgentPluginError(w, err)
 		return
@@ -143,7 +161,7 @@ func (s *Server) handleAgentPluginUpdate(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
 		return
 	}
-	item, err := store.Update(r.PathValue("id"), req.Name, req.Content, req.Global, req.Repos)
+	item, err := store.Update(r.PathValue("id"), req.Name, req.Content)
 	if err != nil {
 		writeAgentPluginError(w, err)
 		return

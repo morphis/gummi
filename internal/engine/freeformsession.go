@@ -308,7 +308,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
-		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend), f.Repo),
+		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives

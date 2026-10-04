@@ -18,13 +18,9 @@ func TestAgentPluginCRUDAndProviderCapabilities(t *testing.T) {
 	var created agentplugins.Item
 	status := b.call(http.MethodPost, "/api/plugins", webapi.AgentPluginCreateRequest{
 		Kind: agentplugins.KindSkill, Name: "Code Reviewer", Content: "# Review\n",
-		Repos: []string{"default"},
 	}, &created)
 	if status != http.StatusCreated {
 		t.Fatalf("create status = %d, item = %+v", status, created)
-	}
-	if created.Global || len(created.Repos) != 1 || created.Repos[0] != "default" {
-		t.Fatalf("created scope = %+v", created)
 	}
 	var detail webapi.AgentPluginDetail
 	if status := b.call(http.MethodGet, "/api/plugins/"+created.ID, nil, &detail); status != http.StatusOK {
@@ -50,9 +46,9 @@ func TestAgentPluginCRUDAndProviderCapabilities(t *testing.T) {
 	}
 
 	status = b.call(http.MethodPut, "/api/plugins/"+created.ID, webapi.AgentPluginUpdateRequest{
-		Name: "Code Reviewer", Content: "# Updated\n", Global: true,
+		Name: "Code Reviewer", Content: "# Updated\n",
 	}, &created)
-	if status != http.StatusOK || !created.Global {
+	if status != http.StatusOK {
 		t.Fatalf("update status=%d item=%+v", status, created)
 	}
 	if status := b.call(http.MethodDelete, "/api/plugins/"+created.ID, nil, nil); status != http.StatusOK {
@@ -96,7 +92,6 @@ func TestAgentPluginDiscoveryImportAndExport(t *testing.T) {
 	}
 	if status := b.call(http.MethodPost, "/api/plugins/import", webapi.AgentPluginImportRequest{
 		Sources: discovered.Candidates,
-		Global:  true,
 	}, &imported); status != http.StatusCreated {
 		t.Fatalf("import status = %d, response = %+v", status, imported)
 	}
@@ -139,17 +134,13 @@ func TestAgentPluginDiscoveryImportAndExport(t *testing.T) {
 	}
 }
 
-func TestAgentPluginImportRejectsInvalidScope(t *testing.T) {
+// An import whose source path does not exist is rejected with a 400; there
+// is no availability scope to validate anymore, since every item is
+// globally available once imported.
+func TestAgentPluginImportRejectsMissingPath(t *testing.T) {
 	b := newBoardHarness(t)
-	res := b.call(http.MethodPost, "/api/plugins", webapi.AgentPluginCreateRequest{
-		Kind: agentplugins.KindSkill, Name: "Scoped", Content: "# scoped\n", Repos: []string{"not-configured"},
-	}, nil)
-	if res != http.StatusBadRequest {
-		t.Fatalf("invalid scope status = %d, want 400", res)
-	}
-	res = b.call(http.MethodPost, "/api/plugins/import", webapi.AgentPluginImportRequest{
+	res := b.call(http.MethodPost, "/api/plugins/import", webapi.AgentPluginImportRequest{
 		Sources: []agentplugins.Candidate{{Kind: agentplugins.KindSkill, Repo: "default", Path: "missing/SKILL.md"}},
-		Global:  true,
 	}, nil)
 	if res != http.StatusBadRequest {
 		t.Fatalf("missing import path status = %d, want 400", res)
@@ -158,8 +149,7 @@ func TestAgentPluginImportRejectsInvalidScope(t *testing.T) {
 
 func TestAgentPluginResponseShape(t *testing.T) {
 	body, err := json.Marshal(webapi.AgentPlugins{
-		Items:     []agentplugins.Item{{ID: "skill-review", Kind: agentplugins.KindSkill, Name: "Review", Entry: "SKILL.md", Global: true}},
-		Repos:     []string{"griffin"},
+		Items:     []agentplugins.Item{{ID: "skill-review", Kind: agentplugins.KindSkill, Name: "Review", Entry: "SKILL.md"}},
 		Providers: []webapi.AgentPluginProvider{{Name: "copilot", SkillDirs: true, SkillDetail: "Enabled skills are available to new sessions."}},
 	})
 	if err != nil {
@@ -169,7 +159,7 @@ func TestAgentPluginResponseShape(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"items", "repos", "providers"} {
+	for _, key := range []string{"items", "providers"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("response missing %q: %s", key, body)
 		}
