@@ -34,7 +34,15 @@ export function initPanel (c) {
     cacheFor = state.sel
     // no card (a new session's draft): nothing loads, so the pane and its
     // tabs are cleared here or they keep the last card's
-    if (!state.sel) { set({ diffPending: 0 }); renderTabs(); renderPane(false); return }
+    if (!state.sel) {
+      set({ diffPending: 0 })
+      // nor does the address bar keep naming the card that was open: a
+      // reload must not reopen it under the draft
+      if (location.hash) try { history.replaceState(history.state, '', location.pathname + location.search) } catch {}
+      renderTabs()
+      renderPane(false)
+      return
+    }
     prefetch()
     load(state.tab)
   })
@@ -147,7 +155,8 @@ function renderTabs () {
       onclick: () => set({ view: 'thread' })
     }, 'Thread'))
   }
-  for (const t of shown()) {
+  // a session's draft has no documents: the row holds no tabs to pick
+  for (const t of state.sel ? shown() : []) {
     const e = cache[t.name]
     const on = state.tab === t.name && (!phone || state.view === 'panel')
     const empty = e && !e.err && e.data && t.empty?.(e.data)
@@ -169,7 +178,8 @@ function renderTabs () {
   if (!phone) box.append(h('span', { class: 'sp' }, h('button', {
     class: 'iconbtn', type: 'button', testid: 'panel-close', title: 'Hide panel (])', 'aria-label': 'Hide panel', onclick: togglePanel
   }, icon('close'))))
-  $('#pane').setAttribute('aria-labelledby', `tab-${state.tab}`)
+  if (state.sel) $('#pane').setAttribute('aria-labelledby', `tab-${state.tab}`)
+  else $('#pane').removeAttribute('aria-labelledby')
   if (hadFocus) list.querySelector('[aria-selected="true"]')?.focus()
 }
 

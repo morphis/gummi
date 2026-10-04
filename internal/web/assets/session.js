@@ -44,9 +44,12 @@ async function loadForm (repo = '') {
   return form
 }
 
-// newSession opens an empty draft in the conversation column.
+// newSession opens an empty draft in the conversation column. cameFrom
+// is the card open before it, which Cancel goes back to.
+let cameFrom = null
 export async function newSession () {
   closePop()
+  if (state.sel) cameFrom = state.sel
   // the draft opens at once, on what the page already knows; the form's
   // defaults fill it when they arrive, without touching what was typed
   const known = form
@@ -136,8 +139,8 @@ function cancelDraft () {
   closePop()
   set({ sessionDraft: null })
   ctx.clearComposer?.()
-  const first = state.board?.rows?.[0]?.id
-  if (first) ctx.select(first)
+  const back = state.board?.rows?.some(r => r.id === cameFrom) ? cameFrom : state.board?.rows?.[0]?.id
+  if (back) ctx.select(back)
 }
 
 // draftTakesImages is whether the session this draft would start can
@@ -199,7 +202,7 @@ function render () {
   row.append(h('button', {
     class: 'dsel dbtn', type: 'button', testid: 'draft-main',
     title: d.mainCheckout ? 'The session works in the main checkout: no branch, no worktree, its changes left uncommitted' : 'The session works in its own branch worktree',
-    onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout, base: '' } })
+    onclick: () => set({ sessionDraft: { ...state.sessionDraft, mainCheckout: !d.mainCheckout } })
   }, d.mainCheckout ? h('b', null, 'the main checkout') : 'own worktree'))
   if (!d.mainCheckout) {
     row.append(h('label', { class: 'dsel' }, h('span', { class: 'lbl' }, 'from'),
