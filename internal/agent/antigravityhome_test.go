@@ -167,7 +167,13 @@ func antigravitySnapshotsEqual(a, b map[string]string) bool {
 // is that home, and the home survives Close (conversations live under
 // it, which is what resume needs).
 func TestAntigravityCardHomeRedirectsChild(t *testing.T) {
-	_ = antigravityTokenFixture(t, "tok")
+	tok := antigravityTokenFixture(t, "tok")
+	realHome := strings.TrimSuffix(tok, string(filepath.Separator)+filepath.FromSlash(antigravityTokenRelPath))
+	gitconfig := filepath.Join(realHome, ".gitconfig")
+	if err := os.WriteFile(gitconfig, []byte("[user]\n\tname = op\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", "")
 	dir := t.TempDir()
 	log := filepath.Join(dir, "calls")
 	bin := filepath.Join(dir, "agy")
@@ -195,7 +201,7 @@ func TestAntigravityCardHomeRedirectsChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var homes []string
+	var homes, gitconfigs []string
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 		var rec map[string]any
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
@@ -203,10 +209,16 @@ func TestAntigravityCardHomeRedirectsChild(t *testing.T) {
 		}
 		if h, ok := rec["home"].(string); ok {
 			homes = append(homes, h)
+			g, _ := rec["gitconfig"].(string)
+			gitconfigs = append(gitconfigs, g)
 		}
 	}
 	if len(homes) != 1 || homes[0] != filepath.Join(scratch, "agy-home") {
 		t.Fatalf("child HOME = %v, want the card home under ScratchDir", homes)
+	}
+	// the tools agy runs keep the operator's git identity
+	if gitconfigs[0] != gitconfig {
+		t.Errorf("child GIT_CONFIG_GLOBAL = %q, want the operator's %s", gitconfigs[0], gitconfig)
 	}
 	if _, err := os.Stat(antigravityTokenIn(filepath.Join(scratch, "agy-home"))); err != nil {
 		t.Errorf("card home's seeded token missing after Close: %v", err)
@@ -752,5 +764,87 @@ func antigravityTempHomes() []string {
 func TestAntigravityCatalogEmptyMeansNoCatalog(t *testing.T) {
 	if _, err := antigravityModelCatalog(context.Background(), filepath.Join(t.TempDir(), "no-such-agy")); err == nil {
 		t.Error("a missing binary cataloged without error")
+	}
+}
+
+// TestAntigravityToolEnvPinsTheRealHomesSettings: the redirected HOME is
+// agy's alone — git, gpg and Go are pointed back at the operator's real
+// settings and caches, an operator-set value always wins, and agy's own
+// XDG roots are never pinned to the real home.
+func TestAntigravityToolEnvPinsTheRealHomesSettings(t *testing.T) {
+	opHome := t.TempDir()
+	for _, d := range []string{".gnupg", filepath.Join(".config", "go")} {
+		if err := os.MkdirAll(filepath.Join(opHome, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(opHome, ".gitconfig"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	goenv := filepath.Join(opHome, ".config", "go", "env")
+	if err := os.WriteFile(goenv, []byte("GOPROXY=direct\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lookup := func(env []string) map[string]string {
+		m := map[string]string{}
+		for _, kv := range env {
+			k, v, _ := strings.Cut(kv, "=")
+			m[k] = v // last wins, as for exec
+		}
+		return m
+	}
+
+	got := lookup(antigravityToolEnv([]string{"HOME=/card", "PATH=/bin"}, opHome))
+	want := map[string]string{
+		"HOME":                "/card",
+		"GIT_CONFIG_GLOBAL":   filepath.Join(opHome, ".gitconfig"),
+		"GNUPGHOME":           filepath.Join(opHome, ".gnupg"),
+		"GOENV":               goenv,
+		"GOPATH":              filepath.Join(opHome, "go"),
+		"GOCACHE":             filepath.Join(opHome, ".cache", "go-build"),
+		"GOLANGCI_LINT_CACHE": filepath.Join(opHome, ".cache", "golangci-lint"),
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_CACHE_HOME"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("%s pinned to %q; agy reads it, so it must stay redirected", k, got[k])
+		}
+	}
+
+	// operator-set values pass through untouched; an operator XDG cache
+	// root already covers the Go caches.
+	got = lookup(antigravityToolEnv([]string{
+		"HOME=/card", "GIT_CONFIG_GLOBAL=/mine", "GOPATH=/gp", "XDG_CACHE_HOME=/xc",
+	}, opHome))
+	if got["GIT_CONFIG_GLOBAL"] != "/mine" || got["GOPATH"] != "/gp" {
+		t.Errorf("operator values overridden: %v", got)
+	}
+	if _, ok := got["GOCACHE"]; ok {
+		t.Errorf("GOCACHE pinned despite an operator XDG_CACHE_HOME: %v", got)
+	}
+
+	// a go env file that sets GOPATH/GOCACHE itself is honored, not
+	// overridden by a pinned default.
+	if err := os.WriteFile(goenv, []byte("GOPATH=/from-file\nGOCACHE=/c\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = lookup(antigravityToolEnv([]string{"HOME=/card"}, opHome))
+	if _, ok := got["GOPATH"]; ok {
+		t.Errorf("GOPATH pinned over the go env file's own: %v", got)
+	}
+	if _, ok := got["GOCACHE"]; ok {
+		t.Errorf("GOCACHE pinned over the go env file's own: %v", got)
+	}
+
+	// nothing to pin to: no gitconfig, no gnupg — nothing invented.
+	got = lookup(antigravityToolEnv([]string{"HOME=/card"}, t.TempDir()))
+	for _, k := range []string{"GIT_CONFIG_GLOBAL", "GNUPGHOME", "GOENV"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("%s pinned to %q with nothing at the opHome home", k, got[k])
+		}
 	}
 }

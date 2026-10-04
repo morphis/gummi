@@ -81,7 +81,7 @@ skills = None
 sd = os.path.join(home, ".gemini", "config", "skills")
 if os.path.isdir(sd):
     skills = sorted(os.listdir(sd))
-rec({"argv": sys.argv[1:], "home": home, "mcp": mcp, "skills": skills})
+rec({"argv": sys.argv[1:], "home": home, "mcp": mcp, "skills": skills, "gitconfig": os.environ.get("GIT_CONFIG_GLOBAL", "")})
 for line in sys.stdin:
     line = line.strip()
     if not line: continue

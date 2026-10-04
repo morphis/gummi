@@ -78,7 +78,13 @@ review.
   `mcp_config.json`, conversations) lives there and nowhere in the
   operator's own config; the card home is seeded from the operator's
   login (re-run `agy` in your real home to refresh it) and removed with
-  the card's cleanup. gummi's tools reach the child through the card
+  the card's cleanup. The tools agy runs inherit that `HOME`, so gummi
+  points the few settings they need back at your real home, each only
+  when you have not set it yourself: `GIT_CONFIG_GLOBAL` (your git
+  identity and signing setup), `GNUPGHOME`, and Go's `GOENV`, `GOPATH`,
+  `GOCACHE` and `GOLANGCI_LINT_CACHE`, so cards share your module and
+  build caches. `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` stay redirected,
+  because agy reads them itself. gummi's tools reach the child through the card
   home's `mcp_config.json`, and forwarded skills are symlinked into the
   card home's skill root (`~/.gemini/config/skills` under the card home).
   Usage is metered as per-turn deltas from agy's cumulative token totals;

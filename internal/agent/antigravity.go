@@ -221,8 +221,11 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 	cmd.Dir = opts.WorkDir
 	// HOME is the card's redirected home: every file agy writes lands
 	// inside it and never inside the operator's real config (INV-1). The
-	// rest of the environment passes through.
-	cmd.Env = envWithAntigravityHome(os.Environ(), home.dir)
+	// tools agy runs inherit that HOME too, so the few settings they need
+	// from the real one are pinned back (antigravityToolEnv). The rest of
+	// the environment passes through.
+	realHome, _ := os.UserHomeDir()
+	cmd.Env = antigravityToolEnv(envWithAntigravityHome(os.Environ(), home.dir), realHome)
 	// Run the child in its own process group and, on cancel/close, kill
 	// the whole group: agy spawns tool subprocesses that would otherwise
 	// orphan and keep the stdout pipe open, stalling read()'s EOF.
@@ -302,6 +305,97 @@ func envWithAntigravityHome(env []string, home string) []string {
 		out = append(out, kv)
 	}
 	return append(out, "HOME="+home)
+}
+
+// antigravityToolEnv pins back to the operator's real home the settings
+// that the tools an agy child runs would otherwise resolve under the
+// redirected HOME. Without them, every card works as a fresh user:
+//
+//   - git has no global config, so the commit an implementer is told to
+//     make fails with "Author identity unknown" (or the agent writes an
+//     identity into the repo's own config), and a signing setup is lost;
+//   - gpg has no keyring for a commit.gpgsign the global config asks for;
+//   - Go starts with an empty module and build cache per card — gigabytes
+//     per card, cold every time — and ignores the operator's `go env -w`
+//     settings (GOPROXY, GOPRIVATE, …).
+//
+// XDG_CONFIG_HOME and XDG_CACHE_HOME are deliberately not pinned: agy
+// reads both itself, and pointing them at the real home would let it
+// write there. Each pin is the tool's own variable instead, set only when
+// the operator has not set it and only to a location that exists (or,
+// for the Go caches, to where Go itself would put them). ssh needs no pin
+// — it finds ~/.ssh through the passwd entry, not $HOME.
+func antigravityToolEnv(env []string, realHome string) []string {
+	if realHome == "" {
+		return env
+	}
+	set := make(map[string]bool, len(env))
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && v != "" {
+			set[k] = true
+		}
+	}
+	exists := func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	}
+	pin := func(k, v string) {
+		if !set[k] && v != "" {
+			env = append(env, k+"="+v)
+			set[k] = true
+		}
+	}
+
+	// git reads ~/.gitconfig and, when XDG_CONFIG_HOME is unset,
+	// ~/.config/git/config; GIT_CONFIG_GLOBAL names exactly one, so take
+	// the first that exists. An operator-set XDG_CONFIG_HOME already
+	// passes through and git finds its file there itself.
+	if p := filepath.Join(realHome, ".gitconfig"); exists(p) {
+		pin("GIT_CONFIG_GLOBAL", p)
+	} else if p := filepath.Join(realHome, ".config", "git", "config"); !set["XDG_CONFIG_HOME"] && exists(p) {
+		pin("GIT_CONFIG_GLOBAL", p)
+	}
+	if p := filepath.Join(realHome, ".gnupg"); exists(p) {
+		pin("GNUPGHOME", p)
+	}
+
+	// Go: GOENV first, so the operator's `go env -w` file is read; then
+	// the defaults Go derives from HOME, unless that file sets them.
+	var goenvKeys map[string]bool
+	goenv := filepath.Join(realHome, ".config", "go", "env")
+	if set["XDG_CONFIG_HOME"] || !exists(goenv) {
+		goenv = ""
+	}
+	if goenv != "" {
+		pin("GOENV", goenv)
+		goenvKeys = goEnvFileKeys(goenv)
+	}
+	if !goenvKeys["GOPATH"] {
+		pin("GOPATH", filepath.Join(realHome, "go"))
+	}
+	if !set["XDG_CACHE_HOME"] {
+		cache := filepath.Join(realHome, ".cache")
+		if !goenvKeys["GOCACHE"] {
+			pin("GOCACHE", filepath.Join(cache, "go-build"))
+		}
+		pin("GOLANGCI_LINT_CACHE", filepath.Join(cache, "golangci-lint"))
+	}
+	return env
+}
+
+// goEnvFileKeys reads the variable names a `go env -w` file sets.
+func goEnvFileKeys(path string) map[string]bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	keys := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if k, _, ok := strings.Cut(strings.TrimSpace(line), "="); ok && k != "" {
+			keys[k] = true
+		}
+	}
+	return keys
 }
 
 // Close implements Agent: end every live session (temp homes with
