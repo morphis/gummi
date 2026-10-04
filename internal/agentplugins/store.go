@@ -31,15 +31,13 @@ var (
 )
 
 type Item struct {
-	ID          string   `json:"id"`
-	Kind        string   `json:"kind"`
-	Name        string   `json:"name"`
-	Entry       string   `json:"entry"`
-	SourcePath  string   `json:"sourcePath,omitempty"`
-	Linked      bool     `json:"linked"`
-	Global      bool     `json:"global"`
-	Description string   `json:"description,omitempty"`
-	Repos       []string `json:"repos,omitempty"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	Entry       string `json:"entry"`
+	SourcePath  string `json:"sourcePath,omitempty"`
+	Linked      bool   `json:"linked"`
+	Description string `json:"description,omitempty"`
 }
 
 func validateSourceTree(root string) error {
@@ -148,6 +146,10 @@ func New(workspace string, repos []Repo) (*Store, error) {
 		itemsDir:  filepath.Join(gummiDir, "agent-plugins", "items"),
 		repos:     make(map[string]string, len(repos)),
 	}
+	// Always register the workspace root as the "default" repository so
+	// discovery and imports that specify the default repo resolve to the
+	// workspace itself without requiring the caller to provide it.
+	s.repos["default"] = filepath.Clean(root)
 	for _, repo := range repos {
 		name := strings.TrimSpace(repo.Name)
 		if name == "" || strings.ContainsAny(name, `/\`) {
@@ -186,9 +188,6 @@ func (s *Store) List() ([]Item, error) {
 		return nil, err
 	}
 	out := append([]Item(nil), m.Items...)
-	for i := range out {
-		out[i].Repos = append([]string(nil), out[i].Repos...)
-	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Kind != out[j].Kind {
 			return out[i].Kind < out[j].Kind
@@ -230,13 +229,13 @@ func (s *Store) Get(id string) (Detail, error) {
 	return Detail{}, ErrNotFound
 }
 
-func (s *Store) Create(kind, name, content string, global bool, repos []string) (Item, error) {
+func (s *Store) Create(kind, name, content string) (Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.create(kind, name, content, global, repos)
+	return s.create(kind, name, content)
 }
 
-func (s *Store) create(kind, name, content string, global bool, repos []string) (Item, error) {
+func (s *Store) create(kind, name, content string) (Item, error) {
 	name = strings.TrimSpace(name)
 	if err := validateName(name); err != nil {
 		return Item{}, err
@@ -246,10 +245,6 @@ func (s *Store) create(kind, name, content string, global bool, repos []string) 
 	}
 	if len(content) > 1<<20 {
 		return Item{}, fmt.Errorf("%w: markdown content exceeds 1 MiB", ErrInvalid)
-	}
-	repos, err := s.validateScope(global, repos)
-	if err != nil {
-		return Item{}, err
 	}
 	m, err := s.readManifest()
 	if err != nil {
@@ -268,7 +263,7 @@ func (s *Store) create(kind, name, content string, global bool, repos []string) 
 		_ = os.RemoveAll(itemDir)
 		return Item{}, fmt.Errorf("write item: %w", err)
 	}
-	item := Item{ID: id, Kind: kind, Name: name, Entry: entry, Global: global, Repos: repos, Description: parseDescriptionFromText(content)}
+	item := Item{ID: id, Kind: kind, Name: name, Entry: entry, Description: parseDescriptionFromText(content)}
 	m.Items = append(m.Items, item)
 	if err := s.writeManifest(m); err != nil {
 		_ = os.RemoveAll(itemDir)
@@ -277,7 +272,7 @@ func (s *Store) create(kind, name, content string, global bool, repos []string) 
 	return item, nil
 }
 
-func (s *Store) Update(id, name, content string, global bool, repos []string) (Item, error) {
+func (s *Store) Update(id, name, content string) (Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	name = strings.TrimSpace(name)
@@ -286,10 +281,6 @@ func (s *Store) Update(id, name, content string, global bool, repos []string) (I
 	}
 	if len(content) > 1<<20 {
 		return Item{}, fmt.Errorf("%w: markdown content exceeds 1 MiB", ErrInvalid)
-	}
-	repos, err := s.validateScope(global, repos)
-	if err != nil {
-		return Item{}, err
 	}
 	m, err := s.readManifest()
 	if err != nil {
@@ -305,7 +296,7 @@ func (s *Store) Update(id, name, content string, global bool, repos []string) (I
 		if err := atomicfile.Write(filepath.Join(s.itemPath(id), item.Entry), []byte(content), 0o600); err != nil {
 			return Item{}, fmt.Errorf("write item: %w", err)
 		}
-		item.Name, item.Global, item.Repos, item.Linked = name, global, repos, false
+		item.Name, item.Linked = name, false
 		item.Description = parseDescriptionFromText(content)
 		m.Items[i] = item
 		if err := s.writeManifest(m); err != nil {
@@ -316,23 +307,19 @@ func (s *Store) Update(id, name, content string, global bool, repos []string) (I
 	return Item{}, ErrNotFound
 }
 
-func (s *Store) Import(kind, path, repo string, global bool, repos []string) (Item, error) {
-	items, err := s.ImportMany([]Candidate{{Kind: kind, Path: path, Repo: repo}}, global, repos)
+func (s *Store) Import(kind, path, repo string) (Item, error) {
+	items, err := s.ImportMany([]Candidate{{Kind: kind, Path: path, Repo: repo}})
 	if err != nil {
 		return Item{}, err
 	}
 	return items[0], nil
 }
 
-func (s *Store) ImportMany(sources []Candidate, global bool, repos []string) ([]Item, error) {
+func (s *Store) ImportMany(sources []Candidate) ([]Item, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("%w: select at least one item to import", ErrInvalid)
-	}
-	targetRepos, err := s.validateScope(global, repos)
-	if err != nil {
-		return nil, err
 	}
 	m, err := s.readManifest()
 	if err != nil {
@@ -391,8 +378,7 @@ func (s *Store) ImportMany(sources []Candidate, global bool, repos []string) ([]
 		}
 		item := Item{
 			ID: id, Kind: source.Kind, Name: name, Entry: entry,
-			SourcePath: sourcePath, Linked: linked, Global: global,
-			Repos: append([]string(nil), targetRepos...),
+			SourcePath: sourcePath, Linked: linked,
 		}
 		// populate description from the source/copy's entry file
 		if linked {
@@ -707,9 +693,9 @@ func (s *Store) Export(id string) ([]byte, string, error) {
 	return nil, "", ErrNotFound
 }
 
-// SkillDirs returns managed skill directories enabled for repo. "default" is
-// the scope id used by a single-repository workspace.
-func SkillDirs(workspace, repo string) ([]string, error) {
+// SkillDirs returns every managed skill directory in the workspace. Managed
+// skills are always globally available — there is no per-repository scope.
+func SkillDirs(workspace string) ([]string, error) {
 	if _, err := os.Lstat(filepath.Join(workspace, ".gummi")); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
@@ -723,12 +709,9 @@ func SkillDirs(workspace, repo string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if repo == "" {
-		repo = "default"
-	}
 	var out []string
 	for _, item := range m.Items {
-		if item.Kind != KindSkill || (!item.Global && !contains(item.Repos, repo)) {
+		if item.Kind != KindSkill {
 			continue
 		}
 		root, err := s.itemRoot(item.ID)
@@ -753,9 +736,12 @@ func (s *Store) resolveSource(source Candidate) (root, entry, name, sourcePath s
 	}
 	base := s.workspace
 	if source.Repo != "" {
-		var ok bool
-		base, ok = s.repos[source.Repo]
-		if !ok {
+		if repoRoot, ok := s.repos[source.Repo]; ok {
+			base = repoRoot
+		} else if source.Repo != "default" {
+			// "default" labels a workspace-relative scan (see repoOrDefault)
+			// rather than a configured managed repository; only an
+			// unrecognized name that isn't that label is an actual error.
 			err = fmt.Errorf("%w: unknown source repository %q", ErrInvalid, source.Repo)
 			return
 		}
@@ -846,25 +832,6 @@ func (s *Store) resolveSource(source Candidate) (root, entry, name, sourcePath s
 	}
 	sourcePath = filepath.ToSlash(rel)
 	return
-}
-
-func (s *Store) validateScope(global bool, repos []string) ([]string, error) {
-	if !global && len(repos) == 0 {
-		return nil, fmt.Errorf("%w: select at least one repository or enable globally", ErrInvalid)
-	}
-	seen := make(map[string]bool)
-	var out []string
-	for _, repo := range repos {
-		if _, ok := s.repos[repo]; !ok {
-			return nil, fmt.Errorf("%w: unknown managed repository %q", ErrInvalid, repo)
-		}
-		if !seen[repo] {
-			seen[repo] = true
-			out = append(out, repo)
-		}
-	}
-	sort.Strings(out)
-	return out, nil
 }
 
 func (s *Store) makePrivate(item Item) error {
@@ -1174,13 +1141,4 @@ func regularFile(path string) bool {
 func within(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func contains(values []string, value string) bool {
-	for _, v := range values {
-		if v == value {
-			return true
-		}
-	}
-	return false
 }

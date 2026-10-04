@@ -94,7 +94,7 @@ func TestDiscoverAtFindsBundledItemsAndImportMany(t *testing.T) {
 	for _, c := range cands {
 		exported = append(exported, c)
 	}
-	items, err := store.ImportMany(exported, true, nil)
+	items, err := store.ImportMany(exported)
 	if err != nil {
 		t.Fatal(err)
 	}

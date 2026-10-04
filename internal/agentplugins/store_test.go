@@ -25,31 +25,26 @@ func testStore(t *testing.T) (*Store, string, string) {
 	return store, workspace, repo
 }
 
-func TestCreateAndScopeSkills(t *testing.T) {
+// Every managed skill is globally available — SkillDirs returns all of
+// them regardless of which repository a card is working in.
+func TestCreateSkillsAreGloballyAvailable(t *testing.T) {
 	store, workspace, _ := testStore(t)
-	global, err := store.Create(KindSkill, "Code Reviewer", "# review\n", true, nil)
+	global, err := store.Create(KindSkill, "Code Reviewer", "# review\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	project, err := store.Create(KindSkill, "Griffin", "# griffin\n", false, []string{"griffin"})
+	project, err := store.Create(KindSkill, "Griffin", "# griffin\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := SkillDirs(workspace, "griffin")
+	got, err := SkillDirs(workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0] != filepath.Join(workspace, ".gummi", "agent-plugins", "items", global.ID) ||
 		got[1] != filepath.Join(workspace, ".gummi", "agent-plugins", "items", project.ID) {
-		t.Fatalf("SkillDirs(griffin) = %v", got)
-	}
-	got, err = SkillDirs(workspace, "other")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0] != filepath.Join(workspace, ".gummi", "agent-plugins", "items", global.ID) {
-		t.Fatalf("SkillDirs(other) = %v", got)
+		t.Fatalf("SkillDirs() = %v", got)
 	}
 }
 
@@ -65,7 +60,7 @@ func TestImportLinksAndEditCopiesWithoutChangingSource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "references", "rules.md"), []byte("Keep this file.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	item, err := store.Import(KindSkill, ".github/skills/style/SKILL.md", "griffin", false, []string{"griffin"})
+	item, err := store.Import(KindSkill, ".github/skills/style/SKILL.md", "griffin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +73,7 @@ func TestImportLinksAndEditCopiesWithoutChangingSource(t *testing.T) {
 	if _, _, err := store.Export(item.ID); err != nil {
 		t.Fatalf("export linked item: %v", err)
 	}
-	updated, err := store.Update(item.ID, item.Name, "# Edited\n", false, []string{"griffin"})
+	updated, err := store.Update(item.ID, item.Name, "# Edited\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +133,7 @@ func TestImportRejectsPathsOutsideWorkspace(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("# secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Import(KindSkill, outside, "", true, nil); err == nil {
+	if _, err := store.Import(KindSkill, outside, ""); err == nil {
 		t.Fatal("import outside the workspace succeeded")
 	}
 }
@@ -152,7 +147,7 @@ func TestAgentImportCopiesOnlySelectedFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "unrelated.go"), []byte("package example\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	item, err := store.Import(KindAgent, "AGENTS.md", "griffin", true, nil)
+	item, err := store.Import(KindAgent, "AGENTS.md", "griffin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +185,7 @@ func TestRejectsSymlinkedLibraryAndItemsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	item, err := store.Create(KindSkill, "external", "# External\n", true, nil)
+	item, err := store.Create(KindSkill, "external", "# External\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +204,7 @@ func TestRejectsSymlinkedLibraryAndItemsDirectories(t *testing.T) {
 	if err := os.Symlink(externalItems, store.itemsDir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := SkillDirs(workspace, "default"); err == nil {
+	if _, err := SkillDirs(workspace); err == nil {
 		t.Fatal("forwarded a skill through a symlinked items directory")
 	}
 }
@@ -228,7 +223,7 @@ func TestExportContainsItemAndSupportingFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	item, err := store.Import(KindSkill, filepath.Join(source, "SKILL.md"), "griffin", true, nil)
+	item, err := store.Import(KindSkill, filepath.Join(source, "SKILL.md"), "griffin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,5 +243,38 @@ func TestExportContainsItemAndSupportingFiles(t *testing.T) {
 	}
 	if files != 2 {
 		t.Fatalf("zip contains %d files, want 2", files)
+	}
+}
+
+func TestImportWorkspaceRelativeCandidateInMultiRepoWorkspace(t *testing.T) {
+	// Reproduces the multi-repo workspace shape where a "default" repo is
+	// not configured; ensure a workspace-relative discovery candidate (repo
+	// == "default" label) can be imported when the Store was created with
+	// only named repositories.
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, ".gummi"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	repoA := filepath.Join(workspace, "git", "repoA")
+	if err := os.MkdirAll(filepath.Join(repoA, ".github", "skills", "demo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	skill := filepath.Join(repoA, ".github", "skills", "demo", "SKILL.md")
+	if err := os.WriteFile(skill, []byte("# Demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(workspace, []Repo{{Name: "repoA", Root: repoA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cands, err := store.DiscoverAt("git/repoA/.github/skills/demo/SKILL.md", "")
+	if err != nil {
+		t.Fatalf("discover failed: %v", err)
+	}
+	if len(cands) == 0 {
+		t.Fatalf("no candidates discovered")
+	}
+	if _, err := store.ImportMany(cands); err != nil {
+		t.Fatalf("import failed: %v", err)
 	}
 }
