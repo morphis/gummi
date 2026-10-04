@@ -340,17 +340,17 @@ func TestAntigravityMCPUnionAndPrune(t *testing.T) {
 	}
 	s2, err := ag.NewSession(context.Background(), SessionOpts{
 		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
-		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/consult-FD-1-a.sock",
+		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1-review.sock",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := antigravityReadMCPConfig(t, home)
 	if _, ok := got["gummi-FD-1"]; !ok {
-		t.Errorf("union missing the stage session's entry: %v", got)
+		t.Errorf("union missing the first session's entry: %v", got)
 	}
-	if _, ok := got["gummi-consult-FD-1-a"]; !ok {
-		t.Errorf("union missing the consult session's entry: %v", got)
+	if _, ok := got["gummi-FD-1-review"]; !ok {
+		t.Errorf("union missing the second session's entry: %v", got)
 	}
 
 	// closing s1 leaves its entry in the file (prune is at next spawn)
@@ -376,6 +376,55 @@ func TestAntigravityMCPUnionAndPrune(t *testing.T) {
 	}
 	_ = s2.Close()
 	_ = s3.Close()
+}
+
+// TestAntigravityConsultNeverLoadsTheStageEndpoint: a consult session
+// spawned while a stage session is live keeps its own card home, whose
+// config lists only the consult's read-only endpoint — never the stage
+// session's, with its spec-writing and verdict tools — and the stage
+// home's config never lists the consult's.
+func TestAntigravityConsultNeverLoadsTheStageEndpoint(t *testing.T) {
+	_ = antigravityTokenFixture(t, "tok")
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "agy")
+	if err := os.WriteFile(bin, []byte("#!/usr/bin/env python3\n"+fakeAgyArgvEcho), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prev := antigravityExecPath
+	antigravityExecPath = func() (string, error) { return "/opt/gummi-stub", nil }
+	t.Cleanup(func() { antigravityExecPath = prev })
+	ag, err := NewAntigravity(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	scratch := t.TempDir()
+
+	stage, err := ag.NewSession(context.Background(), SessionOpts{
+		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		Role: RoleImplementer, FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1.sock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stage.Close()
+	consult, err := ag.NewSession(context.Background(), SessionOpts{
+		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		Role: RoleConsult, FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/consult-FD-1-a.sock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer consult.Close()
+
+	got := antigravityReadMCPConfig(t, filepath.Join(scratch, "agy-home-consult"))
+	if len(got) != 1 || got["gummi-consult-FD-1-a"] == nil {
+		t.Errorf("consult home's servers = %v, want only its own gummi-consult-FD-1-a", got)
+	}
+	got = antigravityReadMCPConfig(t, filepath.Join(scratch, "agy-home"))
+	if len(got) != 1 || got["gummi-FD-1"] == nil {
+		t.Errorf("stage home's servers = %v, want only gummi-FD-1", got)
+	}
 }
 
 func antigravityReadMCPConfig(t *testing.T, home string) map[string]any {

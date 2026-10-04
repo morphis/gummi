@@ -273,13 +273,24 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 // homeFor resolves and prepares the session's redirected home: the card
 // home keyed by its directory (created lazily, kept across restarts),
 // or a fresh seeded temp home the owning session removes at Close.
+//
+// A consult session gets a card home of its own beside the stage's. agy
+// loads every server a home's mcp_config.json lists, and that file is
+// the union of the home's live sessions — so a consult sharing the stage
+// home would load the stage's endpoint too, and with it spec_replace and
+// submit_verdict, from a conversation whose tool surface is meant to be
+// the read-only three.
 func (a *Antigravity) homeFor(opts SessionOpts) (*antigravityHome, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if opts.ScratchDir == "" {
 		return newAntigravityTempHome()
 	}
-	dir := filepath.Join(opts.ScratchDir, "agy-home")
+	name := "agy-home"
+	if opts.Role == RoleConsult {
+		name = "agy-home-consult"
+	}
+	dir := filepath.Join(opts.ScratchDir, name)
 	if a.homes == nil {
 		a.homes = map[string]*antigravityHome{}
 	}

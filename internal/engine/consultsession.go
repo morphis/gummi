@@ -18,9 +18,11 @@ import (
 // consultPermission is the fixed tool-call policy every consult session
 // spawns with — allow-all (PermissionGuarded is refused outright by some
 // adapters and hangs the others, since nothing in this codebase ever
-// emits agent.EventPermission to answer it). A consult session's tool
-// surface is read-only regardless, so "allow" here never risks a
-// mutation.
+// emits agent.EventPermission to answer it). The gummi tools a consult
+// session is given are read-only regardless. The backend's own shell and
+// file tools are not: they are confined only where the backend can
+// enforce it, and on one without ReadOnlyEnforce (copilot, codex,
+// antigravity) "allow" here lets them run in the main checkout.
 const consultPermission = agent.PermissionAllowAll
 
 // consultIdleTimeout is the golden value (Implementation notes): long
@@ -235,7 +237,7 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		MCPSockPath:    mcpPath,
 		// The card's scratch-files anchor: a backend that anchors its
 		// config in a per-card home (antigravity) derives it from here,
-		// so this session shares the card home its stage sessions use.
+		// keeping a consult home of its own beside the stage sessions'.
 		ScratchDir: e.scratchFilesDirFor(c.id),
 		// No ArtifactPath, no MaxCredits: a consult session has no spec
 		// prompt to seed (card_spec answers that on demand instead) and no

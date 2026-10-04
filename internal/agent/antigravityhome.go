@@ -29,7 +29,9 @@ import (
 //   - the card home, `<SessionOpts.ScratchDir>/agy-home`: created lazily,
 //     kept across restarts (agy's conversations live under it, so resume
 //     survives), and removed with the card's own cleanup pass, which
-//     deletes the scratch-files directory the home sits under;
+//     deletes the scratch-files directory the home sits under. A consult
+//     session's is `agy-home-consult` beside it, so it never loads the
+//     stage session's MCP endpoint (Antigravity.homeFor);
 //   - the temp home, one per session: the intended home for one-shot
 //     session kinds (they never resume), for doctor probes, and for the
 //     model-catalog probe; removed when the session closes.
@@ -289,9 +291,8 @@ func (h *antigravityHome) writeMCPConfig(exe string) error {
 // First-wins on a basename collision: an existing link pointing at a
 // live directory stays. The only removal is a link whose target
 // directory has vanished, which is re-pointed at the incoming dir. A
-// session with no skills touches nothing, so a consult session (which
-// receives no SkillDirs) cannot strip the stage session's links — the
-// two kinds share one card home.
+// session with no skills touches nothing, so a session that forwards
+// none cannot strip the links of another session sharing its home.
 func materializeAntigravitySkills(home string, dirs []string) error {
 	if len(dirs) == 0 {
 		return nil
