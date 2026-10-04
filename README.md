@@ -102,6 +102,10 @@ cd gummi
 make build        # → bin/gummi
 ```
 
+Snap builds use the Go snap's `1.27/stable` track, independently of the
+host toolchain. The minimum Go version for source builds remains the
+version declared in `go.mod`.
+
 The default agent backend is the GitHub Copilot CLI, authenticated:
 
 ```sh

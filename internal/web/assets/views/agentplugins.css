@@ -15,6 +15,7 @@
 .pitem{display:grid;grid-template-columns:minmax(160px,1fr) minmax(210px,auto) auto;align-items:center;gap:12px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
 .pitemtitle{display:flex;align-items:center;gap:8px;color:var(--fg)}
 .pitemtitle strong{font-size:13px}
+.pitemtitle abbr{border-bottom:1px dotted var(--line);cursor:help}
 .ptag,.plinked{font-size:11px;border-radius:10px;padding:2px 7px;color:var(--fg3);background:var(--sunk)}
 .pscope-summary{margin-top:4px;font-size:12px;color:var(--fg2)}
 .psource{margin-top:3px;font-size:11px;color:var(--fg4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
