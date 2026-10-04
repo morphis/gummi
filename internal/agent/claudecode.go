@@ -67,6 +67,12 @@ func NewClaudeCode(bin string) (*ClaudeCode, error) {
 	return &ClaudeCode{bin: resolved}, nil
 }
 
+// ModelCatalog implements ModelCataloger: the models the claude CLI offers,
+// asked through the same transient probe a picker uses without an adapter.
+func (c *ClaudeCode) ModelCatalog(ctx context.Context) ([]string, error) {
+	return ClaudeModelCatalog(ctx, c.bin)
+}
+
 // Name implements Agent.
 func (c *ClaudeCode) Name() string { return "claude" }
 

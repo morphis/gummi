@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -301,9 +303,41 @@ func TestSessionModelChoicesMergesTheCatalogWithTheProfiles(t *testing.T) {
 // TestSessionModelChoicesWithoutAnAgent: nil-safe on every axis — no
 // profiles, no agent, no probe.
 func TestSessionModelChoicesWithoutAnAgent(t *testing.T) {
+	old := agent.ClaudeModelCatalog
+	t.Cleanup(func() { agent.ClaudeModelCatalog = old })
+	agent.ClaudeModelCatalog = func(context.Context, string) ([]string, error) {
+		return nil, errors.New("no claude CLI in this test")
+	}
 	e := &Engine{cfg: Config{Model: "fallback"}}
 	if got := e.SessionModelChoices(context.Background(), "claude"); got != nil {
 		t.Errorf("choices = %v, want nil", got)
+	}
+}
+
+// TestClaudeModelsAreListedInThePicker: a board whose profiles name no
+// claude model still lists claude's models in the picker — the claude
+// CLI's own answer about itself (a list_models control request a
+// stream-json child answers without a turn), the same offer copilot and
+// opencode pickers give. Skips where the CLI is not installed, like any
+// probe that needs a binary.
+func TestClaudeModelsAreListedInThePicker(t *testing.T) {
+	bin, ok := agentcli.Binary("claude")
+	if !ok {
+		t.Skip("claude is not a known backend")
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		t.Skip("claude CLI not installed")
+	}
+	claude, err := agent.NewClaudeCode(bin)
+	if err != nil {
+		t.Skipf("claude CLI unusable: %v", err)
+	}
+	t.Cleanup(func() { _ = claude.Close() })
+	e := &Engine{cfg: Config{Agents: map[string]agent.Agent{"claude": claude}, Model: "fallback"}}
+
+	got := e.SessionModelChoices(context.Background(), "claude")
+	if len(got) == 0 {
+		t.Errorf("claude choices = %v, want the claude CLI's own models listed", got)
 	}
 }
 
@@ -429,5 +463,35 @@ func TestSessionModelCatalogAsksAntigravityWithoutStartingIt(t *testing.T) {
 	}
 	if !strings.Contains(hint, "gemini-3.1-pro-high") || pattern != "" {
 		t.Errorf("rule = (%v, %q, %q), want the effort-in-id hint and no pattern", needsModel, hint, pattern)
+	}
+}
+
+// TestSessionModelCatalogAsksClaudeWithoutStartingIt: claude answers without
+// an adapter to start — its no-adapter probe is asked directly, rebindable
+// like opencode's — so a picker offers the CLI's own models on a board whose
+// profiles name no claude model, and the probe spawns nothing here.
+func TestSessionModelCatalogAsksClaudeWithoutStartingIt(t *testing.T) {
+	var starts atomic.Int32
+	e := New(Config{
+		Agents: map[string]agent.Agent{},
+		StartAgent: func(string) (agent.Agent, error) {
+			starts.Add(1)
+			return nil, errors.New("not installed")
+		},
+		Model: "fallback",
+	})
+	t.Cleanup(func() { e.Close() })
+	old := agent.ClaudeModelCatalog
+	t.Cleanup(func() { agent.ClaudeModelCatalog = old })
+	agent.ClaudeModelCatalog = func(context.Context, string) ([]string, error) {
+		return []string{"sonnet", "claude-sonnet-5-5", "haiku"}, nil
+	}
+
+	ids, ok := e.SessionModelCatalog(context.Background(), "claude")
+	if !ok || !slices.Equal(ids, []string{"sonnet", "claude-sonnet-5-5", "haiku"}) {
+		t.Fatalf("claude catalog = %v (ok=%v), want the probe's own ids", ids, ok)
+	}
+	if starts.Load() != 0 {
+		t.Errorf("the probe started a backend to ask it")
 	}
 }

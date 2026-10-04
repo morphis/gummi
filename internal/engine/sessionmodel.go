@@ -387,9 +387,9 @@ func (e *Engine) SessionModelCatalog(ctx context.Context, backend string) ([]str
 
 // probeModelCatalog asks backend itself, un-cached: the adapter it holds
 // when the adapter can enumerate, else the probes that need no adapter
-// (opencode's CLI answers without a started backend — no authentication
-// involved, just its own catalog; antigravity's `agy models` likewise,
-// under its own seeded temp home).
+// (opencode's, claude's and antigravity's CLIs answer without a started
+// backend — no session involved, just their own catalog; antigravity's
+// `agy models` runs under its own seeded temp home).
 func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]string, bool) {
 	if a := e.knownAgent(backend); a != nil {
 		cl, ok := a.(agent.ModelCataloger)
@@ -402,23 +402,23 @@ func (e *Engine) probeModelCatalog(ctx context.Context, backend string) ([]strin
 		}
 		return ids, true
 	}
-	if backend == "opencode" {
-		bin, _ := agentcli.Binary("opencode")
-		ids, err := agent.OpencodeModelCatalog(ctx, bin)
-		if err != nil || len(ids) == 0 {
-			return nil, false
-		}
-		return ids, true
+	var probe func(context.Context, string) ([]string, error)
+	switch backend {
+	case "opencode":
+		probe = agent.OpencodeModelCatalog
+	case "claude":
+		probe = agent.ClaudeModelCatalog
+	case "antigravity":
+		probe = agent.AntigravityModelCatalog
+	default:
+		return nil, false
 	}
-	if backend == "antigravity" {
-		bin, _ := agentcli.Binary("antigravity")
-		ids, err := agent.AntigravityModelCatalog(ctx, bin)
-		if err != nil || len(ids) == 0 {
-			return nil, false
-		}
-		return ids, true
+	bin, _ := agentcli.Binary(backend)
+	ids, err := probe(ctx, bin)
+	if err != nil || len(ids) == 0 {
+		return nil, false
 	}
-	return nil, false
+	return ids, true
 }
 
 // SessionModelChoices is what a session's model picker offers for
