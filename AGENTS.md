@@ -70,6 +70,7 @@ leaf services.
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |
 | `notify` | Terminal bell / desktop notification on needs-attention. |
 | `atomicfile` | Crash-safe file writes for pre-approval drafts (no git backstop). |
+| `rmtree` | `RemoveAll` that also takes read-only trees (a Go module cache under an agent home) without following links. Use it for any per-card directory an agent may have built in. |
 | `ui` | The Bubbletea TUI: board, chat, diff/spec views, inbox, dialogs. |
 | `driver` | The headless counterpart of the TUI's autonomous loop: drives `run`/`resume` over the engine, emits NDJSON + typed exit statuses, holds the `.gummi` lock. |
 | `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |

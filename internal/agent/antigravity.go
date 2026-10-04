@@ -17,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/morphis/gummi/internal/rmtree"
 )
 
 // antigravityExecPath locates gummi's own executable when rendering the
@@ -1003,7 +1005,7 @@ func (s *antigravitySession) Close() error {
 		_ = s.reap() // reap (read() may already have)
 		s.unregister()
 		if s.home.temp {
-			_ = os.RemoveAll(s.home.dir)
+			_ = rmtree.RemoveAll(s.home.dir)
 		}
 	})
 	return nil
@@ -1015,7 +1017,7 @@ func (s *antigravitySession) Close() error {
 func (s *antigravitySession) teardown() {
 	s.unregister()
 	if s.home != nil && s.home.temp {
-		_ = os.RemoveAll(s.home.dir)
+		_ = rmtree.RemoveAll(s.home.dir)
 	}
 }
 

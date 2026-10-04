@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/cardmint"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/rmtree"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -1717,7 +1718,8 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 	// the card's scratch-files dir is keyed to the record the same way —
 	// throwaway files, and the per-card config home a backend like
 	// antigravity keeps there (best effort: an orphan is only clutter).
-	_ = os.RemoveAll(m.ws.ScratchFilesDir(f.ID))
+	// Through rmtree: that home can hold a read-only Go module cache.
+	_ = rmtree.RemoveAll(m.ws.ScratchFilesDir(f.ID))
 	// what a goal knew that no card owned is keyed to the record in the
 	// same way (state.Workspace.GoalNotebookDir).
 	if f.IsGoal() {

@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/morphis/gummi/internal/rmtree"
 )
 
 // antigravityhome.go is the per-card redirected HOME the antigravity
@@ -350,7 +352,7 @@ func antigravityModelCatalog(ctx context.Context, bin string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = os.RemoveAll(home.dir) }()
+	defer func() { _ = rmtree.RemoveAll(home.dir) }()
 	cmd := exec.CommandContext(ctx, resolved, "models")
 	// INV-1 covers probes: the child's HOME is the temp home, and the
 	// real HOME entry is filtered out first — appending after an

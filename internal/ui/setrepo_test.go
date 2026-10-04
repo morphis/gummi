@@ -185,6 +185,19 @@ func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// what an agent's `go build` leaves under that home: a module cache of
+	// read-only directories and files, which plain os.RemoveAll cannot take.
+	mod := filepath.Join(home, "go", "pkg", "mod", "x@v1")
+	if err := os.MkdirAll(mod, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mod, "a.go"), []byte("package x\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(mod, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mod, 0o700) })
 	other := filepath.Join(m.ws.ScratchFilesDir("FD-999"), "agy-home", ".gemini")
 	if err := os.MkdirAll(other, 0o700); err != nil {
 		t.Fatal(err)

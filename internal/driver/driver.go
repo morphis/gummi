@@ -18,6 +18,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/gatepolicy"
+	"github.com/morphis/gummi/internal/rmtree"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -718,8 +719,10 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 	}
 	// The card's scratch-files dir goes with the card too — a backend
 	// that keeps a per-card config home (antigravity) derives it from
-	// here, and its conversations are no use once the card is gone.
-	if err := os.RemoveAll(d.ws.ScratchFilesDir(id)); err != nil {
+	// here, and its conversations are no use once the card is gone. An
+	// agent's `go build` leaves a read-only module cache under that home,
+	// which plain os.RemoveAll cannot take.
+	if err := rmtree.RemoveAll(d.ws.ScratchFilesDir(id)); err != nil {
 		return d.fail(ctx, string(id), fmt.Errorf("removing scratch files %s: %w", d.ws.ScratchFilesDir(id), err))
 	}
 	d.out.emit(cleanedEvent{
