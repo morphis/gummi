@@ -8,18 +8,16 @@ import { shot } from '../fixtures/shots';
 // does. An issue already on the board lists as such; a gh failure is shown
 // as gh said it.
 
-async function openBugs(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('card-back').click();
+async function openBugs(page: Page) {
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-bugs').click();
   await expect(page.getByTestId('view-bugs')).toBeVisible();
 }
 
 test('list the issues, import two, and they land on the rail', async ({ pairedPage: page, workspace }, info) => {
-  const phone = info.project.name === 'phone';
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await openBugs(page, phone);
+  await openBugs(page);
   await page.getByTestId('bugs-repo').fill('e2e/tiny');
   await page.getByTestId('bugs-fetch').click();
   const list = page.getByTestId('bugs-list');
@@ -53,7 +51,7 @@ test('list the issues, import two, and they land on the rail', async ({ pairedPa
 });
 
 test('closed issues by filter, and gh’s own failure shown plainly', async ({ pairedPage: page }, info) => {
-  await openBugs(page, info.project.name === 'phone');
+  await openBugs(page);
   await page.getByTestId('bugs-repo').fill('e2e/tiny');
   await page.getByTestId('bugs-state').selectOption('closed');
   await page.getByTestId('bugs-fetch').click();

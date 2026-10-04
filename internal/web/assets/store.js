@@ -24,7 +24,7 @@ export const state = {
   showNext: null, // id of the next card needing you, after an answer
   railManual: storage.get('railManual', null), // null: follow the width
   rightHidden: storage.get('rightHidden', false),
-  view: 'thread', // phone view: cards | thread | panel
+  view: 'cards', // phone view: cards | thread | panel — the cards are the root screen
   mdecOpen: false,
   filter: '',
   kind: 'all',

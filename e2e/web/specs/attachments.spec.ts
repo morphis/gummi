@@ -11,8 +11,7 @@ import { shot } from '../fixtures/shots';
 // headless backend — out of scope for image delivery, so its composer and
 // a session draft's attach control are never offered at all).
 
-async function openForm(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('card-back').click();
+async function openForm(page: Page) {
   await page.getByTestId('rail-new').click();
   await expect(page.getByTestId('view-newcard')).toBeVisible();
 }
@@ -20,7 +19,7 @@ async function openForm(page: Page, phone: boolean) {
 const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
 test('a new card attaches an image and its spec shows it', async ({ pairedPage: page }, info) => {
-  await openForm(page, phone(info));
+  await openForm(page);
   await page.getByTestId('newcard-title').fill('Fix the broken header layout');
   await page.getByTestId('newcard-desc').fill('See the attached screenshot.');
   await page.getByTestId('newcard-file').setInputFiles(pixelPNG);
@@ -37,10 +36,8 @@ test('a new card attaches an image and its spec shows it', async ({ pairedPage: 
   await shot(page, info, 'attachments-spec');
 });
 
-test('a session draft hides its attach control on the headless backend', async ({ pairedPage: page }, info) => {
-  const phone = info.project.name === 'phone';
+test('a session draft hides its attach control on the headless backend', async ({ pairedPage: page }) => {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-new-session').click();
   await expect(page.getByTestId('draft-hero')).toBeVisible();
 

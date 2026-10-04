@@ -9,8 +9,7 @@ import { shot } from '../fixtures/shots';
 // is seeded through the CLI and left at implement for this board to
 // conduct; its cards are [slow] so it stays there while the test works.
 
-async function openGoals(page: Page, mobile: boolean) {
-  if (mobile) await page.getByTestId('card-back').click();
+async function openGoals(page: Page) {
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-goals').click();
   await expect(page.getByTestId('view-goals')).toBeVisible();
@@ -31,8 +30,7 @@ test.describe('a running goal', () => {
 
   test('the list, the page, the ledger, a raise, a note and a stop', async ({ pairedPage: page }, info) => {
     test.setTimeout(120_000);
-    const mobile = info.project.name === 'phone';
-    await openGoals(page, mobile);
+    await openGoals(page);
     const row = page.getByTestId(`goal-row-${goal}`);
     await expect(row).toContainText('Greet in two languages');
     await expect(row).toHaveAttribute('data-state', 'running');
@@ -98,9 +96,8 @@ test.describe('a running goal', () => {
     await view.getByTestId('goal-panel-land').getByTestId('goal-action-cancel').click();
   });
 
-  test('a goal card opens on the board, and its head leads back to the goal', async ({ pairedPage: page }, info) => {
-    const mobile = info.project.name === 'phone';
-    await openGoals(page, mobile);
+  test('a goal card opens on the board, and its head leads back to the goal', async ({ pairedPage: page }) => {
+    await openGoals(page);
     await page.getByTestId(`goal-row-${goal}`).click();
     const card = page.getByTestId('view-goal').locator('[data-testid^="goal-card-FD-"]').first();
     const id = (await card.getAttribute('data-testid'))!.replace('goal-card-', '');
@@ -116,7 +113,7 @@ test.describe('a running goal', () => {
   // closes, as in the composer.
   test('a refused goal verb is said on its panel, and the keyboard drives it', async ({ pairedPage: page }, info) => {
     test.skip(info.project.name !== 'desktop', 'the keyboard paths are the same on every viewport');
-    await openGoals(page, false);
+    await openGoals(page);
     await page.getByTestId(`goal-row-${goal}`).click();
     const view = page.getByTestId('view-goal');
     await expect(view.getByTestId('goal-title')).toBeVisible();
@@ -154,7 +151,7 @@ test.describe('a running goal', () => {
   // A goal's page that cannot be read says which goal, and why.
   test('a goal page that fails to load names the goal and the reason', async ({ pairedPage: page }, info) => {
     test.skip(info.project.name !== 'desktop', 'one viewport is enough for an error state');
-    await openGoals(page, false);
+    await openGoals(page);
     await page.route((u) => u.pathname === `/api/goals/${goal}`, (route) =>
       route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'the store is locked' }) }));
     await page.getByTestId(`goal-row-${goal}`).click();
@@ -206,8 +203,7 @@ test.describe('a running goal', () => {
 });
 
 test('a goal is created from the form', async ({ pairedPage: page }, info) => {
-  const mobile = info.project.name === 'phone';
-  await openGoals(page, mobile);
+  await openGoals(page);
   await expect(page.getByTestId('goals-empty')).toBeVisible();
   await page.getByTestId('goals-new').click();
   const form = page.getByTestId('goal-form');
@@ -241,7 +237,7 @@ for (const c of [
     test.skip(info.project.name !== 'desktop', 'one viewport is enough for an error state');
     await page.route((u) => u.pathname === '/api/goals', (route) =>
       route.fulfill({ status: c.status, contentType: 'application/json', body: JSON.stringify(c.body) }));
-    await openGoals(page, false);
+    await openGoals(page);
     const err = page.getByTestId('goals-error');
     await expect(err).toContainText('Goals did not load');
     await expect(err).toContainText(c.says);

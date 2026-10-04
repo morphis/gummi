@@ -170,7 +170,11 @@ async function startBoard () {
     rows().find(r => r.status === 'needs')?.id || rows()[0]?.id
   if (route.id && first !== route.id) toast(`${route.id} is not on this board`)
   const tab = route.id === first ? route.tab : null
-  if (first) await select(first, { tab, view: !!tab })
+  // a phone opens on the cards; only a route that names the card actually
+  // shown (a deep link) moves to its screen — a plain open, and a deep
+  // link naming an id that is not on this board, stay there
+  const view = !!(route.id && first === route.id)
+  if (first) await select(first, { tab, view })
 
   connectEvents()
 }

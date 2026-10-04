@@ -21,8 +21,7 @@ test.use({
   },
 });
 
-async function openFleet(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('card-back').click();
+async function openFleet(page: Page) {
   await page.getByTestId('rail-fleet').click();
   await expect(page.getByTestId('view-fleet')).toBeVisible();
 }
@@ -31,7 +30,7 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
   const phone = info.project.name === 'phone';
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await openFleet(page, phone);
+  await openFleet(page);
   await expect(page.getByTestId('fleet-window-7d')).toHaveAttribute('aria-pressed', 'true');
 
   const rep = (await api('GET', `/api/fleet?from=${encodeURIComponent(new Date(Date.now() - 7 * 864e5).toISOString())}`)).json;
@@ -104,7 +103,7 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
 test('reads in the dark theme too', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name !== 'desktop', 'one theme screenshot is enough');
   await page.getByTestId('btn-theme').click();
-  await openFleet(page, false);
+  await openFleet(page);
   await expect(page.getByTestId(`fleet-lane-${ids.landed}`)).toBeVisible();
   await shot(page, info, 'fleet-dark');
 });

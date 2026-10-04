@@ -21,8 +21,7 @@ test.use({
   },
 });
 
-async function openStacks(page: Page, mobile: boolean) {
-  if (mobile) await page.getByTestId('card-back').click();
+async function openStacks(page: Page) {
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-stacks').click();
   await expect(page.getByTestId('view-stacks')).toBeVisible();
@@ -37,8 +36,7 @@ async function moveBottom(ws: Workspace, id: string, n: number) {
 
 test('a stack is started, grown, reordered, trimmed and restacked', async ({ pairedPage: page, workspace }, info) => {
   test.setTimeout(120_000);
-  const mobile = info.project.name === 'phone';
-  await openStacks(page, mobile);
+  await openStacks(page);
   await expect(page.getByTestId('stacks-empty')).toBeVisible();
 
   // start one from the card at its bottom
@@ -109,6 +107,9 @@ test('the card head’s stack badge opens its stack', async ({ pairedPage: page,
   const made = await api('POST', '/api/stacks', { card: ids.wave, cards: [ids.shrug] });
   expect(made.status).toBe(200);
   const stack = made.json.id as string;
+  // boot names the auto-picked card in the address bar; from there the
+  // reload reopens it (the hash persists)
+  await expect(page).toHaveURL(/#/);
   await page.reload();
   if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   await page.getByTestId(`rail-row-${ids.shrug}`).click();

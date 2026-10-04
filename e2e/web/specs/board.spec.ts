@@ -31,6 +31,9 @@ function watchErrors(page: Page): string[] {
 
 test('the rail shows the seeded cards and a card opens with its head', async ({ pairedPage: page }, info) => {
   const errors = watchErrors(page);
+  // boot names the auto-picked card in the address bar; from there the
+  // reload reopens it (the hash persists)
+  await expect(page).toHaveURL(/#/);
   await page.reload();
   if (info.project.name === 'phone') await page.getByTestId('card-back').click();
   for (const id of [ids.gate, ...ids.backlog, ids.bug]) {
@@ -59,6 +62,8 @@ test('a deep link opens the card and the tab it names', async ({ pairedPage: pag
 });
 
 test('the panel tabs switch, and 501 routes read as not available yet', async ({ pairedPage: page }, info) => {
+  // the tabs sit on a card's screen on a phone: enter one first
+  if (info.project.name === 'phone') await page.getByTestId(`rail-row-${ids.bug}`).click();
   for (const tab of ['diff', 'pr', 'stats', 'spec']) {
     await page.getByTestId(`tab-${tab}`).click();
     await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
@@ -94,25 +99,23 @@ test('three panes sit side by side and never overlap', async ({ pairedPage: page
   await expect.poll(async () => (await page.getByTestId('rail').boundingBox())!.width).not.toBe(before);
 });
 
-test('the phone opens a card from the cards, and its screen names it above its tabs', async ({ pairedPage: page }, info) => {
+test('the phone opens on the cards, and a card opens from them with its screen naming it above its tabs', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name !== 'phone', 'phone only');
-  await expect(page.getByTestId('conversation')).toBeVisible();
-  await expect(page.getByTestId('rail')).toBeHidden();
-  const id = (await page.getByTestId('card-id').textContent())!;
-  await page.getByTestId('card-back').click();
+  // the cards are the root screen: a plain open lands there, cardless
   await expect(page.getByTestId('rail')).toBeVisible();
   await expect(page.getByTestId('conversation')).toBeHidden();
-  // the cards are the root: nothing of one card is on screen over them
   await expect(page.getByTestId('mobile-card')).toBeHidden();
   await shot(page, info, 'cards');
-  await page.getByTestId(`rail-row-${id}`).click();
+  await page.getByTestId(`rail-row-${ids.bug}`).click();
   await expect(page.getByTestId('conversation')).toBeVisible();
+  await expect(page.getByTestId('rail')).toBeHidden();
+  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
   await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('panel')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
   // the documents say whose they are
-  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'false');
   await shot(page, info, 'panel');
@@ -152,8 +155,7 @@ test('j and k walk the rail, ? lists the keys, ⌘K jumps', async ({ pairedPage:
   await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
 });
 
-test('a surface that is not built yet says so', async ({ pairedPage: page }, info) => {
-  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
+test('a surface that is not built yet says so', async ({ pairedPage: page }) => {
   await page.getByTestId('rail-fleet').click();
   await expect(page.getByTestId('view-fleet')).toBeVisible();
   await page.keyboard.press('Escape');

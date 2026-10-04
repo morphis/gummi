@@ -11,9 +11,8 @@ let gate: string;
 let backlog: string[];
 test.use({ seed: { run: async (ws) => { gate = await ws.seedDesignGate('Add a wave helper'); backlog = await ws.seedBacklog(['Add a shrug helper']); } } });
 
-async function openForm(page: Page, phone: boolean) {
+async function openForm(page: Page) {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-new').click();
   await expect(page.getByTestId('view-newcard')).toBeVisible();
   await expect(page.getByTestId('newcard-title')).toBeVisible();
@@ -22,7 +21,7 @@ async function openForm(page: Page, phone: boolean) {
 const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
 test('a feature that waits on one card and stacks on another', async ({ pairedPage: page, api }, info) => {
-  await openForm(page, phone(info));
+  await openForm(page);
   // nothing typed: the form's own refusal, beside the title
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('newcard-error-title')).toHaveText('A card needs a title');
@@ -55,7 +54,7 @@ async function server_deps(api: any, id: string): Promise<string> {
 }
 
 test('a bug with its severity and report', async ({ pairedPage: page, api }, info) => {
-  await openForm(page, phone(info));
+  await openForm(page);
   await page.getByTestId('newcard-kind-bug').click();
   await expect(page.getByTestId('newcard-about')).toContainText('defect');
   await page.getByTestId('newcard-title').fill('Greet panics on an empty name');
@@ -74,7 +73,7 @@ test('a bug with its severity and report', async ({ pairedPage: page, api }, inf
 });
 
 test('a freeform card opens at once', async ({ pairedPage: page }, info) => {
-  await openForm(page, phone(info));
+  await openForm(page);
   await page.getByTestId('newcard-kind-freeform').click();
   await expect(page.getByTestId('newcard-autopilot')).toHaveCount(0);
   await expect(page.getByTestId('newcard-adopt')).toHaveCount(0);
@@ -91,7 +90,7 @@ test('a freeform card opens at once', async ({ pairedPage: page }, info) => {
 });
 
 test('a research card, and a diagnosis', async ({ pairedPage: page, api }, info) => {
-  await openForm(page, phone(info));
+  await openForm(page);
   await page.getByTestId('newcard-kind-research').click();
   await expect(page.getByTestId('newcard-stack')).toHaveCount(0);
   await page.getByTestId('newcard-title').fill('How does the module greet');
@@ -105,8 +104,10 @@ test('a research card, and a diagnosis', async ({ pairedPage: page, api }, info)
   await expect(page.getByTestId('card-id')).toHaveText(/^RS-/);
   const rs = (await page.getByTestId('card-id').textContent())!;
   expect((await api('GET', `/api/cards/${rs}`)).json).toMatchObject({ kind: 'research', envelope: 150 });
+  // the created card opened; back to the cards for the next form
+  if (phone(info)) await page.getByTestId('card-back').click();
 
-  await openForm(page, phone(info));
+  await openForm(page);
   await page.getByTestId('newcard-kind-research-diagnosis').click();
   await page.getByTestId('newcard-title').fill('Why does the build print twice');
   await page.getByTestId('newcard-create').click();
@@ -114,7 +115,7 @@ test('a research card, and a diagnosis', async ({ pairedPage: page, api }, info)
 });
 
 test('create & autopilot hands the new card to autopilot', async ({ pairedPage: page, api }, info) => {
-  await openForm(page, phone(info));
+  await openForm(page);
   await page.getByTestId('newcard-title').fill('Add a wink helper');
   await page.getByTestId('newcard-autopilot').click();
   await expect(page.getByTestId('card-title')).toHaveText('Add a wink helper');
@@ -126,12 +127,14 @@ test('create & autopilot hands the new card to autopilot', async ({ pairedPage: 
 // the branch name, and a script that does not fold still gets one.
 test('a title in any script makes a card', async ({ pairedPage: page, api }, info) => {
   for (const [title, branch] of [['Привет мир', /\/card-[0-9a-f]{8}$/], ['Café résumé', /\/cafe-resume$/]] as const) {
-    await openForm(page, phone(info));
+    await openForm(page);
     await page.getByTestId('newcard-title').fill(title);
     await page.getByTestId('newcard-desc').fill('Say hello in the reader’s own words.');
     await page.getByTestId('newcard-create').click();
     await expect(page.getByTestId('card-title')).toHaveText(title);
     const id = (await page.getByTestId('card-id').innerText()).trim();
     expect((await api('GET', `/api/cards/${id}`)).json.branch).toMatch(branch);
+    // the created card opened; back to the cards for the next one
+    if (phone(info)) await page.getByTestId('card-back').click();
   }
 });

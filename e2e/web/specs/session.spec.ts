@@ -10,7 +10,6 @@ test('a session starts from its first message, on the model picked beside Send',
   test.setTimeout(90_000);
   const phone = info.project.name === 'phone';
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-new-session').click();
 
   await expect(page.getByTestId('draft-hero')).toBeVisible();
@@ -70,7 +69,6 @@ test('a session starts from its first message, on the model picked beside Send',
 test('the model picker survives the keyboard it raises, on a phone', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name !== 'phone', 'the keyboard is a phone’s');
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  await page.getByTestId('card-back').click();
   await page.getByTestId('rail-new-session').click();
   await expect(page.getByTestId('draft-hero')).toBeVisible();
 

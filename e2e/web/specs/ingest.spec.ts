@@ -24,8 +24,7 @@ const DOC = [
   '',
 ].join('\n');
 
-async function openIngest(page: Page, phone: boolean) {
-  if (phone) await page.getByTestId('card-back').click();
+async function openIngest(page: Page) {
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-ingest').click();
   await expect(page.getByTestId('view-ingest')).toBeVisible();
@@ -45,7 +44,7 @@ test('paste, review, rename and drop, approve: the cards land on the rail', asyn
   const phone = info.project.name === 'phone';
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await openIngest(page, phone);
+  await openIngest(page);
   await shot(page, info, 'ingest-form');
   await decompose(page, 'greeting kit');
 
@@ -96,8 +95,8 @@ test('paste, review, rename and drop, approve: the cards land on the rail', asyn
   expect(errors).toEqual([]);
 });
 
-test('merge, one-liner, undrop and discard', async ({ pairedPage: page, api }, info) => {
-  await openIngest(page, info.project.name === 'phone');
+test('merge, one-liner, undrop and discard', async ({ pairedPage: page, api }) => {
+  await openIngest(page);
   await decompose(page, 'greeting kit two');
 
   await page.getByTestId('ingest-oneliner-1').click();

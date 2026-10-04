@@ -18,8 +18,7 @@ test.use({
   },
 });
 
-async function openSchedules(page: Page, mobile: boolean) {
-  if (mobile) await page.getByTestId('card-back').click();
+async function openSchedules(page: Page) {
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-schedules').click();
   await expect(page.getByTestId('view-schedules')).toBeVisible();
@@ -27,8 +26,7 @@ async function openSchedules(page: Page, mobile: boolean) {
 
 test('a schedule is defined, enabled through its confirm, fired and deleted', async ({ pairedPage: page, api, workspace }, info) => {
   test.setTimeout(120_000);
-  const mobile = info.project.name === 'phone';
-  await openSchedules(page, mobile);
+  await openSchedules(page);
 
   // the seeded definition lists, off
   const seeded = page.getByTestId('schedule-nightly-triage');

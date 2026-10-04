@@ -16,22 +16,19 @@ import { shot } from '../fixtures/shots';
 
 const pushFile = (repo: string) => path.join(repo, '.gummi', 'state', 'web', 'push.json');
 
-async function openPush(page: Page, phone: boolean) {
+async function openPush(page: Page) {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
-  if (phone) await page.getByTestId('card-back').click();
   await page.getByTestId('rail-more').click();
   await page.getByTestId('menu-push').click();
   await expect(page.getByTestId('push-dialog')).toBeVisible();
 }
-
-const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
 
 test('a browser that is not allowed to notify says so', async ({ pairedPage: page }, info) => {
   // headless Chromium has no notifications at all: Notification.permission
   // reads "denied" whatever is granted, which is what a person who blocked
   // the site sees
   expect(await page.evaluate(() => Notification.permission)).toBe('denied');
-  await openPush(page, phone(info));
+  await openPush(page);
   await expect(page.getByTestId('push-state')).toHaveAttribute('data-state', 'denied');
   await expect(page.getByTestId('push-body')).toContainText('blocked for this site');
   await expect(page.getByTestId('push-on')).toHaveCount(0);
@@ -74,7 +71,7 @@ test.describe('with a stand-in push service', () => {
 
   test('turning it on subscribes this device, and off unsubscribes it', async ({ pairedPage: page, workspace }, info) => {
     await page.reload();
-    await openPush(page, phone(info));
+    await openPush(page);
     await expect(page.getByTestId('push-state')).toHaveAttribute('data-state', 'off');
     const subscribed = page.waitForRequest((r) => r.url().endsWith('/api/push/subscribe') && r.method() === 'POST');
     await page.getByTestId('push-on').click();
