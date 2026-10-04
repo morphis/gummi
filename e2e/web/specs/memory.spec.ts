@@ -75,3 +75,27 @@ test('a workflow card shows no memory tab', async ({ pairedPage: page, server, a
   const mem = (await api('GET', `/api/cards/${id}/memory`)).json;
   expect(mem.none).toBe(true);
 });
+// The Memory tab is a tab like the others: it survives moving to another
+// session (the next card's head still in flight says nothing about which
+// tabs it has), and a reload or a link naming it opens it.
+test('the memory tab sticks across sessions and reloads', async ({ pairedPage: page, server, api }, info) => {
+  test.setTimeout(90_000);
+  const a = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'First session' })).json?.id);
+  const b = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Second session' })).json?.id);
+  await page.goto(`${server.url}/#${a}`);
+  await expect(page.getByTestId('card-id')).toHaveText(a);
+  await page.getByTestId('tab-memory').click();
+  await expect(page).toHaveURL(new RegExp(`#${a}/memory$`));
+  if (info.project.name === 'phone') {
+    await page.goto(`${server.url}/#${b}/memory`);
+  } else {
+    await page.getByTestId(`rail-row-${b}`).click();
+  }
+  await expect(page.getByTestId('card-id')).toHaveText(b);
+  await expect(page.getByTestId('tab-memory')).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(new RegExp(`#${b}/memory$`));
+  await page.reload();
+  await expect(page.getByTestId('card-id')).toHaveText(b);
+  await expect(page.getByTestId('tab-memory')).toHaveAttribute('aria-selected', 'true');
+  await expect(page).toHaveURL(new RegExp(`#${b}/memory$`));
+});

@@ -32,7 +32,8 @@ function render (pane, entry, ctx) {
       m?.why || 'Memory belongs to a freeform session.'))
     return
   }
-  pane.append(h('div', { class: 'spec', testid: 'memory' },
+  // one column: the documents stack, with none of the spec's outline
+  pane.append(h('div', { class: 'memory', testid: 'memory' },
     h('div', { class: 'src', testid: 'memory-src' },
       m.dir ? `${m.dir} — plain files, never committed; editable by hand` : ''),
     doc('global', 'Global memory', m.global, !isMobile(),
