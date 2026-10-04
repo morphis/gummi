@@ -89,10 +89,10 @@ test.describe('a backlog', () => {
     expect(sent[2].confirm.length).toBeGreaterThan(8);
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).status).toBe(404);
     // where it was open, it is said to be gone; the page does not move
-    // itself onto another card
+    // itself onto another card (on a phone it is this screen's own delete,
+    // so the page is back on the cards already)
     await expect(page.getByTestId('card-title')).toHaveText(`${id} · deleted`);
     await expect(page.getByTestId('card-id')).toHaveCount(0);
-    if (phone(info)) await page.getByTestId('card-back').click();
     await expect(page.getByTestId(`rail-row-${id}`)).toHaveCount(0);
   });
 });

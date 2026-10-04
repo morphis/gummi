@@ -37,6 +37,30 @@ test('a card deleted elsewhere stays gone where it was open', async ({ pairedPag
   expect((await api('GET', `/api/cards/${verified}`)).json.stage).toBe('verify');
 });
 
+// Deleting the open card from its own screen is the reader's own doing, so
+// on a phone — where the card's screen covers the cards and only a tap on
+// back leaves it — the page goes back to the cards by itself. Deleted
+// somewhere else while it was open is different: the reader did nothing,
+// and the page stays put (the test above).
+
+test('deleting the open card from its own screen goes back to the cards', async ({ pairedPage: page, server, api }, info) => {
+  await page.goto(`${server.url}/#${doomed}`);
+  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
+  await page.getByTestId('card-actions').click();
+  await page.getByTestId('action-delete').click();
+  await expect(page.getByTestId('action-question')).toContainText(`Delete ${doomed}?`);
+  await page.getByTestId('action-confirm').click();
+  await expect.poll(async () => (await api('GET', `/api/cards/${doomed}`)).status).toBe(404);
+  if (info.project.name === 'phone') {
+    await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
+    await expect(page.getByTestId('mobile-card')).toBeHidden();
+    await expect(page.getByTestId('rail')).toBeVisible();
+  } else {
+    await expect(page.getByTestId('card-title')).toContainText('deleted');
+  }
+});
+
 // A card's dialog is about that card: opening another one by a link or a
 // hash closes it, rather than leaving it up over a card it does not act
 // on with the keys still going into it.

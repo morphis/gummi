@@ -16,7 +16,7 @@
 // which answers that question and nothing else. A refusal stays in the
 // dialog, in the board's own words.
 
-import { h, clear } from './dom.js?v=__ASSET_V__'
+import { h, clear, isMobile } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal } from './views.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -258,8 +258,18 @@ async function send (id, a, body) {
   const res = await post(cardPath(id, `actions/${encodeURIComponent(a.id)}`), body)
   // what the action changed is read again, documents included
   if (res && res.id === state.sel) set({ card: res, cardRev: (state.cardRev || 0) + 1 })
-  if (res?.ok && !res.id) toast(`${cap(a.label)}: ${id} is gone`)
-  else toast(`${cap(a.label)} · ${id}`)
+  if (res?.ok && !res.id) {
+    toast(`${cap(a.label)}: ${id} is gone`)
+    // the action removed the card this page has open, and it was this
+    // page's own doing: on a phone the card's screen covers the cards, so
+    // the page goes back the way the screen's back chevron does. A
+    // deletion that arrives from elsewhere keeps the page still (the
+    // board watcher in selection.js), and so does the desktop, where the
+    // cards stay beside the open card.
+    if (state.sel === id && isMobile()) set({ view: 'cards' })
+  } else {
+    toast(`${cap(a.label)} · ${id}`)
+  }
   return res
 }
 
