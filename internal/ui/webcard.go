@@ -427,6 +427,9 @@ func (b *Bridge) WritespecDraft(ctx context.Context, id string) (webapi.Writespe
 	}
 	brief, source, err := m.engine.SessionHandoffBrief(ctx, f.ID)
 	if err != nil {
+		if errors.Is(err, engine.ErrSessionDirty) {
+			return webapi.WritespecDraft{}, refuse(WebBadRequest, sanitize(err.Error()))
+		}
 		if errors.Is(err, agent.ErrBusy) {
 			return webapi.WritespecDraft{}, &WebError{
 				Code: WebConflict, Reason: webapi.ConflictBusy,

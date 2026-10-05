@@ -534,7 +534,11 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	// a card is at done with a verified stamp already on it, so both
 	// preconditions below would refuse it on a technicality rather than on
 	// anything about the branch.
-	if !f.HandedOff() {
+	if f.HandedOff() {
+		if err := f.MayLandAfterAll(); err != nil {
+			return d.fail(ctx, string(id), fmt.Errorf("%s is %w", id, err))
+		}
+	} else {
 		if f.Stage == domain.StageDone {
 			return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
 		}

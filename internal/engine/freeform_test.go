@@ -556,12 +556,12 @@ func TestAFreeformSessionIsNotToldTheWorkflowGovernsIt(t *testing.T) {
 	}
 }
 
-// TestInterruptingAFreeformTurnCommitsWhatItWrote: a turn a reader stops
+// TestInterruptingAFreeformTurnLeavesWhatItWroteUncommitted: a turn a reader stops
 // has still written whatever it wrote before being stopped, and on a
 // freeform card nothing else will commit it — the idle that normally does
 // never arrives for a turn the backend abandoned. The pty drive found the
 // stop unreachable at all; this pins both halves of it.
-func TestInterruptingAFreeformTurnCommitsWhatItWrote(t *testing.T) {
+func TestInterruptingAFreeformTurnLeavesWhatItWroteUncommitted(t *testing.T) {
 	var interrupted atomic.Bool
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
 		if err := os.WriteFile(filepath.Join(opts.WorkDir, "half.txt"), []byte("half\n"), 0o600); err != nil {

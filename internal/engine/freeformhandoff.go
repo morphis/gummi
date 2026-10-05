@@ -24,10 +24,13 @@ import (
 //
 //   - The session writes its own brief. One synchronous turn, on the
 //     session's own agent and model, asking exactly that. The turn runs
-//     on a fresh, tool-less session of the same backend — the conversation
-//     rides in as a replay hint — so it can neither read nor write
-//     anything, the project memory included; its product is the brief
-//     alone, and its usage is booked against the card like any turn's.
+//     on a fresh session of the same backend with none of gummi's tools —
+//     the conversation rides in as a replay hint — and read-only wherever
+//     the backend can enforce it (ConsultConfined), so it cannot write to
+//     the worktree or the project memory; its product is the brief alone,
+//     and its usage is booked against the card like any turn's. A brief
+//     already answered, with nothing said since, is handed back as it is
+//     rather than paid for again.
 //   - Assembled from the persisted transcript. For a session that cannot
 //     answer — closed, or the backend failed — the asks, the answered
 //     questions and the last reply are laid out as a draft. Deterministic,
@@ -123,11 +126,26 @@ const briefTurnTimeout = 3 * time.Minute
 // backend (closed, or restored after a restart) is never asked; its
 // persisted transcript is all there is, and the draft is assembled from it.
 func (e *Engine) SessionHandoffBrief(ctx context.Context, id domain.FeatureID) (string, BriefSource, error) {
+	// Refused before anything is spent: a brief for a spec that could not
+	// be written is a turn paid for nothing.
+	if err := e.WritespecRefusal(ctx, id); err != nil {
+		return "", "", err
+	}
 	ff := e.Freeform(id)
 	if ff != nil {
 		if err := ff.briefRefusals(); err != nil {
 			return "", "", err
 		}
+	}
+	// The dialog closed and opened again with nothing said in between:
+	// the brief on the record is still the conversation's, so it is
+	// handed back rather than written — and paid for — a second time.
+	if snap, ok := e.freeformTranscript(id); ok {
+		if brief, ok := answeredBrief(snap.Transcript); ok {
+			return trimBrief(brief), BriefLive, nil
+		}
+	}
+	if ff != nil {
 		sess := ff.Session()
 		// A live backend is asked; anything else — a session restored
 		// after a restart carries its conversation but no backend, and
@@ -169,17 +187,87 @@ func (ff *FreeformSession) briefRefusals() error {
 	}
 	snap := sess.Snapshot()
 	if ff.busyBriefing() {
-		return fmt.Errorf("%s is %s already; open the dialog again once it is done: %w",
-			ff.id, BriefDrafting, agent.ErrBusy)
+		return busyRefusal(string(ff.id) + " is " + BriefDrafting + " already; open the dialog again once it is done")
 	}
 	if snap.Busy {
-		return fmt.Errorf("%s is mid-turn; write the spec once this turn ends: %w", ff.id, agent.ErrBusy)
+		return busyRefusal(string(ff.id) + " is mid-turn; write the spec once this turn ends")
 	}
 	if snap.PendingAsk != nil {
-		return fmt.Errorf("%s is waiting on your answer — answer the question before writing a spec from it: %w",
-			ff.id, agent.ErrBusy)
+		return busyRefusal(string(ff.id) + " is waiting on your answer — answer the question before writing a spec from it")
 	}
 	return nil
+}
+
+// refusal is a sentence of its own that still answers errors.Is for the
+// sentinel the faces map it by — without that sentinel's wording ("a turn
+// is already in progress") tacked onto a sentence about something else.
+type refusal struct {
+	text string
+	kind error
+}
+
+func (r refusal) Error() string        { return r.text }
+func (r refusal) Is(target error) bool { return target == r.kind }
+
+// busyRefusal is a refusal both faces answer with the busy conflict.
+func busyRefusal(text string) error { return refusal{text: text, kind: agent.ErrBusy} }
+
+// ErrSessionDirty refuses writing a spec from a session whose worktree
+// holds uncommitted work. The spec's branch is cut from the session's
+// last commit, and gummi never commits a session's work for it (DESIGN
+// §19.3), so the loose work would be left behind on a branch the spec
+// does not continue.
+var ErrSessionDirty = errors.New("uncommitted work in the session's worktree")
+
+// WritespecRefusal is why a spec cannot be written from session id right
+// now, or nil. Both the brief and the hand-off ask it: the first so no
+// brief turn is paid for a spec that cannot be written, the second
+// because the worktree may have changed while the dialog was open. A
+// main-checkout session is not asked — its loose work is the person's
+// checkout, and the spec says it carries none of it.
+func (e *Engine) WritespecRefusal(ctx context.Context, id domain.FeatureID) error {
+	f, err := e.feature(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !f.IsFreeform() || f.MainCheckout {
+		return nil
+	}
+	wt, err := e.mgr(ctx, &f)
+	if err != nil {
+		return err
+	}
+	if exists, err := wt.Exists(ctx, &f); err != nil || !exists {
+		return err
+	}
+	dirty, err := wt.Dirty(ctx, &f)
+	if err != nil {
+		return err
+	}
+	if dirty {
+		return refusal{
+			text: string(id) + " has uncommitted work — commit it, or discard it, before writing a spec from it: the spec continues from the session's last commit",
+			kind: ErrSessionDirty,
+		}
+	}
+	return nil
+}
+
+// answeredBrief is the brief a transcript already ends on: gummi's brief
+// line answered by the agent, with nothing after it. Anything said or
+// done since — a turn, a commit, a failed brief's note — makes the
+// conversation newer than the brief, and it is written again.
+func answeredBrief(transcript []Message) (string, bool) {
+	n := len(transcript)
+	if n < 2 {
+		return "", false
+	}
+	ask, reply := transcript[n-2], transcript[n-1]
+	if ask.Author != AuthorSystem || ask.Content != briefTurnPrompt() ||
+		reply.Author != AuthorAssistant || strings.TrimSpace(reply.Content) == "" {
+		return "", false
+	}
+	return reply.Content, true
 }
 
 // briefTurnPrompt is the gummi-authored line the brief turn rides on: what
@@ -193,7 +281,8 @@ func briefTurnPrompt() string {
 		"Write the handoff brief that architect will read — what was asked of you here, what was " +
 		"decided (including every question you asked and the answer you were given), what was done " +
 		"on the branch, and what remains.\n\n" +
-		"Answer in four sections, in order, headed asked, decided, done, remaining. " +
+		"Answer in four sections, in order, each opened by its label alone on a line — asked:, decided:, done:, " +
+		"remaining: — with no markdown headings, since the brief is set inside a section of the spec. " +
 		"Keep the whole brief under " + strconv.Itoa(SpecBriefMax) + " characters — it becomes the spec's " +
 		"opening, not a transcript. Your reply is the brief itself: write it and nothing else."
 }
@@ -238,23 +327,29 @@ func (ff *FreeformSession) liveBrief(ctx context.Context, sess *Session) (string
 	// rather than spent. Released after the turn — win or lose — and
 	// rolled back by it when the backend never gave the turn a session.
 	if !ff.beginBriefing() {
-		return "", fmt.Errorf("%s is %s already; open the dialog again once it is done: %w",
-			ff.id, BriefDrafting, agent.ErrBusy)
+		return "", busyRefusal(string(ff.id) + " is " + BriefDrafting + " already; open the dialog again once it is done")
 	}
 	defer ff.setBriefing(false)
 
 	briefSess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:    workDir,
-		Role:       agent.RoleImplementer,
+		Role:       agent.RoleConsult,
 		Model:      rc.Model,
 		Permission: e.cfg.Permission,
+		// Read-only wherever the backend can enforce it, exactly as a
+		// consult is: the turn runs in the card's worktree, and without
+		// this a backend starts it with its whole writing tool surface —
+		// edits auto-accepted, a shell pre-approved — kept off the files by
+		// the hint below alone. The stripped surface is also the smaller
+		// prompt, which is most of what an uncached first turn costs.
+		ReadOnly: ConsultConfined(ag.Capabilities()),
 		SystemHints: append([]string{
 			"You are writing a handoff summary of a conversation that is ending; " +
 				"read-only — do not modify any file.",
 		}, hints...),
 		FeatureID: string(ff.id),
-		// No Tools, and no MCP endpoint: the brief turn reads and writes
-		// nothing — not the worktree, not the project memory tier. Its
+		// No Tools, and no MCP endpoint: none of gummi's tools reach the
+		// brief turn — not the spec's, not the project memory tier. Its
 		// product is the brief alone.
 	})
 	if err != nil {

@@ -128,3 +128,33 @@ func TestASessionKeepsTheModelItWasGiven(t *testing.T) {
 		t.Errorf("after the switch read back %q/%q, want claude/claude-sonnet-5-5", again.SessionBackend, again.SessionModel)
 	}
 }
+
+// TestASessionRecordsTheSpecItWentOnAs: writing a spec from a session
+// records the spec on the session, read back from the row, and only a
+// freeform card can carry it.
+func TestASessionRecordsTheSpecItWentOnAs(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	ff := freeformFeat(3, "continue me")
+	if err := s.CreateFeature(ctx, ff); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetContinuedAs(ctx, ff.ID, "FD-004"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeature(ctx, ff.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContinuedAs != "FD-004" {
+		t.Errorf("ContinuedAs = %q, want FD-004", got.ContinuedAs)
+	}
+
+	f := feat(5, "a real feature")
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetContinuedAs(ctx, f.ID, "FD-006"); err == nil {
+		t.Error("a feature card recorded a spec it went on as")
+	}
+}

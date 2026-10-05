@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -438,15 +439,20 @@ func TestWhileAFreeformTurnRunsTheAnswerIsToStopIt(t *testing.T) {
 		t.Error("the dependency picker is what p would open mid-turn")
 	}
 
-	// Between turns it is the review loop again, and p is the picker.
+	// Between turns it is the review loop again: nothing to stop, and no
+	// dependency picker either — a session has no stages for a
+	// dependency to hold back.
 	idle := busy
 	idle.freeformBusy = false
 	offered = map[string]bool{}
 	for _, a := range cardActionsFor(idle, r) {
 		offered[a.id] = true
 	}
-	if offered["pause"] || !offered["deps"] {
-		t.Error("between turns p should open the dependency picker, not a stop")
+	if offered["pause"] {
+		t.Error("between turns there is no turn to stop")
+	}
+	if offered["deps"] {
+		t.Error("a session offers a dependency picker, but nothing holds a session back")
 	}
 }
 
@@ -737,5 +743,54 @@ func TestStackCandidatesSkipBranchlessSessions(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "FD-042" || got[1] != open.F.ID {
 		t.Errorf("stack candidates = %v, want FD-042 and %s", got, open.F.ID)
+	}
+}
+
+// TestASessionContinuedAsASpecDoesNotLand: a session continued as a spec
+// hands its work to that spec's branch, which lands it verified. Its own
+// closing block offers no landing, says where the work went, and every
+// landing door refuses it — the same work reaching main a second way,
+// past the floor the person just sent it to, is the one thing it must not
+// do.
+func TestASessionContinuedAsASpecDoesNotLand(t *testing.T) {
+	r := freeformRow(31, "drop the leaked pty fd", true)
+	r.F.Stage = domain.StageDone
+	r.F.HandedOffAt = fixedTime
+	r.F.ContinuedAs = "FD-032"
+
+	in := nextInput{
+		stage: domain.StageDone, kind: domain.KindFreeform, hasWorktree: true,
+		ending: r.F.Ending(false), continuedAs: r.F.ContinuedAs,
+	}
+	for _, a := range closedActions(in) {
+		if a.id == "merge" {
+			t.Errorf("the continued session offers %q", a.label)
+		}
+		if a.id == "newbug" && strings.Contains(a.why, "spec") {
+			t.Errorf("a session has no spec to carry, but the bug row says %q", a.why)
+		}
+	}
+	if s := endingSentence(in); !strings.Contains(s, "Continued as the spec FD-032") || strings.Contains(s, "Landing it after all") {
+		t.Errorf("the closing sentence = %q, want it to name the spec and offer no landing", s)
+	}
+	if q := decisionQuestion(decisionClosed, r, in); q != "FF-031 is closed — continued as FD-032." {
+		t.Errorf("the closing head = %q, want it to name the spec", q)
+	}
+	why := (&Shell{}).landingRefusalIn(r.F, r, true, &in)
+	if !strings.Contains(why, "continues as FD-032") {
+		t.Errorf("landing the continued session was not refused for its spec: %q", why)
+	}
+	// the inventory reads the same refusal, as nextInputFor hands it over
+	in.landRefused = why
+	for _, a := range cardActionsFor(in, r) {
+		if a.id == "handoff" || a.id == "merge" {
+			t.Errorf("the closed session still lists %q", a.id)
+		}
+	}
+
+	// a plain hand-off still lands after all
+	in.continuedAs, r.F.ContinuedAs = "", ""
+	if !slices.ContainsFunc(closedActions(in), func(a nextAction) bool { return a.id == "merge" }) {
+		t.Error("a plain hand-off no longer offers landing it after all")
 	}
 }

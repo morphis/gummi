@@ -174,3 +174,34 @@ func TestAFreeformHandOffClosesTheCardAndKeepsItsBranch(t *testing.T) {
 		t.Errorf("the handed-off branch %s is gone: %v", f.BranchName(), err)
 	}
 }
+
+// TestASessionContinuedAsASpecIsNotLanded: `gummi merge` lands a handed-off
+// card after all — except a session whose work went on as a spec, which
+// lands it on a verified branch. Landing the session too would put the same
+// work on main a second way, past the floor it was sent to.
+func TestASessionContinuedAsASpecIsNotLanded(t *testing.T) {
+	h := newHarness(t, true, nil)
+	f := freeformWithWork(t, h, 25)
+	ctx := context.Background()
+	if _, err := h.driver(Options{}).HandOff(ctx, f.ID); err != nil {
+		t.Fatalf("HandOff: %v", err)
+	}
+	if err := h.store.SetContinuedAs(ctx, f.ID, "FD-026"); err != nil {
+		t.Fatal(err)
+	}
+	before := gitHead(t, h.root)
+
+	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd")
+	if err == nil {
+		t.Fatal("a session continued as a spec landed on its own")
+	}
+	if out.Status != StatusError {
+		t.Errorf("status = %q, want error", out.Status)
+	}
+	if !strings.Contains(err.Error(), "continues as FD-026") {
+		t.Errorf("the refusal does not name the spec that lands the work: %v", err)
+	}
+	if got := gitHead(t, h.root); got != before {
+		t.Errorf("main HEAD moved by a refused merge: %s -> %s", before, got)
+	}
+}

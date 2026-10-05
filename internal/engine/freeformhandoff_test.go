@@ -175,7 +175,8 @@ func TestSessionHandoffBrief(t *testing.T) {
 	if reply < line {
 		t.Errorf("the brief (at %d) sits above the line that asked for it (at %d)", reply, line)
 	}
-	if !strings.Contains(tr[line].Content, "asked, decided, done, remaining") {
+	if !strings.Contains(tr[line].Content, "asked:, decided:, done:, remaining:") ||
+		!strings.Contains(tr[line].Content, "no markdown headings") {
 		t.Errorf("the gummi line does not state the brief's contract: %q", tr[line].Content)
 	}
 	// The flag is down again once the turn has ended.

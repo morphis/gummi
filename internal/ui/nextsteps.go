@@ -246,6 +246,10 @@ type nextInput struct {
 	// predicate so the block, the board badge and `status` cannot
 	// disagree.
 	ending domain.Ending
+	// continuedAs is the spec a freeform session's work went on as
+	// (domain.Feature.ContinuedAs): a hand-off whose branch lands through
+	// that card, never from this one.
+	continuedAs domain.FeatureID
 	// endedAt is when the card reached done, read from the transition
 	// record rather than from any one ending's stamp — a landing has no
 	// stamp of its own, and the transition is the fact all three share.
@@ -521,6 +525,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		branch:           r.F.BranchName(),
 		adopted:          r.F.Adopted(),
 		ending:           r.F.Ending(r.Landed),
+		continuedAs:      r.F.ContinuedAs,
 		commit:           r.F.LandedSHA,
 		spend:            r.F.Spend.Credits,
 		corrective:       m.round(r.F.ID, domain.RoundKindCorrective),
@@ -1063,7 +1068,7 @@ func stageAnswers(in nextInput) []nextAction {
 		// going the wrong way should not have to pay it out.
 		if in.freeformBusy {
 			return []nextAction{nextStep("pause", "p", "stop this turn",
-				"stop it mid-turn — whatever it has written is committed")}
+				"stop it mid-turn — whatever it has written stays in the worktree, uncommitted")}
 		}
 		// A freeform card (DESIGN §19). It has no gate to teach the reader
 		// what comes next and no stage to advance, so saying what its
@@ -1535,9 +1540,13 @@ func closedActions(in nextInput) []nextAction {
 	switch in.ending {
 	case domain.EndingHandedOff:
 		// m has always worked on a handed-off card, and the card it
-		// happened to has never said so. Landing it retracts the stamp.
-		out = append(out, nextStep("merge", "m", "land it after all",
-			"changed your mind — squash-merge "+in.keptBranch()+" onto "+in.landBase()))
+		// happened to has never said so. Landing it retracts the stamp —
+		// except on a session continued as a spec, whose work lands through
+		// that spec (domain.Feature.MayLandAfterAll).
+		if in.continuedAs == "" {
+			out = append(out, nextStep("merge", "m", "land it after all",
+				"changed your mind — squash-merge "+in.keptBranch()+" onto "+in.landBase()))
+		}
 	case domain.EndingDropped:
 		out = append(out, nextStep("adopt", "", "adopt it",
 			"take it back onto the board with its work kept — it is yours now"))
@@ -1547,8 +1556,13 @@ func closedActions(in nextInput) []nextAction {
 	// and the answer — a fresh bug card — was reachable only by pressing
 	// n and retyping context this card is already holding.
 	if in.kind != domain.KindGoal {
+		carries := "spec, branch and thread"
+		if in.kind == domain.KindFreeform {
+			// a session has no spec to carry
+			carries = "branch and thread"
+		}
 		out = append(out, nextStep("newbug", "", "open a bug from this",
-			"a fresh bug card carrying this card's spec, branch and thread"))
+			"a fresh bug card carrying this card's "+carries))
 	}
 	// Clean-up last, because it is the destructive one and a destructive
 	// action never gets to be what enter runs by default.

@@ -493,6 +493,8 @@ func section(b *strings.Builder, title, body, prompt string) {
 	fmt.Fprintf(b, "## %s\n\n", title)
 	if body = strings.TrimSpace(body); body == "" {
 		body = prompt
+	} else {
+		body = nestHeadings(body)
 	}
 	if body != "" {
 		b.WriteString(body + "\n\n")
@@ -533,6 +535,58 @@ func renderDraft(f *domain.Feature, seed domain.DraftSeed, prov domain.DraftProv
 	section(&b, "Review", "", promptReview)
 	section(&b, "Verification plan", neutralizeMarkers(seed.Acceptance), promptVerification)
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// nestHeadings keeps a seeded body inside the section it is set in. A
+// heading at level one or two in it would end that section and open one
+// of its own — a handoff brief's "## asked" became a sibling of Problem,
+// leaving Problem holding the title alone — so headings are pushed down
+// together until the shallowest is level three, keeping their order
+// relative to one another. Lines inside a fenced code block are code, not
+// headings, and are left as they are.
+func nestHeadings(body string) string {
+	lines := strings.Split(body, "\n")
+	levels := make([]int, len(lines))
+	shallowest, fence := 7, ""
+	for i, ln := range lines {
+		if fence != "" {
+			if strings.HasPrefix(ln, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(ln, "```") || strings.HasPrefix(ln, "~~~") {
+			fence = ln[:3]
+			continue
+		}
+		if n := headingLevel(ln); n > 0 {
+			levels[i] = n
+			shallowest = min(shallowest, n)
+		}
+	}
+	if shallowest >= 3 {
+		return body
+	}
+	shift := 3 - shallowest
+	for i, n := range levels {
+		if n > 0 {
+			lines[i] = strings.Repeat("#", min(n+shift, 6)) + lines[i][n:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// headingLevel is the level of an ATX heading starting at the line's first
+// column, or 0 when the line is not one.
+func headingLevel(line string) int {
+	n := 0
+	for n < len(line) && line[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 || (n < len(line) && line[n] != ' ' && line[n] != '\t') {
+		return 0
+	}
+	return n
 }
 
 // oneLine flattens a seed value to a single line (open-question markers

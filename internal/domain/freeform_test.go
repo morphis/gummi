@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -200,5 +201,27 @@ func TestOnlyASessionNamesItsOwnModel(t *testing.T) {
 	}
 	if err := stage.Validate(); err == nil {
 		t.Error("a feature naming a session model was accepted; its stages take their models from its profile")
+	}
+}
+
+// TestOnlyASessionIsContinuedAsASpec: ContinuedAs is a freeform card's
+// alone, and it is the one handed-off card that may not land after all.
+func TestOnlyASessionIsContinuedAsASpec(t *testing.T) {
+	ff := freeformCard(t)
+	ff.ContinuedAs = "FD-002"
+	if err := ff.Validate(); err != nil {
+		t.Errorf("a session continued as a spec does not validate: %v", err)
+	}
+	if err := ff.MayLandAfterAll(); !errors.Is(err, ErrContinued) || !strings.Contains(err.Error(), "FD-002") {
+		t.Errorf("MayLandAfterAll = %v, want ErrContinued naming FD-002", err)
+	}
+	ff.ContinuedAs = ""
+	if err := ff.MayLandAfterAll(); err != nil {
+		t.Errorf("a plain hand-off may not land after all: %v", err)
+	}
+
+	f := Feature{ID: "FD-001", Num: 1, Kind: KindFeature, Title: "t", Slug: "t", Stage: StagePlan, ContinuedAs: "FD-002"}
+	if err := f.Validate(); err == nil {
+		t.Error("a feature card validates carrying ContinuedAs")
 	}
 }

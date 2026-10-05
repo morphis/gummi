@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS features (
 	session_backend TEXT NOT NULL DEFAULT '',
 	session_model   TEXT NOT NULL DEFAULT '',
 	main_checkout   INTEGER NOT NULL DEFAULT 0,
-	verified_rev    TEXT NOT NULL DEFAULT ''
+	verified_rev    TEXT NOT NULL DEFAULT '',
+	continued_as    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 -- features_stack is created by the column migrations, not here: this
@@ -817,6 +818,10 @@ var migrations = []string{
 	// was sent on. Empty decodes to no images — every row written before
 	// attachments existed, and every turn that never carried one.
 	`ALTER TABLE session_messages ADD COLUMN images TEXT NOT NULL DEFAULT ''`,
+	// The feature a freeform session's work went on as, once a spec was
+	// written from it (domain.Feature.ContinuedAs). Empty is every other
+	// card, and every session closed before the column existed.
+	`ALTER TABLE features ADD COLUMN continued_as TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -895,7 +900,7 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
-	session_backend, session_model, main_checkout, verified_rev`
+	session_backend, session_model, main_checkout, verified_rev, continued_as`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -919,7 +924,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
 	var goalID, goalDropped, foundBy, goalWrapUp, mode string
-	var stackID string
+	var stackID, continuedAs string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -936,11 +941,12 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
-		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.VerifiedRev)
+		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.VerifiedRev, &continuedAs)
 	if err != nil {
 		return f, err
 	}
 	f.StackID = domain.StackID(stackID)
+	f.ContinuedAs = domain.FeatureID(continuedAs)
 	f.Mode = domain.ResearchMode(mode)
 	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)
@@ -1070,6 +1076,23 @@ func (s *Store) SetHandedOffAt(ctx context.Context, id domain.FeatureID, t time.
 		t.UTC().Format(timeFmt), string(id))
 	if err != nil {
 		return fmt.Errorf("marking %s handed off: %w", id, err)
+	}
+	return nil
+}
+
+// SetContinuedAs records that freeform card id's work went on as the
+// feature spec (domain.Feature.ContinuedAs) — written by the hand-off that
+// continued it, once the spec exists. It refuses any card that is not a
+// freeform one, the same refusal Validate makes of a row that carries it.
+func (s *Store) SetContinuedAs(ctx context.Context, id, spec domain.FeatureID) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE features SET continued_as = ? WHERE id = ? AND kind = ?`,
+		string(spec), string(id), string(domain.KindFreeform))
+	if err != nil {
+		return fmt.Errorf("recording %s continued as %s: %w", id, spec, err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("recording %s continued as %s: no freeform card %s", id, spec, id)
 	}
 	return nil
 }

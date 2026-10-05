@@ -27,7 +27,10 @@ import (
 //     deliverable here — nothing downstream is going to squash it onto
 //     main and sweep the remainder in — so uncommitted work left behind
 //     is work lost to the next `clean` or `delete`. This is the same
-//     final checkpoint the merge path takes, for the same reason.
+//     final checkpoint the merge path takes, for the same reason. A
+//     freeform card is the exception: gummi never commits its work for it
+//     (DESIGN §19.3), so what it left loose stays in the worktree, which
+//     `Remove` refuses to delete while it is dirty.
 //  2. Stamp HandedOffAt. It is written BEFORE the transition, because it
 //     is what gives Advance permission to cross the verify→done gate
 //     with a branch still ahead of main (advance.go's fourth skip),
@@ -91,15 +94,36 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 			return AdvanceResult{}, fmt.Errorf("%s already landed on %s — there is nothing to hand off", id, wt.BaseBranch(ctx))
 		}
 
-		if exists, err := wt.Exists(ctx, &f); err != nil {
-			return AdvanceResult{}, err
-		} else if exists {
-			// AsIs: the ordinary checkpoint refuses on fork drift, to keep a
-			// landing coherent. Nothing lands here, and the loose work would
-			// otherwise be lost with the branch the person is about to take.
-			if _, err := wt.CommitAllAsIs(ctx, &f, string(id)+": final checkpoint"); err != nil {
+		// No checkpoint for a freeform card: every commit on a session's
+		// branch is one somebody made on purpose, and its loose work is
+		// kept where it is, in the worktree the hand-off leaves standing.
+		if !f.IsFreeform() {
+			if exists, err := wt.Exists(ctx, &f); err != nil {
 				return AdvanceResult{}, err
+			} else if exists {
+				// AsIs: the ordinary checkpoint refuses on fork drift, to keep a
+				// landing coherent. Nothing lands here, and the loose work would
+				// otherwise be lost with the branch the person is about to take.
+				if _, err := wt.CommitAllAsIs(ctx, &f, string(id)+": final checkpoint"); err != nil {
+					return AdvanceResult{}, err
+				}
 			}
+		}
+	}
+
+	// A freeform card has no gate to cross and no stage to advance — it
+	// holds StageOpen, which has no outgoing edge (DESIGN §19) — so its
+	// hand-off IS its ending and the store closes it directly. Waiving the
+	// landing still waives no floor: the one floor a freeform card has is
+	// its unresolved diff comments, and it is checked right here rather
+	// than inherited from Advance — before the stamp, because a refused
+	// hand-off of a card that stays open must not leave it badged as
+	// handed off.
+	if f.IsFreeform() {
+		if _, diffOpen, _, berr := e.GateBlockers(ctx, id); berr != nil {
+			return AdvanceResult{}, berr
+		} else if diffOpen > 0 {
+			return AdvanceResult{Feature: f, From: f.Stage, Status: StatusBlockedDiff, Blockers: diffOpen}, nil
 		}
 	}
 
@@ -108,18 +132,7 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 		return AdvanceResult{}, err
 	}
 
-	// A freeform card has no gate to cross and no stage to advance — it
-	// holds StageOpen, which has no outgoing edge (DESIGN §19) — so its
-	// hand-off IS its ending and the store closes it directly. Waiving the
-	// landing still waives no floor: the one floor a freeform card has is
-	// its unresolved diff comments, and it is checked right here rather
-	// than inherited from Advance.
 	if f.IsFreeform() {
-		if _, diffOpen, _, berr := e.GateBlockers(ctx, id); berr != nil {
-			return AdvanceResult{}, berr
-		} else if diffOpen > 0 {
-			return AdvanceResult{Feature: f, From: f.Stage, Status: StatusBlockedDiff, Blockers: diffOpen}, nil
-		}
 		closed, cerr := e.cfg.Store.CloseFreeform(ctx, id, actor)
 		if cerr != nil {
 			return AdvanceResult{}, cerr

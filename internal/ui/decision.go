@@ -423,6 +423,9 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// person for something; this one tells them what happened and
 		// then offers whatever is still open. Phrasing it as a question
 		// ("what now?") would invite a decision the card no longer has.
+		if in.continuedAs != "" {
+			return string(r.F.ID) + " is closed — continued as " + string(in.continuedAs) + "."
+		}
 		return string(r.F.ID) + " is closed — " + endingWord(in.ending) + "."
 	case decisionBudget:
 		return string(r.F.Stage) + " ran out of budget."

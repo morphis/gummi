@@ -336,12 +336,16 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// in e.live, so in.sess is empty for it and the deps row below
 		// would otherwise be what p offers while a turn is running.
 		{
-			"pause", "p", "stop this turn", "stop it mid-turn — whatever it has written is committed", false,
+			"pause", "p", "stop this turn", "stop it mid-turn — whatever it has written stays in the worktree, uncommitted", false,
 			in.freeformBusy,
 		},
+		// Never on a freeform card: a dependency holds a card back from
+		// its stages, and a session has none — it starts on create and
+		// moves when a person types, so the picker would set a wait
+		// nothing ever reads.
 		{
 			"deps", "p", "dependencies", "open the dependency picker for this card", false,
-			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy && !closed,
+			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy && !closed && in.kind != domain.KindFreeform,
 		},
 		// The same picker while a stage session exists, where p pauses: a
 		// card at its design gate still holds its finished session, and
@@ -350,7 +354,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// (and the menu built from it) is the way in.
 		{
 			"deps", "", "dependencies", "open the dependency picker for this card", false,
-			in.sess != "" && in.sess != engine.StateInteractive && !in.freeformBusy && !closed,
+			in.sess != "" && in.sess != engine.StateInteractive && !in.freeformBusy && !closed && in.kind != domain.KindFreeform,
 		},
 		{
 			// the label is the interface, so it takes the card's own noun
@@ -469,7 +473,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// work it keeps is loose in the checkout, and that is what the
 			// confirm names.
 			((needsWT && r.HasWorktree) || (freeform && in.mainCheckout)) &&
-				!r.Landed && (in.stage == domain.StageVerify || freeform) && !in.freeformBusy,
+				!r.Landed && (in.stage == domain.StageVerify || freeform) && !in.freeformBusy && !closed,
 		},
 		{
 			// offered where a landing may happen (merge.go's

@@ -78,6 +78,11 @@ func (m *Shell) landingRefusal(f domain.Feature) string {
 // this way, so the menu offers a landing exactly when this lets one
 // through (nextInput.landRefused). in nil builds it from r on demand.
 func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *nextInput) string {
+	if f.HandedOff() {
+		if err := f.MayLandAfterAll(); err != nil {
+			return string(f.ID) + " is " + err.Error()
+		}
+	}
 	if f.IsFreeform() {
 		if !ok {
 			return ""

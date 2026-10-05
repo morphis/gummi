@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -130,5 +131,43 @@ func TestSeededTemplateResearchProvenance(t *testing.T) {
 	prd := SeededTemplate(f, domain.DraftSeed{}, domain.DraftProvenance{Source: ".gummi/ingest/foo.md"})
 	if !strings.Contains(prd, "> _Ingested from `.gummi/ingest/foo.md`_") {
 		t.Errorf("PRD source should keep its backticked form\n---\n%s", prd)
+	}
+}
+
+// TestASeededBodyStaysInItsSection: a brief written in markdown carries
+// headings of its own — a handoff brief's "## asked", "## done" — and set
+// into Problem unchanged each one ended Problem and opened a section of
+// its own, leaving Problem holding the title alone and four strays beside
+// the sections the plan gate reads. Seeded headings are pushed beneath the
+// section's, in order, and code is left as it is.
+func TestASeededBodyStaysInItsSection(t *testing.T) {
+	f := &domain.Feature{ID: "FD-009", Title: "Continue the session", Kind: domain.KindFeature}
+	brief := "Continued from FF-001.\n\n# brief\n\n## asked\n- add Sub\n\n### detail\n- binary only\n\n## done\n- Sub on the branch"
+	out := SeededTemplate(f, domain.DraftSeed{Problem: brief}, domain.DraftProvenance{})
+
+	want := []string{"Problem", "Out of scope", "Considered approaches", "Chosen approach", "Implementation notes", "Progress", "Review", "Verification plan"}
+	if got := Headings(out); !slices.Equal(got, want) {
+		t.Fatalf("sections = %v, want the template's own %v", got, want)
+	}
+	problem, ok := ViewSection(out, "Problem")
+	if !ok {
+		t.Fatal("no Problem section")
+	}
+	for _, line := range []string{"### brief", "#### asked", "##### detail", "#### done", "- Sub on the branch"} {
+		if !strings.Contains(problem, line) {
+			t.Errorf("Problem lacks %q:\n%s", line, problem)
+		}
+	}
+
+	// code is not markdown: a fenced line stays as it was written
+	fenced := "## asked\n```sh\n## a shell comment\n```"
+	if got := nestHeadings(fenced); got != "### asked\n```sh\n## a shell comment\n```" {
+		t.Errorf("nestHeadings(%q) = %q, want the fenced line untouched", fenced, got)
+	}
+
+	// a body whose headings already sit beneath the section is untouched
+	nested := "### asked\n- add Sub"
+	if got := nestHeadings(nested); got != nested {
+		t.Errorf("nestHeadings(%q) = %q, want it unchanged", nested, got)
 	}
 }

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -227,6 +228,17 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	if specRows != 1 {
 		t.Fatalf("the session's menu offers %d write-a-spec rows, want one: %+v", specRows, h.card(s.ID).Actions)
 	}
+	// the turn left clock.go loose, and nothing commits a session's work
+	// for it: the spec continues from the last commit, so the dialog
+	// refuses to open — before a brief turn is paid for — until the work
+	// is committed on purpose
+	var refused webapi.Error
+	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &refused); st != http.StatusBadRequest ||
+		!strings.Contains(refused.Error, "uncommitted work") {
+		t.Fatalf("writespec-draft over loose work = %d %q, want 400 naming the uncommitted work", st, refused.Error)
+	}
+	h.action(s.ID, "commit", webapi.ActionRequest{Message: "sync: clock"})
+
 	// the draft is fetched once, at dialog open — its own read, never a
 	// side effect of reading the card: a second GET returns the brief
 	// again only because the dialog was opened again
@@ -264,6 +276,32 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	closed := h.feature(s.ID)
 	if closed.Stage != domain.StageDone || closed.HandedOffAt.IsZero() {
 		t.Errorf("the session is at %s (handed off %v), want closed by hand-off", closed.Stage, closed.HandedOffAt)
+	}
+	if closed.ContinuedAs != domain.FeatureID(spec.ID) {
+		t.Errorf("the session records it went on as %q, want %s", closed.ContinuedAs, spec.ID)
+	}
+	// its work lands through the spec, on a verified branch: the closed
+	// session offers no landing of its own, and refuses one asked for
+	page := h.card(s.ID)
+	for _, a := range page.Actions {
+		if a.ID == "merge" {
+			t.Errorf("the continued session still offers %q", a.ID)
+		}
+	}
+	if d := page.Decision; d != nil {
+		for _, o := range d.Options {
+			if o.ID == "merge" {
+				t.Errorf("the continued session's closing block offers %q", o.Label)
+			}
+		}
+	}
+	var landed json.RawMessage
+	against := ""
+	if page.Decision != nil {
+		against = page.Decision.Against.Token
+	}
+	if st := h.call(http.MethodPost, "/api/cards/"+s.ID+"/actions/merge", webapi.ActionRequest{Against: against}, &landed); st == http.StatusOK {
+		t.Errorf("landing the continued session = %d %s, want it refused: %s lands its work", st, landed, spec.ID)
 	}
 	git := func(a ...string) {
 		if out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", h.root}, a...)...).CombinedOutput(); err != nil {

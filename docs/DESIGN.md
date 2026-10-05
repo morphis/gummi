@@ -233,7 +233,8 @@ Stage semantics:
   - **Hand off** (`h`, `/handoff`; `gummi handoff`) — the card closes and
     the branch stays exactly where it is: yours to push, PR by hand,
     cherry-pick, or keep. gummi commits a final checkpoint so nothing
-    loose is left on the branch, stamps `handed_off_at`, and crosses the
+    loose is left on the branch (never on a freeform card, whose loose
+    work stays in its worktree, §19.3), stamps `handed_off_at`, and crosses the
     same gate with the landing waived and **every other floor intact** —
     open `%%` threads, open diff annotations, the omission gate and the
     document floor all still hold it. Landing it after all stays
@@ -3683,8 +3684,10 @@ The TUI treats a freeform card as a card and withholds the workflow:
   help overlay together — `g`, `s`, `b`, `v`, `A` — so "not shown" and
   "not available" cannot diverge.
 - **Landing closes it**, the same way a verified card's landing does, and
-  ending the card closes its session: the last turn is committed, the
-  backend stops and the card lock is dropped.
+  ending the card closes its session: the backend stops and the card lock
+  is dropped. A landing squashes whatever is still loose into the commit
+  whose message the person approves; a hand-off commits nothing, and the
+  loose work stays in the worktree it keeps.
 
 ### 19.7 Deferred
 
@@ -3773,8 +3776,13 @@ itself keeps only that first line, so before this a multi-line opening
 was cut to its title.
 
 **Writing a spec continues the work on a branch of the spec's own.** The
-session is handed off: its last turn committed, its branch kept, and the
-one floor it has (open diff comments) checked first. A feature is minted
+session is handed off: its branch kept, and the one floor it has (open
+diff comments) checked first. It is refused while the worktree holds
+uncommitted work (`Engine.WritespecRefusal`): the spec's branch is cut
+from the session's last commit, and nothing here commits for the session,
+so that work would be left behind on a branch the spec does not continue.
+The person commits it first — the page's **Commit**, `gummi commit`, or
+by asking the agent — or discards it. A feature is minted
 with the person's turns as its brief, and its branch is cut from the
 session's tip (`Manager.CreateFrom`). Its fork point is the merge base
 with the card's base, which for such a branch is the session's own fork,
@@ -3788,6 +3796,24 @@ closed session force-deletes a branch it cut, which would take the spec's
 work with it. A branch of its own is gummi's to rebase, land and clean
 like any feature's. The session's branch is left where a hand-off always
 leaves one.
+
+The session records the spec it went on as (`Feature.ContinuedAs`), and
+that closes the one door a hand-off otherwise leaves open: it may not be
+landed after all (`Feature.MayLandAfterAll`). Its work lands through the
+spec, on a verified branch; landing the session too would put the same
+commits on main a second way, past the floor the person just sent them
+to. Its closing block says where the work went and offers no landing.
+
+The brief the dialog opens on is written by the session itself, on a
+fresh session of its backend with none of gummi's tools and — wherever
+the backend can enforce it, as for a consult — read-only: it runs in the
+card's worktree, and a backend's own writing tools must not be in reach
+of a turn whose only product is text. That turn is uncached, so a brief
+already on the record with nothing said since is handed back rather than
+written again. It is asked for labelled sections, not headings, and any
+heading a seeded body carries is nested beneath the section it is set in
+(`spec.nestHeadings`), so the brief stays inside Problem rather than
+opening sections of its own beside the ones the plan gate reads.
 
 **An idle session pins nothing.** A card in the workflow that has
 stopped is waiting on a decision, so its thread pins one. A session that

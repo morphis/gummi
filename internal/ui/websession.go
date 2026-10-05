@@ -207,8 +207,9 @@ type sessionSwitchedMsg struct {
 }
 
 // specFromSession ends a session and continues its work as a feature card
-// (DESIGN §19.8, "write a spec"). The session is handed off — its last
-// turn committed, its branch kept — and a feature is minted with the brief
+// (DESIGN §19.8, "write a spec"). The session is handed off — its branch
+// kept, and refused while its worktree holds work nobody committed, since
+// nothing here commits it — and a feature is minted with the brief
 // the writespec dialog handed in: the person's edited text, fetched once
 // when the dialog opened (the session's own words, or the assembled draft
 // when no live session could answer), never re-derived here at mint. The
@@ -231,6 +232,16 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 				them = "it"
 			}
 			return noticeMsg{text: string(f.ID) + " has " + itoa(diffOpen) + " open diff comment" + plural(diffOpen) + " — send or resolve " + them + " before writing a spec from it", isErr: true, id: f.ID}
+		}
+		// a turn in flight is still writing into the worktree the next
+		// check reads, and closing the session below would cut it off
+		if ff := eng.Freeform(f.ID); ff != nil && ff.Busy() {
+			return noticeMsg{text: string(f.ID) + " is mid-turn; write the spec once this turn ends", isErr: true, id: f.ID}
+		}
+		// the spec continues from the session's last commit, and nothing
+		// here commits for it: loose work would be left behind
+		if err := eng.WritespecRefusal(ctx, f.ID); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		// the session's backend and lock go first: the hand-off commits the
 		// worktree, and nothing may still be writing into it
@@ -266,6 +277,11 @@ func (m *Shell) specFromSession(f domain.Feature, title, brief, profile string, 
 			// start its plan from the base, as if the work never happened
 			_ = m.store.DeleteFeature(ctx, spec.ID)
 			return noticeMsg{text: string(f.ID) + " was handed off, but the spec's branch could not be cut from " + f.BranchName() + ": " + sanitize(err.Error()), isErr: true, id: f.ID}
+		}
+		// the session's work now lands through the spec, so the session
+		// must not land it a second way (domain.Feature.MayLandAfterAll)
+		if err := m.store.SetContinuedAs(ctx, f.ID, spec.ID); err != nil {
+			return noticeMsg{text: string(spec.ID) + " was created, but " + string(f.ID) + " could not record it: " + sanitize(err.Error()), isErr: true, id: f.ID}
 		}
 		// into the plan stage, where the architect is what runs: todo runs
 		// no agent, and a spec written from a session has nothing to wait

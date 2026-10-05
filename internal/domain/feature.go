@@ -347,6 +347,14 @@ type Feature struct {
 	// not a thing it does: there is no branch to squash, its work stays
 	// loose in the checkout, and the person commits what they keep.
 	MainCheckout bool
+	// ContinuedAs names the feature a freeform card's work went on as,
+	// once a spec was written from it (DESIGN §19.8). That feature's
+	// branch is cut from this card's, so it carries every commit here and
+	// lands them on a verified branch; this card landing them too would
+	// put the same work on main a second way, past the floor the person
+	// just sent it to. MayLandAfterAll refuses it. Freeform-only, and set
+	// once, on the hand-off that continued it.
+	ContinuedAs FeatureID
 	// GateApproval is who crosses this card's gates on an unattended
 	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
@@ -698,7 +706,7 @@ var ErrNotVerified = errors.New("not at a verified branch")
 //
 // A handed-off card is neither case: it already closed with a verified
 // stamp on it and landing it after all stays available, so callers check
-// HandedOff before asking.
+// HandedOff before asking, and ask MayLandAfterAll instead.
 func (f *Feature) MayLand() error {
 	if f.IsFreeform() {
 		return nil
@@ -824,6 +832,21 @@ func (f *Feature) GateMode() string {
 // surface asks (the board badge, the clean-up refusal, Advance's fourth
 // skip), phrased once so none of them tests the timestamp by hand.
 func (f *Feature) HandedOff() bool { return !f.HandedOffAt.IsZero() }
+
+// ErrContinued refuses landing a freeform card whose work went on as a
+// spec: that spec lands it (Feature.ContinuedAs).
+var ErrContinued = errors.New("continued as a spec")
+
+// MayLandAfterAll is the floor a handed-off card meets when it is landed
+// after all, which every landing door asks in place of MayLand. It holds
+// one card: a freeform session continued as a spec, whose work lands
+// through that spec on a verified branch and not from here.
+func (f *Feature) MayLandAfterAll() error {
+	if f.ContinuedAs != "" {
+		return fmt.Errorf("%w — its work continues as %s, which lands it on a verified branch", ErrContinued, f.ContinuedAs)
+	}
+	return nil
+}
 
 // Ending names how a card left gummi. It is the one word every surface
 // uses for that — the board badge, `gummi status`, `status --json`, the
@@ -1010,6 +1033,9 @@ func (f *Feature) Validate() error {
 	}
 	if (f.SessionBackend != "" || f.SessionModel != "") && f.kind() != KindFreeform {
 		return fmt.Errorf("feature %s: a %s takes its agents from its profile, not a session model", f.ID, f.kind())
+	}
+	if f.ContinuedAs != "" && f.kind() != KindFreeform {
+		return fmt.Errorf("feature %s: only a freeform card is continued as a spec, not a %s", f.ID, f.kind())
 	}
 	// MainCheckout is a freeform-only property, and a main-checkout card
 	// has no branch to name: a base, a carried branch or a stack position
