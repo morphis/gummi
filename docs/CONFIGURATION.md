@@ -140,6 +140,12 @@ Scaffolded on first run. Every key is optional.
 
 ## `.gummi/profiles.yaml`
 
+The first run seeds this file. Its default `thrifty` profile leaves
+`backend:` out, so the default backend drives it, and its model ids are
+written for that backend: the CLI's aliases for claude, `provider/model`
+for opencode and pi, OpenAI ids for codex, and `agy models` ids for
+antigravity. An existing file is never rewritten.
+
 A `default:` name plus a `profiles:` map. Each profile maps roles
 (`architect`, `implementer`, `reviewer`, `scribe`) to `{backend, model}`:
 

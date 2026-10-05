@@ -1672,3 +1672,32 @@ profiles:
 		t.Error("an uncaged role blocked readiness; the tier is a choice, not a fault")
 	}
 }
+
+// TestSeededProfilesRunOnEveryBackend: whatever GUMMI_AGENT selects, the
+// profiles.yaml a first run seeds names, for every role, a model the
+// backend that role resolves to accepts — the check the session picker
+// and SwitchSessionModel apply — and doctor finds no backend/model
+// conflict in it. A role without `backend:` follows the default backend,
+// which is the case a single shared template got wrong.
+func TestSeededProfilesRunOnEveryBackend(t *testing.T) {
+	for _, backend := range engine.SessionBackends {
+		p, err := config.ParseProfiles([]byte(config.ProfilesTemplateFor(backend)), "seed template")
+		if err != nil {
+			t.Fatalf("%s: the seeded template does not parse: %v", backend, err)
+		}
+		for name, prof := range p.Profiles {
+			for role, rc := range prof {
+				eff := rc.Backend
+				if eff == "" {
+					eff = backend
+				}
+				if err := engine.CheckSessionModel(eff, rc.Model); err != nil {
+					t.Errorf("%s: profile %s role %s on %s: %v", backend, name, role, eff, err)
+				}
+			}
+		}
+		if bad := backendModelConflicts(backendInfo{name: backend}, p); bad != "" {
+			t.Errorf("%s: doctor flags the seeded template: %s", backend, bad)
+		}
+	}
+}

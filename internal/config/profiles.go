@@ -220,6 +220,28 @@ var thriftyFor = map[string]string{
     reviewer: { model: anthropic/claude-sonnet-4-5 }
     scribe: { model: anthropic/claude-haiku-4-5 }
 `,
+	// pi resolves provider/id itself, so the ids carry their provider
+	// rather than depend on GUMMI_PI_PROVIDER being set.
+	"pi": `  thrifty: # everyday features — backend omitted → engine default
+    architect: { model: anthropic/claude-sonnet-4-5 }
+    implementer: { model: anthropic/claude-haiku-4-5 }
+    reviewer: { model: anthropic/claude-sonnet-4-5 }
+    scribe: { model: anthropic/claude-haiku-4-5 }
+`,
+	// codex runs OpenAI's models only and needs one named.
+	"codex": `  thrifty: # everyday features — backend omitted → engine default
+    architect: { model: gpt-5 }
+    implementer: { model: gpt-5-codex }
+    reviewer: { model: gpt-5 }
+    scribe: { model: gpt-5-mini }
+`,
+	// agy's ids carry their effort dial; `agy models` lists them.
+	"antigravity": `  thrifty: # everyday features — backend omitted → engine default
+    architect: { model: gemini-3.1-pro-high }
+    implementer: { model: gemini-3.8-flash-high }
+    reviewer: { model: gemini-3.1-pro-high }
+    scribe: { model: gemini-3.8-flash-low }
+`,
 }
 
 // ProfilesTemplateFor is the starter profiles.yaml seeded for a workspace
