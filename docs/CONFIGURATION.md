@@ -118,6 +118,15 @@ scrubbed session env). It does not suppress repo-level agent instructions:
 no adapter disables `AGENTS.md`, `CLAUDE.md` or project skills, because
 those are the repository's own guidance for agents working in it.
 
+A card's **consult** (a question asked beside its stage) runs in the main
+checkout, not the card's worktree. On claude, opencode and pi it runs
+read-only: the backend's own write tools are stripped, as for a research
+session. copilot, codex and antigravity cannot strip them, so a consult
+there still answers but can write to the checkout; the consult says so
+where it opens (TUI and web), and `gummi doctor` reports it per backend as
+`consult:<backend>`. Route the profile's `consult` role (it falls back to
+the architect's) to a confining backend to avoid that.
+
 No usable agent leaves the board static. Creation, specs, worktrees and
 gates all still work.
 

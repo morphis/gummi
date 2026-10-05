@@ -239,6 +239,10 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		}
 	}
 
+	// consult — whether a card's consult runs read-only on the backend
+	// that answers it, or can write to the checkout.
+	checks = append(checks, consultChecks(def, profiles)...)
+
 	// 4. profile
 	bi := backendInfoFor(def)
 	switch {
@@ -572,6 +576,59 @@ func pricingCheck(backend string) (doctorCheck, bool) {
 			detail, domain.ByokCreditsPer1KTokens),
 		Remediation: "export " + agent.AntigravityRateEnv + "=<credits per 1k tokens> for the models your profiles run, so budgets measure real spend",
 	}, true
+}
+
+// consultChecks emits one consult:<backend> check per backend that answers
+// a card's consult in some profile, resolved the way the engine resolves
+// it (the consult role, else the architect, else the default backend). A
+// consult runs in the main checkout, so it is read-only only where the
+// backend can strip its own write tools (engine.ConsultConfined); on any
+// other it still runs and can write there, which is worth a warning. A
+// backend gummi has no capabilities for is not reported either way.
+func consultChecks(def string, profiles config.Profiles) []doctorCheck {
+	used := map[string][]string{}
+	if len(profiles.Profiles) == 0 {
+		used[def] = nil
+	}
+	for pname, p := range profiles.Profiles {
+		name := def
+		for _, role := range []agent.Role{agent.RoleConsult, agent.RoleArchitect} {
+			if rc, ok := p[string(role)]; ok {
+				name = cmp.Or(rc.Backend, def)
+				break
+			}
+		}
+		used[name] = append(used[name], pname)
+	}
+	names := make([]string, 0, len(used))
+	for name := range used {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var checks []doctorCheck
+	for _, name := range names {
+		caps, ok := agent.CapabilitiesFor(name)
+		if !ok {
+			continue
+		}
+		if engine.ConsultConfined(caps) {
+			checks = append(checks, doctorCheck{
+				Name: "consult:" + name, Status: statusOK,
+				Detail: "consult runs read-only on " + name + ": its write tools are stripped",
+			})
+			continue
+		}
+		detail := engine.ConsultNotice(name)
+		if ps := used[name]; len(ps) > 0 {
+			sort.Strings(ps)
+			detail += " (profiles: " + strings.Join(ps, ", ") + ")"
+		}
+		checks = append(checks, doctorCheck{
+			Name: "consult:" + name, Status: statusWarn, Detail: detail,
+			Remediation: "route the consult role to claude, opencode or pi in profiles.yaml to confine it, or treat a consult there as able to write",
+		})
+	}
+	return checks
 }
 
 // The check REPORTS itself as "budget", not "envelope". The env var and

@@ -1065,6 +1065,40 @@ func TestPricingCheckWarnsWithoutAnAntigravityRate(t *testing.T) {
 	}
 }
 
+// TestConsultChecksReportConfinementPerBackend: doctor names, per backend
+// that answers a consult, whether the consult runs read-only there — the
+// consult role first, the architect when a profile has none, the default
+// backend when neither names one — and warns, naming the profiles, where
+// it can write to the checkout.
+func TestConsultChecksReportConfinementPerBackend(t *testing.T) {
+	profiles := config.Profiles{Profiles: map[string]config.Profile{
+		"thrifty": {"architect": {Backend: "claude"}, "implementer": {Backend: "copilot"}},
+		"premium": {"consult": {Backend: "codex"}, "architect": {Backend: "claude"}},
+		"plain":   {"implementer": {Backend: "opencode"}},
+	}}
+	got := map[string]doctorCheck{}
+	for _, c := range consultChecks("copilot", profiles) {
+		got[c.Name] = c
+	}
+	if len(got) != 3 {
+		t.Fatalf("checks = %+v, want one each for claude, codex and copilot", got)
+	}
+	if c := got["consult:claude"]; c.Status != statusOK || !strings.Contains(c.Detail, "read-only") {
+		t.Errorf("claude: %+v, want ok and read-only", c)
+	}
+	if c := got["consult:codex"]; c.Status != statusWarn || !strings.Contains(c.Detail, engine.ConsultNotice("codex")) || !strings.Contains(c.Detail, "premium") || c.Remediation == "" {
+		t.Errorf("codex: %+v, want a warn carrying the notice and naming premium", c)
+	}
+	if c := got["consult:copilot"]; c.Status != statusWarn || !strings.Contains(c.Detail, "plain") {
+		t.Errorf("copilot (the default, for a profile naming neither role): %+v, want a warn naming plain", c)
+	}
+
+	none := consultChecks("claude", config.Profiles{})
+	if len(none) != 1 || none[0].Name != "consult:claude" || none[0].Status != statusOK {
+		t.Errorf("no profiles: %+v, want one ok check for the default backend", none)
+	}
+}
+
 // A fresh TTL cache entry is reused verbatim: the live probe is never
 // called and the cached servable result is reported.
 func TestProbeCacheFreshHit(t *testing.T) {
