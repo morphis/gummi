@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/morphis/gummi/internal/ui/theme"
 )
 
 // TestThreadInputKeystrokeCommandIsSubscription: the composer textarea
@@ -36,6 +39,22 @@ func TestThreadInputKeystrokeCommandIsSubscription(t *testing.T) {
 	if cmd != nil && !isSubscription(cmd) {
 		t.Fatal("a composer keystroke returned a command flow_test.go's pump will run to completion " +
 			"instead of treating as a subscription — this is the seam the 530ms-per-keystroke hang came from")
+	}
+}
+
+// TestThreadInputTakesALongPaste: the composer takes a pasted document of
+// several thousand characters whole, and refuses only past
+// threadInputCharLimit. Before the limit was raised, a 4000-character cap
+// silently cut anything longer.
+func TestThreadInputTakesALongPaste(t *testing.T) {
+	in := newThreadInput(theme.New(theme.GummiDark()))
+	in.SetValue(strings.Repeat("x", 5000))
+	if got := len([]rune(in.Value())); got != 5000 {
+		t.Fatalf("composer kept %d runes of a 5000-rune paste, want all of it", got)
+	}
+	in.SetValue(strings.Repeat("y", threadInputCharLimit+1))
+	if got := len([]rune(in.Value())); got != threadInputCharLimit {
+		t.Fatalf("composer kept %d runes past the limit, want %d", got, threadInputCharLimit)
 	}
 }
 

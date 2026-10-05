@@ -145,10 +145,17 @@ const conductedPlaceholderText = "read-only — %s conducts this card; type into
 // kickoff note or bounce reason without scrolling — the prose these
 // decisions actually carry (deliverDecisionWords) — while still leaving
 // a normal-height thread most of its room for the conversation and the
-// decision above the line; CharLimit stays 4000, so a longer message is
-// still typeable, just scrolls inside the five rows like the one-row box
-// always scrolled.
+// decision above the line; a message past threadInputCharLimit is refused,
+// and anything under it is still typeable, just scrolls inside the five
+// rows like the one-row box always scrolled.
 const threadInputMaxHeight = 5
+
+// threadInputCharLimit is the most characters the composer takes in one
+// message. It is a sanity bound on a pasted document, not a context-window
+// budget: the agent backends take the prompt on stdin (stream-json for
+// Claude Code, stdin for Codex), so argv's per-argument size limit does not
+// apply, and the model's own context window is the real ceiling.
+const threadInputCharLimit = 64000
 
 // newThreadInput builds the composer, styled from the theme rather than
 // left on the widget's own defaults.
@@ -174,7 +181,7 @@ const threadInputMaxHeight = 5
 func newThreadInput(s *theme.Styles) textarea.Model {
 	in := textarea.New()
 	in.Placeholder = placeholderText
-	in.CharLimit = 4000
+	in.CharLimit = threadInputCharLimit
 	in.ShowLineNumbers = false
 	// grows with the wrapped line count instead of forcing every
 	// multi-sentence note into a permanently scrolling one-row tail
