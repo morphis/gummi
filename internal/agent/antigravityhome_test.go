@@ -742,7 +742,7 @@ func TestAntigravityCatalogParsesIdsAndLeavesTheRealHomeUntouched(t *testing.T) 
 	// a real-enough `agy models`: tab-separated id/description lines,
 	// and a log of the HOME the probe's child resolved
 	if err := os.WriteFile(bin, []byte("#!/usr/bin/env python3\n"+agyLogHook+`
-rec({"home": os.environ.get("HOME", "")})
+rec({"home": os.environ.get("HOME", ""), "noupdate": os.environ.get("AGY_CLI_DISABLE_AUTO_UPDATE", "")})
 print('gemini-3.1-pro-high\tGemini 3.1 Pro (High)')
 print('gemini-3.1-pro-low\tGemini 3.1 Pro (Low)')
 print()
@@ -777,7 +777,7 @@ print()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawHome []string
+	var sawHome, sawNoUpdate []string
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 		var rec map[string]any
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
@@ -785,7 +785,14 @@ print()
 		}
 		if h, ok := rec["home"].(string); ok {
 			sawHome = append(sawHome, h)
+			v, _ := rec["noupdate"].(string)
+			sawNoUpdate = append(sawNoUpdate, v)
 		}
+	}
+	// agy's own updater would outlive the probe in a session of its own
+	// and write into the temp home as it is removed
+	if len(sawNoUpdate) == 1 && sawNoUpdate[0] != "true" {
+		t.Errorf("the probe ran agy with its auto-updater on (AGY_CLI_DISABLE_AUTO_UPDATE=%q)", sawNoUpdate[0])
 	}
 	if len(sawHome) != 1 {
 		t.Fatalf("fake agy logged %d home records, want 1:\n%s", len(sawHome), raw)

@@ -335,17 +335,26 @@ func antigravityMCPHint(sockPath string) string {
 }
 
 // envWithAntigravityHome returns env with HOME redirected — the one
-// variable that decides where agy's config tree lives.
+// variable that decides where agy's config tree lives — and agy's own
+// auto-updater turned off. Left on, every agy gummi starts spawns
+// `agy --bg-updater` in a session of its own: out of reach of the process
+// group gummi kills, it outlives the run and writes into a home gummi is
+// removing (or replaces the operator's binary from under a throwaway one).
+// Updating agy is the operator's own `agy update`.
 func envWithAntigravityHome(env []string, home string) []string {
-	out := make([]string, 0, len(env)+1)
+	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "HOME=") {
+		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, antigravityNoUpdateEnv+"=") {
 			continue
 		}
 		out = append(out, kv)
 	}
-	return append(out, "HOME="+home)
+	return append(out, "HOME="+home, antigravityNoUpdateEnv+"=true")
 }
+
+// antigravityNoUpdateEnv is the variable agy reads to skip its
+// background auto-updater. It takes "true": agy reads "1" as unset.
+const antigravityNoUpdateEnv = "AGY_CLI_DISABLE_AUTO_UPDATE"
 
 // antigravityToolEnv pins back to the operator's real home the settings
 // that the tools an agy child runs would otherwise resolve under the
