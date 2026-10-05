@@ -23,11 +23,13 @@ const claudeModelsTimeout = 30 * time.Second
 // told apart from any other frame the child might print first.
 const claudeListModelsID = "gummi-list-models-1"
 
-// ClaudeModelCatalog returns the model values the claude CLI itself offers,
-// as its own list_models control request reports them, minus the "default"
-// entry (the picker already offers the default as its no-model row). Values
-// are the CLI's own spellings — aliases like "sonnet" and versioned ids like
-// "claude-sonnet-5" — forwarded verbatim.
+// ClaudeModelCatalog returns the model ids the claude CLI itself offers, as
+// its own list_models control request reports them, minus the "default"
+// entry (the picker already offers the default as its no-model row). Each
+// value is forwarded verbatim — aliases like "sonnet" and versioned ids like
+// "claude-sonnet-5". Each alias is followed by the full id it currently
+// resolves to (its resolvedModel, e.g. "claude-sonnet-5-5"), so the newest
+// model of a family is offered under an id the operator recognises.
 //
 // It needs only the binary on PATH, no adapter and no session: the probe
 // spawns a transient stream-json child, asks it the control request, and
@@ -113,10 +115,14 @@ func claudeModelCatalog(ctx context.Context, bin string) ([]string, error) {
 }
 
 // parseClaudeModelList reads one stdout frame of the stream-json child. It
-// reports done only for the control_response carrying claudeListModelsID: ids are the
-// list_models values in the order the CLI gave them, minus "default" and
-// blanks. Any other frame is not an answer and is skipped (done false, nil
-// error). An error response is returned as an error.
+// reports done only for the control_response carrying claudeListModelsID. The
+// ids are the list_models values in the order the CLI gave them, minus
+// "default" and blanks; each value that resolves to a different full id
+// (resolvedModel) is followed by that id, unless it was already listed. The
+// result never repeats an id. A resolvedModel that is not a JSON string is
+// ignored, so the entry's value still comes through. Any other frame is not
+// an answer and is skipped (done false, nil error). An error response is
+// returned as an error.
 func parseClaudeModelList(line []byte) (ids []string, done bool, err error) {
 	line = bytes.TrimSpace(line)
 	if len(line) == 0 {
@@ -131,6 +137,9 @@ func parseClaudeModelList(line []byte) (ids []string, done bool, err error) {
 			Response  struct {
 				Models []struct {
 					Value string `json:"value"`
+					// ResolvedModel stays raw: a wrong-typed field must not
+					// reject the whole answer, only the id it would have named.
+					ResolvedModel json.RawMessage `json:"resolvedModel"`
 				} `json:"models"`
 			} `json:"response"`
 		} `json:"response"`
@@ -144,11 +153,27 @@ func parseClaudeModelList(line []byte) (ids []string, done bool, err error) {
 	if frame.Response.Subtype != "success" {
 		return nil, true, fmt.Errorf("the CLI refused list_models: %s", frame.Response.Error)
 	}
+	seen := make(map[string]bool)
+	add := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
 	for _, m := range frame.Response.Response.Models {
 		if m.Value == "" || m.Value == "default" {
 			continue
 		}
-		ids = append(ids, m.Value)
+		add(m.Value)
+		var resolved string
+		// A null or non-string resolvedModel decodes to "" and is skipped.
+		if json.Unmarshal(m.ResolvedModel, &resolved) != nil {
+			continue
+		}
+		if resolved != m.Value && resolved != "default" {
+			add(resolved)
+		}
 	}
 	return ids, true, nil
 }
