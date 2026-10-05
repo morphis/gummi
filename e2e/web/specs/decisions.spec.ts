@@ -330,7 +330,7 @@ test.describe('a verified card linked to a pull request', () => {
     await page.getByTestId('decision-option-advance').click();
     await expect(page.getByTestId('decision-error')).toContainText('linked to');
     // the way to land it here anyway is the menu's, not a terminal command
-    await expect(page.getByTestId('decision-error')).toContainText('“unlink PR” in the card’s menu');
+    await expect(page.getByTestId('decision-error')).toContainText('“unlink PR” in the card\'s menu');
     await expect(page.getByTestId('decision-error')).not.toContainText('gummi pr unlink');
     await expect(page.getByTestId('landing-dialog')).toHaveCount(0);
     await shot(page, info, 'pr-merge-refused');

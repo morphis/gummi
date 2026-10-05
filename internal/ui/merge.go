@@ -206,7 +206,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 				f: f,
 				err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
 					f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f), f.ID),
-				webErr: fmt.Sprintf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (unlink PR in the card's menu to land it locally instead)",
+				webErr: fmt.Sprintf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (“unlink PR” in the card's menu lands it locally instead)",
 					f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f)),
 			}
 		}
