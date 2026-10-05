@@ -71,5 +71,16 @@
       "landed": true,
       "pr": "#12 merged"
     }
-  ]
+  ],
+  "resume": {
+    "cards": [
+      {
+        "id": "FD-012",
+        "title": "Dark mode",
+        "stage": "plan"
+      }
+    ],
+    "since": "3m ago",
+    "at": "2026-09-27T09:12:00Z"
+  }
 }

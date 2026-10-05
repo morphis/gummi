@@ -256,7 +256,7 @@ func (m *Shell) webResumeOffer() *webapi.ResumeOffer {
 	if o == nil {
 		return nil
 	}
-	out := &webapi.ResumeOffer{Since: o.since, Cards: make([]webapi.CardRef, 0, len(o.cards))}
+	out := &webapi.ResumeOffer{Since: o.since, At: o.at, Cards: make([]webapi.CardRef, 0, len(o.cards))}
 	for _, c := range o.cards {
 		out.Cards = append(out.Cards, webapi.CardRef{ID: string(c.Feature.ID), Title: c.Feature.Title, Stage: string(c.Feature.Stage)})
 	}

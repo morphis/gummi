@@ -23,11 +23,12 @@ func TestHeadlessBoardHoldsTheResumeQuestion(t *testing.T) {
 	b, _, eng, f, _ := headlessBoard(t, agent.NewFake("ok"))
 	ctx := context.Background()
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	quit := time.Date(2026, 9, 1, 8, 58, 0, 0, time.UTC)
 	offer := func() {
 		t.Helper()
 		pausedByQuit(t, b, eng, f)
 		if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-			m.resumeOffer = &quitResumeOffer{cards: []engine.QuitStoppedCard{{Feature: f, ParkedAt: time.Now()}}, since: "2m ago"}
+			m.resumeOffer = &quitResumeOffer{cards: []engine.QuitStoppedCard{{Feature: f, ParkedAt: time.Now()}}, since: "2m ago", at: quit}
 			return nil
 		}); err != nil {
 			t.Fatal(err)
@@ -35,7 +36,7 @@ func TestHeadlessBoardHoldsTheResumeQuestion(t *testing.T) {
 	}
 	offer()
 	bd := waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume != nil })
-	if len(bd.Resume.Cards) != 1 || bd.Resume.Cards[0].ID != "FD-001" || bd.Resume.Since != "2m ago" {
+	if len(bd.Resume.Cards) != 1 || bd.Resume.Cards[0].ID != "FD-001" || bd.Resume.Since != "2m ago" || !bd.Resume.At.Equal(quit) {
 		t.Fatalf("resume offer = %+v", bd.Resume)
 	}
 	if err := b.Resume(ctx, webapi.ResumeRequest{None: true}, "Simon"); err != nil {

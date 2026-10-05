@@ -59,8 +59,9 @@ request once).
 ## Resume offer
 
 `resume-slot` (always present), `resume-banner` (the quit-resume question),
-`resume-text`, `resume-all`, `resume-choose`, `resume-card-<ID>` (a checkbox
-once choosing), `resume-picked`, `resume-none` ("Not now").
+`resume-text`, `resume-ago` (how long ago the quit was, kept current),
+`resume-all`, `resume-choose`, `resume-card-<ID>` (a checkbox once
+choosing), `resume-picked`, `resume-none` ("Not now").
 
 ## Notifications
 

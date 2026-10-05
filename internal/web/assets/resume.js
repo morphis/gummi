@@ -19,6 +19,10 @@ const unticked = new Set()
 let busy = false
 let reload = () => {}
 let selectCard = () => {}
+// the banner's "3m ago" is counted from the quit itself, so it is
+// redrawn while it stands: said once, it went stale in place
+let ticker = null
+const TICK_MS = 15_000
 
 export function initResume ({ loadBoard, select }) {
   reload = loadBoard
@@ -34,7 +38,7 @@ function render () {
   const focused = box.contains(document.activeElement) ? document.activeElement.dataset?.testid : null
   clear(box)
   const offer = state.board?.resume
-  if (!offer?.cards?.length) { choosing = false; unticked.clear(); return }
+  if (!offer?.cards?.length) { choosing = false; unticked.clear(); stopTicker(); return }
   const cards = offer.cards
   const picks = cards.map(c => ({
     c,
@@ -48,10 +52,7 @@ function render () {
     h('div', { class: 'rb-row' },
       h('span', { class: 'rb-dot', 'aria-hidden': 'true' }),
       h('span', { class: 'rb-text', testid: 'resume-text' },
-        // the server measures since against the moment this board started,
-        // not against now: "closed 3s ago" would stand, unchanging, for as
-        // long as the banner did, so it is said as the gap it is
-        `When the board last quit${quitGap(offer.since)}, ${plural(cards.length, 'card')} ${cards.length === 1 ? 'was' : 'were'} mid-stage: `, names,
+        'When the board last quit', quitWhen(offer), `, ${plural(cards.length, 'card')} ${cards.length === 1 ? 'was' : 'were'} mid-stage: `, names,
         '. ', cards.length === 1 ? 'It is' : 'They are', ' parked where ', cards.length === 1 ? 'it' : 'they', ' stopped.'),
       h('span', { class: 'rb-actions' },
         h('button', { class: 'btn pri', type: 'button', testid: 'resume-all', disabled: busy, onclick: () => answer({ cards: cards.map(c => c.id) }) }, cards.length === 1 ? 'Resume it' : 'Resume all'),
@@ -69,14 +70,43 @@ function render () {
         }, 'Resume the ticked ones')))
       : null))
   if (focused) box.querySelector(`[data-testid="${CSS.escape(focused)}"]`)?.focus()
+  if (offer.at) startTicker()
 }
 
-// quitGap is how long before this board started the last one quit, from
-// the server's "3m ago" — nothing when that was a moment.
-function quitGap (since) {
-  const gap = String(since || '').replace(/\s*ago$/, '').trim()
+// quitWhen says when the last board quit: "(3m ago)" from the moment the
+// server sends, counted against now — or, from a server that sends only
+// its own measure, the gap before this board started, which does not go
+// stale ("(3m before this one started)").
+function quitWhen (offer) {
+  if (offer.at) return h('span', { testid: 'resume-ago', data: { at: offer.at } }, ` (${ago(offer.at)})`)
+  const gap = String(offer.since || '').replace(/\s*ago$/, '').trim()
   if (!gap || /^0s$/.test(gap)) return ''
   return ` (${gap} before this one started)`
+}
+
+// ago is how long before now t was, in the board's shortest honest unit.
+export function ago (t, now = Date.now()) {
+  const s = Math.max(0, Math.floor((now - new Date(t).getTime()) / 1000))
+  if (s < 60) return 'moments ago'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const hr = Math.floor(m / 60)
+  if (hr < 48) return `${hr}h ago`
+  return `${Math.floor(hr / 24)}d ago`
+}
+
+function startTicker () {
+  if (ticker) return
+  ticker = setInterval(() => {
+    const el = $('[data-testid="resume-ago"]')
+    if (!el) { stopTicker(); return }
+    el.textContent = ` (${ago(el.dataset.at)})`
+  }, TICK_MS)
+}
+
+function stopTicker () {
+  if (ticker) clearInterval(ticker)
+  ticker = null
 }
 
 async function answer (body) {

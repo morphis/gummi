@@ -1,5 +1,7 @@
 package webapi
 
+import "time"
+
 // Board is GET /api/board: the rail of cards and the header above it.
 type Board struct {
 	// Repo names the workspace; Head is the default repository's checked-
@@ -22,10 +24,13 @@ type Board struct {
 }
 
 // ResumeOffer is the quit-resume question: the cards the last quit
-// stopped, and how long ago ("2h ago").
+// stopped, and when. Since is how long before this board started that
+// was ("2h ago"), measured once; At is the moment itself, for a page that
+// says how long ago it is now and keeps saying it.
 type ResumeOffer struct {
 	Cards []CardRef `json:"cards"`
 	Since string    `json:"since"`
+	At    time.Time `json:"at,omitzero"`
 }
 
 // ResumeRequest is POST /api/board/resume. Cards names the offered cards

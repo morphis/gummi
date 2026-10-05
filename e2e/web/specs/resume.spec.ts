@@ -35,6 +35,25 @@ test('not now leaves the stopped cards parked', async ({ pairedPage: page, serve
   expect((await api('GET', `/api/cards/${id}`)).json.status).not.toBe('running');
 });
 
+// The banner says how long ago the board quit, counted from the quit
+// itself, and keeps saying it while it stands rather than freezing on
+// the age it had when the page drew it.
+test('how long ago the board quit stays current', async ({ pairedPage: page, server, api }) => {
+  const id = await runningOnAutopilot(api, '[slow] Add a lazy helper');
+  await server.restart();
+  await page.clock.install();
+  await page.reload();
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  const offer = (await api('GET', '/api/board')).json.resume;
+  expect(offer.cards.map((c: any) => c.id)).toEqual([id]);
+  expect(Date.parse(offer.at)).toBeLessThanOrEqual(Date.now());
+  const ago = page.getByTestId('resume-ago');
+  await expect(ago).toHaveText(' (moments ago)');
+  await page.clock.fastForward('05:00');
+  await expect(ago).toHaveText(' (5m ago)');
+  await page.getByTestId('resume-none').click();
+});
+
 test('resume picks the chosen cards back up', async ({ pairedPage: page, server, api }, info) => {
   const a = await runningOnAutopilot(api, '[slow] Add a lazy helper');
   const b = await runningOnAutopilot(api, '[slow] Add a sleepy helper');
