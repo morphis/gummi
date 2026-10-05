@@ -19,6 +19,11 @@ const stack = [] // open layers, oldest first: [{ seq, close, dead, pushed }]
 // at one of those, would find nothing newer than it to close.
 let seq = Date.now()
 let ours = 0 // history.back() calls we made, whose popstate is ours to swallow
+// the address of a navigation (a hash typed or linked) made while one of
+// our steps back was still under way: that step was queued first, so it
+// lands behind the navigation — where exactly, the browser decides — and
+// the navigation is made again from there
+let overtaken = null
 // the address a step back arrived at, for a moment: the hash change it
 // raises is the tail of that step, not a navigation — and only that one
 let stepped = { hash: null, until: 0 }
@@ -85,12 +90,24 @@ export function initBack () {
   if (inited) return // boot runs again after pairing; one listener is the whole design
   inited = true
   window.addEventListener('popstate', (e) => {
-    if (ours) {
+    // our own step back always arrives on an entry this page numbered; a
+    // new entry (a hash typed or linked while that step was still under
+    // way) has no number, and is a navigation to follow, not ours to
+    // swallow — swallowed, its hash would read as the tail of a step and
+    // the card it names would never open
+    if (ours && e.state?.gummiSeq != null) {
       ours--
       stamp() // our own step back arrived: its hash is not a navigation
+      if (!ours && overtaken != null) {
+        // it went past a navigation made meanwhile: make that again
+        const to = overtaken
+        overtaken = null
+        location.hash = to
+      }
       if (!ours) for (const l of stack) if (!l.pushed && !l.dead) push(l)
       return
     }
+    if (ours) { overtaken = location.hash; mark(); return }
     const to = e.state?.gummiSeq
     if (to == null) { mark(); return } // a new entry: a navigation
     let closed = false

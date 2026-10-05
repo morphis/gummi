@@ -145,4 +145,27 @@ test.describe('back', () => {
     await page.goBack();
     await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
   });
+
+  // A layer closed by its own control steps its history entry back out,
+  // and that step is asynchronous: a card linked or typed into the address
+  // while it is still under way must open, not be stepped back over.
+  test('a link followed while a closed layer steps back still opens its card', async ({ pairedPage: page, server }, info) => {
+    test.skip(info.project.name === 'phone', 'the desktop palette is the layer');
+    await page.goto(`${server.url}/#${a}`);
+    await expect(page.getByTestId('card-id')).toHaveText(a);
+    await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+    await page.keyboard.press('Control+k');
+    await expect(page.getByTestId('palette')).toBeVisible();
+    // close the palette and follow the link in one task: its step back is
+    // queued, not yet done, when the address changes
+    await page.evaluate((id) => {
+      document.querySelector<HTMLElement>('[data-testid="palette-input"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      location.hash = id;
+    }, b);
+    await expect(page.getByTestId('palette')).toHaveCount(0);
+    await expect(page.getByTestId('card-id')).toHaveText(b);
+    await page.waitForTimeout(600);
+    await expect(page.getByTestId('card-id')).toHaveText(b);
+    expect(page.url()).toContain(`#${b}`);
+  });
 });
