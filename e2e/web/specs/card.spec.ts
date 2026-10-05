@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showCard, test } from '../fixtures/test';
 import { decision, mockCard, stats } from '../fixtures/contract';
 import { shot } from '../fixtures/shots';
 
@@ -18,6 +18,7 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedDesignGate('Add a wave
 test('the thread folds past stages and draws every item kind', async ({ pairedPage: page }, info) => {
   await mockCard(page, id);
   await page.reload();
+  await showCard(page, id);
   const items = page.getByTestId('thread-items');
   await expect(page.getByTestId('stage-group-verify')).toHaveAttribute('open', '');
   await expect(page.getByTestId('stage-group-plan')).not.toHaveAttribute('open', '');
@@ -45,6 +46,7 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
   const m = await mockCard(page, id);
   await page.goto(page.url().replace(/#.*$/, '') + `#${id}/spec`);
   await page.reload();
+  await showCard(page, id);
   if (info.project.name === 'phone') await page.getByTestId('tab-spec').click();
   const doc = page.getByTestId('spec-doc');
   await expect(doc.getByTestId('spec-section-1')).toContainText('Chosen approach');
@@ -67,6 +69,7 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
 test('the diff draws files, comments inline, keeps viewed ticks and adds a comment', async ({ pairedPage: page }, info) => {
   const m = await mockCard(page, id);
   await page.reload();
+  await showCard(page, id);
   if (info.project.name === 'phone') await page.getByTestId('tab-diff').click();
   // a verify-failed decision is about the diff: the panel follows it
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
@@ -82,6 +85,7 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   await page.getByTestId('diff-viewed-1').check();
   await expect(page.getByTestId('diff-filebox-1')).toHaveClass(/viewed/);
   await page.reload();
+  await showCard(page, id);
   if (info.project.name === 'phone') await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('diff-viewed-1')).toBeChecked();
   expect(m.annotations).toHaveLength(2);
@@ -102,6 +106,7 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
   // the document, whatever tab the decision is about
   await mockCard(page, id, { kind: 'research' });
   await page.reload();
+  await showCard(page, id);
   if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
   await expect(page.getByTestId('decision-jump')).toHaveText('read the document');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -110,6 +115,7 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
   const { options } = decision;
   await mockCard(page, id, { decision: { ...decision, options: options.map((o) => ({ ...o, carriesComments: false })) } });
   await page.reload();
+  await showCard(page, id);
   await page.getByTestId('tab-diff').click();
   await expect(page.getByTestId('diff-pending')).toHaveText('1 comment on this diff is still open.');
   await expect(page.getByTestId('decision-carry')).toHaveCount(0);
@@ -118,6 +124,7 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
 test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info) => {
   await mockCard(page, id);
   await page.reload();
+  await showCard(page, id);
   await page.getByTestId('tab-pr').click();
   await expect(page.getByTestId('pr-state')).toContainText('open');
   await expect(page.getByTestId('pr-thread-0')).toContainText('Should Wave trim');
@@ -178,6 +185,7 @@ test('the stats tab says none recorded where a backend reports no tool calls', a
     body: JSON.stringify({ ...stats, hands: { ...stats.hands, tools: undefined } }),
   }));
   await page.reload();
+  await showCard(page, id);
   await page.getByTestId('tab-stats').click();
   await expect(page.getByTestId('stats-hands')).toContainText('turns 9');
   await expect(page.getByTestId('stats-no-tools')).toContainText('none recorded');

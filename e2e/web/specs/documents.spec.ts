@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showCard, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // The card page against a real `gummi web` and a card the scripted agent
@@ -9,6 +9,7 @@ let id: string;
 test.use({ seed: { run: async (ws) => { id = await ws.seedVerifyFailed('Add a regressing helper'); await ws.linkPR(id); } } });
 
 test('the thread shows the stages the card walked and its verify', async ({ pairedPage: page }, info) => {
+  await showCard(page, id);
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('stage-group-verify').last()).toBeVisible();
   await expect(page.getByTestId('stage-group-plan').first()).not.toHaveAttribute('open', '');
@@ -17,6 +18,7 @@ test('the thread shows the stages the card walked and its verify', async ({ pair
 });
 
 test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage: page }, info) => {
+  await showCard(page, id);
   await page.getByTestId('tab-spec').click();
   await expect(page.getByTestId('spec-toc')).toContainText('Chosen approach');
   await expect(page.getByTestId('spec-checks')).toContainText('go build');

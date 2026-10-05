@@ -29,7 +29,8 @@ test.use({
 // and each row's repo chip; the full rail is what these tests are about.
 async function fullRail(page: Page, project: string): Promise<void> {
   if (project === 'phone') {
-    await page.getByTestId('mnav-cards').click();
+    // a phone opens on its cards list, the full rail; from a card, back
+    if ((await page.getByTestId('app').getAttribute('data-view')) !== 'cards') await page.getByTestId('card-back').click();
     return;
   }
   if ((await page.getByTestId('rail-toggle').getAttribute('aria-pressed')) === 'false') {

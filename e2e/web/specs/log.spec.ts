@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showCard, test } from '../fixtures/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,6 +29,7 @@ test.use({
 });
 
 test('the log lists the branch, and squash and reword rewrite it without changing content', async ({ pairedPage: page, workspace }, info) => {
+  await showCard(page, id);
   await page.getByTestId('tab-log').click();
   const rows = page.locator('[data-testid^="log-commit-"]');
   await expect(page.getByTestId('log-head')).toContainText('commits ahead of');

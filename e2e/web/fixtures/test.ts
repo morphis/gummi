@@ -144,3 +144,18 @@ export const test = base.extend<Fixtures>({
     await use((method, pathname, body, opts) => api(request, server, method, pathname, body, opts));
   },
 });
+
+/**
+ * Open card `id` the way a person would on a phone: a phone's board opens
+ * on its cards list (and comes back to it on reload), so the card is
+ * tapped there. Anywhere wider the board already shows the card it
+ * picked, and this does nothing.
+ */
+export async function showCard(page: Page, id: string): Promise<void> {
+  if ((page.viewportSize()?.width ?? 1440) > 760) return;
+  // the board is up once it is live; a deep link has already opened the
+  // card by then, and the cards list is only showing when it has not
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  if ((await page.getByTestId('app').getAttribute('data-view')) === 'cards') await page.getByTestId(`rail-row-${id}`).click();
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+}
