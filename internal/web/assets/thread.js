@@ -261,13 +261,15 @@ function message (it) {
   }
   if (it.author === 'you') return you(it)
   const role = it.author || it.role || ROLE[it.stage] || 'agent'
-  // a consult answer sits where it was asked, and says it steered nothing
+  // a consult answer sits where it was asked, and says it steered nothing;
+  // it claims no read-only here, since the log does not record whether
+  // the backend that answered could confine it
   const consult = it.via === 'consult'
   return h('div', { class: ['msg', it.stage && `st-${it.stage}`], testid: consult ? 'thread-consult' : null },
     h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, role),
-        consult ? h('span', { class: 'via' }, 'read-only') : null,
+        consult ? h('span', { class: 'via' }, 'consult') : null,
         it.flavor && it.flavor !== 'work' ? h('span', { class: 'via' }, it.flavor) : null,
         it.model ? h('span', { class: 'mono' }, it.model) : null,
         h('span', { class: 'mono' }, clock(it.time))),
@@ -418,12 +420,16 @@ function renderLive () {
           l.spent ? h('span', { class: 'spent' }, `${cr(l.spent)} cr`) : null))
       }
       if (l.err) parts.push(h('div', { class: 'live badc', testid: 'live-error' }, l.err))
-      for (const [k, label] of [['consult', 'consult · read-only'], ['freeform', 'session']]) {
+      for (const k of ['consult', 'freeform']) {
         const c = l[k]
         if (!c || !(c.turns?.length || c.streaming || c.busy || c.sending || c.err)) continue
+        // a consult says what it may do: read-only, or the engine's notice
+        // when the backend it runs on cannot confine it
+        const label = k === 'freeform' ? 'session' : c.notice ? 'consult · not confined' : 'consult · read-only'
         // headed as the settled turns are: the conversation, then its agent
         parts.push(h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
           k === 'freeform' ? h('span', { class: 'sum' }, c.role || 'implementer') : null))
+        if (c.notice) parts.push(h('div', { class: 'live warnc', testid: `live-${k}-notice` }, c.notice))
         parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
         if (c.sending) parts.push(you({ text: c.sending, via: 'sending' }))
         if (c.tasks?.length) parts.push(tasks(c.tasks, k))

@@ -284,7 +284,12 @@ func TestThreadAttachRespectsStage(t *testing.T) {
 // turn, the kickoff labelled gummi and the user turn labelled you, with
 // the composer ready below.
 func TestThreadConversationGolden(t *testing.T) {
-	m, eng := agentWorkspace(t, agent.NewFake("Persist per-device via localStorage; account sync is a follow-up."))
+	ag := agent.NewFake("Persist per-device via localStorage; account sync is a follow-up.")
+	// a backend that confines a consult, so the thread's consult block is
+	// the read-only one (TestThreadConsultBlockSaysWhenUnconfined draws
+	// the other)
+	ag.Caps.ReadOnlyEnforce = true
+	m, eng := agentWorkspace(t, ag)
 	m = openAndAttach(t, m)
 	settleChat(t, eng) // kickoff reply lands before the user types
 	m = typeString(t, m, "per-device or synced?")

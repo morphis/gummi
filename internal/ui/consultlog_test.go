@@ -12,6 +12,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -32,7 +33,13 @@ func TestTheTUIDrawsARecordedConsultAfterARestart(t *testing.T) {
 	}
 	m.sel, m.cardOpen = 0, true
 	view := ansi.Strip(m.threadView(157, 46))
-	for _, want := range []string{"asked · read-only", "is this already done?", "Not yet — nothing touches it."} {
+	// The caption makes no read-only claim here: the log does not record
+	// which backend answered, so it cannot know whether that one was
+	// confined.
+	if strings.Contains(view, "read-only") || strings.Contains(view, "not confined") {
+		t.Errorf("a recorded consult claimed a confinement the log does not record:\n%s", view)
+	}
+	for _, want := range []string{"┄┄ asked ┄", "is this already done?", "Not yet — nothing touches it."} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the thread lost the recorded consult (%q missing):\n%s", want, view)
 		}
@@ -84,5 +91,45 @@ func TestTheWebLiveConsultHoldsOnlyWhatIsInFlight(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("the log holds %d consult turns, want the question and its answer", n)
+	}
+}
+
+// The web's live consult carries the engine's notice when the backend it
+// runs on cannot confine it, so the page says so where the TUI does; a
+// confined one carries none.
+func TestTheWebLiveConsultCarriesTheConfinementNotice(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enforce bool
+		want    string
+	}{
+		{"unconfined", false, engine.ConsultNotice("fake")},
+		{"confined", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ag := agent.NewFake("Not yet.")
+			ag.Caps.ReadOnlyEnforce = tc.enforce
+			b, _, eng, f, _ := headlessBoard(t, ag)
+			waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+			ctx := context.Background()
+			if _, err := eng.OpenConsult(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+			var live webapi.Live
+			if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+				// a line on its way keeps the live block drawn
+				m.consultSending[f.ID] = "is this already done?"
+				live, _ = m.WebLive(string(f.ID))
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if live.Consult == nil {
+				t.Fatal("no live consult block for a line in flight")
+			}
+			if live.Consult.Notice != tc.want {
+				t.Errorf("Notice = %q, want %q", live.Consult.Notice, tc.want)
+			}
+		})
 	}
 }

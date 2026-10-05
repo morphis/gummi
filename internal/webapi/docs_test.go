@@ -20,7 +20,8 @@ func TestLiveShape(t *testing.T) {
 			{Author: "you", Text: "keep it small"},
 		},
 		Consult: &Conversation{
-			Busy: true, Verb: "thinking", Turns: []Turn{{Author: "you", Text: "why two funcs?"}, {Author: "thinking", Text: "one per backend"}},
+			Busy: true, Notice: "consult is not confined on copilot: it can write to the checkout",
+			Verb: "thinking", Turns: []Turn{{Author: "you", Text: "why two funcs?"}, {Author: "thinking", Text: "one per backend"}},
 			Tool:  &ToolCall{Tool: "Read", Label: "Read  main.go", Detail: "main.go", Status: "running"},
 			Spent: 0.5, Model: "claude-opus", Context: &AgentContext{Tokens: 41000, Limit: 200000},
 			Tasks:  []Task{{Text: "read the adapter", Status: "completed"}, {Text: "Fixing the leak", Status: "in_progress"}},

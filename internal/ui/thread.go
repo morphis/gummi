@@ -1629,7 +1629,7 @@ func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 	if len(snap.Transcript) == 0 && asking == "" {
 		return nil
 	}
-	lines := []string{consultCaption(s, snap, w), ""}
+	lines := consultHead(s, snap, c.Notice(), w)
 	lines = append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 	if snap.Err != nil {
 		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
@@ -1646,6 +1646,20 @@ func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" thinking…"))
 	}
 	return lines
+}
+
+// consultHead is a live consult's caption, followed by the engine's
+// notice when the backend it runs on cannot confine it — said where the
+// consult opens, in place of a read-only claim it could not keep.
+func consultHead(s *theme.Styles, snap engine.Snapshot, notice string, w int) []string {
+	if notice == "" {
+		return []string{consultCaption(s, snap, "read-only", w), ""}
+	}
+	lines := []string{consultCaption(s, snap, "not confined", w)}
+	for _, l := range strings.Split(wrapText(notice, max(w-4, 8)), "\n") {
+		lines = append(lines, "  "+s.Warning.Render(l))
+	}
+	return append(lines, "")
 }
 
 // recordedConsultLines is the consult exchange as the card's log recorded
@@ -1667,7 +1681,7 @@ func (m *Shell) recordedConsultLines(s *theme.Styles, r featureRow, w int) []str
 		return nil
 	}
 	snap := engine.Snapshot{Role: agent.RoleConsult, Transcript: tr}
-	lines := []string{consultCaption(s, snap, w), ""}
+	lines := []string{consultCaption(s, snap, "", w), ""}
 	return append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 }
 
@@ -1789,9 +1803,14 @@ func (m *Shell) askingLines(s *theme.Styles, text string, w int) []string {
 // filled (┄, never boundaryRule's solid ──) so it reads as a different
 // KIND of divider on sight, not just a differently-worded one — a stage
 // boundary marks a fresh context in the same conversation; this marks a
-// second, entirely separate one.
-func consultCaption(s *theme.Styles, snap engine.Snapshot, w int) string {
-	label := "asked · read-only"
+// second, entirely separate one. mode is what the consult may do —
+// "read-only" or "not confined" for a live session, which knows; empty
+// for one drawn from the card's log, which does not record it.
+func consultCaption(s *theme.Styles, snap engine.Snapshot, mode string, w int) string {
+	label := "asked"
+	if mode != "" {
+		label += " · " + mode
+	}
 	if mdl := runModel(snap); mdl != "" {
 		label += " · " + mdl
 	}

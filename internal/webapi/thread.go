@@ -213,10 +213,13 @@ type Turn struct {
 }
 
 // Conversation is a session that is not a stage run: the card's consult
-// (questions asked beside the stage, read-only) or a freeform card's
-// working session.
+// (questions asked beside the stage, read-only where the backend can
+// enforce it) or a freeform card's working session.
 type Conversation struct {
 	Busy bool `json:"busy"`
+	// Notice is a consult's warning that the backend it runs on cannot
+	// confine it, in the engine's words; empty when it runs read-only.
+	Notice string `json:"notice,omitempty"`
 	// Role is who speaks for the agent side, as the thread's finished
 	// turns name it ("implementer" on a freeform card), so the turn being
 	// written is headed the same way as the ones already written.

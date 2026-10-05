@@ -36,6 +36,7 @@
   ],
   "consult": {
     "busy": true,
+    "notice": "consult is not confined on copilot: it can write to the checkout",
     "verb": "thinking",
     "turns": [
       {

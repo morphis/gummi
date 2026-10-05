@@ -310,7 +310,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .checks .c{font-family:var(--mono);font-size:12px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .checks .d{font-family:var(--mono);font-size:11px;color:var(--fg3)}
 .checks pre{grid-column:1/-1;margin:2px 0 0;padding:8px 10px;background:var(--sunk);border-radius:6px;font:12px/1.45 var(--mono);color:var(--err);overflow-x:auto;white-space:pre}
-.okc{color:var(--ok)} .badc{color:var(--err)} .nonec{color:var(--fg3)}
+.okc{color:var(--ok)} .badc{color:var(--err)} .warnc{color:var(--warn)} .nonec{color:var(--fg3)}
 /* the live turn is spaced as the settled items above it are, and its
    status line stands in the message grid: the spinner centred in the
    avatar column and on the first line, the words in the text column */

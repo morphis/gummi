@@ -2,13 +2,16 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 )
 
 // TestAskArmsWithEmptyLine: bare `ask` arms the composer against the
@@ -195,6 +198,9 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 			{Kind: agent.EventIdle},
 		}
 	}}
+	// A backend that confines a consult: the golden is the read-only
+	// caption (TestThreadConsultBlockSaysWhenUnconfined is the other one).
+	ag.Caps.ReadOnlyEnforce = true
 	m, eng := agentWorkspace(t, ag)
 	// tall enough that the consult block's own caption survives the
 	// thread's bottom-anchored scroll alongside everything above it
@@ -218,4 +224,42 @@ func TestThreadConsultBlockGolden(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // disarm — steering resumes for the next line
 
 	golden.RequireEqual(t, []byte(m.View().Content))
+}
+
+// TestThreadConsultBlockSaysWhenUnconfined: on a backend that cannot
+// strip its own write tools the consult still answers, but its caption
+// stops claiming read-only and the engine's notice is drawn under it,
+// where the consult opens.
+func TestThreadConsultBlockSaysWhenUnconfined(t *testing.T) {
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleConsult {
+			return []agent.Event{{Kind: agent.EventMessage, Text: "plenty of headroom."}, {Kind: agent.EventIdle}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "Done."}, {Kind: agent.EventIdle}}
+	}}
+	m, eng := agentWorkspace(t, ag)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
+	m = model.(*Shell)
+	if err := m.store.SetGateApproval(context.Background(), "FD-001", domain.GateAttended); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	m = advanceTo(t, m, domain.StageImplement)
+	m = openAndAttach(t, m)
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m)
+
+	m = typeString(t, m, "/ask is the envelope close to the cap?")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = drainEngineLoop(t, m)
+
+	view := ansi.Strip(m.View().Content)
+	if strings.Contains(view, "asked · read-only") {
+		t.Errorf("an unconfined consult claimed read-only:\n%s", view)
+	}
+	for _, want := range []string{"asked · not confined", engine.ConsultNotice("fake")} {
+		if !strings.Contains(view, want) {
+			t.Errorf("consult block missing %q:\n%s", want, view)
+		}
+	}
 }

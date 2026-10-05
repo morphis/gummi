@@ -106,6 +106,7 @@ func (m *Shell) webConsult(r featureRow) *webapi.Conversation {
 		return nil
 	}
 	conv := webConversation(snap, asking, "thinking")
+	conv.Notice = c.Notice()
 	if m.store != nil {
 		// Every question and answer is in the card's log (EventConsult),
 		// and the thread draws them from there, where they were asked; the
