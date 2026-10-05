@@ -717,13 +717,16 @@ func (d *Driver) Clean(ctx context.Context, id domain.FeatureID) (Outcome, error
 			}
 		}
 	}
-	// The card's scratch-files dir goes with the card too — a backend
-	// that keeps a per-card config home (antigravity) derives it from
-	// here, and its conversations are no use once the card is gone. An
-	// agent's `go build` leaves a read-only module cache under that home,
-	// which plain os.RemoveAll cannot take.
-	if err := rmtree.RemoveAll(d.ws.ScratchFilesDir(id)); err != nil {
-		return d.fail(ctx, string(id), fmt.Errorf("removing scratch files %s: %w", d.ws.ScratchFilesDir(id), err))
+	// The card's scratch-files dir and backend home go with the card too —
+	// a backend that keeps a per-card config home (antigravity) keeps it
+	// in the latter (an older gummi kept it in the former), and its
+	// conversations are no use once the card is gone. An agent's
+	// `go build` leaves a read-only module cache under that home, which
+	// plain os.RemoveAll cannot take.
+	for _, dir := range []string{d.ws.ScratchFilesDir(id), d.ws.AgentHomeDir(id)} {
+		if err := rmtree.RemoveAll(dir); err != nil {
+			return d.fail(ctx, string(id), fmt.Errorf("removing card files %s: %w", dir, err))
+		}
 	}
 	d.out.emit(cleanedEvent{
 		Event: "cleaned", ID: string(id), Branch: f.BranchName(),

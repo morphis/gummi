@@ -365,11 +365,11 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// The session lives past its turns, so the backend's own watch
 		// and backgrounded commands have somewhere to report back to.
 		Watch: true,
-		// The card's scratch-files anchor: a backend that anchors its
-		// config in a per-card home (antigravity) derives it from here,
-		// so the session's home — and the conversations it keeps there —
-		// survive a restart, which ResumeID below depends on.
 		ScratchDir: e.scratchFilesDirFor(ff.id),
+		// The card's own backend home (antigravity keeps its config
+		// there), so the session's home — and the conversations it keeps
+		// there — survive a restart, which ResumeID below depends on.
+		AgentHomeDir: e.agentHomeDirFor(ff.id),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives

@@ -235,10 +235,11 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		OutputTokenMax: c.rc.OutputTokenMax,
 		FeatureID:      string(c.id),
 		MCPSockPath:    mcpPath,
-		// The card's scratch-files anchor: a backend that anchors its
-		// config in a per-card home (antigravity) derives it from here,
-		// keeping a consult home of its own beside the stage sessions'.
 		ScratchDir: e.scratchFilesDirFor(c.id),
+		// The card's own backend home: a backend that keeps a per-card
+		// config home (antigravity) keeps a consult home of its own in it,
+		// beside the stage sessions'.
+		AgentHomeDir: e.agentHomeDirFor(c.id),
 		// No ArtifactPath, no MaxCredits: a consult session has no spec
 		// prompt to seed (card_spec answers that on demand instead) and no
 		// budget to enforce. An MCP-reaching backend here always dials in

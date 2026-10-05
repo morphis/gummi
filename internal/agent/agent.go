@@ -163,6 +163,12 @@ type SessionOpts struct {
 	// Adapters with a path cage let the session read and write it;
 	// adapters without one ignore it.
 	ScratchDir string
+	// AgentHomeDir is the card's gummi-owned directory for backend state
+	// the agent must never touch — antigravity anchors its per-card HOME
+	// here. Unlike ScratchDir it is never named to the session. Empty
+	// means no per-card anchor: a backend that wants one falls back to a
+	// throwaway home of its own.
+	AgentHomeDir string
 	// SkillDirs are absolute skill-directory paths the session should load
 	// beyond whatever the backend discovers on its own. Every card runs in
 	// a worktree under <workspace>/.gummi/worktrees, a sibling of the

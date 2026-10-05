@@ -181,24 +181,34 @@ func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	home := filepath.Join(m.ws.ScratchFilesDir(f.ID), "agy-home")
-	if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o700); err != nil {
-		t.Fatal(err)
+	// the card home where it lives now, and where an older gummi left it
+	homes := []string{
+		filepath.Join(m.ws.AgentHomeDir(f.ID), "agy"),
+		filepath.Join(m.ws.ScratchFilesDir(f.ID), "agy-home"),
 	}
-	// what an agent's `go build` leaves under that home: a module cache of
-	// read-only directories and files, which plain os.RemoveAll cannot take.
-	mod := filepath.Join(home, "go", "pkg", "mod", "x@v1")
-	if err := os.MkdirAll(mod, 0o700); err != nil {
-		t.Fatal(err)
+	for _, home := range homes {
+		if err := os.MkdirAll(filepath.Join(home, ".gemini"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// what an agent's `go build` leaves under that home: a module cache of
+		// read-only directories and files, which plain os.RemoveAll cannot take.
+		mod := filepath.Join(home, "go", "pkg", "mod", "x@v1")
+		if err := os.MkdirAll(mod, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(mod, "a.go"), []byte("package x\n"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(mod, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(mod, 0o700) })
 	}
-	if err := os.WriteFile(filepath.Join(mod, "a.go"), []byte("package x\n"), 0o444); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(mod, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(mod, 0o700) })
 	other := filepath.Join(m.ws.ScratchFilesDir("FD-999"), "agy-home", ".gemini")
+	otherHome := filepath.Join(m.ws.AgentHomeDir("FD-999"), "agy", ".gemini")
+	if err := os.MkdirAll(otherHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(other, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -207,10 +217,15 @@ func TestDeletingACardRemovesItsScratchFiles(t *testing.T) {
 	if !ok || msg.isErr {
 		t.Fatalf("delete refused: %#v", msg)
 	}
-	if _, err := os.Stat(home); !os.IsNotExist(err) {
-		t.Fatalf("deleted card's card home still present: stat err = %v", err)
+	for _, home := range homes {
+		if _, err := os.Stat(home); !os.IsNotExist(err) {
+			t.Fatalf("deleted card's card home %s still present: stat err = %v", home, err)
+		}
 	}
 	if _, err := os.Stat(other); err != nil {
 		t.Fatalf("co-resident card's scratch files removed: %v", err)
+	}
+	if _, err := os.Stat(otherHome); err != nil {
+		t.Fatalf("co-resident card's backend home removed: %v", err)
 	}
 }

@@ -299,14 +299,17 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 func (a *Antigravity) homeFor(opts SessionOpts) (*antigravityHome, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if opts.ScratchDir == "" {
+	if opts.AgentHomeDir == "" {
 		return newAntigravityTempHome()
 	}
-	name := "agy-home"
+	name, legacy := "agy", "agy-home"
 	if opts.Role == RoleConsult {
-		name = "agy-home-consult"
+		name, legacy = "agy-consult", "agy-home-consult"
 	}
-	dir := filepath.Join(opts.ScratchDir, name)
+	dir := filepath.Join(opts.AgentHomeDir, name)
+	if opts.ScratchDir != "" {
+		dir = adoptLegacyAntigravityHome(filepath.Join(opts.ScratchDir, legacy), dir)
+	}
 	if a.homes == nil {
 		a.homes = map[string]*antigravityHome{}
 	}

@@ -29,7 +29,7 @@ func TestAntigravityFirstTurnNamesTheMCPServer(t *testing.T) {
 	}
 	defer ag.Close()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: t.TempDir(),
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: t.TempDir(),
 		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1.sock", SystemHints: []string{"HINT"},
 	})
 	if err != nil {
@@ -79,12 +79,12 @@ func TestAntigravityFailedStartReleasesItsEntry(t *testing.T) {
 	}
 	scratch := t.TempDir()
 	if _, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1.sock",
 	}); err == nil {
 		t.Fatal("NewSession succeeded with an unexecutable binary")
 	}
-	home := ag.homes[filepath.Join(scratch, "agy-home")]
+	home := ag.homes[filepath.Join(scratch, "agy")]
 	if home == nil {
 		t.Fatal("card home not created")
 	}

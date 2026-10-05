@@ -1715,11 +1715,13 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 	// a deleted card's last session would linger as a watchable file
 	// (harmless — its owner is gone — but clutter all the same).
 	_ = os.Remove(m.ws.LiveFile(f.ID))
-	// the card's scratch-files dir is keyed to the record the same way —
-	// throwaway files, and the per-card config home a backend like
-	// antigravity keeps there (best effort: an orphan is only clutter).
-	// Through rmtree: that home can hold a read-only Go module cache.
+	// the card's scratch-files dir and backend home are keyed to the
+	// record the same way — throwaway files, and the per-card config home
+	// a backend like antigravity keeps (in the latter; an older gummi kept
+	// it in the former). Best effort: an orphan is only clutter. Through
+	// rmtree: that home can hold a read-only Go module cache.
 	_ = rmtree.RemoveAll(m.ws.ScratchFilesDir(f.ID))
+	_ = rmtree.RemoveAll(m.ws.AgentHomeDir(f.ID))
 	// what a goal knew that no card owned is keyed to the record in the
 	// same way (state.Workspace.GoalNotebookDir).
 	if f.IsGoal() {

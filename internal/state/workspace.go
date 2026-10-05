@@ -84,6 +84,17 @@ func (w Workspace) ScratchFilesDir(id domain.FeatureID) string {
 	return filepath.Join(w.StateDir(), "scratch", string(id))
 }
 
+// AgentHomeDir is where a backend that needs a per-card home of its own
+// (antigravity's redirected HOME: the OAuth token copy, its MCP config,
+// the conversations a resume picks up) keeps it. Beside ScratchFilesDir,
+// never inside it: the stage hints hand the scratch directory to the
+// agent as its own, and an agent tidying it would delete the token and
+// the conversation the next resume needs. The agent is never told this
+// path. Under .gummi, gitignored, and cleaned with the card.
+func (w Workspace) AgentHomeDir(id domain.FeatureID) string {
+	return filepath.Join(w.StateDir(), "agent-home", string(id))
+}
+
 // GoalNotebookDir is where a goal keeps what it knows that no card owns —
 // the owner's reference documents, the constants it has decided, what it
 // found to be true (internal/notebook). Beside the goal doc and, like it,

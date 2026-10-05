@@ -1623,6 +1623,17 @@ func (e *Engine) scratchFilesDirFor(id domain.FeatureID) string {
 	return dir
 }
 
+// agentHomeDirFor returns the card's backend-home directory
+// (state.Workspace.AgentHomeDir) — not created here: only a backend that
+// keeps a per-card home makes it, so a card that never runs on one
+// leaves nothing behind. Empty when the workspace has no root.
+func (e *Engine) agentHomeDirFor(id domain.FeatureID) string {
+	if e.cfg.Workspace.Root == "" {
+		return ""
+	}
+	return e.cfg.Workspace.AgentHomeDir(id)
+}
+
 // newAgentSession builds an agent session for a feature's stage, with
 // the backend/model chosen by the feature's profile for this role. It
 // also returns the resolved spec path so the caller can record it on the
@@ -1816,6 +1827,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// The scratch directory the boundary hint names: a caged backend
 		// must let the session use the place it was told to use.
 		ScratchDir: scratch,
+		// Where a backend keeps its per-card home: never named to the
+		// session, so following the hint above cannot reach it.
+		AgentHomeDir: e.agentHomeDirFor(f.ID),
 		// Workspace skills the operator forwarded. The worktree is a
 		// sibling of the repository, so nothing the workspace root holds
 		// is in this session's project scope unless it is named here.

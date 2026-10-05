@@ -685,3 +685,51 @@ func TestConsultAndFreeformSessionsCarryTheCardScratchDir(t *testing.T) {
 		t.Fatalf("freeform ScratchDir = %q, want the card's scratch dir %q", r2.opts().ScratchDir, want)
 	}
 }
+
+// TestSessionsCarryAnAgentHomeOutsideScratch: every session kind that can
+// resume stamps the card's backend-home dir, and it is not under the
+// scratch dir the stage hints hand the agent — an agent clearing out its
+// scratch files must not be able to take the backend's token and
+// conversations with them.
+func TestSessionsCarryAnAgentHomeOutsideScratch(t *testing.T) {
+	ctx := context.Background()
+	check := func(kind string, o agent.SessionOpts, want string) {
+		t.Helper()
+		if o.AgentHomeDir != want {
+			t.Fatalf("%s AgentHomeDir = %q, want %q", kind, o.AgentHomeDir, want)
+		}
+		if rel, err := filepath.Rel(o.ScratchDir, o.AgentHomeDir); err == nil && !strings.HasPrefix(rel, "..") {
+			t.Fatalf("%s AgentHomeDir %q is inside ScratchDir %q", kind, o.AgentHomeDir, o.ScratchDir)
+		}
+	}
+
+	ws, store, wt := newRepo(t)
+	rec := recordingAgent()
+	e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, "FD-001", StateDone)
+	check("stage", rec.opts(), ws.AgentHomeDir(f.ID))
+
+	r := recordingAgent()
+	e2 := newEngine(t, r)
+	f2 := feature(3, "consult home", domain.StageImplement)
+	createFeature(t, e2.cfg.Store, f2)
+	if _, err := e2.OpenConsult(ctx, f2); err != nil {
+		t.Fatal(err)
+	}
+	check("consult", r.opts(), e2.cfg.Workspace.AgentHomeDir(f2.ID))
+
+	r3 := recordingAgent()
+	e3 := newEngine(t, r3)
+	f3 := freeformCard(4, "freeform home")
+	createFeature(t, e3.cfg.Store, f3)
+	if _, err := e3.OpenFreeform(ctx, f3); err != nil {
+		t.Fatal(err)
+	}
+	check("freeform", r3.opts(), e3.cfg.Workspace.AgentHomeDir(f3.ID))
+}

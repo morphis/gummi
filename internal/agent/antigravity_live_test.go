@@ -105,7 +105,7 @@ func TestAntigravityLiveTurn(t *testing.T) {
 	}
 	defer ag.Close()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: antigravityLiveScratch(t),
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: antigravityLiveScratch(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestAntigravityLiveResume(t *testing.T) {
 	scratch := antigravityLiveScratch(t)
 
 	a, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: scratch,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestAntigravityLiveResume(t *testing.T) {
 	}
 
 	b, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: scratch, ResumeID: id,
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: scratch, ResumeID: id,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestAntigravityLiveResumeUsageBaseline(t *testing.T) {
 	// watches for the turn's end (the reply helper below consumes events
 	// until idle, which would starve a follow-up loop).
 	a, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: scratch,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ closed:
 	}
 
 	b, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: scratch, ResumeID: id,
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: scratch, ResumeID: id,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +339,7 @@ func TestAntigravityLiveMCPWiring(t *testing.T) {
 	}
 	defer ag.Close()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: antigravityLiveScratch(t),
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: antigravityLiveScratch(t),
 		FeatureID: "FD-012", MCPSockPath: filepath.Join(t.TempDir(), "FD-012.sock"),
 	})
 	if err != nil {
@@ -372,7 +372,7 @@ func TestAntigravityLiveSkillForwarding(t *testing.T) {
 		t.Fatal(err)
 	}
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: t.TempDir(), Permission: PermissionAllowAll, ScratchDir: antigravityLiveScratch(t),
+		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: antigravityLiveScratch(t),
 		SkillDirs: []string{skill},
 	})
 	if err != nil {

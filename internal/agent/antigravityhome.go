@@ -27,12 +27,16 @@ import (
 //
 // Two home shapes exist:
 //
-//   - the card home, `<SessionOpts.ScratchDir>/agy-home`: created lazily,
+//   - the card home, `<SessionOpts.AgentHomeDir>/agy`: created lazily,
 //     kept across restarts (agy's conversations live under it, so resume
-//     survives), and removed with the card's own cleanup pass, which
-//     deletes the scratch-files directory the home sits under. A consult
-//     session's is `agy-home-consult` beside it, so it never loads the
-//     stage session's MCP endpoint (Antigravity.homeFor);
+//     survives), and removed with the card's own cleanup pass. It is not
+//     under the scratch directory the stage hints give the agent: an
+//     agent clearing out its scratch files would take the token and the
+//     conversations with them. A home an older gummi left at
+//     `<ScratchDir>/agy-home` is moved here on the card's next session
+//     (adoptLegacyAntigravityHome). A consult session's is `agy-consult`
+//     beside it, so it never loads the stage session's MCP endpoint
+//     (Antigravity.homeFor);
 //   - the temp home, one per session: the intended home for one-shot
 //     session kinds (they never resume), for doctor probes, and for the
 //     model-catalog probe; removed when the session closes.
@@ -172,6 +176,32 @@ type antigravityHome struct {
 	// temp marks a home the adapter must remove itself (at the owning
 	// session's Close); a card home is removed with the card's cleanup.
 	temp bool
+}
+
+// adoptLegacyAntigravityHome moves a card home from where it used to
+// live (inside the card's scratch directory) to where it lives now, and
+// returns the directory the session should use. The home is moved, not
+// recreated, because agy's conversations are inside it: a card that
+// stopped mid-stage resumes by an id that only that tree can answer.
+//
+// The new location wins when it already exists — the old one is then
+// left for the card's cleanup. A move that fails (the two on different
+// filesystems, say) keeps the old home in place rather than start a
+// fresh one, since losing the conversation is the worse outcome.
+func adoptLegacyAntigravityHome(legacy, dir string) string {
+	if _, err := os.Lstat(dir); err == nil {
+		return dir
+	}
+	if fi, err := os.Lstat(legacy); err != nil || !fi.IsDir() {
+		return dir
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return legacy
+	}
+	if err := os.Rename(legacy, dir); err != nil {
+		return legacy
+	}
+	return dir
 }
 
 // newAntigravityHome creates dir (0o700, matching the engine's

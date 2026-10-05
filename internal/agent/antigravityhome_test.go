@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,7 +39,7 @@ func antigravityTokenIn(home string) string {
 func TestAntigravityHomeSeedsAndModes(t *testing.T) {
 	_ = antigravityTokenFixture(t, "tok-operator")
 	scratch := t.TempDir()
-	home := filepath.Join(scratch, "agy-home")
+	home := filepath.Join(scratch, "agy")
 	if err := seedAntigravityToken(home); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestAntigravityHomeIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "agy-home") {
+		if strings.HasPrefix(e.Name(), "agy") {
 			t.Errorf("a temp home survived Close: %s", e.Name())
 		}
 	}
@@ -162,8 +163,8 @@ func antigravitySnapshotsEqual(a, b map[string]string) bool {
 	return true
 }
 
-// TestAntigravityCardHomeRedirectsChild: a session with a ScratchDir
-// anchors its card home there (<ScratchDir>/agy-home), the child's HOME
+// TestAntigravityCardHomeRedirectsChild: a session with an AgentHomeDir
+// anchors its card home there (<AgentHomeDir>/agy), the child's HOME
 // is that home, and the home survives Close (conversations live under
 // it, which is what resume needs).
 func TestAntigravityCardHomeRedirectsChild(t *testing.T) {
@@ -187,7 +188,7 @@ func TestAntigravityCardHomeRedirectsChild(t *testing.T) {
 	}
 	defer ag.Close()
 	scratch := t.TempDir()
-	sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch})
+	sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,19 +214,19 @@ func TestAntigravityCardHomeRedirectsChild(t *testing.T) {
 			gitconfigs = append(gitconfigs, g)
 		}
 	}
-	if len(homes) != 1 || homes[0] != filepath.Join(scratch, "agy-home") {
-		t.Fatalf("child HOME = %v, want the card home under ScratchDir", homes)
+	if len(homes) != 1 || homes[0] != filepath.Join(scratch, "agy") {
+		t.Fatalf("child HOME = %v, want the card home under AgentHomeDir", homes)
 	}
 	// the tools agy runs keep the operator's git identity
 	if gitconfigs[0] != gitconfig {
 		t.Errorf("child GIT_CONFIG_GLOBAL = %q, want the operator's %s", gitconfigs[0], gitconfig)
 	}
-	if _, err := os.Stat(antigravityTokenIn(filepath.Join(scratch, "agy-home"))); err != nil {
+	if _, err := os.Stat(antigravityTokenIn(filepath.Join(scratch, "agy"))); err != nil {
 		t.Errorf("card home's seeded token missing after Close: %v", err)
 	}
 }
 
-// TestAntigravityTempHomeRemovedAtClose: a session without a ScratchDir
+// TestAntigravityTempHomeRemovedAtClose: a session without an AgentHomeDir
 // pays a seeded temp home that is gone when the session is — the
 // intended home for one-shot session kinds, doctor probes, and tests.
 func TestAntigravityTempHomeRemovedAtClose(t *testing.T) {
@@ -254,7 +255,7 @@ func TestAntigravityTempHomeRemovedAtClose(t *testing.T) {
 func TestAntigravityReseedOnAuthFailure(t *testing.T) {
 	tokenPath := antigravityTokenFixture(t, "tok-v1")
 	scratch := t.TempDir()
-	home := filepath.Join(scratch, "agy-home")
+	home := filepath.Join(scratch, "agy")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +285,7 @@ for line in sys.stdin:
 		t.Fatal(err)
 	}
 	defer ag.Close()
-	sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: scratch, Permission: PermissionAllowAll, ScratchDir: scratch})
+	sess, err := ag.NewSession(context.Background(), SessionOpts{WorkDir: scratch, Permission: PermissionAllowAll, AgentHomeDir: scratch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,17 +330,17 @@ func TestAntigravityMCPUnionAndPrune(t *testing.T) {
 	}
 	defer ag.Close()
 	scratch := t.TempDir()
-	home := filepath.Join(scratch, "agy-home")
+	home := filepath.Join(scratch, "agy")
 
 	s1, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1.sock",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s2, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1-review.sock",
 	})
 	if err != nil {
@@ -361,7 +362,7 @@ func TestAntigravityMCPUnionAndPrune(t *testing.T) {
 	}
 	// the next spawn prunes it.
 	s3, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1-verify.sock",
 	})
 	if err != nil {
@@ -401,7 +402,7 @@ func TestAntigravityConsultNeverLoadsTheStageEndpoint(t *testing.T) {
 	scratch := t.TempDir()
 
 	stage, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		Role: RoleImplementer, FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1.sock",
 	})
 	if err != nil {
@@ -409,7 +410,7 @@ func TestAntigravityConsultNeverLoadsTheStageEndpoint(t *testing.T) {
 	}
 	defer stage.Close()
 	consult, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		Role: RoleConsult, FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/consult-FD-1-a.sock",
 	})
 	if err != nil {
@@ -417,11 +418,11 @@ func TestAntigravityConsultNeverLoadsTheStageEndpoint(t *testing.T) {
 	}
 	defer consult.Close()
 
-	got := antigravityReadMCPConfig(t, filepath.Join(scratch, "agy-home-consult"))
+	got := antigravityReadMCPConfig(t, filepath.Join(scratch, "agy-consult"))
 	if len(got) != 1 || got["gummi-consult-FD-1-a"] == nil {
 		t.Errorf("consult home's servers = %v, want only its own gummi-consult-FD-1-a", got)
 	}
-	got = antigravityReadMCPConfig(t, filepath.Join(scratch, "agy-home"))
+	got = antigravityReadMCPConfig(t, filepath.Join(scratch, "agy"))
 	if len(got) != 1 || got["gummi-FD-1"] == nil {
 		t.Errorf("stage home's servers = %v, want only gummi-FD-1", got)
 	}
@@ -467,13 +468,13 @@ func TestAntigravityFailedConfigWriteKeepsTheHomeConsistent(t *testing.T) {
 	scratch := t.TempDir()
 	// Pre-create the card home so every spawn below shares one home
 	// object — the union the error paths must not corrupt.
-	if _, err := ag.homeFor(SessionOpts{ScratchDir: scratch}); err != nil {
+	if _, err := ag.homeFor(SessionOpts{AgentHomeDir: scratch}); err != nil {
 		t.Fatal(err)
 	}
-	badConfig := filepath.Join(scratch, "agy-home", filepath.FromSlash(antigravityMCPConfigRelPath))
+	badConfig := filepath.Join(scratch, "agy", filepath.FromSlash(antigravityMCPConfigRelPath))
 	opts := func(sock string) SessionOpts {
 		return SessionOpts{
-			WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+			WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 			FeatureID: "FD-1", MCPSockPath: sock,
 		}
 	}
@@ -514,7 +515,7 @@ func TestAntigravityFailedConfigWriteKeepsTheHomeConsistent(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitAgyIdle(t, sess)
-	got := antigravityReadMCPConfig(t, filepath.Join(scratch, "agy-home"))
+	got := antigravityReadMCPConfig(t, filepath.Join(scratch, "agy"))
 	if len(got) != 1 {
 		t.Errorf("union after failed spawns = %v, want the live session's entry alone", got)
 	}
@@ -547,7 +548,7 @@ func TestAntigravityMCPConfigWrittenBeforeSpawn(t *testing.T) {
 	defer ag.Close()
 	scratch := t.TempDir()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		FeatureID: "FD-1", MCPSockPath: "/tmp/mcp/FD-1.sock",
 	})
 	if err != nil {
@@ -559,11 +560,13 @@ func TestAntigravityMCPConfigWrittenBeforeSpawn(t *testing.T) {
 	for {
 		var err error
 		raw, err = os.ReadFile(log)
-		if err == nil {
+		// the file exists before the child's first line is in it: wait
+		// for a whole line, not just for the file
+		if err == nil && bytes.HasSuffix(raw, []byte("\n")) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the child never logged its startup: %v", err)
+			t.Fatalf("the child never logged its startup: %v (%q)", err, raw)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -609,9 +612,9 @@ func TestAntigravitySkillLinks(t *testing.T) {
 	writeSkill(t, filepath.Join(dir, "kept"), "solo", "solo-body")
 
 	scratch := t.TempDir()
-	home := filepath.Join(scratch, "agy-home")
+	home := filepath.Join(scratch, "agy")
 	s1, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		SkillDirs: []string{deployDir, sharedDir},
 	})
 	if err != nil {
@@ -634,7 +637,7 @@ func TestAntigravitySkillLinks(t *testing.T) {
 	writeSkill(t, other, "deploy", "deploy-second")
 	otherDeploy := filepath.Join(other, "deploy")
 	s2, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		SkillDirs: []string{otherDeploy},
 	})
 	if err != nil {
@@ -647,7 +650,7 @@ func TestAntigravitySkillLinks(t *testing.T) {
 	// a session with no SkillDirs touches nothing.
 	entries := antigravitySkillEntries(t, root)
 	s3, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -660,7 +663,7 @@ func TestAntigravitySkillLinks(t *testing.T) {
 	// when a later session forwards a dir of the same basename.
 	_ = os.RemoveAll(skillA)
 	s4, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, ScratchDir: scratch,
+		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
 		SkillDirs: []string{otherDeploy},
 	})
 	if err != nil {
@@ -896,4 +899,96 @@ func TestAntigravityToolEnvPinsTheRealHomesSettings(t *testing.T) {
 			t.Errorf("%s pinned to %q with nothing at the opHome home", k, got[k])
 		}
 	}
+}
+
+// TestAntigravityLegacyCardHomeIsMovedOutOfScratch: a card home an older
+// gummi left inside the scratch directory is moved to AgentHomeDir on the
+// card's next session — moved, not recreated, so the conversation a
+// resume names is still there — and the scratch directory no longer
+// holds it. A consult home moves the same way, to its own name.
+func TestAntigravityLegacyCardHomeIsMovedOutOfScratch(t *testing.T) {
+	_ = antigravityTokenFixture(t, "tok")
+	dir := t.TempDir()
+	ag, err := NewAntigravity(writeFakeAgy(t, fakeAgyArgvEcho))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
+	t.Setenv("AGY_LOG", filepath.Join(t.TempDir(), "calls"))
+
+	for _, tc := range []struct {
+		role         Role
+		legacy, home string
+	}{
+		{RoleImplementer, "agy-home", "agy"},
+		{RoleConsult, "agy-home-consult", "agy-consult"},
+	} {
+		scratch, homes := t.TempDir(), t.TempDir()
+		conv := filepath.Join(".gemini", "antigravity-cli", "conversations", "conv-1.pb")
+		legacy := filepath.Join(scratch, tc.legacy)
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(legacy, conv)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(legacy, conv), []byte("history"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sess, err := ag.NewSession(context.Background(), SessionOpts{
+			WorkDir: dir, Permission: PermissionAllowAll, Role: tc.role,
+			ScratchDir: scratch, AgentHomeDir: homes, ResumeID: "conv-1",
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.role, err)
+		}
+		sess.Close()
+		if b, err := os.ReadFile(filepath.Join(homes, tc.home, conv)); err != nil || string(b) != "history" {
+			t.Errorf("%s: the conversation did not move with the home: %q, %v", tc.role, b, err)
+		}
+		if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+			t.Errorf("%s: the legacy home is still inside scratch: stat err = %v", tc.role, err)
+		}
+	}
+}
+
+// TestAdoptLegacyAntigravityHome: the new location wins when both exist
+// (the old one is left for cleanup, untouched), a missing legacy home
+// changes nothing, and a home that cannot be moved is used where it is
+// rather than replaced by an empty one.
+func TestAdoptLegacyAntigravityHome(t *testing.T) {
+	t.Run("both exist", func(t *testing.T) {
+		root := t.TempDir()
+		legacy, dir := filepath.Join(root, "scratch", "agy-home"), filepath.Join(root, "homes", "agy")
+		for _, d := range []string{legacy, dir} {
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := adoptLegacyAntigravityHome(legacy, dir); got != dir {
+			t.Errorf("got %s, want the new home %s", got, dir)
+		}
+		if _, err := os.Stat(legacy); err != nil {
+			t.Errorf("the legacy home was touched: %v", err)
+		}
+	})
+	t.Run("no legacy", func(t *testing.T) {
+		root := t.TempDir()
+		dir := filepath.Join(root, "homes", "agy")
+		if got := adoptLegacyAntigravityHome(filepath.Join(root, "scratch", "agy-home"), dir); got != dir {
+			t.Errorf("got %s, want %s", got, dir)
+		}
+	})
+	t.Run("move fails", func(t *testing.T) {
+		root := t.TempDir()
+		legacy := filepath.Join(root, "scratch", "agy-home")
+		if err := os.MkdirAll(legacy, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		// a parent that is a file: the new home cannot be created
+		blocker := filepath.Join(root, "homes")
+		if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := adoptLegacyAntigravityHome(legacy, filepath.Join(blocker, "agy")); got != legacy {
+			t.Errorf("got %s, want the legacy home kept in use", got)
+		}
+	})
 }

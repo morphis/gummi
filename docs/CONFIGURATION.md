@@ -78,9 +78,15 @@ review.
   mode: one `agy` child per session, turns framed on stdin, events
   streamed off stdout. agy has no config-dir flag, so the adapter spawns
   every child with `HOME` redirected to a per-card directory under the
-  workspace state area — the card's config tree (OAuth token copy,
-  `mcp_config.json`, conversations) lives there and nowhere in the
-  operator's own config; the card home is seeded from the operator's
+  workspace state area (`.gummi/state/agent-home/<ID>/agy`, and
+  `agy-consult` beside it for the card's consult conversation) — the
+  card's config tree (OAuth token copy, `mcp_config.json`,
+  conversations) lives there and nowhere in the operator's own config.
+  It is kept apart from the card's scratch directory, which the agent is
+  told is its own; a home an older gummi kept under
+  `.gummi/state/scratch/<ID>/agy-home` is moved on the card's next
+  session, conversations and all, so a resume still finds them. The card
+  home is seeded from the operator's
   login (re-run `agy` in your real home to refresh it) and removed with
   the card's cleanup. The tools agy runs inherit that `HOME`, so gummi
   points the few settings they need back at your real home, each only
