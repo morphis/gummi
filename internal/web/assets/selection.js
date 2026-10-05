@@ -36,7 +36,9 @@ function rowMoved (r, c) {
 // picked on this card, on this page; otherwise the panel follows the
 // card's pinned decision (the spec for a design gate, the diff for a
 // failed verify), and stays where it was when there is none. Whichever
-// it lands on is written into the address, so a reload opens the same.
+// it lands on is written into the address, so a reload opens the same —
+// unless named is false: a card the page picked by itself on a phone's
+// cards list, which a reload must not read as a deep link.
 let picks = 0
 const picked = new Map() // card id -> the tab a person chose on it
 
@@ -44,7 +46,7 @@ const picked = new Map() // card id -> the tab a person chose on it
 // panel's setTab), which a later visit to the card returns to.
 export function rememberTab (id, tab) { if (id && tab) picked.set(id, tab) }
 
-export async function select (id, { tab = null, view = true } = {}) {
+export async function select (id, { tab = null, view = true, named = true } = {}) {
   if (!id) return
   const mine = ++picks
   const changed = id !== state.sel
@@ -58,7 +60,7 @@ export async function select (id, { tab = null, view = true } = {}) {
   if (tab && tab !== state.tab) set({ tab })
   // the address names the tab showing, so a reload opens it again — but
   // not under a phone's thread, where naming one would open the document
-  writeHash(id, tab || (isMobile() && state.view !== 'panel' ? null : state.tab))
+  if (named) writeHash(id, tab || (isMobile() && state.view !== 'panel' ? null : state.tab))
   const tabBefore = state.tab
   const card = await loadCard(id)
   // the panel follows the decision only when nothing chose a tab while the
@@ -66,7 +68,7 @@ export async function select (id, { tab = null, view = true } = {}) {
   // click wins over a guess made from a head that was still in flight
   if (changed && !tab && mine === picks && state.tab === tabBefore && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
     set({ tab: card.decision.anchor })
-    writeHash(id, card.decision.anchor)
+    if (named) writeHash(id, card.decision.anchor)
   }
   if (changed) {
     loadThread(id, true)

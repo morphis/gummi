@@ -194,12 +194,14 @@ async function startBoard () {
   // shown (a deep link) moves to its screen — a plain open, and a deep
   // link naming an id that is not on this board, stay there
   const view = !!(route.id && first === route.id)
-  const picking = first ? select(first, { tab, view }) : null
   // the card a phone's plain open picked is not in the address: written
   // there, a reload of the cards would read it as a deep link and open it.
-  // Taken off in the same task select wrote it in, so a link arriving
-  // meanwhile is never mistaken for the address already showing
-  if (isMobile() && !view) clearHash()
+  // select leaves it out, and a hash that named a card not on this board
+  // is taken off in the same task, so a link arriving meanwhile is never
+  // mistaken for the address already showing
+  const named = !(isMobile() && !view)
+  const picking = first ? select(first, { tab, view, named }) : null
+  if (!named) clearHash()
   await picking
   startFocus()
 
