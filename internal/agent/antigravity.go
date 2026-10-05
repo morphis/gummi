@@ -160,9 +160,15 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 		return nil, err
 	}
 
+	// --disable-slash-commands: without it agy reads a message that
+	// starts with "/" as one of its own commands, and in stream-json mode
+	// an unknown or interactive one (a chat reply of "/help", a pasted
+	// path) fails the turn with an ERROR result instead of reaching the
+	// model. Skills the model discovers on its own still load with it
+	// set; only the typed expansion goes (verified on agy 1.2.16).
 	args := []string{
 		"--input-format", "stream-json", "--output-format", "stream-json",
-		"--dangerously-skip-permissions",
+		"--dangerously-skip-permissions", "--disable-slash-commands",
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)

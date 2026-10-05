@@ -1047,7 +1047,7 @@ func TestAntigravityModelPassthroughAndDefault(t *testing.T) {
 	if len(argvs) != 1 {
 		t.Fatalf("logged %d argv records, want 1", len(argvs))
 	}
-	wantArgs := []string{"--input-format", "stream-json", "--output-format", "stream-json", "--dangerously-skip-permissions", "--model", "gemini-3.1-pro-high"}
+	wantArgs := []string{"--input-format", "stream-json", "--output-format", "stream-json", "--dangerously-skip-permissions", "--disable-slash-commands", "--model", "gemini-3.1-pro-high"}
 	if strings.Join(argvs[0], " ") != strings.Join(wantArgs, " ") {
 		t.Errorf("model session argv = %v, want %v", argvs[0], wantArgs)
 	}
