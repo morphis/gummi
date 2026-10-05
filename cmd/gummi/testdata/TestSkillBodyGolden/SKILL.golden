@@ -78,6 +78,7 @@ gummi verify <id|ref>
 
 gummi merge <id|ref> -m <message|->
     -m, --message string  landing commit message (required; - reads from stdin)
+    --no-squash           land as a merge commit keeping the branch's commits (default: one squash commit)
 
 gummi squash <id|ref> -m <message|->
     --force               proceed even if the linked PR has open review threads

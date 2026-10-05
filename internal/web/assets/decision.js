@@ -26,7 +26,7 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
-import { runAction, messageHint, draftAffordance } from './actions.js?v=__ASSET_V__'
+import { runAction, messageHint, draftAffordance, landMethodControl } from './actions.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -710,7 +710,12 @@ function openLanding (id, d, o, draft, question = '') {
   const input = h('textarea', { class: 'lmsg', rows: '8', testid: 'landing-message', 'aria-label': 'Landing message' })
   input.value = draft || ''
   const q = h('p', { class: 'aq', testid: 'landing-question' }, question || 'Read the landing message, then land.')
-  const hint = h('span', { class: 'fh', testid: 'landing-hint' }, messageHint(false, draftWhere(draft)))
+  // squash or a merge commit keeps the branch's commits: offered where the
+  // option says both are (Option.methods), and the hint says which lands
+  const control = o.methods?.length > 1 ? landMethodControl(o.methods) : null
+  const merging = () => control?.value() === 'merge'
+  const hint = h('span', { class: 'fh', testid: 'landing-hint' }, messageHint(false, draftWhere(draft), merging()))
+  control?.el.addEventListener('change', () => { if (!hint.classList.contains('busy')) hint.textContent = messageHint(false, draftWhere(draft), merging()) })
   const aff = draftAffordance(input, hint)
   const err = h('p', { class: 'aerr', testid: 'landing-error', role: 'alert', hidden: true })
   // kept: the last reply was routed into the dialog rather than past it,
@@ -724,7 +729,7 @@ function openLanding (id, d, o, draft, question = '') {
     // the answer that opened it is redrawn while it is up
     returnTo: `[data-testid$="-option-${CSS.escape(o.id)}"]`,
     onClose: () => { dlg.left = true; landing = null; landingDismissed = true },
-    body: [q, h('label', { class: 'field' }, input, hint), err],
+    body: [q, h('label', { class: 'field' }, input, control?.el, hint), err],
     actions: [
       { label: 'Cancel', testid: 'landing-cancel' },
       {
@@ -736,6 +741,7 @@ function openLanding (id, d, o, draft, question = '') {
           const words = input.value.trim()
           const b = { ref: d.ref, option: o.id, against: d.against?.token || '' }
           if (words) b.words = words
+          if (control) b.method = control.value()
           dlg.kept = false
           go.disabled = true
           // sent bare, the landing waits on its drafting pass again: the
@@ -772,7 +778,7 @@ function openLanding (id, d, o, draft, question = '') {
     // stand, as the TUI's dialog never overwrites typed ones
     if (!input.value.trim() && draft.trim()) {
       input.value = draft
-      aff.drafted(messageHint(false, draftWhere(draft)))
+      aff.drafted(messageHint(false, draftWhere(draft), merging()))
       input.focus(); input.setSelectionRange(0, 0); input.scrollTop = 0
     }
   }

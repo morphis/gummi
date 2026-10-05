@@ -52,7 +52,7 @@ func TestAFreeformCardLandsWithoutVerifying(t *testing.T) {
 	before := gitHead(t, h.root)
 
 	out, err := h.driver(Options{}).Merge(context.Background(), f.ID,
-		"fix(copilot): drop the pty fd leaked on idle timeout")
+		"fix(copilot): drop the pty fd leaked on idle timeout", domain.LandSquash)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestUnresolvedCommentsHoldAFreeformLanding(t *testing.T) {
 	}
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd")
+	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd", domain.LandSquash)
 	if err == nil {
 		t.Fatal("a freeform card landed with an unresolved diff comment")
 	}
@@ -191,7 +191,7 @@ func TestASessionContinuedAsASpecIsNotLanded(t *testing.T) {
 	}
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd")
+	out, err := h.driver(Options{}).Merge(ctx, f.ID, "fix(copilot): drop the leaked fd", domain.LandSquash)
 	if err == nil {
 		t.Fatal("a session continued as a spec landed on its own")
 	}

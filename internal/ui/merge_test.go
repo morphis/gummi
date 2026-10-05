@@ -590,3 +590,60 @@ func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 		t.Errorf("main checkout dirty after undone merge:\n%s", out)
 	}
 }
+
+// TestMergeLandingKeepsHistory lands a verify card from the TUI with the
+// merge-commit method toggled in the dialog: main gets a two-parent merge
+// commit carrying the approved message, the branch's commits reach it, and
+// the card moves to done.
+func TestMergeLandingKeepsHistory(t *testing.T) {
+	m, root, _ := mergeFixture(t)
+	message := "FD-001: rebase me\n\nKeeps the feature commit on main."
+	before := gitOut(t, root, "rev-parse", "HEAD")
+
+	m = pressMerge(t, m)
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
+		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	typeMessage(t, m, message)
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.notice.isErr || !strings.Contains(m.notice.text, "merged into") {
+		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if parents := strings.Fields(gitOut(t, root, "log", "-1", "--format=%P")); len(parents) != 2 || parents[0] != before {
+		t.Fatalf("main tip parents = %v, want a merge commit on %s", parents, before)
+	}
+	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != message {
+		t.Errorf("merge commit message = %q, want %q", got, message)
+	}
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	if f.Stage != domain.StageDone {
+		t.Errorf("stage after merge landing = %s, want done", f.Stage)
+	}
+	if landed, err := m.wt.Landed(ctx, &f); !landed || err != nil {
+		t.Errorf("Landed after merge landing = %v, %v; want true", landed, err)
+	}
+}
+
+// TestMergeLandingDefaultsToSquash proves the dialog opens on squash: a
+// landing that never touches the toggle makes one commit, as before.
+func TestMergeLandingDefaultsToSquash(t *testing.T) {
+	m, root, _ := mergeFixture(t)
+	m = pressMerge(t, m)
+	d, ok := m.Overlay.Top().(*commitMsgDialog)
+	if !ok {
+		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
+	}
+	if d.method != domain.LandSquash {
+		t.Fatalf("dialog method = %q, want squash", d.method)
+	}
+	typeMessage(t, m, "FD-001: squash it")
+	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if m.notice.isErr || !strings.Contains(m.notice.text, "squash-merged") {
+		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if parents := strings.Fields(gitOut(t, root, "log", "-1", "--format=%P")); len(parents) != 1 {
+		t.Fatalf("default landing has %d parents, want 1", len(parents))
+	}
+}

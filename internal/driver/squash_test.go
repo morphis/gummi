@@ -65,7 +65,7 @@ func TestDriverSquashCollapsesVerifiedBranch(t *testing.T) {
 // mutation.
 func TestDriverSquashRefusesDoneCard(t *testing.T) {
 	h, d, id := driveVerified(t)
-	if _, err := d.Merge(context.Background(), id, "feat(export): land it"); err != nil {
+	if _, err := d.Merge(context.Background(), id, "feat(export): land it", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	before := gitHead(t, h.root)
@@ -168,4 +168,93 @@ func TestDriverOpenReviewThreadsCountsUnresolvedAnnotations(t *testing.T) {
 	if url != ref.URL {
 		t.Fatalf("url = %q, want %q", url, ref.URL)
 	}
+}
+
+// TestMergeNoSquashKeepsHistory lands a verified card with --no-squash: the
+// branch's commits reach main intact under a two-parent merge commit, the
+// `merged` event says so, and the card moves to done.
+func TestMergeNoSquashKeepsHistory(t *testing.T) {
+	h, d, id := driveVerified(t)
+	before := gitHead(t, h.root)
+	branch, _ := h.store.GetFeature(context.Background(), id)
+
+	out, err := d.Merge(context.Background(), id, "feat(export): land it keeping history", domain.LandMerge)
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if out.Status != StatusVerified {
+		t.Fatalf("status = %q, want done", out.Status)
+	}
+	parents := strings.Fields(gitOut(t, h.root, "log", "-1", "--format=%P"))
+	if len(parents) != 2 || parents[0] != before {
+		t.Fatalf("main tip parents = %v, want first parent %s", parents, before)
+	}
+	if !strings.HasPrefix(gitOut(t, h.root, "log", "-1", "--format=%s"), "feat(export): land it keeping history") {
+		t.Fatalf("merge commit subject = %q", gitOut(t, h.root, "log", "-1", "--format=%s"))
+	}
+	if got := gitOut(t, h.root, "rev-parse", "HEAD^2"); got != gitOut(t, h.root, "rev-parse", branch.BranchName()) {
+		t.Fatalf("second parent = %s, want the branch tip", got)
+	}
+	ev := lastEvent(h, "merged")
+	if ev == nil {
+		t.Fatalf("no merged event; got %v", h.eventKinds())
+	}
+	if ev["method"] != "merge" || ev["commit"] != gitHead(t, h.root) {
+		t.Fatalf("merged event = %v, want method merge at HEAD", ev)
+	}
+	if got, _ := h.store.GetFeature(context.Background(), id); got.Stage != domain.StageDone {
+		t.Fatalf("stage after merge landing = %s, want done", got.Stage)
+	}
+}
+
+// TestMergeDefaultEventSaysSquash proves a landing without --no-squash still
+// squashes and says so on the stream.
+func TestMergeDefaultEventSaysSquash(t *testing.T) {
+	h, d, id := driveVerified(t)
+	if _, err := d.Merge(context.Background(), id, "feat(export): land it", domain.LandSquash); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if ev := lastEvent(h, "merged"); ev == nil || ev["method"] != "squash" {
+		t.Fatalf("merged event = %v, want method squash", ev)
+	}
+	if parents := strings.Fields(gitOut(t, h.root, "log", "-1", "--format=%P")); len(parents) != 1 {
+		t.Fatalf("squash landing has %d parents, want 1", len(parents))
+	}
+}
+
+// TestMergeNoSquashRefusedForGoalCard refuses a merge-commit landing of a
+// goal before any git mutation: a goal's history is one squash per card.
+func TestMergeNoSquashRefusedForGoalCard(t *testing.T) {
+	h, d, _ := driveVerified(t)
+	ctx := context.Background()
+	gid, err := domain.NewID(domain.KindGoal, 900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal := &domain.Feature{ID: gid, Num: 900, Kind: domain.KindGoal, Title: "goal", Slug: "goal", Stage: domain.StageVerify}
+	if err := h.store.CreateFeature(ctx, goal); err != nil {
+		t.Fatal(err)
+	}
+	before := gitHead(t, h.root)
+
+	out, err := d.Merge(ctx, goal.ID, "feat(goal): land it", domain.LandMerge)
+	if err == nil {
+		t.Fatal("goal landed as a merge commit")
+	}
+	if out.Status != StatusError {
+		t.Fatalf("status = %q, want error", out.Status)
+	}
+	if got := gitHead(t, h.root); got != before {
+		t.Fatalf("main HEAD moved by refused goal landing: %s -> %s", before, got)
+	}
+}
+
+// gitOut runs git in dir and returns its trimmed stdout.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
 }

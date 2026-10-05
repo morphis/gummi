@@ -557,7 +557,11 @@ func bindResumeFlags(fs *pflag.FlagSet) {
 // them — and print them in the goals reference instead.
 var goalResumeFlagNames = []string{"goal-note", "reverse", "wrap-up", "runs", "minutes", "retake"}
 
-func bindMergeFlags(fs *pflag.FlagSet) { messageFlag(fs, "landing commit message") }
+func bindMergeFlags(fs *pflag.FlagSet) {
+	messageFlag(fs, "landing commit message")
+	fs.Bool("no-squash", false, "land as a merge commit keeping the branch's commits (default: one squash commit)")
+}
+
 func bindCommitFlags(fs *pflag.FlagSet) {
 	messageFlag(fs, "commit message for the card's uncommitted worktree changes")
 }

@@ -28,7 +28,7 @@ func TestCommitDialogTakesThePredraftAndRedraftsFresh(t *testing.T) {
 	var asked []bool
 	d := newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "dark-mode"},
-		func(string) tea.Cmd { return nil },
+		func(_ string, _ domain.LandMethod) tea.Cmd { return nil },
 		func(_ context.Context, _ domain.Feature, fresh bool) (string, error) {
 			asked = append(asked, fresh)
 			return "feat(ui): a message\n\n- a bullet", nil

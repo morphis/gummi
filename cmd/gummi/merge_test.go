@@ -204,3 +204,34 @@ func TestCleanCommandRemovesLanded(t *testing.T) {
 		t.Error("branch still present after clean")
 	}
 }
+
+// `--no-squash` lands the verified branch as a merge commit whose second
+// parent is the branch tip; without it the landing is one squash commit.
+func TestMergeNoSquashFlag(t *testing.T) {
+	_, f := verifiedCLIRepo(t)
+	branchTip := cliGit(t, ".", "rev-parse", f.BranchName())
+	before := cliGit(t, ".", "rev-parse", "HEAD")
+
+	if err := runCLI("merge", string(f.ID), "-m", "feat(export): keep history", "--no-squash"); err != nil {
+		t.Fatalf("runMerge --no-squash: %v", err)
+	}
+	parents := strings.Fields(cliGit(t, ".", "log", "-1", "--format=%P"))
+	if len(parents) != 2 || parents[0] != before || parents[1] != branchTip {
+		t.Fatalf("main tip parents = %v, want [%s %s]", parents, before, branchTip)
+	}
+	if msg := cliGit(t, ".", "log", "-1", "--format=%s"); msg != "feat(export): keep history" {
+		t.Fatalf("landed subject = %q", msg)
+	}
+}
+
+// Without the flag the same landing squashes: one parent, the branch's
+// commits are not on main as their own.
+func TestMergeWithoutNoSquashSquashes(t *testing.T) {
+	_, f := verifiedCLIRepo(t)
+	if err := runCLI("merge", string(f.ID), "-m", "feat(export): squash it"); err != nil {
+		t.Fatalf("runMerge: %v", err)
+	}
+	if parents := strings.Fields(cliGit(t, ".", "log", "-1", "--format=%P")); len(parents) != 1 {
+		t.Fatalf("landing has %d parents, want 1", len(parents))
+	}
+}

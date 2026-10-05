@@ -504,6 +504,15 @@ func (p *Pool) SquashMerge(ctx context.Context, f *domain.Feature, message strin
 	return wt.SquashMerge(ctx, f, message)
 }
 
+// Land mirrors Manager.Land, resolving f's repository manager first.
+func (p *Pool) Land(ctx context.Context, f *domain.Feature, message string, method domain.LandMethod) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.Land(ctx, f, message, method)
+}
+
 // Collapse mirrors Manager.Collapse, resolving f's repository manager first.
 // It exists for TUI-facing symmetry with SquashMerge (Shell.wt is a *Pool);
 // the CLI `gummi squash` path calls Manager.Collapse directly via the

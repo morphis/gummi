@@ -84,7 +84,7 @@ func TestNestedLayoutEndToEnd(t *testing.T) {
 
 	// merge onto main (the repo), then clean the worktree + branch
 	d := h.driver(Options{})
-	if out, err := d.Merge(context.Background(), id, "feat(nested): land the nested end-to-end card"); err != nil {
+	if out, err := d.Merge(context.Background(), id, "feat(nested): land the nested end-to-end card", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	} else if out.Status != StatusVerified {
 		t.Fatalf("merge status = %q, want done", out.Status)

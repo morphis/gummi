@@ -15,10 +15,11 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// commitMsgDialog collects the squash-merge commit message before the
-// merge runs. It opens immediately with an empty editable textarea, and a
-// best-effort scribe pass drafts a suggested landing message while the
-// user reads and edits. The draft fills the textarea only if the user has
+// commitMsgDialog collects the landing commit message before the merge
+// runs, and the method the branch lands by (squash, or a merge commit). It
+// opens immediately with an empty editable textarea, and a best-effort
+// scribe pass drafts a suggested landing message while the user reads and
+// edits. The draft fills the textarea only if the user has
 // not typed into it — it never clobbers keystrokes — and merges on
 // ctrl+s, so a plain enter stays free for editing multi-line messages.
 // The human gate is unchanged: nothing lands except on an explicit
@@ -39,7 +40,14 @@ type commitMsgDialog struct {
 	// round2.md §3.4).
 	baseBranch string
 	input      textarea.Model
-	onSubmit   func(message string) tea.Cmd
+	// onSubmit lands the branch with the message and the method in force.
+	onSubmit func(message string, method domain.LandMethod) tea.Cmd
+	// method is how this landing reaches the base: squash unless the person
+	// toggles it (ctrl+t or the toggle button). methods lists what this
+	// landing may use; the toggle is shown only when it offers a choice,
+	// which a goal's card and a squash in place never do.
+	method  domain.LandMethod
+	methods []domain.LandMethod
 	// draft yields the landing message under a caller-provided context (so
 	// esc cancels it); a nil backend or any failure returns an empty draft.
 	// fresh asks for a newly composed one: false accepts the pre-drafted
@@ -84,15 +92,45 @@ type commitMsgDialog struct {
 	inPlace bool
 }
 
+// methodToggleLabel names the button that flips the landing method.
+const methodToggleLabel = "Squash ⇄ Merge commit"
+
 // squashInPlace makes d the squash-in-place flavour of the dialog.
 func (d *commitMsgDialog) squashInPlace() *commitMsgDialog {
 	d.inPlace = true
+	d.method = domain.LandSquash
+	d.methods = nil
 	d.buttons = newButtonRow(
 		button{label: "Cancel"},
 		button{label: "Redraft"},
 		button{label: "Squash", danger: true},
 	)
 	return d
+}
+
+// canToggle reports whether the person may choose the landing method here.
+func (d *commitMsgDialog) canToggle() bool { return len(d.methods) > 1 }
+
+// toggleMethod flips the landing method between squash and merge commit.
+// It clears an arm: the arm was taken against the method then in force, so
+// it must not carry over to the one this flip just chose.
+func (d *commitMsgDialog) toggleMethod() {
+	if d.method == domain.LandMerge {
+		d.method = domain.LandSquash
+	} else {
+		d.method = domain.LandMerge
+	}
+	d.armed = false
+}
+
+// landVerb is the word the landing is called by: "squash-merge" for the
+// default, "merge" once a merge commit is chosen (or for a goal, which
+// always lands as a merge commit over its cards).
+func (d *commitMsgDialog) landVerb() string {
+	if d.feature.Kind() == domain.KindGoal || d.method == domain.LandMerge {
+		return "merge"
+	}
+	return "squash-merge"
 }
 
 // action says what the dialog's submit does, for a person about to do it.
@@ -103,7 +141,7 @@ func (d *commitMsgDialog) action() string {
 	return "land " + d.branch + " on " + d.base()
 }
 
-func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft func(ctx context.Context, f domain.Feature, fresh bool) (string, error)) *commitMsgDialog {
+func newCommitMsgDialog(f domain.Feature, onSubmit func(string, domain.LandMethod) tea.Cmd, draft func(ctx context.Context, f domain.Feature, fresh bool) (string, error)) *commitMsgDialog {
 	in := textarea.New()
 	in.Placeholder = "commit message"
 	in.CharLimit = 4000
@@ -111,14 +149,24 @@ func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft f
 	in.SetWidth(64)
 	in.SetHeight(8)
 	in.Focus()
-	return &commitMsgDialog{
+	d := &commitMsgDialog{
 		feature: f.ID, f: f, branch: f.BranchName(), input: in, onSubmit: onSubmit, draft: draft,
-		buttons: newButtonRow(
-			button{label: "Cancel"},
-			button{label: "Redraft"},
-			button{label: "Merge", danger: true},
-		),
+		method:  domain.LandSquash,
+		methods: f.LandMethods(),
 	}
+	d.buttons = d.landButtons()
+	return d
+}
+
+// landButtons is a landing's button row: Cancel, Redraft, Merge, and the
+// method toggle where a choice is offered. The toggle sits after Merge so
+// the land button keeps its place in the row.
+func (d *commitMsgDialog) landButtons() *buttonRow {
+	btns := []button{{label: "Cancel"}, {label: "Redraft"}, {label: "Merge", danger: true}}
+	if d.canToggle() {
+		btns = append(btns, button{label: methodToggleLabel})
+	}
+	return newButtonRow(btns...)
 }
 
 // base is the branch this merge lands on, falling back to
@@ -234,7 +282,7 @@ func (d *commitMsgDialog) merge() (bool, tea.Cmd) {
 	if d.cancel != nil {
 		d.cancel()
 	}
-	return true, d.onSubmit(text)
+	return true, d.onSubmit(text, d.method)
 }
 
 // HandleKey implements overlay.Dialog. The textarea owns enter (a commit
@@ -256,6 +304,12 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "ctrl+r":
 		// regenerate the draft; applies only while the user hasn't typed.
 		return false, d.startDraft(true)
+	case "ctrl+t":
+		// flip squash ⇄ merge commit, where a landing may choose.
+		if d.canToggle() {
+			d.toggleMethod()
+		}
+		return false, nil
 	case "tab", "shift+tab":
 		d.focus = (d.focus + 1) % 2
 		if d.focus == commitFieldText {
@@ -280,9 +334,12 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 				return true, nil
 			case 1: // Redraft
 				return false, d.startDraft(true)
-			default: // Merge
-				return d.merge()
 			}
+			if d.buttons.Selected().label == methodToggleLabel {
+				d.toggleMethod()
+				return false, nil
+			}
+			return d.merge()
 		}
 		return false, nil
 	}
@@ -332,12 +389,13 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	d.input.SetHeight(clamp(h-12, 6, 24))
 
 	var b strings.Builder
-	title := "squash-merge "
-	if d.feature.Kind() == domain.KindGoal {
-		// a goal lands as one merge commit over its cards' own commits
-		title = "merge "
-	}
+	// a goal lands as one merge commit over its cards' own commits; a
+	// merge-commit landing keeps the branch's commits as they are
+	title := d.landVerb() + " "
 	where := d.branch + " → " + d.base()
+	if d.method == domain.LandMerge && !d.inPlace {
+		where += ", keeping the branch's commits"
+	}
 	if d.inPlace {
 		title, where = "squash ", d.branch+" → one commit, in place (nothing lands on "+d.base()+")"
 	}
@@ -359,6 +417,8 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 		again := "ctrl+s again to land it as written"
 		if d.inPlace {
 			again = "ctrl+s again to squash with it as written"
+		} else if d.method == domain.LandMerge {
+			again = "ctrl+s again to merge it as written"
 		}
 		b.WriteString("\n" + s.Warning.Render("this is the scribe's draft, untouched — "+again))
 	case d.drafting && !d.modified:
@@ -393,6 +453,10 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	if d.inPlace {
 		verb = "squash"
 	}
-	b.WriteString("\n" + s.Faint.Render("tab buttons · enter activates · ctrl+s "+verb+" · esc cancel"))
+	hint := "tab buttons · enter activates · ctrl+s " + verb
+	if d.canToggle() {
+		hint += " · ctrl+t squash ⇄ merge commit"
+	}
+	b.WriteString("\n" + s.Faint.Render(hint+" · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }

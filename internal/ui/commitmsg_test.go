@@ -19,7 +19,7 @@ func newTestCommitMsgDialog(t *testing.T) *commitMsgDialog {
 	t.Helper()
 	return newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "dark-mode"},
-		func(string) tea.Cmd { return nil },
+		func(_ string, _ domain.LandMethod) tea.Cmd { return nil },
 		nil,
 	)
 }
@@ -131,7 +131,7 @@ func TestCommitMsgDialogSurfacesDraftFailureReason(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newCommitMsgDialog(
 				domain.Feature{ID: "FD-001", Slug: "dark-mode"},
-				func(string) tea.Cmd { return nil },
+				func(_ string, _ domain.LandMethod) tea.Cmd { return nil },
 				func(ctx context.Context, f domain.Feature, fresh bool) (string, error) { return "", tc.err },
 			)
 			msg, ok := d.startDraft(false)().(commitDraftMsg)
@@ -158,7 +158,7 @@ func TestCommitMsgDialogSurfacesDraftFailureReason(t *testing.T) {
 func TestCommitMsgDialogClearsReasonOnRedraft(t *testing.T) {
 	d := newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "dark-mode"},
-		func(string) tea.Cmd { return nil },
+		func(_ string, _ domain.LandMethod) tea.Cmd { return nil },
 		func(ctx context.Context, f domain.Feature, fresh bool) (string, error) { return "", errors.New("boom") },
 	)
 	d.apply(d.startDraft(false)().(commitDraftMsg))
@@ -323,5 +323,76 @@ func TestCommitMsgDialogHidesDraftingHintOnceModified(t *testing.T) {
 	}
 	if v := d.View(theme.New(theme.GummiDark()), 80, 24); strings.Contains(v, "drafting a suggested message") {
 		t.Fatalf("drafting hint shown while the operator is editing:\n%s", v)
+	}
+}
+
+// TestCommitDialogTogglesMethod: ctrl+t flips the landing between squash and
+// merge commit, the title and verb follow, and the submit carries the method
+// in force.
+func TestCommitDialogTogglesMethod(t *testing.T) {
+	var gotMsg string
+	var gotMethod domain.LandMethod
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(msg string, method domain.LandMethod) tea.Cmd {
+		gotMsg, gotMethod = msg, method
+		return nil
+	}, nil)
+	d.baseBranch = "main"
+	d.input.SetValue("land the thing")
+	d.modified = true
+
+	if got := d.View(theme.New(theme.GummiDark()), 100, 30); !strings.Contains(got, "squash-merge FD-001") {
+		t.Fatalf("default title does not say squash-merge:\n%s", got)
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if got := d.View(theme.New(theme.GummiDark()), 100, 30); !strings.Contains(got, "merge FD-001") || !strings.Contains(got, "keeping the branch's commits") {
+		t.Fatalf("toggled title does not say merge:\n%s", got)
+	}
+	if !strings.Contains(d.View(theme.New(theme.GummiDark()), 100, 30), "ctrl+s merge") {
+		t.Error("footer does not name the merge verb once toggled")
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if gotMsg != "land the thing" || gotMethod != domain.LandMerge {
+		t.Fatalf("submit = %q, %q; want the message with merge", gotMsg, gotMethod)
+	}
+}
+
+// TestCommitDialogDefaultSubmitSquashes: a dialog never toggled submits squash.
+func TestCommitDialogDefaultSubmitSquashes(t *testing.T) {
+	var gotMethod domain.LandMethod
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(_ string, method domain.LandMethod) tea.Cmd {
+		gotMethod = method
+		return nil
+	}, nil)
+	d.input.SetValue("land the thing")
+	d.modified = true
+	d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if gotMethod != domain.LandSquash {
+		t.Fatalf("default submit method = %q, want squash", gotMethod)
+	}
+}
+
+// TestCommitDialogNoMethodToggleForGoalCard: a goal's card lands as a squash
+// only, so the dialog offers no toggle and ctrl+t does nothing.
+func TestCommitDialogNoMethodToggleForGoalCard(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-002", Slug: "x", GoalID: "GL-001"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil)
+	if d.canToggle() {
+		t.Fatal("a card in a goal offers a method toggle")
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if d.method != domain.LandSquash {
+		t.Fatalf("ctrl+t changed a goal card's method to %q", d.method)
+	}
+}
+
+// TestCommitDialogSquashInPlaceHasNoMethod: a squash in place is one commit
+// on the branch; it offers no landing method at all.
+func TestCommitDialogSquashInPlaceHasNoMethod(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil).squashInPlace()
+	if d.canToggle() {
+		t.Fatal("squash in place offers a landing method")
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if d.method != domain.LandSquash {
+		t.Fatalf("ctrl+t changed a squash in place to %q", d.method)
 	}
 }

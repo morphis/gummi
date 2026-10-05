@@ -84,7 +84,10 @@ prefilled with its default), `action-hint` (under a landing's or a squash's
 message: where it came from and what it becomes, or — with a spinner, the box read-only and
 `action-confirm` saying "Drafting…" — that gummi is drafting it), `action-card-<ID>` (a card in the dependency
 picker), `action-cards-filter`, `action-error` (the board's refusal, in the
-dialog), `action-confirm`, `action-cancel`.
+dialog), `action-confirm`, `action-cancel`, `land-method` (the squash ⇄ merge-commit
+choice beside a landing's message, in the menu's dialog and in the verify
+answer's landing dialog, where a card may keep its commits; its radios are
+`land-method-squash` and `land-method-merge`).
 
 ## Thread
 

@@ -382,15 +382,17 @@ type cardVerifiedEvent struct {
 	Spent  float64 `json:"spent_credits"`
 }
 
-// mergedEvent reports a successful headless landing: the feature branch was
-// squash-merged onto main as one commit. Commit is the landed commit's sha —
-// exactly what SquashMerge created — so a driving script can record which
-// commit reached main without re-reading git.
+// mergedEvent reports a successful headless landing: the feature branch
+// reached main by Method — squash (one commit) or merge (a merge commit
+// keeping the branch's commits). Commit is the landed commit's sha — exactly
+// what the landing created — so a driving script can record which commit
+// reached main without re-reading git.
 type mergedEvent struct {
 	Event  string `json:"event"`
 	ID     string `json:"id"`
 	Branch string `json:"branch"`
 	Commit string `json:"commit"`
+	Method string `json:"method"`
 }
 
 // committedEvent reports a successful `gummi commit`: the card's own

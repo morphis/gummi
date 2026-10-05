@@ -108,6 +108,10 @@ type nextInput struct {
 	stage  domain.Stage
 	kind   domain.Kind
 	landed bool
+	// mergeChoice: the card may land as a merge commit keeping its commits
+	// as well as a squash (domain.Feature.Offers), so the landing's wording
+	// says both are on offer
+	mergeChoice bool
 	// goal is a goal card's report, nil for every other card: a goal's
 	// verify pass is a hand-over whose sentence names what was met
 	goal *engine.GoalReport
@@ -507,6 +511,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	in := nextInput{
 		stage:            r.F.Stage,
 		kind:             r.F.Kind,
+		mergeChoice:      r.F.Offers(domain.LandMerge),
 		goal:             r.Goal,
 		landed:           r.Landed,
 		mainCheckout:     r.F.MainCheckout,
@@ -1102,7 +1107,7 @@ func stageAnswers(in nextInput) []nextAction {
 		acts := []nextAction{
 			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
 			nextStep("merge", "m", "land it on "+in.landBase(),
-				"squash-merge the branch — anything still uncommitted is committed first, as a final checkpoint; you review and approve the message"),
+				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — anything still uncommitted is committed first, as a final checkpoint; you review and approve the message"),
 			nextStep("handoff", "h", "hand off",
 				"close the card and keep the branch exactly as it is"),
 		}
@@ -1440,7 +1445,7 @@ func stageAnswers(in nextInput) []nextAction {
 		// Landing stays first, and stays what g does: it is still the
 		// recommendation on a clean pass. Hand-off is not a warning and is
 		// not folded; it is the second answer to the question just asked.
-		why := "squash-merge the branch and mark the " + noun(in.kind) + " done"
+		why := landWhy(in.mergeChoice, "squash-merge the branch", "land the branch") + " and mark the " + noun(in.kind) + " done"
 		if in.verdict == verdictPass {
 			why = "verify passed — " + why
 		}
@@ -1545,7 +1550,7 @@ func closedActions(in nextInput) []nextAction {
 		// that spec (domain.Feature.MayLandAfterAll).
 		if in.continuedAs == "" {
 			out = append(out, nextStep("merge", "m", "land it after all",
-				"changed your mind — squash-merge "+in.keptBranch()+" onto "+in.landBase()))
+				"changed your mind — "+landWhy(in.mergeChoice, "squash-merge "+in.keptBranch()+" onto "+in.landBase(), "land "+in.keptBranch()+" onto "+in.landBase())))
 		}
 	case domain.EndingDropped:
 		out = append(out, nextStep("adopt", "", "adopt it",

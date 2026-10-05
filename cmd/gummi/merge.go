@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -14,10 +15,11 @@ import (
 // runMerge implements `gummi merge <id|ref> -m <message|->`: the headless
 // landing verb. It requires the card to be at a verified branch, takes the
 // commit message explicitly from the caller (never drafts one), validates it,
-// squash-merges the branch onto main, and moves the card to done — streaming
-// a `merged` NDJSON event (with the landed commit sha) and exiting 0 on
-// success. A missing, malformed, or unverified precondition fails loudly with
-// a non-zero exit before any git mutation.
+// squash-merges the branch onto main (or, with --no-squash, merges it as a
+// merge commit that keeps the branch's commits), and moves the card to done —
+// streaming a `merged` NDJSON event (with the landed commit sha and method)
+// and exiting 0 on success. A missing, malformed, or unverified precondition
+// fails loudly with a non-zero exit before any git mutation.
 func runMerge(fl cliFlags, args []string) error {
 	idArg, err := oneID("merge", args)
 	if err != nil {
@@ -30,6 +32,10 @@ func runMerge(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
+	method := domain.LandSquash
+	if fl.Bool("no-squash") {
+		method = domain.LandMerge
+	}
 	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
@@ -40,7 +46,7 @@ func runMerge(fl cliFlags, args []string) error {
 			return driver.Outcome{}, err
 		}
 		defer release()
-		return d.Merge(ctx, f.ID, message)
+		return d.Merge(ctx, f.ID, message, method)
 	})
 }
 

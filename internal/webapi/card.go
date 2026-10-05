@@ -121,6 +121,10 @@ type Option struct {
 	Detail string `json:"detail,omitempty"`
 	// Words marks an option that takes a note ("send back with …").
 	Words bool `json:"words"`
+	// Methods lists the landing methods the option offers ("squash",
+	// "merge"), present only on a landing that may keep the branch's
+	// commits as a merge commit. The answer names one as AnswerRequest.Method.
+	Methods []string `json:"methods,omitempty"`
 	// Relabel is the label to show once words have been typed, when the
 	// option reads differently with a note than without.
 	Relabel string `json:"relabel,omitempty"`
@@ -178,6 +182,10 @@ type Action struct {
 	// Needs names the input the page must collect first; empty runs at once.
 	Needs  ActionNeeds `json:"needs,omitempty"`
 	Detail string      `json:"detail,omitempty"`
+	// Methods lists the landing methods the action offers ("squash",
+	// "merge"), present only on a landing that may keep the branch's
+	// commits as a merge commit. The request names one as ActionRequest.Method.
+	Methods []string `json:"methods,omitempty"`
 	// Default is the input's suggested value: the landing message the
 	// verify gate drafted, the current envelope, the current dependencies
 	// (comma-separated ids).
@@ -257,6 +265,10 @@ type AnswerRequest struct {
 	Ref    string `json:"ref"`
 	Option string `json:"option"`
 	Words  string `json:"words,omitempty"`
+	// Method is the landing method, "squash" or "merge", when the answer
+	// lands the branch and the option offers a choice (Option.Methods).
+	// Empty is squash.
+	Method string `json:"method,omitempty"`
 	// Against is the Decision.Against.Token the answer was given against.
 	Against string `json:"against"`
 	// Confirm answers the confirmations the answer's flow raises on the
@@ -345,7 +357,10 @@ type SendResponse struct {
 // ActionRequest is POST /api/cards/{id}/actions/{action}: the input the
 // action's Needs asked for.
 type ActionRequest struct {
-	Message string   `json:"message,omitempty"`
+	Message string `json:"message,omitempty"`
+	// Method is the landing method, "squash" or "merge", when the action
+	// lands the branch and offers a choice (Action.Methods). Empty is squash.
+	Method  string   `json:"method,omitempty"`
 	Number  *int     `json:"number,omitempty"`
 	Profile string   `json:"profile,omitempty"`
 	Cards   []string `json:"cards,omitempty"`

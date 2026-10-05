@@ -107,7 +107,7 @@ type Shell struct {
 	// worktree afterwards (rebase.go's judgeRebase)
 	rebaseDirty map[domain.FeatureID]bool
 	// landConflicts are the files a card's last landing conflicted in
-	// (merge.go's squashMergeFeature), so its decision offers the rebase
+	// (merge.go's landFeature), so its decision offers the rebase
 	// that resolves them rather than the landing that just failed. A
 	// rebase clears it (rebaseFeature); one that resolves nothing sets it
 	// again (rebaseSettled).
@@ -903,7 +903,7 @@ func (m *Shell) probeOpenReviewThreads(ctx context.Context, f domain.Feature) (i
 // openSquashDialog opens the reused commit-message dialog for a squash
 // in place, pre-filled with the same best-effort draft the merge path uses.
 func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
-	d := newCommitMsgDialog(f, func(message string) tea.Cmd {
+	d := newCommitMsgDialog(f, func(message string, _ domain.LandMethod) tea.Cmd {
 		return m.collapseFeature(f, message)
 	}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 		if m.engine == nil {
@@ -2020,11 +2020,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: sanitize(msg.warn), isErr: true}
 		}
 		f, thenDone := msg.f, msg.thenDone
-		d := newCommitMsgDialog(f, func(message string) tea.Cmd {
+		d := newCommitMsgDialog(f, func(message string, method domain.LandMethod) tea.Cmd {
 			if f.IsGoal() {
 				return m.landGoal(f, message)
 			}
-			return m.squashMergeFeature(f, message, thenDone)
+			return m.landFeature(f, message, method, thenDone)
 		}, func(dctx context.Context, feature domain.Feature, fresh bool) (string, error) {
 			// best-effort: a nil engine or any drafting failure yields an
 			// empty draft, never a hard error or a delayed dialog; dctx
@@ -2257,7 +2257,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the dialog opened and stayed gone if the user pressed esc — and it
 		// was also the reason the `m` key had no removal at all, since the
 		// removal lived on this path rather than on the landing. It is
-		// cleared on the merge's own success now (squashMergeFeature).
+		// cleared on the merge's own success now (landFeature).
 		if m.mergePrep[msg.f.ID] {
 			m.notice = noticeMsg{text: "already preparing " + string(msg.f.ID) + "'s merge — wait for it", isErr: true}
 			return m, nil

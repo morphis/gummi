@@ -93,7 +93,11 @@
         "id": "advance",
         "label": "land anyway",
         "detail": "overrule if the failures do not hold up",
-        "words": false
+        "words": false,
+        "methods": [
+          "squash",
+          "merge"
+        ]
       }
     ]
   },

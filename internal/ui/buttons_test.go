@@ -186,7 +186,7 @@ func TestCommitMsgMergeReachableWithoutCtrl(t *testing.T) {
 	var got string
 	d := newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "x"},
-		func(msg string) tea.Cmd { got = msg; return nil },
+		func(msg string, _ domain.LandMethod) tea.Cmd { got = msg; return nil },
 		nil,
 	)
 	d.input.SetValue("land the thing")
@@ -213,7 +213,7 @@ func TestCommitMsgMergeButtonArmsUnmodifiedDraft(t *testing.T) {
 	var got string
 	d := newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "x"},
-		func(msg string) tea.Cmd { got = msg; return nil },
+		func(msg string, _ domain.LandMethod) tea.Cmd { got = msg; return nil },
 		nil,
 	)
 	d.gen = 1
@@ -242,7 +242,10 @@ func TestCommitMsgMergeButtonArmsUnmodifiedDraft(t *testing.T) {
 func TestCommitMsgEnterStillTypesNewline(t *testing.T) {
 	d := newCommitMsgDialog(
 		domain.Feature{ID: "FD-001", Slug: "x"},
-		func(string) tea.Cmd { t.Fatal("enter in the textarea must not submit"); return nil },
+		func(_ string, _ domain.LandMethod) tea.Cmd {
+			t.Fatal("enter in the textarea must not submit")
+			return nil
+		},
 		nil,
 	)
 	d.input.SetValue("line one")

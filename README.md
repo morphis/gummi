@@ -134,7 +134,9 @@ the board. Then:
 5. Done means a verified branch, and the card asks how it leaves gummi.
    Press `g` (or `m`) to squash-merge it into main — gummi drafted the
    landing message when verify passed, so the dialog opens on it; you
-   edit and approve it (`ctrl+r` composes another). Press `h` to
+   edit and approve it (`ctrl+r` composes another). `ctrl+t` in that
+   dialog switches the landing to a merge commit that keeps the branch's
+   own commits; squash stays the default. Press `h` to
    hand it off instead: the card closes and the branch stays yours, to
    push, PR by hand or cherry-pick. Or merge outside gummi: it notices
    either way and offers cleanup with `c`.
@@ -165,7 +167,7 @@ The keys you need first:
 | `alt+r` | the card's stats — where its credits and hours went, and how much was work done twice |
 | `g` / `b` | cross the gate / bounce back one stage |
 | `A` | run this card on autopilot |
-| `m` / `h` / `c` | squash-merge into main / hand the branch off and close the card / clean up a landed branch |
+| `m` / `h` / `c` | squash-merge into main (`ctrl+t` in the dialog: merge commit instead) / hand the branch off and close the card / clean up a landed branch |
 | `T` | new card stacked on this one — its branch forks from this card's, and gummi replays it whenever this card changes |
 | `C` / `W` | close out the session — land what is ready, then sweep the worktrees / what the last seven days produced |
 | `f` | fold a goal's cards, or the board's archive of everything settled earlier |
@@ -406,7 +408,7 @@ it. `gummi status` says by how much when it happens.
 | `status`, `watch`, `spec`, `diff` | read-only; they take no lock |
 | `status <id> --stats` | where the card's credits and hours went, per pass — the rework split included |
 | `verify <id>` | re-run the checks on a verified branch |
-| `merge <id> -m <msg\|->` | land the branch as one squash commit |
+| `merge <id> -m <msg\|->` | land the branch as one squash commit (`--no-squash`: a merge commit keeping its commits) |
 | `handoff <id>` | close a verified card and keep its branch — nothing lands |
 | `squash`, `commit`, `clean` | collapse the branch, commit stray changes, remove a landed worktree |
 | `log <id>` / `rewrite <id> --plan <file\|->` | list a card's own commits / reword or squash them in place — never reorder or drop, so the content stays verified |

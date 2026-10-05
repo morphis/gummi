@@ -253,13 +253,20 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		var warn string
 		if leaks, err := m.wt.ProvenanceWarnings(ctx, &f); err == nil && len(leaks) > 0 {
 			warn = string(f.ID) + ": branch commits carry agent attribution — " + strings.Join(leaks, ", ")
+			if f.Offers(domain.LandMerge) {
+				// the method is chosen in the dialog this warning sits beside
+				warn += " (a squash discards those messages; a merge commit keeps them)"
+			} else {
+				warn += " (a squash discards those messages)"
+			}
 		}
 		return mergeReadyMsg{f: f, thenDone: thenDone, warn: warn}
 	}
 }
 
-// squashMergeFeature lands the branch on main as one commit carrying the
-// user-approved message. Landed is re-checked at run time so a stale
+// landFeature lands the branch on main by method — one squash commit, or a
+// merge commit that keeps the branch's commits — carrying the user-approved
+// message. Landed is re-checked at run time so a stale
 // board row (or a dialog left open across an outside merge) can't land
 // the work twice. With thenDone set (the card was at verify) a landed
 // merge also moves the feature to Done — the user's "this is done"
@@ -273,7 +280,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 // than on the keypress, is also what keeps the decision open when the
 // merge is refused or conflicts — the thing still has not been attended
 // to — and leaves no second place for a future caller to forget.
-func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bool) tea.Cmd {
+func (m *Shell) landFeature(f domain.Feature, message string, method domain.LandMethod, thenDone bool) tea.Cmd {
 	actor := m.humanActor()
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
@@ -287,7 +294,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		if why := m.verifiedTipRefusal(ctx, f); why != "" {
 			return noticeMsg{text: why, isErr: true, id: f.ID}
 		}
-		if _, err := m.wt.SquashMerge(ctx, &f, message); err != nil {
+		if _, err := m.wt.Land(ctx, &f, message, method); err != nil {
 			var ce *worktree.MergeConflictError
 			if errors.As(err, &ce) {
 				// ce carries git-derived file names; sanitize like every
@@ -319,7 +326,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		// leaving it would badge a landed card as handed off forever.
 		if f.HandedOff() {
 			if err := m.store.ClearHandedOffAt(ctx, f.ID); err != nil {
-				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into " + base + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
+				return noticeMsg{text: sanitize(string(f.ID) + " " + landedAs(method, base) + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 		}
 		// a handed-off card is already closed (done): landing it after all
@@ -330,13 +337,22 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 				// is still the state the inbox item was asking about, so it is
 				// cleared here too — leaving it up would keep inviting a
 				// second landing of work already landed.
-				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into " + base + ", but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
+				return noticeMsg{text: sanitize(string(f.ID) + " " + landedAs(method, base) + ", but moving to done failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 			m.dropSession(f.ID)
-			return noticeMsg{text: string(f.ID) + " squash-merged into " + base + " → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+			return noticeMsg{text: string(f.ID) + " " + landedAs(method, base) + " → done — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 		}
-		return noticeMsg{text: string(f.ID) + " squash-merged into " + base + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
+		return noticeMsg{text: string(f.ID) + " " + landedAs(method, base) + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 	})
+}
+
+// landedAs names how a landing reached base, for a notice: a squash is one
+// commit, a merge keeps the branch's commits and says so.
+func landedAs(method domain.LandMethod, base string) string {
+	if method == domain.LandMerge {
+		return "merged into " + base + " (keeping its commits)"
+	}
+	return "squash-merged into " + base
 }
 
 // closeLandedCard moves a just-landed card to done. A card in the workflow

@@ -69,10 +69,14 @@ func (b *Bridge) Answer(ctx context.Context, id string, req webapi.AnswerRequest
 	if req.Ref == "" {
 		return webapi.Card{}, refuse(WebBadRequest, "an answer names the decision it answers")
 	}
+	method, merr := domain.ParseLandMethod(req.Method)
+	if merr != nil {
+		return webapi.Card{}, refuse(WebBadRequest, merr.Error())
+	}
 	if cur.Decision == nil || cur.Decision.Ref != req.Ref || req.Against != cur.Decision.Against.Token {
 		return webapi.Card{}, b.answeredOrMoved(ctx, id, req.Ref, req.Against, cur)
 	}
-	in := webInput{actor: state.PersonActor(person), confirm: req.Confirm}
+	in := webInput{actor: state.PersonActor(person), confirm: req.Confirm, method: method}
 	wait := webWait
 	if (req.Option == "advance" && cur.Stage == string(domain.StageVerify)) || req.Option == "merge" {
 		// landing from the verify gate opens the landing message, which
@@ -449,10 +453,15 @@ func (b *Bridge) Unqueue(ctx context.Context, id string, n int) (webapi.Unqueued
 // action removed the card (delete).
 func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.ActionRequest, person string) (*webapi.Card, error) {
 	id = string(webID(id))
+	method, merr := domain.ParseLandMethod(req.Method)
+	if merr != nil {
+		return nil, refuse(WebBadRequest, merr.Error())
+	}
 	in := webInput{
 		actor: state.PersonActor(person), message: req.Message, number: req.Number,
 		profile: req.Profile, repo: req.Repo, mode: req.Mode, confirm: req.Confirm,
 		land: action == "merge" || action == "squash", autopilot: action == "gate" || action == "autopilot",
+		method: method,
 	}
 	switch req.Mode {
 	case "", domain.GateAutopilot, domain.GateAttended:

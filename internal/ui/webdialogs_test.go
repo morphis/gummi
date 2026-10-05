@@ -56,7 +56,7 @@ func TestAWebLandingMessageTooLongIsRefused(t *testing.T) {
 		{"many lines", "feat: x\n\n" + repeatStr("- item\n", 150)},
 	} {
 		landed := ""
-		d := newCommitMsgDialog(domain.Feature{ID: "FD-001"}, func(m string) tea.Cmd { landed = m; return nil }, nil)
+		d := newCommitMsgDialog(domain.Feature{ID: "FD-001"}, func(m string, _ domain.LandMethod) tea.Cmd { landed = m; return nil }, nil)
 		res := d.webAnswer(nil, &webInput{land: true, message: tc.msg})
 		if want := trimSpace(tc.msg); len([]rune(want)) > d.input.CharLimit {
 			if landed != "" || res.refused == "" {

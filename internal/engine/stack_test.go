@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -650,5 +651,48 @@ func TestAReorderedStackIsReplayed(t *testing.T) {
 	// C gave B's commit back: it carries only its own above A.
 	if n := f.countBetween(a.BranchName(), c.BranchName()); n != 1 {
 		t.Errorf("C has %d commits beyond A, want 1", n)
+	}
+}
+
+// A lower card that lands as a merge commit keeps its own commits on main;
+// the card above it restacks onto the new base carrying only its own commit.
+func TestStackRestacksAfterMergeLanding(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+
+	mgr, err := f.pool.ManagerFor(ctx, &a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, merr := mgr.Land(ctx, &a, "A: landed keeping its commits", domain.LandMerge); merr != nil {
+		t.Fatalf("landing A as a merge commit: %v", merr)
+	}
+	if parents := strings.Fields(f.git("log", "-1", "--format=%P")); len(parents) != 2 {
+		t.Fatalf("main tip has %d parents, want a merge commit", len(parents))
+	}
+
+	for i := 0; i < 16; i++ {
+		res, err := f.eng.StackTick(ctx, "chain")
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+		if res.Conflict != nil {
+			t.Fatalf("unexpected conflict on %s: %v", res.Restacked, res.Conflict.Files)
+		}
+		if !res.Again {
+			break
+		}
+	}
+
+	// B sits on main now, with only its own commit above it.
+	if !f.contains(f.strip(f.git("rev-parse", "HEAD")), b.BranchName()) {
+		t.Fatal("B's branch does not sit on the merge commit main now carries")
+	}
+	if n := f.countBetween("HEAD", b.BranchName()); n != 1 {
+		t.Fatalf("B carries %d commits above main, want its own 1", n)
 	}
 }

@@ -113,7 +113,7 @@ func TestCleanKeepsAnAdoptedBranch(t *testing.T) {
 	h, d, id := driveAdopted(t, "feat/theirs")
 	ctx := context.Background()
 
-	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): finish their work"); err != nil {
+	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): finish their work", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	f, err := h.store.GetFeature(ctx, id)

@@ -44,7 +44,7 @@ func TestTwoLandingsDraftingAtOnceEachGetTheirDraft(t *testing.T) {
 	landed := map[string]string{}
 	start := func(id domain.FeatureID, release chan struct{}) func(m *Shell, r featureRow) (tea.Cmd, error) {
 		return func(m *Shell, r featureRow) (tea.Cmd, error) {
-			d := newCommitMsgDialog(r.F, func(msg string) tea.Cmd {
+			d := newCommitMsgDialog(r.F, func(msg string, _ domain.LandMethod) tea.Cmd {
 				mu.Lock()
 				landed[string(id)] = msg
 				mu.Unlock()

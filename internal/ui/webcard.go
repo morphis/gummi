@@ -144,6 +144,9 @@ func (m *Shell) webWorkflowDecision(r featureRow, d *threadDecision) *webOpenDec
 		od.index[oid] = i
 		ids = append(ids, oid)
 		opt := webapi.Option{ID: oid, Label: a.label, Detail: a.webDetail(), Danger: a.danger}
+		if a.id == "advance" && advanceLands(r.F, r.Landed) {
+			opt.Methods = webLandMethods(r.F)
+		}
 		if i == consumer {
 			opt.Words = true
 			opt.Relabel = a.label + " with your words"
@@ -625,11 +628,24 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 				}
 			}
 			act.Danger = true
+			act.Methods = webLandMethods(r.F)
 		}
 		m.webActionInput(r, &act)
 		out = append(out, act)
 	}
 	return out
+}
+
+// webLandMethods names the landing methods a card's landing offers on the
+// page: squash and merge commit for a card that may keep its commits, nil
+// otherwise (a goal's card, or one in a goal, lands as a squash only, and a
+// squash in place is not a landing). nil is what leaves the page its one
+// squash field.
+func webLandMethods(f domain.Feature) []string {
+	if !f.Offers(domain.LandMerge) {
+		return nil
+	}
+	return []string{string(domain.LandSquash), string(domain.LandMerge)}
 }
 
 // webActionInput says what an action's flow will ask for, so the page
@@ -641,6 +657,9 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		// (Bridge.Card fills it off the loop)
 		a.Needs = webapi.ActionNeedsMessage
 		a.Detail += webLandingEmpty
+		if a.ID == "merge" {
+			a.Methods = webLandMethods(r.F)
+		}
 	case "changes", "newbug", "commit":
 		a.Needs = webapi.ActionNeedsMessage
 	case "envelope":

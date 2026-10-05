@@ -505,10 +505,16 @@ func (d *Driver) Verify(ctx context.Context, id domain.FeatureID) (Outcome, erro
 // message validation, and performs zero git mutations on any precondition or
 // validation failure. On success it emits a `merged` event carrying the
 // landed commit's sha and returns StatusVerified.
-func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string) (Outcome, error) {
+func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string, method domain.LandMethod) (Outcome, error) {
 	f, err := d.store.GetFeature(ctx, id)
 	if err != nil {
 		return d.fail(ctx, string(id), err)
+	}
+	// Refused before any mutation, goal or not: a card that may not keep its
+	// history has no merge-commit landing to fall back on.
+	if !f.Offers(method) {
+		return d.fail(ctx, string(id),
+			fmt.Errorf("%s cannot land as %s — a goal's history is one squash commit per card; drop --no-squash", id, method))
 	}
 	if f.IsGoal() {
 		return d.mergeGoal(ctx, f, message)
@@ -576,7 +582,7 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	} else if diffOpen > 0 {
 		return d.fail(ctx, string(id), fmt.Errorf("%s has %d unresolved diff annotations blocking the merge", id, diffOpen))
 	}
-	// SquashMerge re-enforces these, but checking first fails with a clear
+	// Land re-enforces these, but checking first fails with a clear
 	// reason before any git mutation.
 	// the branch this card actually lands on, read off the manager it
 	// resolved to rather than written as the literal "main": a `master`
@@ -625,7 +631,7 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 		}
 	}
 
-	sha, err := wt.SquashMerge(ctx, &f, message)
+	sha, err := wt.Land(ctx, &f, message, method)
 	if err != nil {
 		var ce *worktree.MergeConflictError
 		if errors.As(err, &ce) {
@@ -657,7 +663,7 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 			return d.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
 		}
 	}
-	d.out.emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha})
+	d.out.emit(mergedEvent{Event: "merged", ID: string(id), Branch: f.BranchName(), Commit: sha, Method: string(method)})
 	return Outcome{Status: StatusVerified, ID: string(id)}, nil
 }
 

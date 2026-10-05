@@ -271,6 +271,8 @@ func TestNextInputForAssembly(t *testing.T) {
 		// so the menu lists a landing only where one goes through: this
 		// card never finished a verify pass
 		landRefused: "FD-001 has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)",
+		// a plain card may keep its commits as a merge commit instead
+		mergeChoice: true,
 	}
 	// undrafted is a slice (one blocker per blank section), so the struct
 	// no longer compares with ==; DeepEqual keeps the assembly pinned.

@@ -108,7 +108,7 @@ func TestSquashRefusedWhenLanded(t *testing.T) {
 	m = pressSquash(t, m)
 	// The guard used to say "press c to clean up" — true only on the
 	// board. This same notice reaches the card page too (prepareMerge's
-	// twin guard, and squashMergeFeature's), where c types into the
+	// twin guard, and landFeature's), where c types into the
 	// composer instead (§2.3), so the wording now names the action
 	// ("clean up") rather than a key that only works on one surface.
 	if !m.notice.isErr || m.notice.text != "FD-001 already landed on main — "+cleanUpNudge {

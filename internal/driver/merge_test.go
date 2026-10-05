@@ -60,7 +60,7 @@ func TestMergeLandsVerifiedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	before := gitHead(t, h.root)
 
-	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly")
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly", domain.LandSquash)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestMergeRefusesUnverified(t *testing.T) {
 	id := f.ID
 	before := gitHead(t, h.root)
 
-	out, err := h.driver(Options{}).Merge(context.Background(), id, "feat(x): not verified")
+	out, err := h.driver(Options{}).Merge(context.Background(), id, "feat(x): not verified", domain.LandSquash)
 	if err == nil {
 		t.Fatal("Merge accepted an unverified card")
 	}
@@ -123,7 +123,7 @@ func TestMergeRefusesInvalidMessage(t *testing.T) {
 	h, d, id := driveVerified(t)
 	before := gitHead(t, h.root)
 
-	out, err := d.Merge(context.Background(), id, "not a conventional commits subject")
+	out, err := d.Merge(context.Background(), id, "not a conventional commits subject", domain.LandSquash)
 	if err == nil {
 		t.Fatal("Merge accepted an invalid commit message")
 	}
@@ -150,7 +150,7 @@ func TestMergeRefusesLinkedPR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly")
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly", domain.LandSquash)
 	if err == nil {
 		t.Fatal("Merge accepted a linked card")
 	}
@@ -181,7 +181,7 @@ func TestMergeSucceedsAfterUnlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly")
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export headlessly", domain.LandSquash)
 	if err != nil {
 		t.Fatalf("Merge after unlink: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestMergeSucceedsAfterUnlink(t *testing.T) {
 func TestCleanRemovesLandedBranch(t *testing.T) {
 	h, d, id := driveVerified(t)
 	// land it first so there is something to clean.
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	f, _ := h.store.GetFeature(context.Background(), id)
@@ -231,7 +231,7 @@ func TestCleanRemovesLandedBranch(t *testing.T) {
 // but leaves a co-resident card's transcripts alone.
 func TestCleanRemovesTranscripts(t *testing.T) {
 	h, d, id := driveVerified(t)
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 
@@ -264,7 +264,7 @@ func TestCleanRemovesTranscripts(t *testing.T) {
 // co-resident card's scratch files alone.
 func TestCleanRemovesScratchFiles(t *testing.T) {
 	h, d, id := driveVerified(t)
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 
@@ -377,7 +377,7 @@ func TestMergeLandsOnNamedRepo(t *testing.T) {
 	defBefore := gitHead(t, h.root)
 	namedBefore := gitHead(t, h.byName["b"])
 
-	out, err := d.Merge(context.Background(), id, "feat(export): land the json export")
+	out, err := d.Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestMergeLandsOnNamedRepo(t *testing.T) {
 // branch through the card's own manager.
 func TestCleanNamedRepo(t *testing.T) {
 	h, _, id := driveVerifiedNamed(t)
-	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export"); err != nil {
+	if _, err := h.driver(Options{}).Merge(context.Background(), id, "feat(export): land the json export", domain.LandSquash); err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	f, _ := h.store.GetFeature(context.Background(), id)
@@ -454,7 +454,7 @@ func TestRefusalsNameTheBranchTheCardLandsOn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h.root, "README.md"), []byte("edited\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): land the json export"); err == nil ||
+	if _, err := h.driver(Options{}).Merge(ctx, id, "feat(export): land the json export", domain.LandSquash); err == nil ||
 		!strings.Contains(err.Error(), "trunk checkout has uncommitted changes") {
 		t.Fatalf("merge names it too: %v", err)
 	}

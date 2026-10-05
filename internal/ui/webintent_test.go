@@ -286,7 +286,7 @@ func TestOnlyALandingRequestAnswersTheLandingDialog(t *testing.T) {
 	} {
 		landed := ""
 		out, err := b.intent(ctx, "FD-001", tc.in, webWait, func(m *Shell, r featureRow) (tea.Cmd, error) {
-			d := newCommitMsgDialog(r.F, func(msg string) tea.Cmd { landed = msg; return nil }, nil)
+			d := newCommitMsgDialog(r.F, func(msg string, _ domain.LandMethod) tea.Cmd { landed = msg; return nil }, nil)
 			d.input.SetValue("feat: the drafted landing")
 			m.Overlay.Push(d)
 			return nil, nil

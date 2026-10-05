@@ -181,6 +181,16 @@ func (d *commitMsgDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if !in.land {
 		return webAnswer{dismiss: true}
 	}
+	// the method the request names, squash when it names none; a merge
+	// commit is refused where this landing does not offer one
+	method := in.method
+	if method == "" {
+		method = domain.LandSquash
+	}
+	if method == domain.LandMerge && !d.canToggle() {
+		return webAnswer{refused: "this landing cannot be a merge commit — it lands as one squash commit"}
+	}
+	d.method = method
 	if msg := strings.TrimSpace(in.message); msg != "" {
 		if why := tooLong(d.input.CharLimit, "the landing message", msg); why != "" {
 			return webAnswer{refused: why}

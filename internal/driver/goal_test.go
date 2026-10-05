@@ -137,7 +137,7 @@ func TestDriveGoalEndToEnd(t *testing.T) {
 
 	// landing: one merge commit on main over both card commits
 	h.buf.Reset()
-	mout, err := h.driver(Options{}).Merge(ctx, g.ID, "")
+	mout, err := h.driver(Options{}).Merge(ctx, g.ID, "", domain.LandSquash)
 	if err != nil || mout.Status != StatusVerified {
 		t.Fatalf("merge: %v %v\n%s", mout.Status, err, h.buf.String())
 	}

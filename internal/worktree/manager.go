@@ -1513,32 +1513,62 @@ func (m *Manager) conflictedFiles(ctx context.Context, wt string) []string {
 	return strings.Split(out, "\n")
 }
 
-// MergeConflictError reports that a squash merge stopped on conflicts
-// and was undone (the main checkout is left clean, at its original
-// HEAD). Files lists the paths that conflicted.
+// MergeConflictError reports that a landing stopped on conflicts and was
+// undone (the main checkout is left clean, at its original HEAD). Files
+// lists the paths that conflicted; Method names the landing it stopped
+// (the zero value is a squash, the default).
 type MergeConflictError struct {
-	Files []string
+	Files  []string
+	Method domain.LandMethod
 }
 
 func (e *MergeConflictError) Error() string {
-	if len(e.Files) == 0 {
-		return "squash merge hit conflicts and was undone (main checkout clean)"
+	verb := "squash merge"
+	if e.Method == domain.LandMerge {
+		verb = "merge"
 	}
-	return "squash merge conflicts in " + strings.Join(e.Files, ", ") + " — undone, main checkout clean"
+	if len(e.Files) == 0 {
+		return verb + " hit conflicts and was undone (main checkout clean)"
+	}
+	return verb + " conflicts in " + strings.Join(e.Files, ", ") + " — undone, main checkout clean"
 }
 
 // SquashMerge lands the feature branch on the main checkout as a single
-// squash commit carrying message, returning the new commit's sha. It
-// refuses when main has tracked changes (they would be swept into the
-// commit), when the branch has no commits of its own, or when its content
-// is already in main. A conflicted merge is undone with reset --merge — a
-// squash merge writes no MERGE_HEAD, so merge --abort cannot — and
-// reported as a *MergeConflictError; main is left clean on every path
-// short of a failed reset. The returned sha is non-empty exactly when a
-// squash commit was created; every failure path returns ("", err).
+// squash commit carrying message, returning the new commit's sha. It is
+// Land with the squash method.
 func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message string) (string, error) {
+	return m.Land(ctx, f, message, domain.LandSquash)
+}
+
+// Land lands the feature branch on the main checkout carrying message,
+// returning the new commit's sha. A squash method makes one commit of the
+// branch's whole change; a merge method makes a --no-ff merge commit whose
+// first parent is main's tip and second is the branch tip, so every commit
+// the branch holds reaches main intact. Both refuse when main has tracked
+// changes (they would be swept into the commit), when the branch has no
+// commits of its own, or when its content is already in main, and both
+// are refused for a card that may not take the method. A conflicted
+// landing is undone and reported as a *MergeConflictError; main is left
+// clean on every path short of a failed undo. The returned sha is
+// non-empty exactly when a commit was created; every failure path returns
+// ("", err).
+func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, method domain.LandMethod) (string, error) {
+	if method == "" {
+		method = domain.LandSquash
+	}
+	verb, commitVerb := "squash merge", "squash commit"
+	switch method {
+	case domain.LandSquash:
+	case domain.LandMerge:
+		verb, commitVerb = "merge", "merge commit"
+	default:
+		return "", fmt.Errorf("refusing to land %s: unknown landing method %q", f.ID, method)
+	}
+	if !f.Offers(method) {
+		return "", fmt.Errorf("refusing to land %s as %s: this card lands by %s only", f.ID, method, domain.LandSquash)
+	}
 	if strings.TrimSpace(message) == "" {
-		return "", fmt.Errorf("refusing squash merge of %s: empty commit message", f.ID)
+		return "", fmt.Errorf("refusing %s of %s: empty commit message", verb, f.ID)
 	}
 	m.mainMu.Lock()
 	defer m.mainMu.Unlock()
@@ -1598,14 +1628,20 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	} else if n == "0" {
 		return "", fmt.Errorf("branch %s has no commits to merge", branch)
 	}
-	if _, err := runGit(ctx, m.repo, "merge", "--squash", branch); err != nil {
-		// capture what conflicted before the reset wipes the state
+	// A merge landing writes MERGE_HEAD, so it is undone with merge --abort;
+	// a squash writes none and only reset --merge can undo it.
+	mergeArgs := []string{"merge", "--squash", branch}
+	if method == domain.LandMerge {
+		mergeArgs = []string{"merge", "--no-ff", "--no-commit", branch}
+	}
+	if _, err := runGit(ctx, m.repo, mergeArgs...); err != nil {
+		// capture what conflicted before the undo wipes the state
 		conflicts := m.conflictedFiles(ctx, m.repo)
-		if _, resetErr := runGit(ctx, m.repo, "reset", "--merge"); resetErr != nil {
-			return "", fmt.Errorf("squash merge failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
+		if resetErr := m.undoLanding(ctx, method); resetErr != nil {
+			return "", fmt.Errorf("%s failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", verb, err, resetErr)
 		}
 		if len(conflicts) > 0 {
-			return "", &MergeConflictError{Files: conflicts}
+			return "", &MergeConflictError{Files: conflicts, Method: method}
 		}
 		return "", err
 	}
@@ -1614,16 +1650,21 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	if clean, err := gitOK(ctx, m.repo, "diff", "--cached", "--quiet"); err != nil {
 		return "", err
 	} else if clean {
+		if method == domain.LandMerge {
+			if resetErr := m.undoLanding(ctx, method); resetErr != nil {
+				return "", fmt.Errorf("%s found nothing to commit AND reset failed, main checkout needs manual attention: %w", verb, resetErr)
+			}
+		}
 		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
 	}
 	if _, err := runGit(ctx, m.repo, "commit", "-m", message); err != nil {
-		if _, resetErr := runGit(ctx, m.repo, "reset", "--merge"); resetErr != nil {
-			return "", fmt.Errorf("squash commit failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", err, resetErr)
+		if resetErr := m.undoLanding(ctx, method); resetErr != nil {
+			return "", fmt.Errorf("%s failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", commitVerb, err, resetErr)
 		}
 		return "", err
 	}
 	// the mainMu lock serializes main mutations, so HEAD is still the
-	// squash commit we just created — its sha is the landed commit.
+	// commit we just created — its sha is the landed commit.
 	sha, err := runGit(ctx, m.repo, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
@@ -1640,6 +1681,20 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 		m.mergeHook(f, sha)
 	}
 	return sha, nil
+}
+
+// undoLanding puts the main checkout back as it was before a landing that
+// failed partway. A merge landing may have left MERGE_HEAD, which
+// merge --abort clears; when there is none (or the method is a squash)
+// reset --merge does the job.
+func (m *Manager) undoLanding(ctx context.Context, method domain.LandMethod) error {
+	if method == domain.LandMerge {
+		if _, err := runGit(ctx, m.repo, "merge", "--abort"); err == nil {
+			return nil
+		}
+	}
+	_, err := runGit(ctx, m.repo, "reset", "--merge")
+	return err
 }
 
 // ForkDriftRemedy is the recovery phrase for a reader who has no single

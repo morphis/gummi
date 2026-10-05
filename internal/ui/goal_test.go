@@ -346,10 +346,10 @@ func TestGoalHandOverSaysWhatWasMet(t *testing.T) {
 }
 
 func TestGoalMergeIsNotASquash(t *testing.T) {
-	if got := mergeHelp(domain.KindGoal, "main"); strings.Contains(got, "squash") {
+	if got := mergeHelp(domain.KindGoal, "main", false); strings.Contains(got, "squash") {
 		t.Fatalf("a goal lands as a merge commit over its cards' commits: %q", got)
 	}
-	d := newCommitMsgDialog(domain.Feature{ID: "GL-001", Kind: domain.KindGoal, Slug: "x"}, func(string) tea.Cmd { return nil }, nil)
+	d := newCommitMsgDialog(domain.Feature{ID: "GL-001", Kind: domain.KindGoal, Slug: "x"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil)
 	if got := ansi.Strip(d.View(theme.New(theme.GummiDark()), 100, 30)); strings.Contains(got, "squash-merge") || !strings.Contains(got, "merge GL-001") {
 		t.Fatalf("the goal's commit dialog names a merge:\n%s", got)
 	}

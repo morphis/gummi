@@ -247,7 +247,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 
 	advanceLabel, advanceWhy := "next stage", "move the card to its next stage"
 	if in.stage == domain.StageVerify {
-		advanceWhy = "approve — squash-merge the branch and land it on " + r.baseBranch()
+		advanceWhy = "approve — " + landWhy(r.F.Offers(domain.LandMerge), "squash-merge the branch and land it on "+r.baseBranch(), "land the branch on "+r.baseBranch())
 	}
 	if research && doneStage {
 		// FD-081: a done RS card has nothing left to advance — g re-runs
@@ -481,7 +481,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// a hand-off — never before the branch has been verified, and
 			// never on a card linked to a pull request, which lands there
 			// (prepareMerge refuses it with the two ways that do)
-			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch()), false,
+			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch(), r.F.Offers(domain.LandMerge)), false,
 			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy && (in.stage == domain.StageVerify || freeform || r.F.HandedOff()) &&
 				landable && r.F.PullRequest.Empty(),
 		},
@@ -968,15 +968,28 @@ func (d *cardActionsDialog) View(s *theme.Styles, w, h int) string {
 }
 
 // mergeHelp describes the merge action: a goal lands as one merge commit
-// over its cards' commits, every other card as one squash commit.
-func mergeHelp(kind domain.Kind, base string) string {
+// over its cards' commits; every other card lands as one squash commit, or
+// as a merge commit keeping its own commits when choice is set (the person
+// picks which in the message dialog).
+func mergeHelp(kind domain.Kind, base string, choice bool) string {
 	if kind == domain.KindGoal {
 		return "merge the goal branch into " + base + " over its cards' commits (review & approve the drafted message)"
 	}
+	what := landWhy(choice, "squash-merge branch into "+base, "land branch into "+base)
 	if kind == domain.KindFreeform {
 		// prepareMerge's final checkpoint: a session's loose work is
 		// committed before it lands, and the reader should know first
-		return "squash-merge branch into " + base + " — anything still uncommitted is committed first, as a final checkpoint (review & approve the drafted message)"
+		return what + " — anything still uncommitted is committed first, as a final checkpoint (review & approve the drafted message)"
 	}
-	return "squash-merge branch into " + base + " (review & approve the drafted message)"
+	return what + " (review & approve the drafted message)"
+}
+
+// landWhy picks the wording of a landing. A card that may keep its commits
+// lands as one squash commit or a merge commit, which the message dialog's
+// toggle chooses, so its wording names both; any other card keeps squash.
+func landWhy(choice bool, squash, either string) string {
+	if !choice {
+		return squash
+	}
+	return either + " — one squash commit, or a merge commit keeping its commits (chosen with the message)"
 }

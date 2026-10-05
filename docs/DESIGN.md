@@ -1462,7 +1462,7 @@ Decided in the design interview (2026-07-03):
    requirements of reading a run, not of the pane that happened to hold
    them. Watching a run another process drives stays a read-only view
    (decision 13).
-6. **The endgame is a squash commit on main.** *Amended for stacks
+6. **The endgame is a squash commit on main** (or, where a person chooses it per landing, a merge commit that keeps the branch's commits). *Amended for stacks
    (§18):* the branch a card forks **from** is now the card's own — a
    chosen local branch, or the branch of the card below it in a stack —
    while what it lands **onto** is unchanged, and a stacked card refuses
@@ -1471,6 +1471,14 @@ Decided in the design interview (2026-07-03):
    commit with a message you approve — no PR or push automation; sharing
    the result is yours. gummi detects when a branch landed outside this
    flow and offers worktree cleanup either way.
+   *Amended for merge landings:* a landing may instead be a `--no-ff`
+   merge commit carrying the approved message, which keeps the branch's
+   own commits on main. The person chooses per landing, in the landing
+   dialog (or `--no-squash` headless), and squash stays the default. A
+   merge landing takes the branch's commits as they are: tidying them is
+   the log tab's or `gummi rewrite`'s job, done before landing. A card
+   that belongs to a goal, and a goal itself, land as a squash only, since
+   a goal's history is one commit per card under the goal's merge commit.
 7. **Verify = discovered checks + spec plan**: the repo's build/test/lint
    commands always run, from the spec's `gummi-checks` block —
    auto-discovered into the Verification plan at approval and

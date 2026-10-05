@@ -43,7 +43,7 @@ func TestMergeRefusesAMainCheckoutCard(t *testing.T) {
 	before := gitHead(t, h.root)
 
 	_, err := h.driver(Options{}).Merge(context.Background(), f.ID,
-		"fix(copilot): drop the pty fd leaked on idle timeout")
+		"fix(copilot): drop the pty fd leaked on idle timeout", domain.LandSquash)
 	if err == nil {
 		t.Fatal("a main-checkout card was merged")
 	}

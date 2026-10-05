@@ -65,6 +65,8 @@ type webInput struct {
 	// mode is the autopilot dialog's answer; empty takes the one the
 	// dialog confirms.
 	mode string
+	// method is the landing method the request names; empty is squash.
+	method domain.LandMethod
 	// confirm is the confirmation tokens the request carries
 	// (webapi.AnswerRequest.Confirm): each the yes to one question the
 	// person was shown, spent by the dialog that asked it (takeConfirm).

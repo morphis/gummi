@@ -353,8 +353,8 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 				m.HasTree = ok
 			}
 			if m.HasTree {
-				// Landed is asked of the card first (a gummi squash or a
-				// merged PR both show up here) and of the record second,
+				// Landed is asked of the card first (a gummi landing, squash
+				// or merge commit, or a merged PR, all show up here) and of the record second,
 				// so a card whose PR merged upstream reads as landed as
 				// soon as main carries it.
 				//
@@ -428,10 +428,10 @@ func (e *Engine) StackBaseFor(ctx context.Context, f *domain.Feature) (string, e
 // names, whether each member has a branch at all, and whether it has
 // finished — using only the store and os.Stat.
 //
-// "Landed" here is the record's answer (a stamped squash commit, or a
-// card that has reached done by any route) and not git's. That is a
-// slightly coarser read than StackSnapshot's, and it is the right one for
-// this caller: it cannot ask git without recursing, and a card whose PR
+// "Landed" here is the record's answer (a stamped landed commit, squash or
+// merge, or a card that has reached done by any route) and not git's. That
+// is a slightly coarser read than StackSnapshot's, and it is the right one
+// for this caller: it cannot ask git without recursing, and a card whose PR
 // merged but whose record has not caught up simply keeps its successor
 // forked from its branch for one more tick — which is correct, because
 // that branch still exists and still carries the work.
