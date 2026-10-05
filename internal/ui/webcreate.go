@@ -113,17 +113,84 @@ func (b *Bridge) Form(ctx context.Context, repo string) (webapi.Form, error) {
 	// call routes_create.go's handler made inline)
 	b.RefreshBranches(ctx)
 	var (
-		f    webapi.Form
-		werr error
+		f     webapi.Form
+		werr  error
+		name  string
+		pool  *worktree.Pool
+		store *state.Store
 	)
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { f, werr = m.WebForm(repo); return nil }); err != nil {
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		f, werr = m.WebForm(repo)
+		name, pool, store = repo, m.wt, m.store
+		if name == "" {
+			name = m.openCardForm(domain.CardType{Kind: domain.KindFeature}).repo.name()
+		}
+		return nil
+	}); err != nil {
 		return webapi.Form{}, err
 	}
 	if werr != nil {
 		return webapi.Form{}, werr
 	}
+	// the adopt list's git reads run beside the catalog's backend asks,
+	// which are the slow half of a first form read
+	adoptable := make(chan []webapi.AdoptChoice, 1)
+	go func() {
+		if pool == nil || store == nil {
+			adoptable <- nil
+			return
+		}
+		adoptable <- webAdoptable(ctx, pool, store, name, f.Branches)
+	}()
 	mergeSessionCatalog(ctx, b.shell.engine, &f.Sessions)
+	f.Adoptable = <-adoptable
 	return f, nil
+}
+
+// webAdoptable says which of the repo's branches a new card may adopt,
+// and why not, with the refusals cardmint and worktree.InspectBranch
+// would give: a branch another card holds (any card, landed ones too —
+// one branch, one card), the branch the card would land on, and a branch
+// with no commits of its own past it or no history in common with it.
+// Measured against the repo's default base; the git reads make it the
+// off-loop half of the form.
+func webAdoptable(ctx context.Context, pool *worktree.Pool, store *state.Store, repo string, branches []string) []webapi.AdoptChoice {
+	if len(branches) == 0 {
+		return nil
+	}
+	owners := map[string]domain.FeatureID{}
+	if fs, err := store.ListFeatures(ctx); err == nil {
+		for _, f := range fs {
+			// BranchTaken's rule: research cards hold no branch
+			if f.Repo != repo || f.Kind == domain.KindResearch {
+				continue
+			}
+			if b := f.BranchName(); b != "" {
+				if _, dup := owners[b]; !dup {
+					owners[b] = f.ID
+				}
+			}
+		}
+	}
+	base := pool.BaseBranch(ctx, repo)
+	out := make([]webapi.AdoptChoice, 0, len(branches))
+	for _, b := range branches {
+		c := webapi.AdoptChoice{Branch: b}
+		switch owner, held := owners[b]; {
+		case held:
+			c.Why, c.Held = string(owner)+" has it", string(owner)
+		case b == base:
+			c.Why = "the branch it lands on"
+		default:
+			if n, err := pool.Ahead(ctx, repo, b, base); err != nil {
+				c.Why = "no history in common with " + base
+			} else if n == 0 {
+				c.Why = "no commits past " + base
+			}
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // webFill sets the form's rows from a request, refusing a value no row

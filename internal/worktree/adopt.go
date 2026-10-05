@@ -141,3 +141,30 @@ func (p *Pool) BranchExistsNamed(ctx context.Context, repo, branch string) (bool
 	}
 	return wt.BranchExistsNamed(ctx, branch)
 }
+
+// Ahead counts the commits branch carries that base does not: what a card
+// adopting it would inherit, measured the way InspectBranch measures it
+// (from the two branches' fork point). InspectBranch refuses a branch
+// with none, and refuses one sharing no history with base, which is the
+// error here — so a form can say which branches are worth offering before
+// anyone picks one.
+func (m *Manager) Ahead(ctx context.Context, branch, base string) (int, error) {
+	forkPoint, err := runGit(ctx, m.repo, "merge-base", base, branch)
+	if err != nil {
+		return 0, fmt.Errorf("%s and %s share no history", branch, base)
+	}
+	out, err := runGit(ctx, m.repo, "rev-list", "--count", forkPoint+".."+branch)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(out))
+}
+
+// Ahead resolves the named repo and counts there (Manager.Ahead).
+func (p *Pool) Ahead(ctx context.Context, repo, branch, base string) (int, error) {
+	wt, err := p.ManagerForName(ctx, repo)
+	if err != nil {
+		return 0, err
+	}
+	return wt.Ahead(ctx, branch, base)
+}

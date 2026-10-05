@@ -139,14 +139,20 @@ test('a title in any script makes a card', async ({ pairedPage: page, api }, inf
   }
 });
 
-// Adopting: the branch the card would land on is listed only to say why it
-// cannot be picked, a refusal sits under the adopt field (said once, not
-// again as a toast over the form), and a stacked card's base steps aside.
+// Adopting: a branch that would be refused is listed only to say why — the
+// one the card would land on, one another card holds — a refusal the list
+// cannot foresee sits under the adopt field (said once, not again as a
+// toast over the form), and a stacked card's base steps aside.
 test('adopt refusals sit under their field, and a stack sets the base', async ({ pairedPage: page, api }, info) => {
   test.skip(phone(info), 'the form’s wiring is the same at every width');
   await openForm(page);
   const head = (await api('GET', '/api/board')).json.head;
-  await expect(page.getByTestId('newcard-adopt').locator(`option[value="${head}"]`)).toHaveAttribute('disabled', '');
+  const adopt = page.getByTestId('newcard-adopt');
+  await expect(adopt.locator(`option[value="${head}"]`)).toHaveAttribute('disabled', '');
+  const branch = (await api('GET', `/api/cards/${gate}`)).json.branch;
+  const held = adopt.locator(`option[value="${branch}"]`);
+  await expect(held).toHaveAttribute('disabled', '');
+  await expect(held).toHaveText(`${branch} — ${gate} has it`);
 
   await page.getByTestId('newcard-stack').selectOption(gate);
   await expect(page.getByTestId('newcard-base')).toBeDisabled();
@@ -154,12 +160,15 @@ test('adopt refusals sit under their field, and a stack sets the base', async ({
   await page.getByTestId('newcard-stack').selectOption('');
   await expect(page.getByTestId('newcard-base')).toBeEnabled();
 
-  const branch = (await api('GET', `/api/cards/${gate}`)).json.branch;
-  await page.getByTestId('newcard-title').fill('Take over the wave');
-  await page.getByTestId('newcard-adopt').selectOption(branch);
+  // forked from the held branch, the trunk carries nothing of its own to
+  // adopt: the list measured against the default base, so the create says it
+  await page.getByTestId('newcard-title').fill('Take over the trunk');
+  await page.getByTestId('newcard-base').selectOption(branch);
+  await expect(held).toHaveAttribute('disabled', '');
+  await adopt.selectOption(head);
   await page.getByTestId('newcard-create').click();
-  await expect(page.getByTestId('newcard-error-adopt')).toContainText(branch);
+  await expect(page.getByTestId('newcard-error-adopt')).toContainText('nothing to adopt');
   await expect(page.getByTestId('newcard-error-base')).toBeHidden();
   await page.waitForTimeout(800);
-  await expect(page.getByTestId('toast').filter({ hasText: branch })).toHaveCount(0);
+  await expect(page.getByTestId('toast').filter({ hasText: 'nothing to adopt' })).toHaveCount(0);
 });

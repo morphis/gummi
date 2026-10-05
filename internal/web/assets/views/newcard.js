@@ -182,17 +182,26 @@ registerView('newcard', {
           : 'What the branch forks from and lands on.'
         syncAdopt()
       }
-      // the adopt list: every branch, but the one the card would land on
-      // is there only to say why it can't be picked — adopting it is
-      // always refused (worktree.Adopt)
+      // the adopt list: every branch, but one that would be refused is
+      // there only to say why it can't be picked — the server's word for
+      // each (another card holds it, nothing of its own to adopt), and
+      // the branch the card would land on, which follows the base picked
+      const why = new Map((f.adoptable || []).map(a => [a.branch, a]))
       const syncAdopt = () => {
         if (!el.adopt) return
         const picked = el.adopt.value || st.adopt || ''
         const lands = el.base.disabled ? '' : (el.base.value || (!st.repo ? ctx.state?.board?.head || '' : ''))
         clear(el.adopt).append(h('option', { value: '' }, 'no — cut a new branch'),
-          ...branches.map(b => b === lands
-            ? h('option', { value: b, disabled: true }, `${b} — the branch it lands on`)
-            : h('option', { value: b, selected: b === picked }, b)))
+          ...branches.map(b => {
+            // the server measured against the default base: under another
+            // base only a card holding the branch still settles it, and the
+            // create says the rest
+            const a = why.get(b) || {}
+            const no = b === lands ? 'the branch it lands on' : (!el.base.value || a.held ? a.why || '' : '')
+            return no
+              ? h('option', { value: b, disabled: true }, `${b} — ${no}`)
+              : h('option', { value: b, selected: b === picked }, b)
+          }))
       }
       el.base.addEventListener('change', syncAdopt)
       el.stack?.addEventListener('change', syncBase)

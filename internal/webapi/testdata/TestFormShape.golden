@@ -1,0 +1,50 @@
+{
+  "kinds": [
+    {
+      "value": "feature",
+      "label": "Feature"
+    }
+  ],
+  "profiles": [
+    "balanced"
+  ],
+  "repos": [],
+  "severities": [
+    "high"
+  ],
+  "branches": [
+    "main",
+    "feat/dark",
+    "fd-001-wave",
+    "stale"
+  ],
+  "adoptable": [
+    {
+      "branch": "main",
+      "why": "the branch it lands on"
+    },
+    {
+      "branch": "feat/dark"
+    },
+    {
+      "branch": "fd-001-wave",
+      "why": "FD-001 has it",
+      "held": "FD-001"
+    },
+    {
+      "branch": "stale",
+      "why": "no commits past main"
+    }
+  ],
+  "stackable": [],
+  "dependable": [],
+  "envelope": 2000,
+  "sessions": {
+    "default": {
+      "backend": "copilot",
+      "model": "gpt-5"
+    },
+    "agents": [],
+    "recent": []
+  }
+}

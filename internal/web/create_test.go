@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"os/exec"
 	"slices"
 	"testing"
 	"time"
@@ -60,6 +61,49 @@ func TestCreateACardWithDependenciesAndAStack(t *testing.T) {
 	}
 	if st := h.call(http.MethodPost, "/api/cards", webapi.CreateCardRequest{Kind: "epic", Title: "x"}, &e); st != http.StatusBadRequest {
 		t.Errorf("an unknown kind = %d", st)
+	}
+}
+
+// The form says which branches a card may adopt, with the refusal each
+// other one would meet: held by a card, the branch it lands on, nothing
+// of its own past that branch.
+func TestFormSaysWhichBranchesCanBeAdopted(t *testing.T) {
+	h := newCardBoard(t, agent.NewFake("ok"))
+	git := func(a ...string) {
+		t.Helper()
+		if out, err := exec.CommandContext(t.Context(), "git", append([]string{"-C", h.root}, a...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+	}
+	for _, b := range []string{"feat/dark", "feat/wave"} {
+		git("checkout", "-q", "-b", b, "main")
+		git("commit", "-q", "--allow-empty", "-m", "work on "+b)
+	}
+	git("checkout", "-q", "main")
+	git("branch", "stale", "main")
+	held := h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Dark mode", Adopt: "feat/dark"})
+
+	var form webapi.Form
+	if st := h.call(http.MethodGet, "/api/form", nil, &form); st != http.StatusOK {
+		t.Fatalf("form = %d", st)
+	}
+	got := map[string]webapi.AdoptChoice{}
+	for _, a := range form.Adoptable {
+		got[a.Branch] = a
+	}
+	want := map[string]webapi.AdoptChoice{
+		"main":      {Branch: "main", Why: "the branch it lands on"},
+		"feat/dark": {Branch: "feat/dark", Why: held.ID + " has it", Held: held.ID},
+		"feat/wave": {Branch: "feat/wave"},
+		"stale":     {Branch: "stale", Why: "no commits past main"},
+	}
+	for b, w := range want {
+		if got[b] != w {
+			t.Errorf("%s = %+v, want %+v", b, got[b], w)
+		}
+	}
+	if len(form.Adoptable) != len(form.Branches) {
+		t.Errorf("adoptable has %d rows for %d branches", len(form.Adoptable), len(form.Branches))
 	}
 }
 
