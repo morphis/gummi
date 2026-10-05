@@ -100,6 +100,11 @@ type Item struct {
 	// Decision is the decision a decision item raised, with Answer set once
 	// someone answered it.
 	Decision *ThreadDecision `json:"decision,omitempty"`
+	// Supersedes holds the keys of items this one takes the place of: the
+	// decisions a receipt answered. A page that drew one of them while it
+	// waited drops it — a paged read (after=) never sends an item that is
+	// gone, so this is the only way the page hears of it.
+	Supersedes []string `json:"supersedes,omitempty"`
 }
 
 // ToolCall is one tool call in a tools item.
@@ -121,7 +126,8 @@ type ToolCall struct {
 
 // Receipt is a crossing's outcome line.
 type Receipt struct {
-	// Kind is the event the receipt records: "gate", "ask", "park",
+	// Kind is the event the receipt records: "gate", "ask", "park" (a card
+	// come to rest, or a run someone stopped by hand), "rebase",
 	// "autopilot" (a mode change) or "decision" (superseded unanswered).
 	Kind string `json:"kind,omitempty"`
 	OK   bool   `json:"ok"`

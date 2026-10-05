@@ -68,6 +68,25 @@ test.describe('a design gate', () => {
     await shot(page, info, 'gate-approved');
   });
 
+  // "stop here" leaves the card at its gate, and the thread says who
+  // stopped it; approving afterwards passes the headless run's stop, and
+  // the thread stops drawing it as the decision waiting
+  test('stop here is recorded, and the stop it parked at goes once approved', async ({ pairedPage: page, server }, info) => {
+    const phone = isPhone(info);
+    await open(page, server, id);
+    await answerOption(page, phone, 'pause');
+    const items = await thread(page, phone);
+    await expect(items.getByTestId('receipt').last()).toContainText('Tester parked it');
+    // past the moment a just-changed decision holds a press
+    await page.waitForTimeout(1000);
+    await answerOption(page, phone, 'advance');
+    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
+    await thread(page, phone);
+    await expect(items.getByTestId('receipt').last()).toContainText('Tester advanced plan → implement');
+    await expect(items.getByTestId('thread-decision')).toHaveCount(0);
+    await expect(items).toContainText('Tester parked it');
+  });
+
   // One press answers. A second press a moment later, meant for the
   // answer just given, meets the stop that answer led to: it is chosen,
   // not answered unread.

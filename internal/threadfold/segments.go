@@ -20,6 +20,7 @@ package threadfold
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -245,6 +246,11 @@ func ReceiptCredits(seg Segment, spend map[domain.Stage]float64, stageSegs int, 
 // collapsed into that answer's row per DESIGN §6.3, and a reader uses
 // this set to say nothing for it rather than saying the same stop twice.
 //
+// A gate crossing also answers every gate decision still open at the
+// stage it leaves (DecisionAnswers): one stage can hold two stops raised
+// by two drivers — a headless run's --until stop, then the board's own —
+// and the one crossing passes both.
+//
 // Callers compute this once per render rather than once per line: a line
 // renderer only ever sees the single event it is asked to render, and a
 // card's history can carry many decision_open rows, so re-scanning the
@@ -270,7 +276,74 @@ func AnsweredDecisions(events []state.CardEvent) map[string]bool {
 			answered[id] = true
 		}
 	}
+	for _, opened := range DecisionAnswers(events) {
+		for _, i := range opened {
+			var p state.DecisionPayload
+			_ = json.Unmarshal([]byte(events[i].Payload), &p)
+			if p.ID != "" {
+				answered[p.ID] = true
+			}
+		}
+	}
 	return answered
+}
+
+// DecisionAnswers maps each gate or ask event that answers a decision to
+// the decision_open rows before it that it answers, by index into events:
+// the one its payload id names, and — for a gate crossing — every gate
+// decision still unanswered at the stage it leaves. A stage the card has
+// crossed out of can hold no stop (the store's OpenDecisions abandons
+// one the same way), so a stop raised there is passed by the crossing,
+// whichever driver raised it and whichever id the crossing carried.
+func DecisionAnswers(events []state.CardEvent) map[int][]int {
+	out := map[int][]int{}
+	byID := map[string]int{}
+	done := map[int]bool{}
+	openGates := map[domain.Stage][]int{}
+	take := func(at, i int) {
+		if !done[i] {
+			done[i] = true
+			out[at] = append(out[at], i)
+		}
+	}
+	for i, ev := range events {
+		switch ev.Kind {
+		case state.EventDecisionOpen:
+			var p state.DecisionPayload
+			if json.Unmarshal([]byte(ev.Payload), &p) != nil {
+				continue
+			}
+			if p.ID != "" {
+				byID[p.ID] = i
+			}
+			if p.Kind == state.DecisionKindGate {
+				openGates[ev.Stage] = append(openGates[ev.Stage], i)
+			}
+		case state.EventGate:
+			var p state.GatePayload
+			if json.Unmarshal([]byte(ev.Payload), &p) != nil {
+				continue
+			}
+			if k, ok := byID[p.ID]; ok && p.ID != "" {
+				take(i, k)
+			}
+			from := domain.Stage(p.From)
+			for _, k := range openGates[from] {
+				take(i, k)
+			}
+			delete(openGates, from)
+			slices.Sort(out[i])
+		case state.EventAsk:
+			var p state.AskPayload
+			if json.Unmarshal([]byte(ev.Payload), &p) != nil {
+				continue
+			}
+			if k, ok := byID[p.ID]; ok && p.ID != "" {
+				take(i, k)
+			}
+		}
+	}
+	return out
 }
 
 // SpendByStage rolls the per-stage/model spend rows up to one total per

@@ -82,8 +82,13 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 // segment its card's log ends in: then the log does not hold its turns
 // yet, and the page draws them from the snapshot. A finished session
 // (the engine keeps it after its run) has handed everything to the log.
+//
+// A paused session has handed its turns over too: Pause saves it before
+// it stops, and nothing writes after. Holding its segment back would hide
+// what the log says since — the pause itself, the stop it parked at —
+// behind a transcript that has nothing more to add.
 func liveSessionActive(snap engine.Snapshot) bool {
-	return snap.State != engine.StateDone
+	return snap.State != engine.StateDone && snap.State != engine.StatePaused
 }
 
 // webConsult is the card's consult exchange, where the TUI thread draws

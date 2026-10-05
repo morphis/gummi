@@ -169,6 +169,37 @@ func ParkLine(p state.ParkPayload) string {
 	return "parked — " + Sanitize(sentence)
 }
 
+// PauseLine is the receipt for a run a person stopped by hand: "you
+// parked it", "Simon parked it" — who pressed "stop here" or park, from
+// whichever face or device.
+func PauseLine(p state.PausePayload) string {
+	return Sanitize(PersonWord(p.By)) + " parked it"
+}
+
+// RebaseLine is a rebase's receipt: "you rebased it onto main", or "the
+// agent rebased it onto main" for a conflicted rebase handed to the agent
+// and judged clean afterwards.
+func RebaseLine(p state.RebasePayload) string {
+	who := PersonWord(p.By)
+	if p.Agent {
+		who = "the agent"
+	}
+	line := who + " rebased it"
+	if p.Onto != "" {
+		line += " onto " + p.Onto
+	}
+	return Sanitize(line)
+}
+
+// PersonWord is ActorWord for a record a person made: a missing actor is
+// the terminal's own "you", as on every row written before names were.
+func PersonWord(actor string) string {
+	if w := ActorWord(actor); w != "" {
+		return w
+	}
+	return "you"
+}
+
 // SupersededLine is the trace a decision leaves when it was opened and
 // then superseded before anyone answered it (DESIGN §10.18: nothing may
 // block a card without leaving a row).

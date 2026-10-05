@@ -1551,7 +1551,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 			// handback is yours, and running it flush against the tally
 			// reads as more of the same block
 			lines = append(lines, "")
-			closed = closed || ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot
+			closed = closed || ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot || ev.Kind == state.EventPause
 		}
 		pad(-1)
 		if closed {
@@ -1968,6 +1968,14 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// the sentence, and why Detail wins over the reason code, is
 		// threadfold.ParkLine's.
 		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(threadfold.ParkLine(p), max(w-2, 8), "…"))
+	case state.EventPause:
+		var p state.PausePayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(threadfold.PauseLine(p), max(w-2, 8), "…"))
+	case state.EventRebase:
+		var p state.RebasePayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(threadfold.RebaseLine(p), max(w-2, 8), "…"))
 	case state.EventDecisionOpen:
 		var p state.DecisionPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)

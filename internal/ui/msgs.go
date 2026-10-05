@@ -1196,6 +1196,7 @@ func (m *Shell) rebaselineCmd(id domain.FeatureID) tea.Cmd {
 }
 
 func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
+	by, onto := m.humanActor(), m.baseBranch(f)
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
@@ -1252,9 +1253,12 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
+		// the branch moved under everyone reading the card: its thread
+		// says so, and who moved it
+		m.logRebase(f.ID, state.RebasePayload{Onto: onto, By: by})
 		return rebasedMsg{
 			id: f.ID, cleared: drifted != nil,
-			notice: noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true},
+			notice: noticeMsg{text: string(f.ID) + " rebased onto " + onto, reload: true},
 		}
 	})
 }

@@ -77,6 +77,10 @@ test.describe('a card whose base was rewritten under it', () => {
     // only the card's own commits sit on main's new tip
     const log = await workspace.git('log', '--format=%s', `main..${cleared.branch ?? `gummi/${id}`}`);
     expect(log).not.toContain('init: a tiny module');
+    // the thread keeps the rebase, naming who asked for it
+    const receipts = async () => ((await api('GET', `/api/cards/${id}/thread`)).json.items as any[])
+      .filter(it => it.receipt?.kind === 'rebase').map(it => it.receipt.text)
+    await expect.poll(receipts).toEqual(['Tester rebased it onto main']);
     await shot(page, info, 'drift-cleared');
 
     // and the stage runs again
@@ -142,6 +146,9 @@ test.describe('a rewritten base the card really conflicts with', () => {
       .toContain('verification stopped here');
     const after = (await api('GET', `/api/cards/${id}`)).json;
     expect(after.decision.options[0].id).not.toBe('rebase');
+    // the thread keeps the rebase the agent finished
+    expect(((await api('GET', `/api/cards/${id}/thread`)).json.items as any[])
+      .filter(it => it.receipt?.kind === 'rebase').map(it => it.receipt.text)).toEqual(['the agent rebased it onto main']);
     // the card's own file on top of the base's, the conflict taking the card's side
     const file = `${id.toLowerCase().replace('-', '')}.go`;
     expect(await workspace.git('show', `${branch}:${file}`)).not.toContain('from the rewritten base');

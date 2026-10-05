@@ -236,6 +236,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	if drifted != nil {
 		m.driftCleared(id)
 	}
+	m.logRebase(id, state.RebasePayload{Onto: m.baseBranch(f), Agent: true})
 	if f.Stage != domain.StageVerify {
 		if interrupted {
 			return func() tea.Msg {

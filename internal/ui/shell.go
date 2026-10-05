@@ -1226,12 +1226,11 @@ func (m *Shell) fetchLastSeen() tea.Msg {
 // and a failed history write is not worth a second message contradicting
 // nothing.
 //
-// Only the two gestures that would otherwise leave no trace write a
-// handback here: turning the switch off, and parking a run by hand.
-// Every other way a card comes back to you already writes something the
-// reader treats as the end of the period — a park row, or a turn you
-// typed — so recording those again here would put two endings on one
-// ending. A handback with no period open is harmless: the reader has
+// Only the gesture that would otherwise leave no trace writes a handback
+// here: turning the switch off. Every other way a card comes back to you
+// already writes something the reader treats as the end of the period —
+// a park or pause row, or a turn you typed — so recording those again
+// here would put two endings on one ending. A handback with no period open is harmless: the reader has
 // nothing to close and ignores it.
 //
 // by is whose gesture it was (humanActor, read on the loop when the
@@ -1242,6 +1241,25 @@ func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode, by string
 	}
 	_ = m.store.AppendAutopilotBy(context.Background(), id, m.recordStage(id),
 		event, reason, mode, by, "", time.Now())
+}
+
+// logPause records a person stopping a card's run by hand
+// (state.EventPause), by whose actor. Best-effort and silent, like
+// logPark: the pause has happened and the notice already said so.
+func (m *Shell) logPause(id domain.FeatureID, by string) {
+	if m.store == nil {
+		return
+	}
+	_ = m.store.AppendPause(context.Background(), id, m.recordStage(id), by, time.Now())
+}
+
+// logRebase records a card's branch rebased onto its base
+// (state.EventRebase). Best-effort and silent, like logPark.
+func (m *Shell) logRebase(id domain.FeatureID, p state.RebasePayload) {
+	if m.store == nil {
+		return
+	}
+	_ = m.store.AppendRebase(context.Background(), id, m.recordStage(id), p, time.Now())
 }
 
 // stageOf reads the card's current stage from the loaded rows. A card
@@ -4133,13 +4151,13 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
 			return pausedMsg{id: id, inner: noticeMsg{text: sanitize(err.Error()), isErr: true}}
 		}
-		// Taking a running card back by hand is one of the two ways a
-		// period of autopilot ends without writing anything a reader could
-		// read as its end: a pause raises no attention, so it leaves no
-		// park row, and it is not a turn anyone typed. Without this the
-		// period would stay open until the next thing you happened to do
-		// on the card, dating the handback to whenever that was.
-		m.logAutopilot(f.ID, state.AutopilotHandedBack, "you parked it", f.GateApproval, by)
+		// A pause raises no attention, so it leaves no park row, and it
+		// is not a turn anyone typed: without a row of its own the thread
+		// on every face and device would say nothing happened, and a
+		// period of autopilot it ended would stay open until the next
+		// thing anyone did on the card. The pause row is both the receipt
+		// naming who stopped it and the period's end (threadfold).
+		m.logPause(f.ID, by)
 		// Pausing stops the *agent*; it does not answer the *question* a
 		// pending attention item is asking, and clearing the item
 		// unconditionally used to conflate the two. A card parked at a

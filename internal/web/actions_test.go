@@ -63,13 +63,13 @@ func TestActionPausesARun(t *testing.T) {
 	}
 	var by []string
 	for _, ev := range evs {
-		var p state.AutopilotPayload
-		if ev.Kind == state.EventAutopilot && json.Unmarshal([]byte(ev.Payload), &p) == nil && p.Event == state.AutopilotHandedBack {
+		var p state.PausePayload
+		if ev.Kind == state.EventPause && json.Unmarshal([]byte(ev.Payload), &p) == nil {
 			by = append(by, p.By)
 		}
 	}
 	if len(by) == 0 || by[len(by)-1] != state.PersonActor("Simon") {
-		t.Errorf("the pause's handback is recorded by %q, want Simon", by)
+		t.Errorf("the pause is recorded by %q, want Simon", by)
 	}
 }
 

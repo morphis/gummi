@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,8 @@ func TestThreadfoldItemsSayWhatTheThreadSays(t *testing.T) {
 	add(impl, state.EventGate, state.GatePayload{From: "implement", To: "verify", Actor: "autopilot"})
 	add(impl, state.EventPark, state.ParkPayload{Reason: state.ParkReasonNeedsYou, Detail: "verify failed"})
 	add(impl, state.EventPark, state.ParkPayload{Reason: state.ParkReasonGaveUp})
+	add(impl, state.EventRebase, state.RebasePayload{Onto: "main", By: state.PersonActor("Simon")})
+	add(impl, state.EventPause, state.PausePayload{By: state.ActorUser})
 
 	s := m0Styles()
 	answered := threadfold.AnsweredDecisions(evs)
@@ -51,7 +54,10 @@ func TestThreadfoldItemsSayWhatTheThreadSays(t *testing.T) {
 		switch it.T {
 		case threadfold.ItemReceipt:
 			receipts++
-			i := bySeq[it.Seq]
+			// a receipt's key is its own event's; its Seq can be later (a
+			// superseded decision is dated to what superseded it)
+			seq, _ := strconv.ParseInt(strings.TrimPrefix(it.Key, "ev:"), 10, 64)
+			i := bySeq[seq]
 			ev := evs[i]
 			tui := stretchDecisionLine(s, ev, threadfold.InStretch(stretches, i), 200)
 			if tui == "" {
@@ -75,9 +81,9 @@ func TestThreadfoldItemsSayWhatTheThreadSays(t *testing.T) {
 		}
 	}
 	// the superseded budget, the gate, the ask, the mode change, autopilot's
-	// crossing and the second park (the first closes the stretch and is said
-	// by its rule)
-	if receipts != 6 {
-		t.Errorf("got %d receipts, want 6", receipts)
+	// crossing, the second park (the first closes the stretch and is said
+	// by its rule), the rebase and the pause
+	if receipts != 8 {
+		t.Errorf("got %d receipts, want 8", receipts)
 	}
 }

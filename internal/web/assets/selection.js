@@ -109,9 +109,13 @@ export async function loadThread (id = state.sel, full = false) {
 }
 
 // upsert merges newer items into the list by key: an item that grew
-// replaces its old self in place; a new one is appended.
+// replaces its old self in place; a new one is appended. An item that
+// supersedes others (a receipt answering a decision drawn while it
+// waited) takes them out: the server stops sending an item that is gone,
+// and this is the only word of it a paged read carries.
 export function upsert (items, fresh) {
-  const out = items.slice()
+  const gone = new Set(fresh.flatMap(it => it.supersedes || []))
+  const out = gone.size ? items.filter(it => !gone.has(it.key)) : items.slice()
   const at = new Map(out.map((it, i) => [it.key, i]))
   for (const it of fresh) {
     if (at.has(it.key)) out[at.get(it.key)] = it

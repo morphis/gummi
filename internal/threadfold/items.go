@@ -102,6 +102,13 @@ type Item struct {
 	Checks   []Check      `json:"checks,omitempty"`
 	Decision *Decision    `json:"decision,omitempty"`
 	Stretch  *StretchMark `json:"stretch,omitempty"`
+
+	// Supersedes names the keys of items this one takes the place of: the
+	// decisions a gate or ask receipt answered. A client that drew such a
+	// decision while it waited drops it when the receipt arrives — the
+	// fold no longer carries it, and paging by Seq never tells a client
+	// about an item that is gone.
+	Supersedes []string `json:"supersedes,omitempty"`
 }
 
 // ToolCall is one call in an ItemTools group.
@@ -121,7 +128,8 @@ type ToolCall struct {
 
 // Receipt is an ItemReceipt's record.
 type Receipt struct {
-	// Kind is the event the receipt records: "gate", "ask", "park",
+	// Kind is the event the receipt records: "gate", "ask", "park" (a
+	// card come to rest, or a run a person stopped by hand), "rebase",
 	// "autopilot" (a stored mode change) or "decision" (superseded).
 	Kind string `json:"kind"`
 	OK   bool   `json:"ok"`
@@ -214,6 +222,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 		}
 	}
 	current := currentDecision(events, answered)
+	answers := DecisionAnswers(events)
 	echoes := askEchoes(events, segOf)
 
 	var out []Item
@@ -238,7 +247,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			emit(closeItem(st, ev.Seq, events))
 			// A park or a handback is said by the rule itself; printing the
 			// event too would say one ending twice (the TUI's live block).
-			closedHere = ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot
+			closedHere = ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot || ev.Kind == state.EventPause
 		}
 		if ev.Kind == state.EventConsult {
 			// a consult turn goes where it was asked, whatever stage the
@@ -321,9 +330,20 @@ func Items(events []state.CardEvent, opt Options) []Item {
 					Decision: &Decision{ID: p.ID, Kind: p.Kind, Question: Sanitize(p.Question)}})
 				continue
 			}
-			emit(receiptItem(ev, Receipt{Kind: "decision", Text: SupersededLine(p)}))
+			// Dated forward to whatever superseded it: while it was the
+			// stop the card waited on, it went out as a decision, and a
+			// client paging by Seq has to be handed it again to learn it
+			// is one no longer.
+			it := receiptItem(ev, Receipt{Kind: "decision", Text: SupersededLine(p)})
+			if end := supersededBy(events, i); end >= 0 {
+				it.Seq = max(it.Seq, events[end].Seq)
+			}
+			emit(it)
 		default:
 			if it, ok := eventItem(ev, InStretch(stretches, i)); ok {
+				for _, k := range answers[i] {
+					it.Supersedes = append(it.Supersedes, "ev:"+seqKey(events[k].Seq))
+				}
 				emit(it)
 			}
 		}
@@ -353,7 +373,8 @@ func Since(items []Item, after int64) []Item {
 }
 
 // eventItem is the item for an event whose whole fact is one receipt or
-// note: gates, asks, parks, mode changes, goal log entries, and whatever
+// note: gates, asks, parks, pauses, rebases, mode changes, goal log
+// entries, and whatever
 // kind this fold has no sentence for. false for an event the thread
 // deliberately draws nothing for (an autopilot boundary, drawn as a
 // stretch rule instead).
@@ -381,6 +402,18 @@ func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
 		var p state.ParkPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		return receiptItem(ev, Receipt{Kind: "park", Text: ParkLine(p)}), true
+	case state.EventPause:
+		var p state.PausePayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return receiptItem(ev, Receipt{Kind: "park", Text: PauseLine(p), By: Sanitize(PersonWord(p.By))}), true
+	case state.EventRebase:
+		var p state.RebasePayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		by := PersonWord(p.By)
+		if p.Agent {
+			by = "the agent"
+		}
+		return receiptItem(ev, Receipt{Kind: "rebase", OK: true, Text: RebaseLine(p), By: Sanitize(by)}), true
 	case state.EventAutopilot:
 		var p state.AutopilotPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
@@ -486,12 +519,13 @@ func roundCredits(c float64) float64 { return float64(int(c*10+0.5)) / 10 }
 
 // currentDecision is the index of the decision_open the card is still
 // waiting on, as far as its log can say: the newest one nothing has
-// answered, with no later decision raised and no later stage entered.
-// Any other unanswered decision was superseded. -1 when there is none.
+// answered, with no later decision raised, no later stage entered and no
+// later gate crossed. Any other unanswered decision was superseded. -1
+// when there is none.
 func currentDecision(events []state.CardEvent, answered map[string]bool) int {
 	for i := len(events) - 1; i >= 0; i-- {
 		switch events[i].Kind {
-		case state.EventStageEnter:
+		case state.EventStageEnter, state.EventGate:
 			return -1
 		case state.EventDecisionOpen:
 			var p state.DecisionPayload
@@ -500,6 +534,19 @@ func currentDecision(events []state.CardEvent, answered map[string]bool) int {
 				return -1
 			}
 			return i
+		}
+	}
+	return -1
+}
+
+// supersededBy is the index of the first event after the decision_open
+// at i that ended its standing as the card's current stop (currentDecision's
+// rule: a later decision, stage or crossing), or -1 when none has.
+func supersededBy(events []state.CardEvent, i int) int {
+	for k := i + 1; k < len(events); k++ {
+		switch events[k].Kind {
+		case state.EventDecisionOpen, state.EventStageEnter, state.EventGate:
+			return k
 		}
 	}
 	return -1

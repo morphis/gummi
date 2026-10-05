@@ -232,6 +232,7 @@ func webItem(it threadfold.Item, cmds map[string]string) webapi.Item {
 		Key: it.Key, Seq: it.Seq, T: webapi.ItemType(it.T), Time: it.At, Stage: string(it.Stage),
 		Role: it.Role, Model: it.Model, Flavor: it.Flavor, Author: it.Author, Text: it.Text, Via: it.Via,
 		Exited: it.Exited, Verdict: it.Verdict, Credits: it.Credits, Outcome: it.Outcome, By: it.By,
+		Supersedes: it.Supersedes,
 	}
 	for _, a := range it.Attachments {
 		out.Attachments = append(out.Attachments, webapi.AttachmentRef{ID: a.ID, Name: a.Name, MediaType: a.MediaType, Size: a.Size})

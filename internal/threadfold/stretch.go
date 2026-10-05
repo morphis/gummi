@@ -24,9 +24,9 @@ package threadfold
 //
 // Closing is derived, and deliberately generous about what counts,
 // because a period that never closes swallows the rest of the card's
-// life. Four things end one, whichever lands first: an explicit handback
-// row, a park, a gate a person crossed, or a turn a person typed. All
-// four are rows: a period ends when the log says it ended, and the one
+// life. Five things end one, whichever lands first: an explicit handback
+// row, a park, a pause a person made, a gate a person crossed, or a turn
+// a person typed. All five are rows: a period ends when the log says it ended, and the one
 // judgement made outside the log (CloseOrphaned) exists only for the
 // stop that by definition wrote nothing down.
 
@@ -183,6 +183,13 @@ func Stretches(events []state.CardEvent) []Stretch {
 			case state.AutopilotHandedBack:
 				closeWith(i, ev.At, StretchTakenBack, p.Reason)
 			}
+
+		case state.EventPause:
+			// a person stopping the run by hand takes the card back, and
+			// the rule says who did (its own receipt is not drawn twice)
+			var p state.PausePayload
+			_ = json.Unmarshal([]byte(ev.Payload), &p)
+			closeWith(i, ev.At, StretchTakenBack, PauseLine(p))
 
 		case state.EventPark:
 			if cur < 0 {

@@ -74,6 +74,17 @@ const (
 	// record and its answer correlate, and neither is ever pruned (§10.18:
 	// nothing may block a card without leaving a row).
 	EventDecisionOpen = "decision_open"
+	// EventPause marks a person stopping a card's run by hand — "stop
+	// here", park — from the board or any device paired to it. The stage
+	// is unchanged and nothing runs until someone resumes it. It is not an
+	// EventPark: a park is a card coming to rest on its own and waiting
+	// for someone, which a goal reads as a stop to act on, while this is
+	// someone already acting.
+	EventPause = "pause"
+	// EventRebase marks a card's branch rebased onto its base: by a
+	// person's rebase that applied cleanly, or by the agent a conflicted
+	// one was handed to once its resolution was judged good.
+	EventRebase = "rebase"
 )
 
 // Event outcomes: the closed vocabulary stored in card_events.status.
@@ -241,6 +252,22 @@ type AutopilotPayload struct {
 	Reason string `json:"reason,omitempty"`
 	Mode   string `json:"mode,omitempty"`
 	By     string `json:"by,omitempty"`
+}
+
+// PausePayload is the JSON shape of an EventPause event's Payload: who
+// stopped the run (ActorUser, or a named person, PersonActor).
+type PausePayload struct {
+	By string `json:"by,omitempty"`
+}
+
+// RebasePayload is the JSON shape of an EventRebase event's Payload: the
+// branch the card was rebased onto and who asked for it. Agent is set
+// when the rebase was finished by the agent a conflicted rebase was
+// handed to, rather than applying cleanly at the press.
+type RebasePayload struct {
+	Onto  string `json:"onto,omitempty"`
+	By    string `json:"by,omitempty"`
+	Agent bool   `json:"agent,omitempty"`
 }
 
 // ToolPayload is the JSON shape of an EventTool and EventToolResult
@@ -730,6 +757,29 @@ func (s *Store) AppendPark(ctx context.Context, id domain.FeatureID, stage domai
 		Feature: id, Stage: stage, Kind: EventPark, At: at,
 		Payload: string(payload), Dedupe: dedupe,
 	})
+}
+
+// AppendPause records a person stopping a card's run by hand. by is the
+// actor (ActorUser or PersonActor). Best-effort by contract, like
+// AppendPark: the pause has already happened, so callers discard the
+// error.
+func (s *Store) AppendPause(ctx context.Context, id domain.FeatureID, stage domain.Stage, by string, at time.Time) error {
+	payload, err := json.Marshal(PausePayload{By: by})
+	if err != nil {
+		return fmt.Errorf("encoding pause event for %s: %w", id, err)
+	}
+	return s.AppendEvent(ctx, CardEvent{Feature: id, Stage: stage, Kind: EventPause, At: at, Payload: string(payload)})
+}
+
+// AppendRebase records a card's branch rebased onto its base.
+// Best-effort by contract, like AppendPark: the branch has already moved,
+// so callers discard the error.
+func (s *Store) AppendRebase(ctx context.Context, id domain.FeatureID, stage domain.Stage, p RebasePayload, at time.Time) error {
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("encoding rebase event for %s: %w", id, err)
+	}
+	return s.AppendEvent(ctx, CardEvent{Feature: id, Stage: stage, Kind: EventRebase, At: at, Payload: string(payload)})
 }
 
 // AppendAutopilot records the autonomous loop taking a card over (event

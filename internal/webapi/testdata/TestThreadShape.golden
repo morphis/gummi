@@ -37,8 +37,24 @@
       "t": "receipt",
       "time": "2026-09-27T09:12:00Z",
       "receipt": {
+        "kind": "gate",
         "ok": true,
         "text": "design approved",
+        "by": "Simon"
+      },
+      "supersedes": [
+        "ev:5"
+      ]
+    },
+    {
+      "key": "rcpt-7",
+      "seq": 7,
+      "t": "receipt",
+      "time": "2026-09-27T09:12:00Z",
+      "receipt": {
+        "kind": "park",
+        "ok": false,
+        "text": "Simon parked it",
         "by": "Simon"
       }
     },
