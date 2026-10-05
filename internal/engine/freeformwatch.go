@@ -11,10 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/childproc"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -182,15 +182,8 @@ func (ff *FreeformSession) startWatch(command string, minutes int) (string, erro
 	cmd.Stdout, cmd.Stderr = pw, pw
 	// its own process group, killed whole: a pipeline's children would
 	// otherwise outlive sh and hold the pipe open (verify.go has the same)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
-	if err := cmd.Start(); err != nil {
+	childproc.Group(cmd)
+	if err := childproc.Start(cmd); err != nil {
 		cancel()
 		return "", err
 	}

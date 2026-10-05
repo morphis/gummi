@@ -14,8 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/morphis/gummi/internal/childproc"
 )
 
 // Pi is an Agent backed by the pi coding agent's RPC mode:
@@ -208,14 +209,7 @@ func (p *Pi) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 	// keep the stdout pipe open, stalling teardown. Same shape as every
 	// process-backed adapter: own process group, kill the whole group,
 	// WaitDelay force-closes the pipes if a grandchild lingers.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
+	childproc.Group(cmd)
 	// capWriter, not strings.Builder: a misconfigured pi can spew
 	// arbitrarily to stderr before it gives up.
 	stderr := &capWriter{max: 8 << 10}
@@ -230,7 +224,7 @@ func (p *Pi) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		cancel()
 		return nil, fmt.Errorf("pi stdout: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := childproc.Start(cmd); err != nil {
 		cancel()
 		return nil, fmt.Errorf("starting pi: %w", err)
 	}

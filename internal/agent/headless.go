@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/morphis/gummi/internal/childproc"
 )
 
 // Headless is an Agent backed by an external agent process that speaks a
@@ -153,14 +155,7 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	// that would otherwise orphan and keep the stdout pipe open, stalling
 	// read()'s EOF and burning Close's readDone timeout. WaitDelay force-
 	// closes the pipes if a grandchild lingers so Wait can't hang.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
+	childproc.Group(cmd)
 	stderr := &capWriter{max: 8 << 10}
 	cmd.Stderr = stderr
 	stdin, err := cmd.StdinPipe()
@@ -173,7 +168,7 @@ func (h *Headless) NewSession(_ context.Context, opts SessionOpts) (Session, err
 		cancel()
 		return nil, fmt.Errorf("headless stdout: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := childproc.Start(cmd); err != nil {
 		cancel()
 		return nil, fmt.Errorf("starting headless agent %q: %w", h.argv[0], err)
 	}

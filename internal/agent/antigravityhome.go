@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morphis/gummi/internal/childproc"
 	"github.com/morphis/gummi/internal/rmtree"
 )
 
@@ -360,7 +361,8 @@ func antigravityModelCatalog(ctx context.Context, bin string) ([]string, error) 
 	// unfiltered environ would leave the operator's HOME in the child's
 	// environment (first match wins), pointing agy at the real config.
 	cmd.Env = envWithAntigravityHome(os.Environ(), home.dir)
-	out, err := cmd.Output()
+	childproc.Group(cmd)
+	out, err := childproc.Output(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("antigravity catalog: %w", err)
 	}

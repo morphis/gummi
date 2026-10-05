@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/morphis/gummi/internal/childproc"
 )
 
 // opencodeServeReady bounds how long a caller waits for `opencode serve`
@@ -348,10 +350,15 @@ var serveOpencode = func(ctx context.Context, bin string, port int, dir string, 
 	cmd := exec.CommandContext(procCtx, bin, "serve", "--hostname", "127.0.0.1", "--port", strconv.Itoa(port)) //nolint:gosec // bin is operator config, args are gummi-built
 	cmd.Dir = dir
 	cmd.Env = env
-	setOpencodeGroup(cmd)
+	// Its own process group, killed whole: opencode spawns tool
+	// subprocesses (bash, editors) and MCP children that would otherwise be
+	// orphaned. Started through childproc so that a gummi killed outright
+	// takes the server with it — it reads no stdin, so nothing else would
+	// tell it gummi is gone.
+	childproc.Group(cmd)
 	stderr := &capWriter{max: 16 << 10}
 	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
+	if err := childproc.Start(cmd); err != nil {
 		cancel()
 		return nil, err
 	}

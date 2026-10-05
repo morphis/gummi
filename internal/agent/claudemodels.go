@@ -9,8 +9,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/morphis/gummi/internal/childproc"
 )
 
 // claudeModelsTimeout bounds one catalog probe: the transient child a probe
@@ -60,13 +61,7 @@ func claudeModelCatalog(ctx context.Context, bin string) ([]string, error) {
 	// parent Claude Code session markers so the child is top-level, the same
 	// hygiene every claude child gets (auth is preserved).
 	cmd.Env = scrubClaudeSessionEnv(os.Environ())
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
+	childproc.Group(cmd)
 	cmd.WaitDelay = 3 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -76,7 +71,7 @@ func claudeModelCatalog(ctx context.Context, bin string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude catalog: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := childproc.Start(cmd); err != nil {
 		return nil, fmt.Errorf("claude catalog: starting claude: %w", err)
 	}
 	defer func() {

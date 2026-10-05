@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -1200,7 +1199,7 @@ type ocBusEvent struct {
 		PartID string `json:"partID"`
 		Field  string `json:"field"`
 		Delta  string `json:"delta"`
-		Error      *struct {
+		Error  *struct {
 			Name string `json:"name"`
 			Data struct {
 				Message string `json:"message"`
@@ -1385,20 +1384,4 @@ func (s *opencodeSession) partDelta(id, full string) string {
 		return full[prev:]
 	}
 	return full // part reset unexpectedly
-}
-
-// setOpencodeGroup runs a spawned opencode process in its own process
-// group and, on cancel, kills the whole group — opencode spawns tool
-// subprocesses (bash, editors) and MCP children that would otherwise be
-// orphaned. WaitDelay force-closes the pipes if a child lingers, so Wait
-// can't hang.
-func setOpencodeGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
 }

@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
-	"time"
+
+	"github.com/morphis/gummi/internal/childproc"
 )
 
 // codexExecPath locates gummi's own executable when materializing the
@@ -211,14 +211,7 @@ func (s *codexSession) SendTurn(_ context.Context, turn Turn) error {
 	// The socket path reaches the __mcp child via the TOML env table on the
 	// -c override, not the parent process env; codex auth still resolves via
 	// the inherited environment above.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
+	childproc.Group(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -229,7 +222,7 @@ func (s *codexSession) SendTurn(_ context.Context, turn Turn) error {
 	// chatty a failing child gets.
 	stderr := &capWriter{max: 16 << 10}
 	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
+	if err := childproc.Start(cmd); err != nil {
 		cancel()
 		s.mu.Unlock()
 		return fmt.Errorf("starting codex exec: %w", err)

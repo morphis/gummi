@@ -16,9 +16,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/morphis/gummi/internal/childproc"
 	"github.com/morphis/gummi/internal/rmtree"
 )
 
@@ -245,14 +245,7 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 	// Run the child in its own process group and, on cancel/close, kill
 	// the whole group: agy spawns tool subprocesses that would otherwise
 	// orphan and keep the stdout pipe open, stalling read()'s EOF.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-		return nil
-	}
-	cmd.WaitDelay = 2 * time.Second
+	childproc.Group(cmd)
 	stderr := &capWriter{max: 8 << 10}
 	cmd.Stderr = stderr
 	// A failure from here to Start leaves no child, but the home already
@@ -271,7 +264,7 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 		s.teardown()
 		return nil, fmt.Errorf("antigravity stdout: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := childproc.Start(cmd); err != nil {
 		cancel()
 		s.teardown()
 		return nil, fmt.Errorf("starting agy: %w", err)
