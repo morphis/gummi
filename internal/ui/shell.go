@@ -2194,7 +2194,16 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.landConflicts = map[domain.FeatureID][]string{}
 		}
 		m.landConflicts[msg.id] = msg.files
-		return m.update(msg.notice)
+		model, cmd := m.update(msg.notice)
+		// on autopilot nobody is there to press r, so the rebase the
+		// decision leads with starts now (autopilotAnswers: every stop
+		// but budget is the mode's to answer)
+		if m.store != nil {
+			if f, err := m.store.GetFeature(context.Background(), msg.id); err == nil && autopilotAnswers(f.GateApproval, decisionVerify) {
+				return model, tea.Batch(cmd, m.rebaseFeature(f))
+			}
+		}
+		return model, cmd
 
 	case sentBackMsg:
 		// the send-back landed; on autopilot the stage it reached runs
@@ -2258,6 +2267,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.prepareMerge(msg.f, true)
 
 	case rebaseConflictMsg:
+		// an autopilot card answers its own hand-off: the agent rebase
+		// starts without the confirm an attended card waits on
+		if autopilotAnswers(msg.f.GateApproval, decisionVerify) {
+			return m, m.agentRebase(msg)
+		}
 		m.offerAgentRebase(msg)
 		return m, nil
 
