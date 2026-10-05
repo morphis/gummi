@@ -58,7 +58,8 @@ test('a session starts from its first message, on the model picked beside Send',
   await expect(page.locator('#pane')).not.toBeEmpty();
   await page.getByTestId('rail-new-session').click();
   await expect(page.getByTestId('draft-hero')).toBeVisible();
-  await expect(page.locator('#pane')).toBeEmpty();
+  await expect(page.getByTestId('panel-draft')).toBeVisible();
+  await expect(page.getByTestId('stats')).toHaveCount(0);
 });
 
 // The model picker's search input takes focus as it opens, which on a phone

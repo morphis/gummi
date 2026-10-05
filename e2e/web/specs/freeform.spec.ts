@@ -214,7 +214,10 @@ test('commit and land say what each commits, and an empty commit message is refu
 
   if (info.project.name === 'phone') return;
   await page.goto(`${server.url}/#${id}`);
-  await page.getByTestId('session-commit').click();
+  // beside the open panel the head's Commit… may fold into the card's
+  // menu, where it is always an entry
+  await page.getByTestId('card-actions').click();
+  await page.getByTestId('action-commit').click();
   await page.getByTestId('action-confirm').click();
   await expect(page.getByTestId('action-error')).toContainText('needs a message');
 });
