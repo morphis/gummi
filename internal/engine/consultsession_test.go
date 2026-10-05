@@ -554,3 +554,45 @@ func TestSessionTakesImagesChecksTheConsultPath(t *testing.T) {
 		t.Errorf("SessionTakesImages = true on a goal card, want false: a goal's notes ride its lead's next turn")
 	}
 }
+
+// TestConsultReadOnlyWhereTheBackendCanEnforceIt: a consult runs in the
+// main checkout with no worktree of its own, so on a backend that can
+// strip its write tools (ReadOnlyEnforce) it is spawned ReadOnly — and
+// still gets its card tools over MCP. On a backend that cannot, it still
+// opens, read-write, and carries the notice the faces show beside it
+// instead of a read-only claim it cannot keep.
+func TestConsultReadOnlyWhereTheBackendCanEnforceIt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		caps     agent.Capabilities
+		readOnly bool
+		notice   string
+	}{
+		{"enforcing", agent.Capabilities{MCPTools: true, ReadOnlyEnforce: true}, true, ""},
+		{"not enforcing", agent.Capabilities{MCPTools: true}, false, ConsultNotice("fake")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []agent.SessionOpts
+			ag := &agent.Fake{Caps: tc.caps, OnNewSession: func(o agent.SessionOpts) { got = append(got, o) }}
+			e := newEngine(t, ag)
+			f := feature(1, "dark mode", domain.StageImplement)
+
+			c, err := e.OpenConsult(context.Background(), f)
+			if err != nil {
+				t.Fatalf("OpenConsult: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("backend spawned %d sessions, want 1", len(got))
+			}
+			if got[0].ReadOnly != tc.readOnly {
+				t.Errorf("ReadOnly = %v, want %v", got[0].ReadOnly, tc.readOnly)
+			}
+			if got[0].MCPSockPath == "" || got[0].FeatureID != string(f.ID) {
+				t.Errorf("consult lost its card tools: MCPSockPath=%q FeatureID=%q", got[0].MCPSockPath, got[0].FeatureID)
+			}
+			if c.Notice() != tc.notice {
+				t.Errorf("Notice() = %q, want %q", c.Notice(), tc.notice)
+			}
+		})
+	}
+}

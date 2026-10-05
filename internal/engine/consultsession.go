@@ -18,12 +18,27 @@ import (
 // consultPermission is the fixed tool-call policy every consult session
 // spawns with — allow-all (PermissionGuarded is refused outright by some
 // adapters and hangs the others, since nothing in this codebase ever
-// emits agent.EventPermission to answer it). The gummi tools a consult
-// session is given are read-only regardless. The backend's own shell and
-// file tools are not: they are confined only where the backend can
-// enforce it, and on one without ReadOnlyEnforce (copilot, codex,
-// antigravity) "allow" here lets them run in the main checkout.
+// emits agent.EventPermission to answer it). Allow-all is not what keeps
+// a consult from writing: the gummi tools it is given are read-only, and
+// the backend's own shell and file tools are stripped by ReadOnly where
+// the backend can enforce that (ConsultConfined). Where it cannot, "allow"
+// lets them run in the main checkout, and the session says so
+// (ConsultNotice) rather than claim a read-only it does not have.
 const consultPermission = agent.PermissionAllowAll
+
+// ConsultConfined reports whether a consult session on a backend with
+// caps runs read-only: only a backend that can structurally strip its
+// own write tools (ReadOnlyEnforce) is asked to. A consult on any other
+// backend still opens — refusing it would take consult away from the
+// default backend — but it is not confined, and ConsultNotice says so.
+// The one rule both the engine and doctor read.
+func ConsultConfined(caps agent.Capabilities) bool { return caps.ReadOnlyEnforce }
+
+// ConsultNotice is the line an unconfined consult on backend carries, for
+// the faces to show where the consult opens and for doctor to report.
+func ConsultNotice(backend string) string {
+	return "consult is not confined on " + backend + ": it can write to the checkout"
+}
 
 // consultIdleTimeout is the golden value (Implementation notes): long
 // enough to survive reading a diff or spec before a follow-up question,
@@ -63,6 +78,10 @@ type ConsultSession struct {
 
 	mu   sync.Mutex
 	sess *Session
+	// notice is ConsultNotice for the backend the current sess runs on,
+	// or empty when that backend confines it (ConsultConfined). Set with
+	// sess on every spawn, under mu.
+	notice string
 
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
@@ -184,6 +203,11 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		return errors.New("no agent configured for the consult role")
 	}
 	caps := ag.Capabilities()
+	readOnly := ConsultConfined(caps)
+	var notice string
+	if !readOnly {
+		notice = ConsultNotice(ag.Name())
+	}
 
 	// The same two-way wiring a card's stage session gets, scoped to this
 	// conversation: native client tools (Tools, answered via
@@ -231,6 +255,10 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		Role:           agent.RoleConsult,
 		Model:          c.rc.Model,
 		Permission:     consultPermission,
+		// Read-only wherever the backend can enforce it: a consult runs in
+		// the main checkout with no worktree and no cage of its own, so
+		// only the stripped tool surface keeps it from writing there.
+		ReadOnly:       readOnly,
 		Tools:          tools,
 		OutputTokenMax: c.rc.OutputTokenMax,
 		FeatureID:      string(c.id),
@@ -262,6 +290,7 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 
 	c.mu.Lock()
 	c.sess = sess
+	c.notice = notice
 	c.mu.Unlock()
 
 	e.wg.Add(1)
@@ -406,6 +435,15 @@ func (c *ConsultSession) Snapshot() Snapshot {
 		return Snapshot{}
 	}
 	return sess.Snapshot()
+}
+
+// Notice is the line this consult's faces show beside it: ConsultNotice
+// when the backend it runs on cannot confine it, empty when it runs
+// read-only.
+func (c *ConsultSession) Notice() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.notice
 }
 
 // Close permanently ends the card's consult session: stops its current
