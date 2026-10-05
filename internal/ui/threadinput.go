@@ -600,7 +600,21 @@ func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *thr
 	//
 	// A verb still keeps the parser: "/land" on a freeform card means what
 	// it says, and the branches below own it.
+	//
+	// The one prose line that is not a turn is the answer to a question the
+	// session's agent is asking. The agent is blocked inside its ask_user
+	// call, so a second turn is refused; the words belong to the question,
+	// as they do on a stage card. The only read added here is decide(). On the
+	// TUI that is visibleDecision, which re-renders the thread to confirm the
+	// question is drawn before it is answered, so every prose submit on a
+	// freeform card pays that redraw. It stops at "is there an ask" — the
+	// decision reader's model pass is never reached from this branch.
 	if r.F.IsFreeform() && (prose || m.isProjectCommand(r, text)) {
+		if prose {
+			if d := decide(); d != nil && d.ask != nil {
+				return lineClass{route: lineAskAnswer, d: d, consumer: -1}
+			}
+		}
 		return lineClass{route: lineFreeformTurn, consumer: -1}
 	}
 	d := decide()

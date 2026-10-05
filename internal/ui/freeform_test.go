@@ -20,6 +20,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -792,5 +793,63 @@ func TestASessionContinuedAsASpecDoesNotLand(t *testing.T) {
 	in.continuedAs, r.F.ContinuedAs = "", ""
 	if !slices.ContainsFunc(closedActions(in), func(a nextAction) bool { return a.id == "merge" }) {
 		t.Error("a plain hand-off no longer offers landing it after all")
+	}
+}
+
+// TestAQuestionOnAFreeformCardTakesTheLine: a freeform card's agent that
+// asks ask_user is blocked inside that call, so a second turn is refused.
+// Prose typed while the question is open is its answer, armed or not; with
+// no question open the same prose is still a turn, and a project command
+// stays a turn whether or not a question is open.
+func TestAQuestionOnAFreeformCardTakesTheLine(t *testing.T) {
+	m, eng := agentWorkspace(t, &agent.Fake{})
+	r := freeformRow(7, "tidy the parser", true)
+	if err := m.store.CreateFeature(context.Background(), &r.F); err != nil {
+		t.Fatal(err)
+	}
+	ff, err := eng.OpenFreeform(context.Background(), r.F)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(ff.WorkDir(), ".claude", "commands", "review.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("---\ndescription: review the diff\n---\nReview $ARGUMENTS."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.rows = append(m.rows, r)
+	m.sel = len(m.rows) - 1
+
+	ask := &engine.Ask{Question: "Which way?", Options: []engine.AskOption{{Label: "Left"}, {Label: "Right"}}}
+	asking := func() *threadDecision {
+		return &threadDecision{card: r.F.ID, kind: decisionAsk, question: ask.Question, ask: ask}
+	}
+	none := func() *threadDecision { return nil }
+	route := func(text string, decide func() *threadDecision) lineRoute {
+		return m.classifyThreadLine(r, text, decide).route
+	}
+
+	if got := route("Go up the middle", asking); got != lineAskAnswer {
+		t.Errorf("prose at an open question routes %v, want the answer", got)
+	}
+	if got := route("Go up the middle", none); got != lineFreeformTurn {
+		t.Errorf("prose with no question open routes %v, want a turn", got)
+	}
+	if got := route("/review the parser", asking); got != lineFreeformTurn {
+		t.Errorf("a project command at an open question routes %v, want a turn", got)
+	}
+	m.threadFreeForm = true
+	if got := route("Go up the middle", asking); got != lineAskAnswer {
+		t.Errorf("armed prose at an open question routes %v, want the answer", got)
+	}
+	if got := route("/review the parser", asking); got != lineFreeformTurn {
+		t.Errorf("an armed project command at an open question routes %v, want a turn", got)
+	}
+	m.threadFreeForm = false
+
+	c := m.classifyThreadLine(r, "Go up the middle", asking)
+	if got, says := m.webLineRoute(r, "Go up the middle", c); got != webapi.RouteAnswer || says != "answers the question above, in your words" {
+		t.Errorf("the web composer says %v %q, want an answer in the person's words", got, says)
 	}
 }

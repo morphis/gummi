@@ -221,3 +221,37 @@ test('commit and land say what each commits, and an empty commit message is refu
   await page.getByTestId('action-confirm').click();
   await expect(page.getByTestId('action-error')).toContainText('needs a message');
 });
+
+// A question the session's agent asks is answered in the person's own words
+// from the composer, as on a stage card. The reported failure was a 409: the
+// words went out as a turn to an agent that was blocked inside its ask.
+test('a question asked in a session is answered in your words', async ({ pairedPage: page, server, api }, info) => {
+  test.setTimeout(90_000);
+  const made = await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the persistence' });
+  const id = String(made.json?.id);
+  await page.goto(`${server.url}/#${id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
+  await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
+
+  const input = page.getByTestId('composer-input');
+  await input.click();
+  await input.fill('[ask] pick a way');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask', { timeout: 30_000 });
+
+  const posts: string[] = [];
+  page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/cards\/[^/]+\/(send|answer)$/.test(r.url())) posts.push(r.url().split('/').pop()!) });
+  if (info.project.name === 'phone') await page.getByTestId('tab-thread').click();
+  await page.getByTestId('decision-option-chat').click();
+  await expect(page.getByTestId('decision-needs')).toContainText('Type your answer');
+  await input.fill('Go up the middle');
+  await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
+  await page.keyboard.press('Enter');
+  // the words answered the question: one answer, no turn, and the agent
+  // echoes them back as the tool's result
+  await expect(input).toHaveValue('');
+  await expect.poll(() => posts).toEqual(['answer']);
+  await expect(page.getByTestId('thread')).toContainText('You said: Go up the middle', { timeout: 30_000 });
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
+});

@@ -3482,6 +3482,10 @@ What it has that neither of them does is that it **writes**:
 It has **no artifact**: `Kind.ArtifactNoun` and `ArtifactPath` are empty
 for it, nothing is seeded at mint, and the thread is the record.
 
+While the session's agent waits on a question (`ask_user`), a prose line in
+the composer is that question's answer (§6.3), not a turn: the agent is
+blocked inside the call, so a turn could only be refused.
+
 ### 19.3a The conversation is the context, so the conversation is persisted
 
 The conversation is also what a freeform card's landing message is drafted

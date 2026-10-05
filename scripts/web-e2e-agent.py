@@ -79,8 +79,9 @@ covers.
 Any other message sent to a live session (a steer, a consult, a freeform
 turn) gets a short acknowledgement quoting it; a freeform card's turn
 also edits a file so its diff is non-empty. A freeform turn
-containing [watch] starts a Monitor watch it leaves open, and one
-containing [tasks-done] completes its checklist. A message opening
+containing [watch] starts a Monitor watch it leaves open, one containing
+[ask] asks the person which way with ask_user and says back what they
+answered, and one containing [tasks-done] completes its checklist. A message opening
 with [slow] is streamed slowly, so a test can interrupt it.
 
 Environment:
@@ -658,6 +659,16 @@ def freeform_turn(turn, text):
         # the card reads as watching once the turn is over
         turn.tool("Monitor", "tail -f build.log", "ff-watch")
         turn.say("Watching the build; I will tell you when it breaks.")
+        return
+    if "[ask]" in text:
+        # blocks inside ask_user until the person answers, then echoes the
+        # answer as the tool result's words, so a test can read them back
+        answer = call_tool("ask_user", args={
+            "question": "Which way?",
+            "options": [{"label": "Left"}, {"label": "Right"}],
+            "changes_section": "Chosen approach",
+        })
+        turn.say("You said: %s" % answer.strip().splitlines()[0])
         return
     wd = turn.ctx["workdir"]
     notes = os.path.join(wd, "NOTES.md")

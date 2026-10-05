@@ -281,3 +281,49 @@ func openPush(ua *ecdh.PrivateKey, auth, body []byte) ([]byte, error) {
 	}
 	return pt[:i], nil
 }
+
+// A freeform card's agent that asks is blocked inside its ask_user call, so
+// a line sent as a turn is refused. The composer routes prose at the open
+// question to its answer, and "Chat about this" with the person's words
+// closes it as the answer.
+func TestAFreeformQuestionIsAnsweredInYourWords(t *testing.T) {
+	h := newCardBoard(t, askingAgent())
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: "Poke at the persistence", Description: "ask me where"})
+	c = h.waitCard(c.ID, "the question", func(c webapi.Card) bool {
+		return c.Decision != nil && c.Decision.Kind == webapi.DecisionAsk
+	})
+	if got := h.composer(c.ID, "Go up the middle"); got.Route != webapi.RouteAnswer {
+		t.Fatalf("prose at the open question routes %q, want an answer", got.Route)
+	}
+	st, raw := h.answer(c.ID, webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "chat", Words: "Go up the middle", Against: c.Decision.Against.Token})
+	if st != http.StatusOK {
+		t.Fatalf("answer: %d %s", st, raw)
+	}
+	h.waitCard(c.ID, "the question to close", func(c webapi.Card) bool {
+		return c.Decision == nil || c.Decision.Kind != webapi.DecisionAsk
+	})
+	if p := lastAsk(t, h, c.ID); p.Answer != "Go up the middle" || !state.IsPersonActor(p.By) {
+		t.Errorf("answer recorded as %+v", p)
+	}
+}
+
+// Enter on a prose line at a freeform card's open question is the answer
+// without "Chat about this" clicked first: the send path is the one the TUI's
+// enter takes, so the words resolve the ask rather than being refused as a
+// second turn.
+func TestAFreeformQuestionTakesASendAsItsAnswer(t *testing.T) {
+	h := newCardBoard(t, askingAgent())
+	c := h.create(webapi.CreateCardRequest{Kind: "freeform", Title: "Poke at the persistence", Description: "ask me where"})
+	c = h.waitCard(c.ID, "the question", func(c webapi.Card) bool {
+		return c.Decision != nil && c.Decision.Kind == webapi.DecisionAsk
+	})
+	if st, raw := h.send(c.ID, "Go up the middle"); st != http.StatusOK {
+		t.Fatalf("send at the open question: %d %s", st, raw)
+	}
+	h.waitCard(c.ID, "the question to close", func(c webapi.Card) bool {
+		return c.Decision == nil || c.Decision.Kind != webapi.DecisionAsk
+	})
+	if p := lastAsk(t, h, c.ID); p.Answer != "Go up the middle" || !state.IsPersonActor(p.By) {
+		t.Errorf("answer recorded as %+v", p)
+	}
+}
