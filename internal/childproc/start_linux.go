@@ -3,10 +3,15 @@
 package childproc
 
 import (
+	"bytes"
+	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // setDeathSignal asks the kernel to SIGKILL the child when its parent dies.
@@ -52,4 +57,44 @@ func spawner() {
 	for r := range spawns {
 		r.done <- r.cmd.Start()
 	}
+}
+
+// awaitGroupGone waits, at most timeout, until no live process is left in
+// process group pgid. A zombie — the group leader itself, until Wait reaps
+// it — no longer runs, so it does not count.
+func awaitGroupGone(pgid int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for groupAlive(pgid) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// groupAlive reports whether any process in group pgid still runs, read
+// from /proc/<pid>/stat: "pid (comm) state ppid pgrp ...", where comm may
+// itself hold spaces and parentheses, so the fields are taken after its
+// last ")".
+func groupAlive(pgid int) bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+	want := strconv.Itoa(pgid)
+	for _, e := range entries {
+		if e.Name()[0] < '0' || e.Name()[0] > '9' {
+			continue
+		}
+		stat, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		i := bytes.LastIndexByte(stat, ')')
+		if i < 0 {
+			continue
+		}
+		f := strings.Fields(string(stat[i+1:]))
+		if len(f) >= 3 && f[2] == want && f[0] != "Z" && f[0] != "X" {
+			return true
+		}
+	}
+	return false
 }

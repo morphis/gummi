@@ -5,6 +5,7 @@ package childproc
 import (
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 // setDeathSignal does nothing: only Linux has a parent-death signal. A
@@ -15,3 +16,8 @@ func setDeathSignal(*syscall.SysProcAttr) {}
 // Start is cmd.Start where there is no parent-death signal to tie to a
 // thread.
 func Start(cmd *exec.Cmd) error { return cmd.Start() }
+
+// awaitGroupGone does nothing where there is no /proc to read the group's
+// members from: the group kill has been sent, and Wait's WaitDelay bounds
+// what is left.
+func awaitGroupGone(int, time.Duration) {}

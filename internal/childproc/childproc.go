@@ -46,6 +46,11 @@ func Group(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			// the kill is delivered asynchronously: wait for the group to
+			// be gone, so that once Wait returns nothing of it still runs
+			// — and nothing still writes into a directory the caller is
+			// about to remove
+			awaitGroupGone(cmd.Process.Pid, waitDelay)
 		}
 		return nil
 	}

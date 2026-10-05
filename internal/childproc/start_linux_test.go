@@ -138,3 +138,48 @@ func TestGroupKeepsTheCallersAttributes(t *testing.T) {
 		t.Error("Group set no group kill")
 	}
 }
+
+// TestCancelWaitsForTheGroupToGo: cancelling a grouped command kills its
+// whole group, and Wait does not return while any member still runs — a
+// grandchild included — so nothing of it outlives the call that ended it.
+func TestCancelWaitsForTheGroupToGo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// the shell leaves a grandchild behind it in the group, as an agent's
+	// tool command or a snap launcher's real binary would
+	cmd := exec.CommandContext(ctx, "sh", "-c", "sleep 300 & sleep 300")
+	Group(cmd)
+	if err := Start(cmd); err != nil {
+		t.Fatal(err)
+	}
+	pgid := cmd.Process.Pid
+	deadline := time.Now().Add(5 * time.Second)
+	for groupMembers(pgid) < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if n := groupMembers(pgid); n < 2 {
+		t.Fatalf("the group never had its grandchild (%d members)", n)
+	}
+	cancel()
+	_ = cmd.Wait()
+	if groupAlive(pgid) {
+		t.Errorf("a member of group %d still runs after Wait returned", pgid)
+	}
+}
+
+// groupMembers counts the live processes in group pgid.
+func groupMembers(pgid int) int {
+	entries, _ := os.ReadDir("/proc")
+	n := 0
+	for _, e := range entries {
+		raw, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		s := string(raw)
+		f := strings.Fields(s[strings.LastIndexByte(s, ')')+1:])
+		if len(f) >= 3 && f[2] == strconv.Itoa(pgid) && f[0] != "Z" {
+			n++
+		}
+	}
+	return n
+}
