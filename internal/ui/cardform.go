@@ -895,7 +895,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		Start: start, FromPicker: d.fromPicker,
 		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 		MainCheckout: d.mainCheckout,
-		Skills: append([]string(nil), d.skills...),
+		Skills:       append([]string(nil), d.skills...),
 	}
 	if d.ct.Kind == domain.KindBug {
 		res.Severity = bugSeverityChoices[d.sev]

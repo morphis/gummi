@@ -562,7 +562,7 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			Discussion:     res.Discussion,
 			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
 			MainCheckout: res.MainCheckout,
-			Skills: res.Skills,
+			Skills:       res.Skills,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
