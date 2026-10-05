@@ -107,11 +107,14 @@ test('the card head’s stack badge opens its stack', async ({ pairedPage: page,
   const made = await api('POST', '/api/stacks', { card: ids.wave, cards: [ids.shrug] });
   expect(made.status).toBe(200);
   const stack = made.json.id as string;
-  // boot names the auto-picked card in the address bar; from there the
-  // reload reopens it (the hash persists)
-  await expect(page).toHaveURL(/#/);
+  // boot names the auto-picked card in the address bar, and the reload
+  // reopens it — except on a phone, whose cards list keeps its own pick
+  // out of the address, so the reload is the cards list again
+  const phone = info.project.name === 'phone';
+  if (phone) await expect(page).not.toHaveURL(/#/);
+  else await expect(page).toHaveURL(/#/);
   await page.reload();
-  if (info.project.name === 'phone') await page.getByTestId('card-back').click();
+  if (phone) await expect(page.getByTestId('app')).toHaveAttribute('data-view', 'cards');
   await page.getByTestId(`rail-row-${ids.shrug}`).click();
   const badge = page.getByTestId('card-stack');
   await expect(badge).toHaveText('stack 2 of 2');

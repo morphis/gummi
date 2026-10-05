@@ -194,8 +194,12 @@ test.describe('a design gate', () => {
         return p.getByTestId('decision-option-advance');
       };
       const [a, b] = [await go(page), await go(page2)];
-      // both give it at once
-      await Promise.all([a.click(), b.click()]);
+      // both give it at once, each to the decision it read: the buttons are
+      // taken before either press, since the winner's answer redraws the
+      // other page's decision and a press that waited for its button to
+      // settle would find a different answer set there, or none
+      const [ha, hb] = [await a.elementHandle(), await b.elementHandle()];
+      await Promise.all([ha!.evaluate((el: HTMLElement) => el.click()), hb!.evaluate((el: HTMLElement) => el.click())]);
       // the loser is told who answered — and that note stays: the card
       // moving under its press a moment later does not replace it with a
       // vaguer "moved while you were choosing"
