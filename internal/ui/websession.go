@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -89,22 +90,30 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 // a backend and possibly runs its CLI, so it happens off the loop; the
 // loop builds the same rows inline from SessionSuggestions alone. Every
 // endpoint that ships the picker's catalog runs this one merge, so no
-// face can see a catalog the others do not.
+// face can see a catalog the others do not. The agents are asked at
+// once: each may run its own CLI, and a first read uncached would
+// otherwise wait for every one of them in turn.
 func mergeSessionCatalog(ctx context.Context, eng *engine.Engine, sm *webapi.SessionModels) {
 	if eng == nil {
 		return
 	}
+	var wg sync.WaitGroup
 	for i := range sm.Agents {
 		a := &sm.Agents[i]
 		if !a.Installed {
 			continue
 		}
-		a.Models = eng.SessionModelChoices(ctx, a.Name)
-		if a.Models == nil {
-			// the contract spells an empty list as [], not null
-			a.Models = []string{}
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.Models = eng.SessionModelChoices(ctx, a.Name)
+			if a.Models == nil {
+				// the contract spells an empty list as [], not null
+				a.Models = []string{}
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 // defaultProfile is the profile a card minted with none resolves under:
