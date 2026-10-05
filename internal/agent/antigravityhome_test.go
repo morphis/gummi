@@ -734,6 +734,9 @@ func TestAntigravityCatalogParsesIdsAndLeavesTheRealHomeUntouched(t *testing.T) 
 	before := antigravityHomeSnapshot(t, realHome)
 
 	dir := t.TempDir()
+	// the probe's temp home is made under TMPDIR: a private one, so a home
+	// another process left in the shared one is not counted as this probe's
+	t.Setenv("TMPDIR", t.TempDir())
 	log := filepath.Join(dir, "calls")
 	bin := filepath.Join(dir, "agy")
 	// a real-enough `agy models`: tab-separated id/description lines,
