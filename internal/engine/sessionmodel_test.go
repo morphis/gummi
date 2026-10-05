@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -267,12 +268,42 @@ func TestAClosedSessionKeepsItsConversation(t *testing.T) {
 // asks, so a test can watch the catalog cache work.
 type catalogAgent struct {
 	*agent.Fake
-	calls int
+	mu     sync.Mutex
+	calls  int
+	models []string
+	// gate, when set, holds every ask open until it is closed
+	gate chan struct{}
 }
 
-func (c *catalogAgent) ModelCatalog(context.Context) ([]string, error) {
+func (c *catalogAgent) ModelCatalog(ctx context.Context) ([]string, error) {
+	c.mu.Lock()
 	c.calls++
-	return c.Models, nil
+	gate := c.gate
+	c.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.models, nil
+}
+
+// answer sets what the agent says it offers from its next ask on.
+func (c *catalogAgent) answer(models ...string) {
+	c.mu.Lock()
+	c.models = models
+	c.mu.Unlock()
+}
+
+// asked is how many times the agent has been asked so far.
+func (c *catalogAgent) asked() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
 }
 
 // TestSessionModelChoicesMergesTheCatalogWithTheProfiles: a picker offers
@@ -343,14 +374,15 @@ func TestClaudeModelsAreListedInThePicker(t *testing.T) {
 
 // TestSessionModelCatalogCachesTheAsk: the probe is a subprocess or RPC
 // read a picker repeats, so the answer — including a backend's refusal to
-// answer — is trusted for its TTL, and a caller whose context was already
-// gone writes nothing (its cancelled ask must not suppress the next
-// caller's good one).
+// answer — is trusted for its TTL. Past it the old answer is still served
+// at once while one refresh asks again in the background, and a caller
+// that stops waiting gets nothing but does not stop the probe: its answer
+// is cached for the next caller.
 func TestSessionModelCatalogCachesTheAsk(t *testing.T) {
 	e, _, _, _ := sessionModelEngine(t)
 	ag := &catalogAgent{Fake: agent.NewFake("ok")}
 	ag.Caps = agent.Capabilities{ReadOnlyEnforce: true}
-	ag.Models = []string{"fake-large"}
+	ag.answer("fake-large")
 	e.cfg.Agents["fake"] = ag
 	e.cfg.Agents[""] = ag
 	ctx := context.Background()
@@ -358,49 +390,146 @@ func TestSessionModelCatalogCachesTheAsk(t *testing.T) {
 	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok {
 		t.Fatal("the staged agent's catalog was not offered")
 	}
-	if ag.calls != 1 {
-		t.Fatalf("the agent was asked %d times for the first read", ag.calls)
+	if n := ag.asked(); n != 1 {
+		t.Fatalf("the agent was asked %d times for the first read", n)
 	}
-	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok || ag.calls != 1 {
-		t.Errorf("a repeat ask re-probed (ok=%v, calls=%d): the cache is not doing its job", ok, ag.calls)
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok || ag.asked() != 1 {
+		t.Errorf("a repeat ask re-probed (ok=%v, calls=%d): the cache is not doing its job", ok, ag.asked())
 	}
 
-	// past the TTL the agent is asked again — and a backend that cannot
-	// enumerate stays cached negative for the same span
-	ag.Models = nil
+	// past the TTL the old answer comes back at once, and the agent is
+	// asked again behind it — once, however many callers read meanwhile
+	ag.answer()
 	oldNow := catalogNow
 	catalogNow = func() time.Time { return oldNow().Add(6 * time.Minute) }
 	t.Cleanup(func() { catalogNow = oldNow })
-	if _, ok := e.SessionModelCatalog(ctx, "fake"); ok || ag.calls != 2 {
-		t.Errorf("past the TTL the ask was not re-paid (ok=%v, calls=%d)", ok, ag.calls)
+	if ids, ok := e.SessionModelCatalog(ctx, "fake"); !ok || !slices.Equal(ids, []string{"fake-large"}) {
+		t.Errorf("past the TTL the read waited or lost the old answer (ids=%v, ok=%v)", ids, ok)
 	}
-	if _, ok := e.SessionModelCatalog(ctx, "fake"); ok || ag.calls != 2 {
-		t.Errorf("a refusal was not cached (ok=%v, calls=%d)", ok, ag.calls)
+	waitCatalog(t, e, "fake", false)
+	if n := ag.asked(); n != 2 {
+		t.Errorf("the refresh asked %d times in all, want 2", n)
+	}
+	// the refusal it brought back is cached negative for its own span
+	if _, ok := e.SessionModelCatalog(ctx, "fake"); ok || ag.asked() != 2 {
+		t.Errorf("a refusal was not cached (ok=%v, calls=%d)", ok, ag.asked())
 	}
 
-	// a cancelled caller gets its answer and writes nothing: the clock
-	// moves past the cached refusal, the probe runs against a context
-	// that is already gone, and the cache still holds the old refusal —
-	// so the next good ask probes again rather than finding the
-	// cancelled call's non-answer.
-	ag.Models = []string{"fake-large"}
-	catalogNow = func() time.Time { return oldNow().Add(12 * time.Minute) }
-	cancelled, cancel := context.WithCancel(ctx)
-	cancel()
-	// the fake answers regardless of the gone context, so the ask reads
-	// as ok — what the test pins is that it did not write the cache
-	if _, ok := e.SessionModelCatalog(cancelled, "fake"); !ok || ag.calls != 3 {
-		t.Errorf("a cancelled ask (ok=%v, calls=%d) did not reach the probe", ok, ag.calls)
+	// a caller that stops waiting goes without, and the probe it started
+	// still answers the next caller from the cache
+	other := &catalogAgent{Fake: agent.NewFake("ok"), gate: make(chan struct{})}
+	other.answer("other-large")
+	e.cfg.Agents["other"] = other
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if ids, ok := e.SessionModelCatalog(short, "other"); ok || ids != nil {
+		t.Errorf("a caller past its deadline was handed a catalog (ids=%v, ok=%v)", ids, ok)
+	}
+	close(other.gate)
+	waitCatalog(t, e, "other", true)
+	if _, ok := e.SessionModelCatalog(ctx, "other"); !ok || other.asked() != 1 {
+		t.Errorf("the probe a short caller started was not kept (ok=%v, calls=%d)", ok, other.asked())
+	}
+}
+
+// TestWarmModelCatalogsAsksAheadOfTheFirstRead: warming asks each backend
+// in the background, so the first read finds the answer already cached.
+func TestWarmModelCatalogsAsksAheadOfTheFirstRead(t *testing.T) {
+	e, _, _, _ := sessionModelEngine(t)
+	ag := &catalogAgent{Fake: agent.NewFake("ok")}
+	ag.answer("fake-large")
+	e.cfg.Agents["fake"] = ag
+	e.WarmModelCatalogs("fake")
+	waitCatalog(t, e, "fake", true)
+	if _, ok := e.SessionModelCatalog(context.Background(), "fake"); !ok || ag.asked() != 1 {
+		t.Errorf("the first read after warming re-probed (ok=%v, calls=%d)", ok, ag.asked())
+	}
+}
+
+// TestSessionModelCatalogJoinsTheAskUnderWay: a read that finds a probe
+// already running (the board's warm-up) waits for it instead of starting
+// the backend's CLI a second time.
+func TestSessionModelCatalogJoinsTheAskUnderWay(t *testing.T) {
+	e, _, _, _ := sessionModelEngine(t)
+	ag := &catalogAgent{Fake: agent.NewFake("ok"), gate: make(chan struct{})}
+	ag.answer("fake-large")
+	e.cfg.Agents["fake"] = ag
+	e.WarmModelCatalogs("fake")
+	deadline := time.Now().Add(5 * time.Second)
+	for ag.asked() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	got := make(chan bool, 1)
+	go func() {
+		_, ok := e.SessionModelCatalog(context.Background(), "fake")
+		got <- ok
+	}()
+	// the read is waiting on the warm-up's probe, not asking itself
+	time.Sleep(50 * time.Millisecond)
+	if n := ag.asked(); n != 1 {
+		t.Fatalf("a read during the warm-up asked again: %d asks", n)
+	}
+	close(ag.gate)
+	if ok := <-got; !ok {
+		t.Error("the read that joined the warm-up got no catalog")
+	}
+	if n := ag.asked(); n != 1 {
+		t.Errorf("the agent was asked %d times, want once", n)
+	}
+}
+
+// TestClosingStopsTheCatalogProbes: a probe runs on the engine's own
+// context, not its caller's, so closing the board cancels one still under
+// way and waits for it — its process group goes with the board instead of
+// outliving it.
+func TestClosingStopsTheCatalogProbes(t *testing.T) {
+	e, _, _, _ := sessionModelEngine(t)
+	ag := &catalogAgent{Fake: agent.NewFake("ok"), gate: make(chan struct{})}
+	ag.answer("fake-large")
+	e.cfg.Agents["fake"] = ag
+	e.WarmModelCatalogs("fake")
+	deadline := time.Now().Add(5 * time.Second)
+	for ag.asked() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		e.stopCatalogProbes()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("closing waited on a probe it never cancelled")
 	}
 	e.catalogMu.Lock()
-	stamp, had := e.modelCatalog["fake"]
+	running := len(e.catalogAsk)
 	e.catalogMu.Unlock()
-	if had && stamp.at.Equal(catalogNow()) {
-		t.Errorf("the cancelled ask wrote the cache: %v", stamp.at)
+	if running != 0 {
+		t.Errorf("%d probes still under way after closing", running)
 	}
-	if _, ok := e.SessionModelCatalog(ctx, "fake"); !ok || ag.calls != 4 {
-		t.Errorf("the cancelled ask suppressed the next good one (ok=%v, calls=%d)", ok, ag.calls)
+	// and nothing new is asked once the board is closing
+	if _, ok := e.SessionModelCatalog(context.Background(), "other"); ok {
+		t.Error("a closed board started a probe")
 	}
+}
+
+// waitCatalog waits until backend's cached answer says ok and no refresh
+// of it is still running.
+func waitCatalog(t *testing.T, e *Engine, backend string, ok bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		e.catalogMu.Lock()
+		c, had := e.modelCatalog[backend]
+		busy := e.catalogAsk[backend] != nil
+		e.catalogMu.Unlock()
+		if had && c.ok == ok && !busy {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%s's catalog never settled at ok=%v", backend, ok)
 }
 
 // TestSessionModelCatalogAsksOpencodeWithoutStartingIt: opencode answers

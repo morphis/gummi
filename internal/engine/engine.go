@@ -314,9 +314,18 @@ type Engine struct {
 	// reads a picker may repeat, so a fresh answer is trusted for
 	// modelCatalogTTL. Negative answers (a backend that cannot say, or a
 	// probe that failed) are cached for the same span, so a picker does
-	// not re-pay a slow failure on every open.
-	catalogMu    sync.Mutex
-	modelCatalog map[string]modelCatalogEntry
+	// not re-pay a slow failure on every open. An answer past its span is
+	// still served while a refresh asks again in the background; catalogAsk
+	// holds the one probe per backend under way, closed when it ends.
+	// Probes run on catalogCtx, not on the read that started them, and
+	// Close cancels it and waits (catalogWG): a probe's process group is
+	// killed with the board rather than left to outlive it.
+	catalogMu     sync.Mutex
+	modelCatalog  map[string]modelCatalogEntry
+	catalogAsk    map[string]chan struct{}
+	catalogCtx    context.Context
+	catalogCancel context.CancelFunc
+	catalogWG     sync.WaitGroup
 	// freeformMu serializes OpenFreeform end to end — consultMu's job, for
 	// the identical check-then-act reason. Held by OpenFreeform and SwitchSessionModel, and
 	// never while e.mu is also held.
@@ -2582,6 +2591,7 @@ func (e *Engine) Close() error {
 	e.freeform = map[domain.FeatureID]*FreeformSession{}
 	e.mu.Unlock()
 
+	e.stopCatalogProbes()
 	for _, s := range sessions {
 		s.stop()
 	}

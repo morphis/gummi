@@ -358,10 +358,18 @@ type modelCatalogEntry struct {
 // starts a backend just to be asked, so a board that runs no copilot
 // reports no copilot catalog and the picker falls back to the profile
 // ids and typed entry. ok is false when this backend cannot say, or its
-// probe failed or timed out. Answers are cached for modelCatalogTTL,
-// negative ones included; a caller whose context was already gone does
-// not write the cache, so its cancelled ask cannot suppress the next
-// caller's good one.
+// probe failed or timed out — or ctx ended before the answer came. Answers
+// are cached for modelCatalogTTL, negative ones included. Past that span
+// the old answer is still what a caller gets — a probe can take seconds (a
+// CLI started to list what it offers), and a form should not wait on it
+// every few minutes — while a refresh asks again in the background.
+//
+// The probe itself never runs on a caller's context: one probe per backend
+// runs at a time, bounded by its own timeout, and every caller with nothing
+// cached waits on it for as long as its own context allows. A caller that
+// stops waiting neither kills the probe nor keeps its answer out of the
+// cache, so a reader with a short deadline (the new-card form) costs the
+// next reader nothing.
 func (e *Engine) SessionModelCatalog(ctx context.Context, backend string) ([]string, bool) {
 	if backend == "" {
 		a := e.agentFor("")
@@ -374,22 +382,87 @@ func (e *Engine) SessionModelCatalog(ctx context.Context, backend string) ([]str
 	if e.modelCatalog == nil {
 		e.modelCatalog = map[string]modelCatalogEntry{}
 	}
-	if c, ok := e.modelCatalog[backend]; ok && catalogNow().Sub(c.at) < modelCatalogTTL {
-		e.catalogMu.Unlock()
-		return c.ids, c.ok
+	c, cached := e.modelCatalog[backend]
+	asking := e.catalogAsk[backend]
+	if asking == nil && (!cached || catalogNow().Sub(c.at) >= modelCatalogTTL) {
+		if base := e.catalogBaseLocked(); base.Err() == nil {
+			asking = e.startCatalogAskLocked(backend)
+			e.catalogWG.Add(1)
+			go e.askModelCatalog(base, backend, asking)
+		}
 	}
 	e.catalogMu.Unlock()
+	if asking == nil && !cached {
+		// the board is closing: nothing is asked any more
+		return nil, false
+	}
+	if cached {
+		return c.ids, c.ok
+	}
+	select {
+	case <-asking:
+	case <-ctx.Done():
+		return nil, false
+	}
+	e.catalogMu.Lock()
+	c = e.modelCatalog[backend]
+	e.catalogMu.Unlock()
+	return c.ids, c.ok
+}
 
+// catalogBaseLocked is the context every probe runs on: the engine's own,
+// cancelled by Close. Callers hold catalogMu.
+func (e *Engine) catalogBaseLocked() context.Context {
+	if e.catalogCtx == nil {
+		e.catalogCtx, e.catalogCancel = context.WithCancel(context.Background())
+	}
+	return e.catalogCtx
+}
+
+// stopCatalogProbes cancels every probe under way and waits for each to be
+// gone, its process group with it, so none outlives the board.
+func (e *Engine) stopCatalogProbes() {
+	e.catalogMu.Lock()
+	e.catalogBaseLocked()
+	e.catalogCancel()
+	e.catalogMu.Unlock()
+	e.catalogWG.Wait()
+}
+
+// startCatalogAskLocked marks a probe of backend as running and returns
+// what ends it; callers hold catalogMu.
+func (e *Engine) startCatalogAskLocked(backend string) chan struct{} {
+	if e.catalogAsk == nil {
+		e.catalogAsk = map[string]chan struct{}{}
+	}
+	done := make(chan struct{})
+	e.catalogAsk[backend] = done
+	return done
+}
+
+// askModelCatalog probes backend, caches the answer and lets go of the
+// running probe done marks. It runs off any caller's request, on the
+// engine's catalog context.
+func (e *Engine) askModelCatalog(ctx context.Context, backend string, done chan struct{}) {
+	defer e.catalogWG.Done()
 	pctx, cancel := context.WithTimeout(ctx, modelCatalogTimeout)
 	defer cancel()
 	ids, ok := e.probeModelCatalog(pctx, backend)
 
 	e.catalogMu.Lock()
-	if ctx.Err() == nil {
-		e.modelCatalog[backend] = modelCatalogEntry{ids: ids, ok: ok, at: catalogNow()}
-	}
+	e.modelCatalog[backend] = modelCatalogEntry{ids: ids, ok: ok, at: catalogNow()}
+	delete(e.catalogAsk, backend)
+	close(done)
 	e.catalogMu.Unlock()
-	return ids, ok
+}
+
+// WarmModelCatalogs asks each backend for its catalog in the background,
+// so the first picker or form that needs one finds it already cached —
+// or joins the ask already under way — instead of starting it then.
+func (e *Engine) WarmModelCatalogs(backends ...string) {
+	for _, b := range backends {
+		go e.SessionModelCatalog(context.Background(), b)
+	}
 }
 
 // probeModelCatalog asks backend itself, un-cached: the adapter it holds

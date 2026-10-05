@@ -183,6 +183,9 @@ func runWeb(fl cliFlags, args []string) error {
 	h.shell.AddAttentionNotifier(pusher)
 
 	bridge := ui.NewHeadless(h.shell)
+	// the new-card form and a session's picker list each agent's models,
+	// which can take a CLI start apiece: ask now, not on the first open
+	bridge.WarmModelCatalogs()
 	srv, err := web.New(web.Options{
 		Push:       pusher,
 		Board:      bridge,

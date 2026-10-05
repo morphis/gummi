@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -84,6 +85,11 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 	return out
 }
 
+// catalogWait is how long a read of the picker's catalog waits for an
+// agent's own list of models before it goes without it: long enough for an
+// adapter that answers from memory, short of a CLI started cold.
+const catalogWait = 1500 * time.Millisecond
+
 // mergeSessionCatalog replaces each installed agent's inline suggestions
 // with the merged view (SessionModelChoices) — the agent's own catalog
 // where it can say one, plus the workspace's profile ids. The merge asks
@@ -92,11 +98,16 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 // endpoint that ships the picker's catalog runs this one merge, so no
 // face can see a catalog the others do not. The agents are asked at
 // once: each may run its own CLI, and a first read uncached would
-// otherwise wait for every one of them in turn.
+// otherwise wait for every one of them in turn. Nor does a read wait long
+// for any of them: an agent whose catalog is not in by catalogWait shows
+// the workspace's profile ids for now, while its probe goes on and caches
+// what it finds for the next read.
 func mergeSessionCatalog(ctx context.Context, eng *engine.Engine, sm *webapi.SessionModels) {
 	if eng == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, catalogWait)
+	defer cancel()
 	var wg sync.WaitGroup
 	for i := range sm.Agents {
 		a := &sm.Agents[i]
@@ -296,4 +307,21 @@ func specBrief(f domain.Feature, title, head, brief string) string {
 		b.WriteString("\n\n" + strings.TrimSpace(brief))
 	}
 	return b.String()
+}
+
+// WarmModelCatalogs starts asking every agent a session could run on here
+// for its own catalog, so the first form or picker that needs one finds it
+// cached rather than waiting while each agent's CLI starts to answer.
+func (b *Bridge) WarmModelCatalogs() {
+	eng := b.shell.engine
+	if eng == nil {
+		return
+	}
+	var names []string
+	for _, name := range engine.SessionBackends {
+		if eng.HasAgent(name) || agentInstalled(name) {
+			names = append(names, name)
+		}
+	}
+	eng.WarmModelCatalogs(names...)
 }
