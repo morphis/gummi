@@ -83,8 +83,8 @@ func (a *Antigravity) Name() string { return "antigravity" }
 // id back via SessionOpts.ResumeID (`--conversation <id>`). UsageEvents
 // is the result line's cumulative usage, emitted as per-turn deltas.
 // MCPTools reports that gummi's tools are reached through the card home's
-// mcp_config.json, not through SessionOpts.Tools. WriteCage is cwd-only (agy, like codex, runs with no
-// structural path cage). Everything not listed is false: no Interrupt,
+// mcp_config.json, not through SessionOpts.Tools. WriteCage is cwd-only
+// (agy, like codex, runs with no structural path cage). Everything not listed is false: no Interrupt,
 // no ClientTools, no ReadOnlyEnforce, no Images, no NativeWatch, no
 // Compact.
 func (a *Antigravity) Capabilities() Capabilities {

@@ -75,7 +75,7 @@ type Config struct {
 	// Load can refuse it by name. Left unparsed, a config that forwarded
 	// skills would load and its skills would silently stop arriving.
 	// Sessions now see what each backend discovers itself (DESIGN §4.1a).
-	RemovedSkills map[string]any `yaml:"skills"`
+	RemovedSkills any `yaml:"skills"`
 	// Checks supplies workspace-wide default verification checks. When
 	// Checks.Default is non-empty, check discovery bypasses the scribe and
 	// writes the configured list straight into the artifact.

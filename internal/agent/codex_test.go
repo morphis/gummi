@@ -220,6 +220,12 @@ func TestCodexFirstAndResumeInvocation(t *testing.T) {
 	if !strings.Contains(got, "resume thr_test -") {
 		t.Fatalf("resume argv missing:\n%s", got)
 	}
+	// The operator's own config.toml loads, as every backend's user scope
+	// does (DESIGN §4.1a). Asserted outright: the prefix check above also
+	// matches an argv that still carries the flag.
+	if strings.Contains(got, "--ignore-user-config") {
+		t.Fatalf("user config still ignored:\n%s", got)
+	}
 	if strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("bypass flag still emitted:\n%s", got)
 	}

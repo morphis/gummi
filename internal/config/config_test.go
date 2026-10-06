@@ -233,15 +233,29 @@ func TestLoadRejectsRelativeInstructionPath(t *testing.T) {
 }
 
 // The retired skills.forward key is refused by name, never ignored: a
-// config that forwarded skills must not load and quietly lose them.
+// config that forwarded skills must not load and quietly lose them —
+// whatever shape the value has. A bare `skills:` carries nothing to lose.
 func TestLoadRejectsRemovedSkillsKey(t *testing.T) {
+	for _, body := range []string{
+		"skills:\n  forward:\n    - container-env\n",
+		"skills: [container-env]\n",
+		"skills: {}\n",
+	} {
+		p := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(p)
+		if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "skills: this key was removed") {
+			t.Errorf("%q: expected removed-key error naming file, got: %v", body, err)
+		}
+	}
 	p := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(p, []byte("skills:\n  forward:\n    - container-env\n"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("skills:\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(p)
-	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "skills: this key was removed") {
-		t.Fatalf("expected removed-key error naming file, got: %v", err)
+	if _, err := Load(p); err != nil {
+		t.Errorf("an empty skills key should load: %v", err)
 	}
 }
 

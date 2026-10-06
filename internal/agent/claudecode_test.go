@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1088,10 +1087,30 @@ func TestClaudeCodeSkipsRosterWhenUnsupported(t *testing.T) {
 // Skill is a built-in, so --tools gates it, and every skill the CLI
 // discovers — the operator's own, a plugin's, the repository's — is
 // invoked through it. Leaving it off the roster left those skills listed
-// and unreachable, so it is always there (DESIGN §4.1a).
+// and unreachable, so every session kind names it (DESIGN §4.1a). It is
+// shown, never allowlisted — the CLI auto-approves it — and gummi adds no
+// skills of its own, so no --plugin-dir is ever passed.
 func TestClaudeRosterAlwaysOffersSkill(t *testing.T) {
-	if !slices.Contains(claudeStageTools(), "Skill") {
-		t.Error("Skill is not on the roster")
+	for name, opts := range map[string]SessionOpts{
+		"stage":     {Model: "test-model", WorkDir: t.TempDir()},
+		"watch":     {Model: "test-model", Watch: true},
+		"read-only": {ReadOnly: true},
+	} {
+		msg := claudeRosterArgv(t, claudeRosterHelpScript, opts)
+		rosterAt, allowAt := strings.Index(msg, "--tools "), strings.Index(msg, "--allowedTools ")
+		if rosterAt < 0 || allowAt < rosterAt {
+			t.Fatalf("%s: roster/allowlist not found in order: %s", name, msg)
+		}
+		if !strings.Contains(msg[rosterAt:allowAt], "Skill") {
+			t.Errorf("%s: Skill missing from the roster: %s", name, msg)
+		}
+		allow, _, _ := strings.Cut(msg[allowAt:], " cwd=")
+		if strings.Contains(allow, "Skill") {
+			t.Errorf("%s: Skill allowlisted; it must only be shown: %s", name, msg)
+		}
+		if strings.Contains(msg, "--plugin-dir") {
+			t.Errorf("%s: gummi passed a plugin of its own: %s", name, msg)
+		}
 	}
 }
 

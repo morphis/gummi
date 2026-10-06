@@ -134,21 +134,25 @@ func claudeReadOnlyTools() []string {
 //
 // Skill is always on it. Skill IS a built-in, so --tools gates it, and
 // every skill the CLI discovers — the repository's, the operator's own
-// under ~/.claude, an installed plugin's — is invoked through it. A roster without Skill does
-// not narrow what the session is shown; it leaves the skills listed and
-// unreachable. gummi does not curate what a backend discovers (DESIGN
-// §4.1a), so this list cannot be where that curation quietly happens.
+// under ~/.claude, an installed plugin's — is invoked through it. A roster
+// without Skill does not narrow what the session is shown; it leaves the
+// skills listed and unreachable. gummi does not curate what a backend
+// discovers (DESIGN §4.1a), so this list cannot be where that curation
+// quietly happens.
 func claudeStageTools() []string {
 	return []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit", "Skill"}
 }
 
 // claudeReadOnlyRoster is the same idea for a ReadOnly research session:
-// the navigation tools its allowlist permits, and nothing that writes.
+// the navigation tools its allowlist permits, nothing that writes, and
+// Skill for the reason above. Skill is auto-approved rather than
+// allowlisted, and a skill's instructions run through the same narrowed
+// tools as the session's own — it cannot write where the session cannot.
 // Bash is named bare here because --tools takes tool names, not the
 // argument-scoped forms --allowedTools takes; the allowlist above is what
 // narrows Bash to read-only git, and it still does.
 func claudeReadOnlyRoster() []string {
-	return []string{"Read", "Grep", "Glob", "Bash"}
+	return []string{"Read", "Grep", "Glob", "Bash", "Skill"}
 }
 
 // claudeHelpTimeout bounds the one-off --help probe below.

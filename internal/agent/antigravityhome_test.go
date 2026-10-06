@@ -640,6 +640,13 @@ func TestAntigravitySkillReconcile(t *testing.T) {
 	elsewhere := t.TempDir()
 	writeSkill(t, elsewhere, "move", "old")
 	writeSkill(t, root, "shadowed", "agy-own") // a real dir
+	// Real entries a non-empty-dir Remove failure would not protect.
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for name, target := range map[string]string{
 		"move":      filepath.Join(elsewhere, "move"),
 		"forwarded": filepath.Join(elsewhere, "forwarded"),
@@ -654,7 +661,7 @@ func TestAntigravitySkillReconcile(t *testing.T) {
 	if err := materializeAntigravitySkills(home, dirs); err != nil {
 		t.Fatal(err)
 	}
-	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"keep", "move", "shadowed"}) {
+	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"empty", "keep", "move", "notes.txt", "shadowed"}) {
 		t.Errorf("skill root = %v", got)
 	}
 	if got, _ := os.Readlink(filepath.Join(root, "move")); got != dirs[1] {
@@ -668,7 +675,7 @@ func TestAntigravitySkillReconcile(t *testing.T) {
 	if err := materializeAntigravitySkills(home, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"shadowed"}) {
+	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"empty", "notes.txt", "shadowed"}) {
 		t.Errorf("after reconciling to nothing: %v", got)
 	}
 }
