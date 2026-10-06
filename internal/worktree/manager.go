@@ -1542,9 +1542,11 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 
 // Land lands the feature branch on the main checkout carrying message,
 // returning the new commit's sha. A squash method makes one commit of the
-// branch's whole change; a merge method makes a --no-ff merge commit whose
-// first parent is main's tip and second is the branch tip, so every commit
-// the branch holds reaches main intact. Both refuse when main has tracked
+// branch's whole change and requires a non-empty message; a merge method
+// makes a --no-ff merge commit whose first parent is main's tip and second
+// is the branch tip, so every commit the branch holds reaches main intact.
+// A merge with an empty message commits with git's own merge message, so
+// the message is optional for a merge only. Both refuse when main has tracked
 // changes (they would be swept into the commit), when the branch has no
 // commits of its own, or when its content is already in main, and both
 // are refused for a card that may not take the method. A conflicted
@@ -1567,7 +1569,10 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 	if !f.Offers(method) {
 		return "", fmt.Errorf("refusing to land %s as %s: this card lands by %s only", f.ID, method, domain.LandSquash)
 	}
-	if strings.TrimSpace(message) == "" {
+	// A squash makes its own commit, so it needs the message it carries. A
+	// merge with no message commits with git's prepared merge message
+	// (MERGE_MSG), which is what git merge --no-ff would have written.
+	if method == domain.LandSquash && strings.TrimSpace(message) == "" {
 		return "", fmt.Errorf("refusing %s of %s: empty commit message", verb, f.ID)
 	}
 	m.mainMu.Lock()
@@ -1657,7 +1662,11 @@ func (m *Manager) Land(ctx context.Context, f *domain.Feature, message string, m
 		}
 		return "", fmt.Errorf("nothing to merge — %s already landed on main", branch)
 	}
-	if _, err := runGit(ctx, m.repo, "commit", "-m", message); err != nil {
+	commitArgs := []string{"commit", "-m", message}
+	if strings.TrimSpace(message) == "" {
+		commitArgs = []string{"commit", "--no-edit"}
+	}
+	if _, err := runGit(ctx, m.repo, commitArgs...); err != nil {
 		if resetErr := m.undoLanding(ctx, method); resetErr != nil {
 			return "", fmt.Errorf("%s failed AND reset failed, main checkout needs manual attention: %w (reset: %v)", commitVerb, err, resetErr)
 		}

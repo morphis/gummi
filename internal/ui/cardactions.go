@@ -979,9 +979,19 @@ func mergeHelp(kind domain.Kind, base string, choice bool) string {
 	if kind == domain.KindFreeform {
 		// prepareMerge's final checkpoint: a session's loose work is
 		// committed before it lands, and the reader should know first
-		return what + " — anything still uncommitted is committed first, as a final checkpoint (review & approve the drafted message)"
+		return what + " — anything still uncommitted is committed first, as a final checkpoint (" + landMessageNote(choice) + ")"
 	}
-	return what + " (review & approve the drafted message)"
+	return what + " (" + landMessageNote(choice) + ")"
+}
+
+// landMessageNote says who writes a landing's message. A squash's is the
+// drafted one the reader approves; a merge commit takes git's own, so where
+// the card may choose, the note names both.
+func landMessageNote(choice bool) string {
+	if choice {
+		return "a squash takes the drafted message, reviewed and approved; a merge commit takes git's own"
+	}
+	return "review & approve the drafted message"
 }
 
 // landWhy picks the wording of a landing. A card that may keep its commits

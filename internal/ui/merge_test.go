@@ -592,20 +592,20 @@ func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 }
 
 // TestMergeLandingKeepsHistory lands a verify card from the TUI with the
-// merge-commit method toggled in the dialog: main gets a two-parent merge
-// commit carrying the approved message, the branch's commits reach it, and
-// the card moves to done.
+// merge-commit method picked in the dialog: main gets a two-parent merge
+// commit carrying git's own merge message (no box is shown for it), the
+// branch's commits reach it, and the card moves to done.
 func TestMergeLandingKeepsHistory(t *testing.T) {
 	m, root, _ := mergeFixture(t)
-	message := "FD-001: rebase me\n\nKeeps the feature commit on main."
 	before := gitOut(t, root, "rev-parse", "HEAD")
+	card, _ := m.store.GetFeature(context.Background(), "FD-001")
+	branch := card.BranchName()
 
 	m = pressMerge(t, m)
 	if _, ok := m.Overlay.Top().(*commitMsgDialog); !ok {
 		t.Fatalf("m did not open the commit-message dialog (notice %q)", m.notice.text)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-	typeMessage(t, m, message)
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if m.notice.isErr || !strings.Contains(m.notice.text, "merged into") {
 		t.Fatalf("merge notice = %q (err=%v)", m.notice.text, m.notice.isErr)
@@ -613,8 +613,8 @@ func TestMergeLandingKeepsHistory(t *testing.T) {
 	if parents := strings.Fields(gitOut(t, root, "log", "-1", "--format=%P")); len(parents) != 2 || parents[0] != before {
 		t.Fatalf("main tip parents = %v, want a merge commit on %s", parents, before)
 	}
-	if got := gitOut(t, root, "log", "-1", "--format=%B"); got != message {
-		t.Errorf("merge commit message = %q, want %q", got, message)
+	if got := gitOut(t, root, "log", "-1", "--format=%s"); got != "Merge branch '"+branch+"'" {
+		t.Errorf("merge commit subject = %q, want git's merge message for %s", got, branch)
 	}
 	ctx := context.Background()
 	f, _ := m.store.GetFeature(ctx, "FD-001")

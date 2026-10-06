@@ -607,9 +607,13 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 	}
 
 	// the headless sharp edge: the message must be valid before any git
-	// mutation, or the command refuses loudly rather than guessing.
-	if err := engine.ValidateCommitMessage(message); err != nil {
-		return d.fail(ctx, string(id), fmt.Errorf("invalid commit message: %w", err))
+	// mutation, or the command refuses loudly rather than guessing. A merge
+	// commit with no message takes git's own, so only a message that was
+	// given, or a squash (which must carry one), is checked.
+	if message != "" || method == domain.LandSquash {
+		if err := engine.ValidateCommitMessage(message); err != nil {
+			return d.fail(ctx, string(id), fmt.Errorf("invalid commit message: %w", err))
+		}
 	}
 
 	// commit any final uncommitted worktree work (matching the TUI's

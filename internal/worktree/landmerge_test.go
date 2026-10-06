@@ -182,3 +182,58 @@ func TestLandSquashIsSquashMerge(t *testing.T) {
 		}
 	}
 }
+
+// TestLandMergeWithoutMessageUsesGitMessage covers a merge landed with no
+// message: the merge commit takes git's own merge message, so its subject
+// is the one git merge --no-ff would have written, and it still has the
+// branch tip as its second parent.
+func TestLandMergeWithoutMessageUsesGitMessage(t *testing.T) {
+	root := newRepo(t)
+	m, f, p := committedFeature(t, root)
+	branchTip := mustGit(t, p, "rev-parse", "HEAD")
+	mainBefore := mustGit(t, root, "rev-parse", "HEAD")
+
+	sha, err := m.Land(ctx, f, "", domain.LandMerge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, root, "rev-parse", "HEAD"); got != sha {
+		t.Errorf("returned sha %q != HEAD %q", sha, got)
+	}
+	parents := strings.Fields(mustGit(t, root, "log", "-1", "--format=%P"))
+	if len(parents) != 2 || parents[0] != mainBefore || parents[1] != branchTip {
+		t.Errorf("parents = %v, want [%s %s]", parents, mainBefore, branchTip)
+	}
+	subject := mustGit(t, root, "log", "-1", "--format=%s")
+	if !strings.HasPrefix(subject, "Merge branch '") {
+		t.Errorf("merge subject = %q, want git's merge message", subject)
+	}
+	if mergeInProgress(t, root) {
+		t.Error("MERGE_HEAD left behind after a message-less merge landing")
+	}
+	if landed, err := m.Landed(ctx, f); !landed || err != nil {
+		t.Errorf("Landed after message-less merge = %v, %v; want true", landed, err)
+	}
+}
+
+// TestLandSquashWithoutMessageRefused covers the one method that still
+// needs a message: a squash with an empty message is refused before any
+// git command mutates main.
+func TestLandSquashWithoutMessageRefused(t *testing.T) {
+	root := newRepo(t)
+	m, f, _ := committedFeature(t, root)
+	mainBefore := mustGit(t, root, "rev-parse", "HEAD")
+
+	for _, msg := range []string{"", "   \n"} {
+		_, err := m.Land(ctx, f, msg, domain.LandSquash)
+		if err == nil || !strings.Contains(err.Error(), "empty commit message") {
+			t.Fatalf("squash with message %q: err = %v, want an empty-message refusal", msg, err)
+		}
+	}
+	if got := mustGit(t, root, "rev-parse", "HEAD"); got != mainBefore {
+		t.Errorf("main HEAD moved by refused squash: %s -> %s", mainBefore, got)
+	}
+	if out := mustGit(t, root, "status", "--porcelain", "--untracked-files=no"); out != "" {
+		t.Errorf("main checkout dirty after refused squash:\n%s", out)
+	}
+}

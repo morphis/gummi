@@ -429,6 +429,10 @@ type commitDraftMsg struct {
 	f     domain.FeatureID
 	gen   int
 	draft string
+	// cancelled marks a pass stopped on purpose (esc, a merge method, a
+	// re-draft): it says nothing about the draft backend, so it is not
+	// recorded as a failure.
+	cancelled bool
 	// reason is a non-empty explanation when the draft pass failed (empty
 	// on success); guard marks a deliberate guard rejection so the dialog
 	// renders it as a warning rather than a config fault.

@@ -558,8 +558,8 @@ func bindResumeFlags(fs *pflag.FlagSet) {
 var goalResumeFlagNames = []string{"goal-note", "reverse", "wrap-up", "runs", "minutes", "retake"}
 
 func bindMergeFlags(fs *pflag.FlagSet) {
-	messageFlag(fs, "landing commit message")
-	fs.Bool("no-squash", false, "land as a merge commit keeping the branch's commits (default: one squash commit)")
+	fs.StringP("message", "m", "", "landing commit message (required for a squash; - reads from stdin)")
+	fs.Bool("no-squash", false, "land as a merge commit keeping the branch's commits (default: one squash commit); -m is optional and git's merge message is used without it")
 }
 
 func bindCommitFlags(fs *pflag.FlagSet) {

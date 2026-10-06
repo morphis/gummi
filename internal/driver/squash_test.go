@@ -258,3 +258,33 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// TestMergeNoSquashWithoutMessage proves a merge landing with no message is
+// not refused for want of one: it lands with git's own merge message and
+// the branch tip as its second parent.
+func TestMergeNoSquashWithoutMessage(t *testing.T) {
+	h, d, id := driveVerified(t)
+	before := gitHead(t, h.root)
+	branch, _ := h.store.GetFeature(context.Background(), id)
+
+	out, err := d.Merge(context.Background(), id, "", domain.LandMerge)
+	if err != nil {
+		t.Fatalf("Merge without message: %v", err)
+	}
+	if out.Status != StatusVerified {
+		t.Fatalf("status = %q, want done", out.Status)
+	}
+	parents := strings.Fields(gitOut(t, h.root, "log", "-1", "--format=%P"))
+	if len(parents) != 2 || parents[0] != before {
+		t.Fatalf("main tip parents = %v, want first parent %s", parents, before)
+	}
+	if got := gitOut(t, h.root, "rev-parse", "HEAD^2"); got != gitOut(t, h.root, "rev-parse", branch.BranchName()) {
+		t.Fatalf("second parent = %s, want the branch tip", got)
+	}
+	if !strings.HasPrefix(gitOut(t, h.root, "log", "-1", "--format=%s"), "Merge branch '") {
+		t.Fatalf("merge commit subject = %q, want git's merge message", gitOut(t, h.root, "log", "-1", "--format=%s"))
+	}
+	if lastEvent(h, "merged") == nil {
+		t.Fatalf("no merged event; got %v", h.eventKinds())
+	}
+}

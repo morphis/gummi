@@ -181,20 +181,30 @@ function dialog (card, a, { ask = null } = {}) {
   if (ta) { ta.focus(); ta.setSelectionRange(0, 0); ta.scrollTop = 0 }
 }
 
-// landMethodSeq gives each landing's method choice its own radio group name.
-let landMethodSeq = 0
-
-// landMethodControl is the two-way choice beside a landing message: squash
-// (the default, one commit) or a merge commit that keeps the branch's own
-// commits. It is shown only where the server offers both methods
-// (Action.methods, Option.methods); value() is the method the request names.
+// landMethodControl is the choice of how a landing lands, shown above its
+// message: squash (the default, one commit) or a merge commit that keeps
+// the branch's own commits. It is shown only where the server offers both
+// methods (Action.methods, Option.methods); value() is the method the
+// request names. A merge commit takes git's own message, so the page hides
+// the box for it (see landMessageBox).
 export function landMethodControl (methods) {
-  const name = 'land-method-' + (++landMethodSeq)
   const words = { squash: 'Squash — one commit', merge: 'Merge commit — keeps the branch’s commits' }
-  const radios = methods.map(m => h('input', { type: 'radio', name, value: m, checked: m === 'squash', testid: 'land-method-' + m }))
-  const el = h('div', { class: 'land-method', testid: 'land-method', role: 'radiogroup', 'aria-label': 'Landing method' },
-    methods.map((m, i) => h('label', { class: 'mopt' }, radios[i], ' ', words[m] || m)))
-  return { el, value: () => radios.find(r => r.checked)?.value || 'squash' }
+  const el = h('select', { class: 'land-method', testid: 'land-method', 'aria-label': 'Landing method' },
+    methods.map(m => h('option', { value: m, selected: m === 'squash' }, words[m] || m)))
+  return { el, value: () => el.value || 'squash' }
+}
+
+// landMessageBox hides a landing's message box and its hint while the
+// method in force is a merge commit, and shows them for a squash. Returns
+// nothing: the box is only a control to hide or show.
+export function landMessageBox (control, box, hint) {
+  const sync = () => {
+    const merging = control.value() === 'merge'
+    box.hidden = merging
+    if (hint) hint.hidden = merging
+  }
+  control.el.addEventListener('change', sync)
+  sync()
 }
 
 function fieldFor (card, a, need) {
@@ -204,25 +214,27 @@ function fieldFor (card, a, need) {
     const landing = isLandingEntry(card, a)
     const ta = h('textarea', { id: 'action-input', testid: 'action-input', value: def, rows: landing ? 8 : 4, spellcheck: 'true' })
     const squash = a.id === 'squash'
-    // where the message in the box came from, for the hint: a method
-    // choice re-words the hint, so the origin is kept to say it again
+    // where the message in the box came from, for the hint
     let from = def ? 'default' : 'none'
     const control = landing && a.methods?.length > 1 ? landMethodControl(a.methods) : null
     const merging = () => control?.value() === 'merge'
-    const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(squash, from, merging())) : null
+    const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(squash, from)) : null
     // the affordance the answer block's landing dialog shares (its own
     // box is built there)
     const aff = hint ? draftAffordance(ta, hint) : null
-    control?.el.addEventListener('change', () => { if (hint && !hint.classList.contains('busy')) hint.textContent = messageHint(squash, from, merging()) })
+    if (control) landMessageBox(control, ta, hint)
     return {
-      el: h('label', { class: 'field' }, label, ta, control?.el, hint),
-      value: () => (control ? { message: ta.value.trim(), method: control.value() } : { message: ta.value.trim() }),
+      el: h('label', { class: 'field' }, label, control?.el, ta, hint),
+      value: () => {
+        if (merging()) return { method: 'merge' }
+        return control ? { message: ta.value.trim(), method: control.value() } : { message: ta.value.trim() }
+      },
       focus: () => ta.focus(),
       // the draft the server stopped to have read is in the box now: the
       // hint says so rather than that nothing was drafted, and where it
       // came from — the one stored when verify passed reads as that, not
       // as one gummi drafted just now
-      drafted: (draft) => { from = draftOrigin(card, a, draft); if (aff) aff.drafted(messageHint(squash, from, merging())) },
+      drafted: (draft) => { from = draftOrigin(card, a, draft); if (aff) aff.drafted(messageHint(squash, from)) },
       // while gummi drafts the message the box is not for typing and the
       // hint says what is being waited on; a reply that brought no draft
       // puts the hint back as it was
@@ -264,9 +276,8 @@ function fieldFor (card, a, need) {
 // collapses the branch where it is — nothing lands — so it never says
 // "lands". The answer block's landing dialog words its own box the same
 // way (decision.js).
-export function messageHint (squash, from, merge = false) {
-  let becomes = squash ? 'this is the one commit the branch becomes' : 'this is what lands'
-  if (merge) becomes = 'this is the merge commit’s message; the branch’s commits land with it'
+export function messageHint (squash, from) {
+  const becomes = squash ? 'this is the one commit the branch becomes' : 'this is what lands'
   if (from === 'none') return 'Nothing was drafted yet: leave it empty and gummi drafts one for you to read first (this can take a minute), or write it.'
   const where = from === 'drafted' ? 'Drafted by gummi just now.' : squash ? 'Drafted for this branch.' : 'Drafted when verify passed.'
   return `${where} Read it, edit it if you like — ${becomes}.`

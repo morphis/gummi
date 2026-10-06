@@ -59,7 +59,7 @@ Other `run` flags:
 | `gummi spec <id\|ref>` | the current spec or report markdown |
 | `gummi diff <id\|ref>` | the worktree diff against main |
 | `gummi verify <id\|ref>` | re-run the checks on a verified branch and finalize its card |
-| `gummi merge <id\|ref> -m <message\|-> [--no-squash]` | land a verified branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits (a goal: one merge commit, `-m` optional, no `--no-squash`) |
+| `gummi merge <id\|ref> -m <message\|-> [--no-squash]` | land a verified branch as one squash commit, or with `--no-squash` as a merge commit keeping its commits, where `-m` is optional and git's own merge message is used (a goal: one merge commit, `-m` optional, no `--no-squash`) |
 | `gummi squash <id\|ref> -m <message\|->` | collapse a card's branch to one commit in place |
 | `gummi commit <id\|ref> -m <message\|->` | commit a card's own uncommitted worktree changes onto its branch |
 | `gummi handoff <id\|ref>` | close a verified card and keep its branch — nothing lands (a goal not yet ready is abandoned) |
@@ -236,7 +236,7 @@ MSG
 input, and is stricter than the board's dialog: the message must be a
 Conventional Commits `type(scope): summary` with no diff dump and no agent
 attribution, or the command refuses before touching git. On success it
-emits a `merged` event with the landed sha and moves the card to `done`. The event's `method` is `squash` or `merge`; `--no-squash` is refused for a goal or a card in one.
+emits a `merged` event with the landed sha and moves the card to `done`. The event's `method` is `squash` or `merge`; `--no-squash` is refused for a goal or a card in one. With `--no-squash` the `-m` is optional: the merge commit takes git's own merge message, and a `-m` given is validated and used verbatim.
 
 ### Ending a card without landing it
 

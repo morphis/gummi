@@ -26,7 +26,7 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
-import { runAction, messageHint, draftAffordance, landMethodControl } from './actions.js?v=__ASSET_V__'
+import { runAction, messageHint, draftAffordance, landMethodControl, landMessageBox } from './actions.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -711,12 +711,19 @@ function openLanding (id, d, o, draft, question = '') {
   input.value = draft || ''
   const q = h('p', { class: 'aq', testid: 'landing-question' }, question || 'Read the landing message, then land.')
   // squash or a merge commit keeps the branch's commits: offered where the
-  // option says both are (Option.methods), and the hint says which lands
+  // option says both are (Option.methods). A merge takes git's own message,
+  // so its box and hint are hidden and nothing is read first
   const control = o.methods?.length > 1 ? landMethodControl(o.methods) : null
   const merging = () => control?.value() === 'merge'
-  const hint = h('span', { class: 'fh', testid: 'landing-hint' }, messageHint(false, draftWhere(draft), merging()))
-  control?.el.addEventListener('change', () => { if (!hint.classList.contains('busy')) hint.textContent = messageHint(false, draftWhere(draft), merging()) })
+  const hint = h('span', { class: 'fh', testid: 'landing-hint' }, messageHint(false, draftWhere(draft)))
   const aff = draftAffordance(input, hint)
+  if (control) {
+    const mergeQ = 'A merge commit lands with git’s own message, so there is nothing to read first.'
+    control.el.addEventListener('change', () => {
+      q.textContent = merging() ? mergeQ : (question || 'Read the landing message, then land.')
+    })
+    landMessageBox(control, input, hint)
+  }
   const err = h('p', { class: 'aerr', testid: 'landing-error', role: 'alert', hidden: true })
   // kept: the last reply was routed into the dialog rather than past it,
   // so the send that is out must not close it (a draft to read, a failure
@@ -729,7 +736,7 @@ function openLanding (id, d, o, draft, question = '') {
     // the answer that opened it is redrawn while it is up
     returnTo: `[data-testid$="-option-${CSS.escape(o.id)}"]`,
     onClose: () => { dlg.left = true; landing = null; landingDismissed = true },
-    body: [q, h('label', { class: 'field' }, input, control?.el, hint), err],
+    body: [q, h('label', { class: 'field' }, control?.el, input, hint), err],
     actions: [
       { label: 'Cancel', testid: 'landing-cancel' },
       {
@@ -738,15 +745,18 @@ function openLanding (id, d, o, draft, question = '') {
         danger: true,
         testid: 'landing-confirm',
         onClick: async () => {
-          const words = input.value.trim()
+          // a merge commit sends no words: the box is hidden for it, and
+          // the server lands it with git's own message at once
+          const merge = !!control && merging()
+          const words = merge ? '' : input.value.trim()
           const b = { ref: d.ref, option: o.id, against: d.against?.token || '' }
           if (words) b.words = words
           if (control) b.method = control.value()
           dlg.kept = false
           go.disabled = true
-          // sent bare, the landing waits on its drafting pass again: the
+          // sent bare, a squash waits on its drafting pass again: the
           // button and the hint say so, the way the menu's merge entry does
-          const wait = !words
+          const wait = !words && !merge
           if (wait) { aff.busy(true); go.textContent = 'Drafting…' }
           try {
             await send(id, b, o.label, false, true)
@@ -778,7 +788,7 @@ function openLanding (id, d, o, draft, question = '') {
     // stand, as the TUI's dialog never overwrites typed ones
     if (!input.value.trim() && draft.trim()) {
       input.value = draft
-      aff.drafted(messageHint(false, draftWhere(draft), merging()))
+      aff.drafted(messageHint(false, draftWhere(draft)))
       input.focus(); input.setSelectionRange(0, 0); input.scrollTop = 0
     }
   }

@@ -3,8 +3,9 @@ import type { Page } from '@playwright/test';
 import { shot } from '../fixtures/shots';
 
 // A verified card's landing from the page can keep the branch's commits: the
-// landing form's two-way choice sends the merge-commit method, and the base
-// gets a merge commit whose second parent is the card's branch tip.
+// landing form's method select sends the merge-commit method, which hides the
+// message box and lands at once with git's own message. The base gets a merge
+// commit whose second parent is the card's branch tip.
 
 async function open(page: Page, server: GummiServer, id: string, phone: boolean) {
   await page.goto(`${server.url}/#${id}`);
@@ -28,13 +29,16 @@ test.describe('a verified card that may keep its commits', () => {
   test('lands as a merge commit when the merge-commit method is chosen', async ({ pairedPage: page, server, workspace, api }, info) => {
     await open(page, server, id, phone(info));
     await menu(page, 'merge');
-    // the choice sits beside the message, squash first
+    // the method select sits above the message, squash first and selected
     const method = page.getByTestId('land-method');
     await expect(method).toBeVisible();
-    await expect(page.getByTestId('land-method-squash')).toBeChecked();
+    await expect(method).toHaveValue('squash');
+    await expect(page.getByTestId('action-input')).toBeVisible();
     await expect(page.getByTestId('action-hint')).toContainText('this is what lands');
-    await page.getByTestId('land-method-merge').check();
-    await expect(page.getByTestId('action-hint')).toContainText('the branch’s commits land with it');
+    await method.selectOption('merge');
+    // a merge commit takes git's message: no box, no hint, nothing to draft
+    await expect(page.getByTestId('action-input')).toBeHidden();
+    await expect(page.getByTestId('action-hint')).toBeHidden();
     await shot(page, info, 'landmethod-merge');
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-dialog')).toHaveCount(0, { timeout: 30_000 });

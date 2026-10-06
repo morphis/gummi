@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
@@ -329,30 +330,145 @@ func TestCommitMsgDialogHidesDraftingHintOnceModified(t *testing.T) {
 // TestCommitDialogTogglesMethod: ctrl+t flips the landing between squash and
 // merge commit, the title and verb follow, and the submit carries the method
 // in force.
-func TestCommitDialogTogglesMethod(t *testing.T) {
-	var gotMsg string
-	var gotMethod domain.LandMethod
-	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(msg string, method domain.LandMethod) tea.Cmd {
-		gotMsg, gotMethod = msg, method
-		return nil
-	}, nil)
+// TestCommitDialogMergeHidesMessageBox: picking merge in the method field
+// hides the message box, its hints and Redraft, and says the merge takes
+// git's own message; picking squash again brings the box back.
+func TestCommitDialogMergeHidesMessageBox(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil)
 	d.baseBranch = "main"
 	d.input.SetValue("land the thing")
 	d.modified = true
+	view := func() string { return ansi.Strip(d.View(theme.New(theme.GummiDark()), 100, 30)) }
 
-	if got := d.View(theme.New(theme.GummiDark()), 100, 30); !strings.Contains(got, "squash-merge FD-001") {
-		t.Fatalf("default title does not say squash-merge:\n%s", got)
+	if got := view(); !strings.Contains(got, "Method: ‹ Squash — one commit ›") || !strings.Contains(got, "Redraft") {
+		t.Fatalf("squash view lacks the method field or Redraft:\n%s", got)
 	}
 	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
-	if got := d.View(theme.New(theme.GummiDark()), 100, 30); !strings.Contains(got, "merge FD-001") || !strings.Contains(got, "keeping the branch's commits") {
-		t.Fatalf("toggled title does not say merge:\n%s", got)
+	got := view()
+	if !strings.Contains(got, "Method: ‹ Merge commit — keeps the branch's commits ›") {
+		t.Fatalf("merge view lacks the merge method:\n%s", got)
 	}
-	if !strings.Contains(d.View(theme.New(theme.GummiDark()), 100, 30), "ctrl+s merge") {
-		t.Error("footer does not name the merge verb once toggled")
+	if strings.Contains(got, "land the thing") || strings.Contains(got, "Redraft") {
+		t.Errorf("merge view still shows the message box or Redraft:\n%s", got)
 	}
-	d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if gotMsg != "land the thing" || gotMethod != domain.LandMerge {
-		t.Fatalf("submit = %q, %q; want the message with merge", gotMsg, gotMethod)
+	if !strings.Contains(got, "git's merge message") {
+		t.Errorf("merge view does not say the merge takes git's message:\n%s", got)
+	}
+	if !strings.Contains(got, "merge FD-001") || !strings.Contains(got, "ctrl+s merge") {
+		t.Errorf("merge view title or footer does not name the merge:\n%s", got)
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if got := view(); !strings.Contains(got, "land the thing") || !strings.Contains(got, "Redraft") {
+		t.Errorf("back to squash, the box did not return with its text:\n%s", got)
+	}
+}
+
+// TestCommitDialogMergeLandsWithoutDraft: a merge submits at once with an
+// empty message, without arming on unmodified text and without a draft.
+func TestCommitDialogMergeLandsWithoutDraft(t *testing.T) {
+	var gotMsg string
+	var gotMethod domain.LandMethod
+	submitted := 0
+	drafted := false
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(msg string, method domain.LandMethod) tea.Cmd {
+		submitted++
+		gotMsg, gotMethod = msg, method
+		return nil
+	}, func(context.Context, domain.Feature, bool) (string, error) {
+		drafted = true
+		return "", nil
+	})
+	d.baseBranch = "main"
+	d.gen = 1
+	d.apply(commitDraftMsg{f: d.feature, gen: 1, draft: "feat(ui): a scribe draft"})
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}); !done {
+		t.Fatal("ctrl+s on a merge did not land at once")
+	}
+	if submitted != 1 || gotMsg != "" || gotMethod != domain.LandMerge {
+		t.Fatalf("submit = %d×, %q, %q; want one empty-message merge", submitted, gotMsg, gotMethod)
+	}
+	if drafted {
+		t.Error("a merge asked for a draft")
+	}
+}
+
+// TestCommitDialogMergeIgnoresRedraft: a merge has no draft to redraft, so
+// ctrl+r starts nothing while merge is selected.
+func TestCommitDialogMergeIgnoresRedraft(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil },
+		func(context.Context, domain.Feature, bool) (string, error) { return "", nil })
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if _, cmd := d.HandleKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}); cmd != nil || d.drafting {
+		t.Fatal("ctrl+r started a draft while merge is selected")
+	}
+}
+
+// TestCommitDialogMergeCancelsInFlightDraft: a draft still running when
+// merge is picked is cancelled, and its late reply is dropped.
+func TestCommitDialogMergeCancelsInFlightDraft(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil },
+		func(context.Context, domain.Feature, bool) (string, error) { return "", nil })
+	d.startDraft(false)
+	if !d.drafting {
+		t.Fatal("no draft in flight to start the test from")
+	}
+	gen := d.gen
+	d.HandleKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	if d.drafting || d.gen == gen {
+		t.Fatalf("picking merge left the draft running (drafting=%v)", d.drafting)
+	}
+	d.apply(commitDraftMsg{f: d.feature, gen: gen, draft: "late"})
+	if d.input.Value() != "" {
+		t.Errorf("a late reply from the cancelled draft filled the box: %q", d.input.Value())
+	}
+}
+
+// TestCommitDialogMethodFieldCyclesWithArrows: the method field is the
+// first tab stop; ←/→ cycle it, and tab from the box reaches the buttons.
+func TestCommitDialogMethodFieldCyclesWithArrows(t *testing.T) {
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(_ string, _ domain.LandMethod) tea.Cmd { return nil }, nil)
+	if d.method != domain.LandSquash {
+		t.Fatalf("default method = %q, want squash", d.method)
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: 0})
+	if d.focus != commitFieldButtons {
+		t.Fatalf("tab from the box went to focus %d, want the buttons", d.focus)
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // back to the box
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}) // and on to the first stop: the method field
+	if d.focus != commitFieldMethod {
+		t.Fatalf("shift+tab did not reach the method field: focus %d", d.focus)
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if d.method != domain.LandMerge {
+		t.Fatalf("→ on the method field left method %q, want merge", d.method)
+	}
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if d.method != domain.LandSquash {
+		t.Fatalf("← on the method field left method %q, want squash", d.method)
+	}
+}
+
+// TestCommitDialogMergeBackToSquashKeepsText: switching to merge and back
+// keeps the box's text, and the squash it returns to still needs its
+// ordinary second confirmation for untouched text.
+func TestCommitDialogMergeBackToSquashKeepsText(t *testing.T) {
+	var gotMsg string
+	d := newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(msg string, _ domain.LandMethod) tea.Cmd {
+		gotMsg = msg
+		return nil
+	}, nil)
+	d.input.SetValue("land the thing")
+	d.modified = true
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight}) // merge
+	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft})  // squash again
+	if d.input.Value() != "land the thing" {
+		t.Fatalf("box text after merge and back = %q, want it kept", d.input.Value())
+	}
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}); !done || gotMsg != "land the thing" {
+		t.Fatalf("squash back on its text did not land it: done=%v msg=%q", done, gotMsg)
 	}
 }
 

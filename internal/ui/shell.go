@@ -2148,6 +2148,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// reason on a failed pass, cleared on a successful draft. The write
 		// runs in a command — never in Update (see the no-IO-in-Update
 		// contract above).
+		if msg.cancelled {
+			return m, nil
+		}
 		reason := ""
 		if msg.draft == "" && msg.reason != "" {
 			reason = msg.reason

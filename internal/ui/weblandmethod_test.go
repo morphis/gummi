@@ -202,3 +202,55 @@ func TestWebLandMethodsOfferedOnlyWhereChosen(t *testing.T) {
 		t.Errorf("goal methods = %v, want none", got)
 	}
 }
+
+// TestWebLandingMergeWithoutMessage: a merge sent with no words lands at
+// once with git's own merge message. It is never told to wait on a draft or
+// to write a message, and the branch tip becomes the merge's second parent.
+func TestWebLandingMergeWithoutMessage(t *testing.T) {
+	m, root, _ := mergeFixture(t)
+	b := bridgeOver(t, m)
+	ctx := context.Background()
+	before := gitOut(t, root, "rev-parse", "HEAD")
+
+	card, err := b.Action(ctx, "FD-001", "merge", webapi.ActionRequest{Method: "merge", Against: pinnedAgainst(t, b)}, "Simon")
+	if err != nil {
+		t.Fatalf("merge action without a message: %v", err)
+	}
+	if card == nil || card.Stage != string(domain.StageDone) {
+		t.Fatalf("card after message-less merge = %+v, want done", card)
+	}
+	if parents := strings.Fields(gitOut(t, root, "log", "-1", "--format=%P")); len(parents) != 2 || parents[0] != before {
+		t.Fatalf("main tip parents = %v, want a merge commit on %s", parents, before)
+	}
+	if got := gitOut(t, root, "log", "-1", "--format=%s"); !strings.HasPrefix(got, "Merge branch '") {
+		t.Errorf("merge commit subject = %q, want git's merge message", got)
+	}
+}
+
+// TestWebLandingMergeNeverWaitsOnDraft pins the answer itself: a merge with
+// no words is not held for a draft (wait) and never asks for a message
+// (needs), while a squash with no words still does.
+func TestWebLandingMergeNeverWaitsOnDraft(t *testing.T) {
+	var submitted []string
+	mk := func() *commitMsgDialog {
+		return newCommitMsgDialog(domain.Feature{ID: "FD-001", Slug: "x"}, func(msg string, _ domain.LandMethod) tea.Cmd {
+			submitted = append(submitted, msg)
+			return nil
+		}, nil)
+	}
+	d := mk()
+	d.drafting = true
+	ans := d.webAnswer(nil, &webInput{land: true, method: domain.LandMerge})
+	if ans.wait || ans.needs != "" {
+		t.Fatalf("merge without words: wait=%v needs=%q, want it to land", ans.wait, ans.needs)
+	}
+	if len(submitted) != 1 || submitted[0] != "" {
+		t.Fatalf("merge without words submitted %q, want one empty-message landing", submitted)
+	}
+
+	d = mk()
+	ans = d.webAnswer(nil, &webInput{land: true})
+	if ans.needs == "" {
+		t.Fatal("squash without words did not ask for a message")
+	}
+}

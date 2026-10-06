@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,8 +44,8 @@ type commitMsgDialog struct {
 	// onSubmit lands the branch with the message and the method in force.
 	onSubmit func(message string, method domain.LandMethod) tea.Cmd
 	// method is how this landing reaches the base: squash unless the person
-	// toggles it (ctrl+t or the toggle button). methods lists what this
-	// landing may use; the toggle is shown only when it offers a choice,
+	// picks merge in the method field (←/→ or ctrl+t). methods lists what
+	// this landing may use; the field is shown only when it offers a choice,
 	// which a goal's card and a squash in place never do.
 	method  domain.LandMethod
 	methods []domain.LandMethod
@@ -92,9 +93,6 @@ type commitMsgDialog struct {
 	inPlace bool
 }
 
-// methodToggleLabel names the button that flips the landing method.
-const methodToggleLabel = "Squash ⇄ Merge commit"
-
 // squashInPlace makes d the squash-in-place flavour of the dialog.
 func (d *commitMsgDialog) squashInPlace() *commitMsgDialog {
 	d.inPlace = true
@@ -114,13 +112,82 @@ func (d *commitMsgDialog) canToggle() bool { return len(d.methods) > 1 }
 // toggleMethod flips the landing method between squash and merge commit.
 // It clears an arm: the arm was taken against the method then in force, so
 // it must not carry over to the one this flip just chose.
-func (d *commitMsgDialog) toggleMethod() {
+//
+// A merge drops any draft still in flight: a merge lands with git's own
+// message, so the pass has nothing to fill. Going back to squash with an
+// empty, untouched box asks for a draft again, since the box has nothing
+// else to show. The returned command is that pass, if one is started.
+func (d *commitMsgDialog) toggleMethod() tea.Cmd {
+	d.armed = false
 	if d.method == domain.LandMerge {
 		d.method = domain.LandSquash
-	} else {
-		d.method = domain.LandMerge
+		d.rebuildButtons()
+		if !d.modified && !d.drafting && strings.TrimSpace(d.input.Value()) == "" {
+			return d.startDraft(false)
+		}
+		return nil
 	}
-	d.armed = false
+	d.method = domain.LandMerge
+	d.cancelDraft()
+	d.rebuildButtons()
+	if !slices.Contains(d.tabStops(), d.focus) {
+		d.focus = commitFieldMethod
+		d.input.Blur()
+	}
+	return nil
+}
+
+// cancelDraft stops the draft pass in flight, if any. The generation moves
+// on too, so a reply that was already on its way is dropped by apply.
+func (d *commitMsgDialog) cancelDraft() {
+	if d.cancel != nil {
+		d.cancel()
+		d.cancel = nil
+	}
+	d.gen++
+	d.drafting = false
+}
+
+// tabStops lists the fields the tab key moves through, in order. The
+// method field exists only where the person may choose a method, and the
+// message box is not a stop while merge is selected, since a merge shows
+// no box.
+func (d *commitMsgDialog) tabStops() []int {
+	var stops []int
+	if d.canToggle() {
+		stops = append(stops, commitFieldMethod)
+	}
+	if d.method != domain.LandMerge {
+		stops = append(stops, commitFieldText)
+	}
+	return append(stops, commitFieldButtons)
+}
+
+// moveFocus steps the focus through tabStops by delta, wrapping at the ends.
+func (d *commitMsgDialog) moveFocus(delta int) {
+	stops := d.tabStops()
+	i := max(slices.Index(stops, d.focus), 0)
+	d.focus = stops[((i+delta)%len(stops)+len(stops))%len(stops)]
+	if d.focus == commitFieldText {
+		d.input.Focus()
+	} else {
+		d.input.Blur()
+	}
+}
+
+// rebuildButtons re-lays the button row for the method in force, keeping
+// the button the cursor was on when it still exists.
+func (d *commitMsgDialog) rebuildButtons() {
+	label := ""
+	if d.buttons != nil {
+		label = d.buttons.Selected().label
+	}
+	d.buttons = d.landButtons()
+	for i, b := range d.buttons.buttons {
+		if b.label == label {
+			d.buttons.SetCursor(i)
+		}
+	}
 }
 
 // landVerb is the word the landing is called by: "squash-merge" for the
@@ -158,15 +225,14 @@ func newCommitMsgDialog(f domain.Feature, onSubmit func(string, domain.LandMetho
 	return d
 }
 
-// landButtons is a landing's button row: Cancel, Redraft, Merge, and the
-// method toggle where a choice is offered. The toggle sits after Merge so
-// the land button keeps its place in the row.
+// landButtons is a landing's button row: Cancel, Redraft and Merge. A merge
+// has no draft to redraft, so its row leaves Redraft out.
 func (d *commitMsgDialog) landButtons() *buttonRow {
-	btns := []button{{label: "Cancel"}, {label: "Redraft"}, {label: "Merge", danger: true}}
-	if d.canToggle() {
-		btns = append(btns, button{label: methodToggleLabel})
+	btns := []button{{label: "Cancel"}}
+	if d.method != domain.LandMerge {
+		btns = append(btns, button{label: "Redraft"})
 	}
-	return newButtonRow(btns...)
+	return newButtonRow(append(btns, button{label: "Merge", danger: true})...)
 }
 
 // base is the branch this merge lands on, falling back to
@@ -222,9 +288,11 @@ func (d *commitMsgDialog) startDraft(fresh bool) tea.Cmd {
 	f := d.f
 	return func() tea.Msg {
 		draft, err := d.draft(ctx, f, fresh)
+		// a pass stopped by its own cancel is no failure to record
+		cancelled := ctx.Err() != nil
 		cancel() // release the bound even on the fast path
-		msg := commitDraftMsg{f: d.feature, gen: gen, draft: draft}
-		if err != nil {
+		msg := commitDraftMsg{f: d.feature, gen: gen, draft: draft, cancelled: cancelled}
+		if err != nil && !cancelled {
 			var guard *engine.CommitDraftGuardError
 			if errors.As(err, &guard) {
 				msg.guard = true
@@ -258,10 +326,12 @@ func (d *commitMsgDialog) apply(msg commitDraftMsg) {
 // ID implements overlay.Dialog.
 func (d *commitMsgDialog) ID() string { return "commit-message" }
 
-// commit message fields, in tab order.
+// commit message fields. The zero value is the text box, where a squash
+// opens with the cursor in it; tab order is tabStops, not this order.
 const (
 	commitFieldText = iota
 	commitFieldButtons
+	commitFieldMethod
 )
 
 // merge validates and fires onSubmit — the same path ctrl+s and the
@@ -270,7 +340,15 @@ const (
 // accepted; the first attempt against it only arms — the view shows a
 // confirm hint — and a second attempt, with the text still unmodified,
 // is what actually lands it.
+//
+// A merge is the exception: it lands with git's own merge message, so there
+// is nothing to read, nothing to arm and no draft to wait on. Its box is
+// hidden while merge is selected, and whatever it held is not sent.
 func (d *commitMsgDialog) merge() (bool, tea.Cmd) {
+	if d.method == domain.LandMerge {
+		d.cancelDraft()
+		return true, d.onSubmit("", domain.LandMerge)
+	}
 	text := strings.TrimSpace(d.input.Value())
 	if text == "" {
 		return false, nil // nothing to commit with — keep editing
@@ -279,9 +357,7 @@ func (d *commitMsgDialog) merge() (bool, tea.Cmd) {
 		d.armed = true
 		return false, nil // arm: require a second attempt to land unreviewed text
 	}
-	if d.cancel != nil {
-		d.cancel()
-	}
+	d.cancelDraft()
 	return true, d.onSubmit(text, d.method)
 }
 
@@ -295,58 +371,64 @@ func (d *commitMsgDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "esc":
 		// cancel the whole merge, including an in-flight draft; a late
 		// reply after this sees a closed dialog and is dropped.
-		if d.cancel != nil {
-			d.cancel()
-		}
+		d.cancelDraft()
 		return true, nil
 	case "ctrl+s":
 		return d.merge()
 	case "ctrl+r":
 		// regenerate the draft; applies only while the user hasn't typed.
+		// A merge has no draft to regenerate.
+		if d.method == domain.LandMerge {
+			return false, nil
+		}
 		return false, d.startDraft(true)
 	case "ctrl+t":
 		// flip squash ⇄ merge commit, where a landing may choose.
 		if d.canToggle() {
-			d.toggleMethod()
+			return false, d.toggleMethod()
 		}
 		return false, nil
-	case "tab", "shift+tab":
-		d.focus = (d.focus + 1) % 2
-		if d.focus == commitFieldText {
-			d.input.Focus()
-		} else {
-			d.input.Blur()
-		}
+	case "tab":
+		d.moveFocus(1)
+		return false, nil
+	case "shift+tab":
+		d.moveFocus(-1)
 		return false, nil
 	}
-	if d.focus == commitFieldButtons {
+	switch d.focus {
+	case commitFieldMethod:
 		switch key.String() {
-		case "left", "h":
-			d.buttons.Move(-1)
-		case "right", "l":
-			d.buttons.Move(1)
-		case "enter":
-			switch d.buttons.Cursor() {
-			case 0: // Cancel
-				if d.cancel != nil {
-					d.cancel()
-				}
-				return true, nil
-			case 1: // Redraft
-				return false, d.startDraft(true)
-			}
-			if d.buttons.Selected().label == methodToggleLabel {
-				d.toggleMethod()
-				return false, nil
-			}
-			return d.merge()
+		case "left", "h", "right", "l", "enter":
+			return false, d.toggleMethod()
 		}
 		return false, nil
+	case commitFieldButtons:
+		return d.buttonKey(key)
 	}
 	before := d.input.Value()
 	d.input, _ = d.input.Update(key)
 	if d.input.Value() != before {
 		d.modified = true
+	}
+	return false, nil
+}
+
+// buttonKey handles a key while the button row has the focus.
+func (d *commitMsgDialog) buttonKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
+	switch key.String() {
+	case "left", "h":
+		d.buttons.Move(-1)
+	case "right", "l":
+		d.buttons.Move(1)
+	case "enter":
+		switch d.buttons.Selected().label {
+		case "Cancel":
+			d.cancelDraft()
+			return true, nil
+		case "Redraft":
+			return false, d.startDraft(true)
+		}
+		return d.merge()
 	}
 	return false, nil
 }
@@ -401,14 +483,24 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	}
 	b.WriteString(s.DialogTitle.Render(title+string(d.feature)) + "\n")
 	b.WriteString(s.Subtle.Render(where) + "\n\n")
-	b.WriteString(d.input.View() + "\n")
-	// Say when the message continues past the box. Approving something
-	// you cannot see all of is the failure this guards, and a reader with
-	// no scrollbar has no other way to know there is more.
-	if hidden := d.input.LineCount() - d.input.Height(); hidden > 0 {
-		b.WriteString(s.Faint.Render("  ↓ "+itoa(hidden)+" more line"+plural(hidden)+" — ↑↓ scrolls the message") + "\n")
+	if d.canToggle() {
+		b.WriteString(d.methodRow(s) + "\n\n")
+	}
+	if d.method == domain.LandMerge && !d.inPlace {
+		// a merge commit takes git's own message, so there is no box to fill
+		b.WriteString(s.Subtle.Render("lands with git's merge message — there is no message to write") + "\n")
+	} else {
+		b.WriteString(d.input.View() + "\n")
+		// Say when the message continues past the box. Approving something
+		// you cannot see all of is the failure this guards, and a reader with
+		// no scrollbar has no other way to know there is more.
+		if hidden := d.input.LineCount() - d.input.Height(); hidden > 0 {
+			b.WriteString(s.Faint.Render("  ↓ "+itoa(hidden)+" more line"+plural(hidden)+" — ↑↓ scrolls the message") + "\n")
+		}
 	}
 	switch {
+	case d.method == domain.LandMerge && !d.inPlace:
+		// a merge has no draft to wait on or arm, and no reason to show
 	case d.armed && !d.modified:
 		// "unreviewed" used to accuse the reader of not reading a draft
 		// that was, in the observed drive, sitting fully visible on
@@ -453,10 +545,25 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 	if d.inPlace {
 		verb = "squash"
 	}
-	hint := "tab buttons · enter activates · ctrl+s " + verb
+	hint := "tab next field · enter activates · ctrl+s " + verb
 	if d.canToggle() {
-		hint += " · ctrl+t squash ⇄ merge commit"
+		hint += " · ←/→ method"
 	}
 	b.WriteString("\n" + s.Faint.Render(hint+" · esc cancel"))
 	return s.DialogFrame.Render(b.String())
+}
+
+// methodRow is the landing method, shown as a cycling field: ←/→ (or
+// enter) moves between squash and merge commit, and the one in force is
+// the one the landing takes.
+func (d *commitMsgDialog) methodRow(s *theme.Styles) string {
+	name := "Squash — one commit"
+	if d.method == domain.LandMerge {
+		name = "Merge commit — keeps the branch's commits"
+	}
+	value := "‹ " + name + " ›"
+	if d.focus == commitFieldMethod {
+		value = s.ButtonFocus.Render(value)
+	}
+	return s.Subtle.Render("Method: ") + value
 }

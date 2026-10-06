@@ -26,15 +26,16 @@ func runMerge(fl cliFlags, args []string) error {
 		return err
 	}
 	// a goal lands as a merge commit gummi writes from the goal and its
-	// cards, so -m is optional for one
+	// cards, so -m is optional for one. A merge commit of a card takes git's
+	// own message when -m is absent; only a squash needs one.
 	isGoal := strings.HasPrefix(strings.ToUpper(idArg), "GL-")
-	message, err := commitMessage(fl, "merge", !isGoal)
-	if err != nil {
-		return err
-	}
 	method := domain.LandSquash
 	if fl.Bool("no-squash") {
 		method = domain.LandMerge
+	}
+	message, err := commitMessage(fl, "merge", !isGoal && method == domain.LandSquash)
+	if err != nil {
+		return err
 	}
 	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)

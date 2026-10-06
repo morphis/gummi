@@ -191,10 +191,22 @@ func (d *commitMsgDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 		return webAnswer{refused: "this landing cannot be a merge commit — it lands as one squash commit"}
 	}
 	d.method = method
-	if msg := strings.TrimSpace(in.message); msg != "" {
-		if why := tooLong(d.input.CharLimit, "the landing message", msg); why != "" {
-			return webAnswer{refused: why}
+	msg := strings.TrimSpace(in.message)
+	if why := tooLong(d.input.CharLimit, "the landing message", msg); why != "" {
+		return webAnswer{refused: why}
+	}
+	if method == domain.LandMerge {
+		// A merge commit lands at once: with the words the person sent, or
+		// with git's own message when they sent none. It never waits on a
+		// draft, since no box is shown for it to fill.
+		if msg != "" {
+			d.cancelDraft()
+			return webAnswer{cmd: d.onSubmit(msg, domain.LandMerge)}
 		}
+		_, cmd := d.merge()
+		return webAnswer{cmd: cmd}
+	}
+	if msg != "" {
 		d.input.SetValue(msg)
 		d.modified = true
 		_, cmd := d.merge()

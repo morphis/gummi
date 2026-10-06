@@ -1104,10 +1104,14 @@ func stageAnswers(in nextInput) []nextAction {
 		if !in.hasWorktree {
 			return nil
 		}
+		msgNote := "you review and approve the message"
+		if in.mergeChoice {
+			msgNote = "a squash has you review and approve the message; a merge commit takes git's own"
+		}
 		acts := []nextAction{
 			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
 			nextStep("merge", "m", "land it on "+in.landBase(),
-				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — anything still uncommitted is committed first, as a final checkpoint; you review and approve the message"),
+				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — anything still uncommitted is committed first, as a final checkpoint; "+msgNote),
 			nextStep("handoff", "h", "hand off",
 				"close the card and keep the branch exactly as it is"),
 		}

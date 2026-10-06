@@ -1475,7 +1475,9 @@ Decided in the design interview (2026-07-03):
    merge commit carrying the approved message, which keeps the branch's
    own commits on main. The person chooses per landing, in the landing
    dialog (or `--no-squash` headless), and squash stays the default. A
-   merge landing takes the branch's commits as they are: tidying them is
+   merge landing needs no message: it commits with git's own merge message,
+   and no drafting pass runs for it. A merge that cannot be made is undone
+   and reported, never retried as a squash. A merge landing takes the branch's commits as they are: tidying them is
    the log tab's or `gummi rewrite`'s job, done before landing. A card
    that belongs to a goal, and a goal itself, land as a squash only, since
    a goal's history is one commit per card under the goal's merge commit.

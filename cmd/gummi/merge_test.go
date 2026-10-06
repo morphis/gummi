@@ -235,3 +235,22 @@ func TestMergeWithoutNoSquashSquashes(t *testing.T) {
 		t.Fatalf("landing has %d parents, want 1", len(parents))
 	}
 }
+
+// `--no-squash` needs no -m: the merge commit takes git's own merge message,
+// and the landing keeps the branch tip as its second parent.
+func TestMergeNoSquashWithoutMessage(t *testing.T) {
+	_, f := verifiedCLIRepo(t)
+	branchTip := cliGit(t, ".", "rev-parse", f.BranchName())
+	before := cliGit(t, ".", "rev-parse", "HEAD")
+
+	if err := runCLI("merge", string(f.ID), "--no-squash"); err != nil {
+		t.Fatalf("runMerge --no-squash without -m: %v", err)
+	}
+	parents := strings.Fields(cliGit(t, ".", "log", "-1", "--format=%P"))
+	if len(parents) != 2 || parents[0] != before || parents[1] != branchTip {
+		t.Fatalf("main tip parents = %v, want [%s %s]", parents, before, branchTip)
+	}
+	if msg := cliGit(t, ".", "log", "-1", "--format=%s"); !strings.HasPrefix(msg, "Merge branch '") {
+		t.Fatalf("landed subject = %q, want git's merge message", msg)
+	}
+}
