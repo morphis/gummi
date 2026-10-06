@@ -70,9 +70,10 @@ func TestRewindTakesTheConversationBackNotTheBranch(t *testing.T) {
 	}
 }
 
-// TestFreeformCompactRoutesToTheBackend: /compact is offered only where
-// the backend can compact, goes to a Compactor's Compact rather than out
-// as a prompt, and goes out as typed to a backend that reads it itself.
+// TestFreeformCompactRoutesToTheBackend: on a backend that compacts
+// itself, /compact goes to a Compactor's Compact rather than out as a
+// prompt. A backend without compaction is asked for a summary instead
+// (TestCompactWithoutBackendCompactionSummarizes).
 func TestFreeformCompactRoutesToTheBackend(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
@@ -81,7 +82,6 @@ func TestFreeformCompactRoutesToTheBackend(t *testing.T) {
 		wantCompacts, sent int
 	}{
 		{"compactor", true, true, 1, 0},
-		{"no compaction", false, false, 0, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ag := agent.NewFake("ok")

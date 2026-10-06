@@ -252,6 +252,11 @@ type Completion struct {
 	// place of the "@word" the line ends with.
 	Text   string `json:"text"`
 	Detail string `json:"detail,omitempty"`
+	// Group is what kind of command it is, for the picker's headings:
+	// "session" (the session's own, offered on every agent), "project" (a
+	// command file in the repository), "card" (the card's own actions) or
+	// "file".
+	Group string `json:"group,omitempty"`
 }
 
 // AttachmentRef is a stored image, as a request names it (an id the page

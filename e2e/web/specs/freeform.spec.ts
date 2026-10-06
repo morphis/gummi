@@ -189,12 +189,15 @@ test('a project command is offered while its name is typed', async ({ pairedPage
   await input.click();
   await input.fill('/re');
   await expect(offer).toBeVisible();
-  // the card's own words complete beside the repository's command files
+  // the session's own commands, then the repository's command files, then
+  // the card's own words
   await expect(offer.getByRole('option')).toHaveText([
+    /\/retry\s*take back your last message/,
     /\/release\s*Cut a release\./,
     /\/review\s*review the diff/,
     /\/rebase\s*rebase branch onto main \(conflicts go to an agent\)/,
   ]);
+  await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Tab');
   await expect(input).toHaveValue('/review ');

@@ -80,7 +80,7 @@ func fileCompletions(dir, word string) []webapi.Completion {
 	}
 	res := make([]webapi.Completion, 0, len(hits))
 	for _, h := range hits {
-		res = append(res, webapi.Completion{Text: "@" + h.p + " ", Detail: "file"})
+		res = append(res, webapi.Completion{Text: "@" + h.p + " ", Detail: "file", Group: "file"})
 	}
 	return res
 }

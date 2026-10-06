@@ -1041,3 +1041,5 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .changes li button{display:flex;gap:8px;width:100%;text-align:left;padding:2px 4px;border-radius:5px;font-family:var(--mono);font-size:12px}
 .changes li button:hover{background:var(--sunk)}
 .changes li .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+.complete .cgroup{padding:6px 10px 2px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg4)}
+.tools.activity li.k-gummi pre.tool-out{color:var(--fg)}

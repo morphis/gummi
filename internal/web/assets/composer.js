@@ -275,7 +275,10 @@ function renderCompletions (c) {
   if (pick >= offered.length) pick = 0
   clear(box)
   box.hidden = offered.length === 0
+  const GROUP = { session: 'Session', project: 'Project', card: 'Card' }
   offered.forEach((o, i) => {
+    // a heading where the kind of command changes
+    if (GROUP[o.group] && o.group !== offered[i - 1]?.group) box.append(h('div', { class: 'cgroup', 'aria-hidden': 'true' }, GROUP[o.group]))
     box.append(h('button', {
       type: 'button',
       role: 'option',

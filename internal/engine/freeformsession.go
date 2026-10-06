@@ -82,6 +82,10 @@ type FreeformSession struct {
 	// compacts is the spawned backend's Capabilities.Compact: whether
 	// Commands offers /compact.
 	compacts bool
+	// compacting is set while a /compact turn on a backend without
+	// compaction of its own is in flight: its reply is the summary the
+	// conversation is replaced with when the turn ends (finishCompact).
+	compacting bool
 	// gummi's own watches (freeformwatch.go): running, and ended with an
 	// exit still to report. They outlive any one backend.
 	watches      []*freeformWatch
@@ -558,6 +562,16 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 // handoff brief: it passes the brief's own flag, which it is the one thing
 // that clears, and so is never queued behind itself.
 func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []AttachmentRef, queued bool) error {
+	cmds := ff.Commands()
+	// the session's own commands that are not a turn for the agent are
+	// answered here, before a backend is woken for them
+	if len(images) == 0 {
+		if c, args, ok := builtinFor(cmds, msg); ok {
+			if handled, err := ff.runBuiltin(ctx, c, args, cmds); handled {
+				return err
+			}
+		}
+	}
 	sess, err := ff.ensureBackend(ctx)
 	if err != nil {
 		return err
@@ -591,11 +605,24 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 	// the transcript keeps the line as typed; the agent hears what a
 	// "/name" in it stands for
-	cmds := ff.Commands()
 	wire := expandProjectCommands(cmds, ff.WorkDir(), msg)
+	ff.mu.Lock()
+	compacts := ff.compacts
+	ff.mu.Unlock()
 	var sendErr error
-	if c, ok := a.(agent.Compactor); ok && len(images) == 0 && isCompactLine(cmds, msg) {
+	if c, ok := a.(agent.Compactor); ok && compacts && len(images) == 0 && isCompactLine(cmds, msg) {
 		sendErr = c.Compact(ctx)
+	} else if b, args, ok := builtinFor(cmds, msg); ok && !compacts && len(images) == 0 && b.Name == compactCommand.Name {
+		// a backend with no compaction of its own is asked for a summary,
+		// which replaces the conversation once the turn ends
+		prompt := compactPrompt
+		if args != "" {
+			prompt += "\n\nGive particular weight to: " + args
+		}
+		ff.mu.Lock()
+		ff.compacting = true
+		ff.mu.Unlock()
+		sendErr = a.Send(ctx, prompt)
 	} else if len(images) > 0 {
 		sendErr = a.(agent.ImageSender).SendTurn(ctx, agent.Turn{Text: wire, Images: ff.engine.turnImages(images)})
 	} else {
@@ -646,16 +673,15 @@ func (ff *FreeformSession) enqueue(ctx context.Context, msg string, images []Att
 
 // Commands is the project's command files as the card's branch has them
 // now, read afresh each time so an edit to one is picked up by the next
-// turn, then /compact when the backend can compact. Empty until the
-// session's first backend has found its worktree.
+// turn, then the session's own commands (freeformbuiltins.go), offered on
+// every backend, a file of the same name winning over one. The files are
+// empty until the session's first backend has found its worktree.
 func (ff *FreeformSession) Commands() []ProjectCommand {
-	ff.mu.Lock()
-	workDir, compacts := ff.workDir, ff.compacts
-	ff.mu.Unlock()
-	cmds := LoadProjectCommands(workDir)
-	if compacts {
-		if _, _, clash := FindProjectCommand(cmds, "/"+compactCommand.Name); !clash {
-			cmds = append(cmds, compactCommand)
+	cmds := LoadProjectCommands(ff.WorkDir())
+	files := len(cmds)
+	for _, b := range sessionCommands {
+		if _, _, clash := FindProjectCommand(cmds[:files], "/"+b.Name); !clash {
+			cmds = append(cmds, b)
 		}
 	}
 	return cmds
@@ -1234,6 +1260,18 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.askOutlivedItsCall(sess)
 		e.persist(sess)
 		ff.armIdleTimer() // a reply landing resets the idle clock
+		ff.mu.Lock()
+		compacted := ff.compacting
+		ff.compacting = false
+		ff.mu.Unlock()
+		if compacted {
+			// off the pump: the restart stops the backend it is draining
+			go func() {
+				ff.finishCompact(sess)
+				ff.drainQueue(sess)
+			}()
+			break
+		}
 		ff.drainQueue(sess)
 	case agent.EventError:
 		sess.setError(ev.Err)

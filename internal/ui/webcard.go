@@ -756,13 +756,23 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 	// the line as typed: "/review " is a command awaiting its arguments,
 	// not a word still being completed
 	if word, ok := strings.CutPrefix(strings.TrimLeft(text, " \t\n"), "/"); ok {
-		for _, c := range m.projectCommandsPrefixed(r, word, 8) {
-			out.Completions = append(out.Completions, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description})
+		// the session's own commands first, then the repository's files
+		var session, project []webapi.Completion
+		for _, c := range m.projectCommandsPrefixed(r, word, 16) {
+			if c.Source == "" {
+				session = append(session, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description, Group: "session"})
+			} else if len(project) < 8 {
+				project = append(project, webapi.Completion{Text: "/" + c.Name + " ", Detail: c.Description, Group: "project"})
+			}
 		}
+		out.Completions = append(session, project...)
 		// gummi's own words, while the word is still being typed — a
 		// completed one is a line for the server to route, not a picker
 		if !strings.ContainsAny(word, " \t\n") {
-			out.Completions = append(out.Completions, m.cardSlashCompletions(r, word)...)
+			for _, c := range m.cardSlashCompletions(r, word) {
+				c.Group = "card"
+				out.Completions = append(out.Completions, c)
+			}
 		}
 	} else if word, ok := mentionWord(text); ok {
 		if dir, ok := filesDir(context.Background(), m.wt, r.F); ok {

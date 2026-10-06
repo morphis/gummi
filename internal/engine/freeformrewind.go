@@ -42,19 +42,10 @@ func (ff *FreeformSession) Rewind(n int) (string, error) {
 	if !ok {
 		return "", ErrNothingToRewind
 	}
-	sess.setAgentSessionID("")
 	sess.appendSystem(fmt.Sprintf("Rewound the conversation to before “%s”. The branch was not rewound: "+
 		"anything committed or written since is still there — check git log and git status before "+
 		"assuming the code matches this conversation.", rewindExcerpt(text)))
-	if sess.Live() {
-		ff.settle()
-		sess.setState(StateDone)
-		sess.stop()
-		ff.dropLock()
-	} else {
-		ff.engine.persist(sess)
-	}
-	ff.engine.send(Event{Feature: ff.id, Kind: EventUpdated})
+	ff.restartBackend(sess)
 	return text, nil
 }
 

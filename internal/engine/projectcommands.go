@@ -243,11 +243,13 @@ func expandProjectCommands(cmds []ProjectCommand, workDir, msg string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// compactCommand is the one command a freeform session offers that no
-// file defines: "/compact" replaces the agent's conversation with a summary
-// of it. It is not expanded — Claude Code reads the line as typed — and
-// a backend whose session is an agent.Compactor is asked directly instead
-// (FreeformSession.SendTurn). A project file named compact wins over it.
+// compactCommand is one of the session's own commands
+// (freeformbuiltins.go): "/compact" replaces the agent's conversation with
+// a summary of it. On a backend that compacts itself it is not expanded —
+// Claude Code reads the line as typed — and a backend whose session is an
+// agent.Compactor is asked directly instead (FreeformSession.SendTurn);
+// any other is asked for the summary as a turn. A project file named
+// compact wins over it.
 var compactCommand = ProjectCommand{
 	Name:        "compact",
 	Description: "summarize the conversation so far to free the agent's context",

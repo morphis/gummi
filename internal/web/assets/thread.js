@@ -420,7 +420,7 @@ function toolRow (t) {
   const named = label.startsWith(t.tool + ' ') || label === t.tool
   const rest = named ? label.slice(t.tool.length).trim() : label
   const target = rest === t.detail || rest.includes(t.detail || '\0') ? rest : [rest, t.detail].filter(Boolean).join(' ')
-  const k = toolKind(t.tool)
+  const k = /^gummi \//.test(t.tool) ? { kind: 'gummi', mark: 'g', verb: t.tool.slice(6) } : toolKind(t.tool)
   const head = [
     h('span', { class: 'mark', 'aria-hidden': 'true' }, k.mark),
     h('b', null, k.kind === 'other' ? t.tool : k.verb),
@@ -437,7 +437,9 @@ function toolRow (t) {
     h('div', { class: 'tout' },
       h('div', { class: 'tbar' }, cut ? h('span', { class: 'cut' }, 'truncated') : null, copyButton(out, 'Copy output', 'tool-copy')),
       h('pre', { class: ['tool-out', t.status === 'fail' && 'fail'], testid: 'tool-output' }, out)))
-  if (t.status === 'fail') el.open = true
+  // gummi's own answer to a session command (/cost, /context…) is what
+  // was asked for: shown, not folded behind its row
+  if (t.status === 'fail' || /^gummi \//.test(t.tool)) el.open = true
   return h('li', { class: cls, testid: 'tool-row' }, el)
 }
 
