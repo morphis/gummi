@@ -20,8 +20,9 @@ func skillDirAt(t *testing.T, root, name string) string {
 	return dir
 }
 
-// The ordinary session forwards nothing and must touch no disk at all.
+// A session with nothing forwarded and no .agents skills touches no disk.
 func TestClaudeSkillsMaterializeNothingWhenNoneForwarded(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	pluginDir, root, err := claudeMaterializeSkills(SessionOpts{WorkDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("claudeMaterializeSkills: %v", err)
@@ -131,5 +132,26 @@ func TestClaudeSkillsPluginDirIsUnderRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(pluginDir); !os.IsNotExist(err) {
 		t.Error("removing the root left the plugin behind")
+	}
+}
+
+// claude never reads .agents/skills itself, so the repository's and the
+// operator's ~/.agents skills ride the generated plugin — that is what
+// makes .agents the one convention every backend honors (DESIGN §4.1a).
+func TestClaudeSkillsCarryAgentsSkills(t *testing.T) {
+	home, wt := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	skillDirAt(t, filepath.Join(wt, ".agents", "skills"), "house-style")
+	skillDirAt(t, filepath.Join(home, ".agents", "skills"), "my-env")
+
+	pluginDir, root, err := claudeMaterializeSkills(SessionOpts{WorkDir: wt})
+	if err != nil {
+		t.Fatalf("claudeMaterializeSkills: %v", err)
+	}
+	defer os.RemoveAll(root)
+	for _, name := range []string{"house-style", "my-env"} {
+		if _, err := os.Stat(filepath.Join(pluginDir, "skills", name, "SKILL.md")); err != nil {
+			t.Errorf("%s did not reach the plugin: %v", name, err)
+		}
 	}
 }

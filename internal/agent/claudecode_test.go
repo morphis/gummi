@@ -579,7 +579,7 @@ func TestClaudeCodeBackgroundWorkOnlyForWatchSessions(t *testing.T) {
 	if !strings.Contains(ff, "bg=<unset>") {
 		t.Errorf("watch session lost background tasks: %s", ff)
 	}
-	want := "--tools " + strings.Join(append(claudeStageTools("", nil), "Monitor"), ",")
+	want := "--tools " + strings.Join(append(claudeStageTools(), "Monitor"), ",")
 	if !strings.Contains(ff, want) || !strings.Contains(ff, "--allowedTools Bash Read Grep Glob Monitor mcp__gummi") {
 		t.Errorf("watch session missing Monitor (want %q and it allowlisted): %s", want, ff)
 	}
@@ -1038,7 +1038,7 @@ func claudeRosterArgv(t *testing.T, script string, opts SessionOpts) string {
 // of behind a per-session lookup turn.
 func TestClaudeCodeNarrowsToolRoster(t *testing.T) {
 	msg := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{Model: "test-model"})
-	want := "--tools " + strings.Join(claudeStageTools("", nil), ",")
+	want := "--tools " + strings.Join(claudeStageTools(), ",")
 	if !strings.Contains(msg, want) {
 		t.Errorf("argv missing %q: %s", want, msg)
 	}
@@ -1085,34 +1085,13 @@ func TestClaudeCodeSkipsRosterWhenUnsupported(t *testing.T) {
 	}
 }
 
-// Skill is a built-in, so --tools gates it. A worktree with no skills
-// keeps the narrow roster the measurement in claudecode.go argued for.
-func TestClaudeRosterOmitsSkillWithoutSkills(t *testing.T) {
-	for _, tool := range claudeStageTools(t.TempDir(), nil) {
-		if tool == "Skill" {
-			t.Fatal("Skill is on the roster for a session with no skills to invoke")
-		}
-	}
-}
-
-// A repository that ships its own .claude/skills gets Skill on the roster
-// without configuring anything: those skills are already in the worktree,
-// and before this they were unreachable — the CLI was never told the tool
-// that invokes them exists.
-func TestClaudeRosterAddsSkillForRepoSkills(t *testing.T) {
-	wt := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(wt, ".claude", "skills", "house-style"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(claudeStageTools(wt, nil), "Skill") {
-		t.Error("a worktree carrying .claude/skills did not get Skill on the roster")
-	}
-}
-
-// A forwarded skill does the same, for the backends that can take one.
-func TestClaudeRosterAddsSkillForForwardedDirs(t *testing.T) {
-	if !slices.Contains(claudeStageTools(t.TempDir(), []string{"/ws/.agents/skills/container-env"}), "Skill") {
-		t.Error("forwarded skill dirs did not put Skill on the roster")
+// Skill is a built-in, so --tools gates it, and every skill the CLI
+// discovers — the operator's own, a plugin's, the repository's — is
+// invoked through it. Leaving it off the roster left those skills listed
+// and unreachable, so it is always there (DESIGN §4.1a).
+func TestClaudeRosterAlwaysOffersSkill(t *testing.T) {
+	if !slices.Contains(claudeStageTools(), "Skill") {
+		t.Error("Skill is not on the roster")
 	}
 }
 

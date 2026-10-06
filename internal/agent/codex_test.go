@@ -214,7 +214,7 @@ func TestCodexFirstAndResumeInvocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	if !strings.Contains(got, "exec --json --color never -m gpt-x -s workspace-write -c approval_policy=\"never\" --skip-git-repo-check --ignore-user-config -") {
+	if !strings.Contains(got, "exec --json --color never -m gpt-x -s workspace-write -c approval_policy=\"never\" --skip-git-repo-check -") {
 		t.Fatalf("first argv missing:\n%s", got)
 	}
 	if !strings.Contains(got, "resume thr_test -") {
@@ -269,7 +269,7 @@ func TestCodexArgvShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := string(raw)
-			for _, tok := range []string{"exec --json", "-s workspace-write", "approval_policy=\"never\"", "--skip-git-repo-check", "--ignore-user-config"} {
+			for _, tok := range []string{"exec --json", "-s workspace-write", "approval_policy=\"never\"", "--skip-git-repo-check"} {
 				if !strings.Contains(got, tok) {
 					t.Errorf("argv missing %q:\n%s", tok, got)
 				}

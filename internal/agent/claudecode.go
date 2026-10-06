@@ -132,36 +132,15 @@ func claudeReadOnlyTools() []string {
 // stage session. MCP tools are not built-ins and are unaffected by
 // --tools; gummi's own reach the session through --mcp-config either way.
 //
-// Skill is conditional, and the condition is the whole point. Skill IS a
-// built-in, so --tools gates it: while it was absent from this list, a
-// stage session could not invoke a skill at all — not a forwarded one, and
-// not one the repository itself ships in .claude/skills, sitting in the
-// session's own worktree. That was a silent hole, since a repo's skills
-// need no configuration to be there. Naming it unconditionally would undo
-// what this roster exists for (every extra definition rides every
-// request), so it is named exactly when the session has something to
-// invoke: a skill directory in its worktree, or a forwarded one.
-func claudeStageTools(workDir string, skillDirs []string) []string {
-	tools := []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit"}
-	if claudeSkillsReachable(workDir, skillDirs) {
-		tools = append(tools, "Skill")
-	}
-	return tools
-}
-
-// claudeSkillsReachable reports whether this session has any skill to
-// invoke: one forwarded from the workspace, or one the checked-out branch
-// carries at claude's own project location. A repo without skills keeps
-// the narrow roster it has always had.
-func claudeSkillsReachable(workDir string, skillDirs []string) bool {
-	if len(skillDirs) > 0 {
-		return true
-	}
-	if workDir == "" {
-		return false
-	}
-	info, err := os.Stat(filepath.Join(workDir, ".claude", "skills"))
-	return err == nil && info.IsDir()
+// Skill is always on it. Skill IS a built-in, so --tools gates it, and
+// every skill the CLI discovers — the repository's, the operator's own
+// under ~/.claude, an installed plugin's, the .agents ones gummi hands it
+// (claude_skills.go) — is invoked through it. A roster without Skill does
+// not narrow what the session is shown; it leaves the skills listed and
+// unreachable. gummi does not curate what a backend discovers (DESIGN
+// §4.1a), so this list cannot be where that curation quietly happens.
+func claudeStageTools() []string {
+	return []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit", "Skill"}
 }
 
 // claudeReadOnlyRoster is the same idea for a ReadOnly research session:
@@ -288,11 +267,12 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath)
 		args = append(args, "--strict-mcp-config", "--mcp-config", string(cfg))
 	}
-	// Forwarded workspace skills. The CLI can only be pointed at skills
-	// outside its project scope through a plugin, so gummi generates one
+	// Forwarded workspace skills and the .agents skills the CLI does not
+	// read on its own. The CLI can only be pointed at skills outside its
+	// own locations through a plugin, so gummi generates one
 	// (claude_skills.go) and loads it for this session alone. Nothing is
-	// written when nothing is forwarded. The temp tree is removed at
-	// Close, and on every failure between here and a started child.
+	// written when there is nothing to hand over. The temp tree is removed
+	// at Close, and on every failure between here and a started child.
 	pluginDir, skillRoot, err := claudeMaterializeSkills(opts)
 	if err != nil {
 		return nil, err
@@ -317,7 +297,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// built-ins only, so dropping this line would widen the prompt, never
 	// the permissions.
 	if c.supportsToolRoster() {
-		roster := claudeStageTools(opts.WorkDir, opts.SkillDirs)
+		roster := claudeStageTools()
 		if opts.ReadOnly {
 			roster = claudeReadOnlyRoster()
 		} else if opts.Watch {

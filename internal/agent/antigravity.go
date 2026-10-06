@@ -222,7 +222,7 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 		s.teardown()
 		return nil, err
 	}
-	if err := materializeAntigravitySkills(home.dir, opts.SkillDirs); err != nil {
+	if err := materializeAntigravitySkills(home.dir, antigravitySkillDirs(opts.SkillDirs)); err != nil {
 		a.mu.Unlock()
 		s.teardown()
 		return nil, err

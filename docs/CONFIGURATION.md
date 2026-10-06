@@ -112,11 +112,21 @@ review.
   there. `GUMMI_HEADLESS_CREDITS_PER_1K` prices a local endpoint's token
   spend into credits so it meters against the same envelope.
 
-gummi suppresses operator-level config that could hijack a stage (codex
-gets `--ignore-user-config`, claude gets `--strict-mcp-config` and a
-scrubbed session env). It does not suppress repo-level agent instructions:
-no adapter disables `AGENTS.md`, `CLAUDE.md` or project skills, because
-those are the repository's own guidance for agents working in it.
+Each backend keeps its own discovery of skills, plugins and extensions,
+at user and at repo scope, exactly as when you run that CLI yourself; no
+adapter disables `AGENTS.md`, `CLAUDE.md`, project skills or the
+operator's own skills and plugins. On top of that, `.agents/skills` — in
+the repository and in `~/.agents/skills` — reaches a card on every
+backend that carries skills: copilot, opencode and codex read it
+themselves (pi too, unverified), and gummi hands
+it to claude (as a plugin, so those skills appear as
+`gummi-skills:<name>`) and to antigravity (linked into its per-card home,
+with your `~/.gemini/config/skills`). Put a skill there and it works
+whichever backend a role is pointed at. See DESIGN §4.1a.
+
+The one operator-level thing gummi shadows is claude's MCP servers
+(`--strict-mcp-config`), so a broken user-side server cannot crash a
+stage, plus a scrubbed session env.
 
 A card's **consult** (a question asked beside its stage) runs in the main
 checkout, not the card's worktree. On claude, opencode and pi it runs

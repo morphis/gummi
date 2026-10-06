@@ -314,6 +314,22 @@ func (h *antigravityHome) writeMCPConfig(exe string) error {
 	return nil
 }
 
+// antigravitySkillDirs is what a session's redirected home links in: the
+// forwarded skills, then the operator's own user-scope skills — those under
+// their real ~/.gemini/config/skills and ~/.agents/skills. The redirected
+// HOME exists to keep agy's writes out of the operator's config, not to
+// hide the operator's skills from it; without these links a card on agy
+// met none of them while the same card on every other backend met them
+// all (DESIGN §4.1a). Repo skills need nothing: agy scans the worktree's
+// own .agents/skills itself.
+func antigravitySkillDirs(forwarded []string) []string {
+	dirs := withAgentsSkills(forwarded, "")
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, skillDirsUnder(filepath.Join(home, filepath.FromSlash(antigravitySkillsRelDir)))...)
+	}
+	return dirs
+}
+
 // materializeAntigravitySkills symlinks a session's forwarded skill
 // directories into the home's skill customization root, named by their
 // basename — agy discovers them there and reads SKILL.md (and reference

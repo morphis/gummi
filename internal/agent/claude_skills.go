@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 )
 
-// claude_skills.go materializes forwarded skill directories as a Claude
-// Code plugin, which is the only way to point that CLI at skills outside
-// its project scope.
+// claude_skills.go materializes forwarded skill directories, and the
+// .agents/skills ones the CLI never reads itself (agentsskills.go), as a
+// Claude Code plugin, which is the only way to point that CLI at skills
+// outside its own locations.
 //
 // The CLI's --plugin-dir loads a PLUGIN for the session, not a folder of
 // skills: a directory holding .claude-plugin/plugin.json, with its skills
@@ -27,9 +28,8 @@ import (
 //     CLI follows the links.
 //   - The plugin is loaded by the roster alone. Skill does not need to
 //     appear in --allowedTools: it is auto-approved, so gummi does not
-//     widen the allowlist to make forwarding work. claudeStageTools adds
-//     Skill to the roster when a session has skills to invoke; that is the
-//     whole permission story.
+//     widen the allowlist to make forwarding work. claudeStageTools keeps
+//     Skill on the roster; that is the whole permission story.
 //
 // Skills arrive namespaced by the plugin, i.e. gummi-skills:<name>.
 
@@ -38,14 +38,15 @@ import (
 // skill came from rather than looking like one of the repository's own.
 const claudeSkillPluginName = "gummi-skills"
 
-// claudeMaterializeSkills writes the plugin for opts.SkillDirs into a
-// fresh temp directory and returns the plugin directory to pass as
-// --plugin-dir. A session with no forwarded skills returns an empty path
-// and creates nothing — the ordinary case must touch no disk.
+// claudeMaterializeSkills writes the plugin for opts.SkillDirs and the
+// session's .agents skills into a fresh temp directory and returns the
+// plugin directory to pass as --plugin-dir. A session with neither
+// returns an empty path and creates nothing.
 //
 // The caller owns the returned root and removes it when the session ends.
 func claudeMaterializeSkills(opts SessionOpts) (pluginDir, root string, err error) {
-	if len(opts.SkillDirs) == 0 {
+	dirs := withAgentsSkills(opts.SkillDirs, opts.WorkDir)
+	if len(dirs) == 0 {
 		return "", "", nil
 	}
 	root, err = os.MkdirTemp("", "gummi-claude-skills-*")
@@ -53,7 +54,7 @@ func claudeMaterializeSkills(opts SessionOpts) (pluginDir, root string, err erro
 		return "", "", fmt.Errorf("claude adapter: creating skill plugin: %w", err)
 	}
 	pluginDir = filepath.Join(root, claudeSkillPluginName)
-	if err := writeClaudeSkillPlugin(pluginDir, opts.SkillDirs); err != nil {
+	if err := writeClaudeSkillPlugin(pluginDir, dirs); err != nil {
 		_ = os.RemoveAll(root)
 		return "", "", err
 	}

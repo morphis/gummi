@@ -369,10 +369,13 @@ func TestPiSendBusyAndFlags(t *testing.T) {
 				t.Fatal(err)
 			}
 			argv := strings.Split(strings.TrimSpace(string(data)), "\n")
-			for _, want := range []string{"--mode", "rpc", "--no-extensions", "--model", "test-model"} {
+			for _, want := range []string{"--mode", "rpc", "--model", "test-model"} {
 				if !sliceContains(argv, want) {
 					t.Errorf("pi args %v missing %q", argv, want)
 				}
+			}
+			if sliceContains(argv, "--no-extensions") {
+				t.Errorf("pi args %v switch off the operator's own extensions", argv)
 			}
 			return
 		case <-deadline:

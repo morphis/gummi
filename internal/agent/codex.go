@@ -245,8 +245,13 @@ func (s *codexSession) buildArgs(images []Image) ([]string, error) {
 	args := []string{
 		"exec", "--json", "--color", "never", "-m", s.model,
 		"-s", "workspace-write", "-c", `approval_policy="never"`,
-		"--skip-git-repo-check", "--ignore-user-config",
+		"--skip-git-repo-check",
 	}
+	// No --ignore-user-config: the operator's own codex config — its MCP
+	// servers, its skills, its profiles — loads as it does in a codex they
+	// run themselves, the way every other backend inherits its user scope
+	// (DESIGN §4.1a). What gummi needs pinned is pinned by flag and by the
+	// -c overrides here, and both win over the user's config.toml.
 	// With an MCP socket and a feature id to bind it to — the per-card
 	// stage session — register gummi's tool server via an inline TOML
 	// config override (`-c`), codex's only per-invocation MCP injection

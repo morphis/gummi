@@ -21,7 +21,7 @@ import (
 
 // Pi is an Agent backed by the pi coding agent's RPC mode:
 //
-//	pi --mode rpc --model <model> [--provider <provider>] [--no-extensions]
+//	pi --mode rpc --model <model> [--provider <provider>] [--extension <gummi tools>]
 //
 // One process per session (cwd = the feature's worktree); commands go to
 // the child's stdin as JSON lines, events stream back on stdout as JSON
@@ -159,7 +159,9 @@ func (p *Pi) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		return nil, errors.New("pi requires a model (provider/id, e.g. openrouter/z-ai/glm-flash-latest)")
 	}
 
-	args := []string{"--mode", "rpc", "--no-extensions"}
+	// No --no-extensions: the operator's and the repository's own pi
+	// extensions load, as every other backend's plugins do (DESIGN §4.1a).
+	args := []string{"--mode", "rpc"}
 	if provider := piProvider(); provider != "" {
 		args = append(args, "--provider", provider)
 	}
@@ -178,11 +180,9 @@ func (p *Pi) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
 		args = append(args, "--tools", strings.Join(piReadOnlyTools(), ","))
 	}
 	// gummi's tools over MCP: materialize the generated extension (see
-	// pi_extension.go) and hand it to pi explicitly — explicit --extension
-	// paths load even under --no-extensions, so a session whose worktree
-	// happens to carry project-local extensions still sees only what gummi
-	// built for it. Unbound sessions (no socket, or no feature id) get no
-	// extension and no flag, exactly as before.
+	// pi_extension.go) and hand it to pi explicitly, beside whatever
+	// extensions pi discovers on its own. Unbound sessions (no socket, or
+	// no feature id) get no extension and no flag, exactly as before.
 	extPath, err := piMaterializeExtension(opts)
 	if err != nil {
 		return nil, err
