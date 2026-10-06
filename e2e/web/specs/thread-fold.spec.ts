@@ -10,7 +10,7 @@ import { expect, test } from '../fixtures/test';
 // a reload forgets, so cards are switched with rail clicks, never reloads.
 
 test.describe('the fold a person set on a thread row survives redraws', () => {
-  test('an unfolded activity row stays open as its calls land', async ({ pairedPage: page, server, api }, info) => {
+  test('a folded activity row stays folded as its calls land', async ({ pairedPage: page, server, api }, info) => {
     test.skip(info.project.name !== 'desktop', 'the fold memory is page state; one viewport is enough');
     const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[fold] Keep the row open' })).json;
     const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
@@ -18,26 +18,29 @@ test.describe('the fold a person set on a thread row survives redraws', () => {
     await expect(page.getByTestId('card-id')).toHaveText(c.id);
     await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token });
 
-    // the plan stage's first activity row draws with its read call running;
-    // the person unfolds it while it is
+    // the plan stage's first activity row draws open with its read call
+    // running; the person folds it while it is
     const row = page.getByTestId('activity').first();
     await expect(row).toBeVisible({ timeout: 30_000 });
     await expect(row).toContainText('greet.go');
-    await row.locator('summary').click();
     await expect(row).toHaveAttribute('open', '');
+    await row.locator(':scope > summary').click();
+    await expect(row).not.toHaveAttribute('open', '');
 
     // the call settles and a second one appends: the row is redrawn twice,
-    // and the person's open state survives both
+    // and the person's folded state survives both
     await expect(row.locator('li.running')).toHaveCount(0);
-    await expect(row).toHaveAttribute('open', '');
+    await expect(row).not.toHaveAttribute('open', '');
     await expect(row).toContainText('Greet');
-    await expect(row).toHaveAttribute('open', '');
+    await expect(row).not.toHaveAttribute('open', '');
 
     // answering the question sends the architect on: the new activity row
-    // appears and the first row is still open, while the session is live
+    // appears open, and the first row is still folded, while the session
+    // is live
     await page.getByTestId('decision-option-1').click();
     await expect(page.getByTestId('activity')).toHaveCount(2, { timeout: 15_000 });
-    await expect(page.getByTestId('activity').first()).toHaveAttribute('open', '');
+    await expect(page.getByTestId('activity').first()).not.toHaveAttribute('open', '');
+    await expect(page.getByTestId('activity').last()).toHaveAttribute('open', '');
   });
 
   test('a folded task list stays folded across the next live delta', async ({ pairedPage: page, server, api }, info) => {

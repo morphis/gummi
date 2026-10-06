@@ -10,11 +10,12 @@
 // polite live region, so a screen reader hears new items and not every
 // streamed token.
 
-import { $, h, clear, clock, dur, cr, initials, ROLE, decisionWord, decisionColor, plural } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, clock, dur, cr, ROLE, decisionWord, decisionColor, plural } from './dom.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { draftHero } from './session.js?v=__ASSET_V__'
-import { attachmentURL, post, cardPath } from './api.js?v=__ASSET_V__'
+import { attachmentURL, post, get, cardPath } from './api.js?v=__ASSET_V__'
+import { setTab } from './panel.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 
@@ -29,6 +30,56 @@ export function initThread () {
   on(['live'], () => { if (state.thread && !state.thread.items.length) render() })
   on(['live', 'card', 'board'], renderLive)
   $('#thread').addEventListener('toggle', (e) => recordFold(e.target), true)
+  // a thread scrolled up off its newest line offers the way back down
+  const sc = $('#thread')
+  const btn = $('#to-bottom')
+  const showBtn = () => { btn.hidden = atBottom(sc) }
+  sc.addEventListener('scroll', showBtn, { passive: true })
+  new ResizeObserver(showBtn).observe($('.thread-inner'))
+  btn.addEventListener('click', () => {
+    sc.scrollTo({ top: sc.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  })
+  on(['sel', 'cardRev'], loadChanges)
+  // the card's head arrives after the selection: load once it says what
+  // kind of card this is
+  on(['card'], () => { if (state.card && state.card.id !== changesCard) loadChanges() })
+  on(['live'], () => {
+    // a turn that just ended has usually changed files
+    const busy = !!state.live?.freeform?.busy
+    if (wasBusy && !busy) loadChanges()
+    wasBusy = busy
+  })
+}
+
+// ---- the changed files ----
+// A session's working tree, summed up above the composer: how many files
+// the branch has changed and by how much, unfolding to the list. Each
+// opens the Diff tab.
+let wasBusy = false
+let changesFor = 0
+let changesCard = null
+async function loadChanges () {
+  const el = $('#changes')
+  const id = state.sel
+  changesCard = state.card?.id || null
+  const n = ++changesFor
+  if (!id || state.card?.stage !== 'open') { el.hidden = true; return }
+  let d
+  try { d = await get(cardPath(id, 'diff')) } catch { d = null }
+  if (n !== changesFor || id !== state.sel) return
+  const files = d?.files || []
+  el.hidden = !files.length
+  if (!files.length) return
+  const add = files.reduce((a, f) => a + (f.add || 0), 0)
+  const del = files.reduce((a, f) => a + (f.del || 0), 0)
+  const open = el.open
+  clear(el).append(
+    h('summary', { testid: 'changes-summary' }, h('b', null, plural(files.length, 'file')), ' changed',
+      h('span', { class: 'add' }, ` +${add}`), h('span', { class: 'del' }, ` −${del}`)),
+    h('ul', null, files.map(f => h('li', null,
+      h('button', { type: 'button', testid: 'changes-file', onclick: () => setTab('diff') }, h('span', { class: 'p' }, f.path),
+        h('span', { class: 'add' }, `+${f.add || 0}`), h('span', { class: 'del' }, `−${f.del || 0}`))))))
+  el.open = open
 }
 
 // ---- the person's folds ----
@@ -279,15 +330,37 @@ function message (it) {
   // it claims no read-only here, since the log does not record whether
   // the backend that answered could confine it
   const consult = it.via === 'consult'
-  return h('div', { class: ['msg', it.stage && `st-${it.stage}`], testid: consult ? 'thread-consult' : null },
-    h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),
-    h('div', null,
-      h('div', { class: 'who' }, h('b', null, role),
-        consult ? h('span', { class: 'via' }, 'consult') : null,
-        it.flavor && it.flavor !== 'work' ? h('span', { class: 'via' }, it.flavor) : null,
-        it.model ? h('span', { class: 'mono' }, it.model) : null,
-        h('span', { class: 'mono' }, clock(it.time))),
-      h('div', { class: 'body' }, md(it.text))))
+  return h('div', { class: ['msg reply', it.stage && `st-${it.stage}`], testid: consult ? 'thread-consult' : 'reply' },
+    h('div', { class: 'who' }, h('b', null, role),
+      consult ? h('span', { class: 'via' }, 'consult') : null,
+      it.flavor && it.flavor !== 'work' ? h('span', { class: 'via' }, it.flavor) : null),
+    h('div', { class: 'body' }, md(it.text)),
+    replyFoot(it))
+}
+
+// replyFoot is the line under an agent's reply: what it ran on, when it
+// was written and how long the turn took, and a copy of its words.
+function replyFoot (it) {
+  return h('div', { class: 'foot', testid: 'reply-foot' },
+    it.model ? h('span', { class: 'mono', testid: 'reply-model' }, it.model) : null,
+    it.ms ? h('span', { class: 'mono', testid: 'reply-took', title: 'how long the turn took' }, dur(it.ms)) : null,
+    it.time ? h('span', { class: 'mono' }, clock(it.time)) : null,
+    copyButton(it.text, 'Copy reply', 'reply-copy'))
+}
+
+// copyButton puts text on the clipboard and says so in place.
+function copyButton (text, title, testid) {
+  const b = h('button', { type: 'button', class: 'copy', title, 'aria-label': title, testid }, 'copy')
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    try {
+      await navigator.clipboard.writeText(String(text || ''))
+      b.textContent = 'copied'
+    } catch { b.textContent = 'copy failed' }
+    setTimeout(() => { b.textContent = 'copy' }, 1500)
+  })
+  return b
 }
 
 // you is a line a person typed. It is headed with the name it was sent
@@ -296,13 +369,21 @@ function message (it) {
 // in another's mouth on a board several people share.
 function you (it) {
   const who = it.by || 'you'
-  return h('div', { class: 'msg', testid: it.via === 'consult' ? 'thread-consult' : null },
-    h('div', { class: 'av you', 'aria-hidden': 'true' }, it.by ? initials(it.by) : 'you'),
-    h('div', null,
-      h('div', { class: 'who' }, h('b', null, who), h('span', { class: 'mono' }, clock(it.time)), it.via ? h('span', { class: 'via' }, it.via) : null,
-        it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null),
-      h('div', { class: 'body' }, md(it.text)),
-      attachmentThumbs(it.attachments)))
+  const text = String(it.text || '')
+  // a long prompt is cut to a few lines, with a way to read it whole
+  const long = text.split('\n').length > 12 || text.length > 900
+  const body = h('div', { class: ['body', long && 'clamped'] }, md(text))
+  const more = long
+    ? h('button', { type: 'button', class: 'more', testid: 'bubble-more', onclick: () => { more.textContent = body.classList.toggle('clamped') ? 'show more' : 'show less' } }, 'show more')
+    : null
+  return h('div', { class: 'msg mine', testid: it.via === 'consult' ? 'thread-consult' : 'bubble' },
+    h('div', { class: 'bubble' }, body, more, attachmentThumbs(it.attachments)),
+    h('div', { class: 'who' },
+      it.via ? h('span', { class: 'via' }, it.via) : null,
+      h('b', { title: 'who sent it' }, who),
+      it.time ? h('span', { class: 'mono' }, clock(it.time)) : null,
+      copyButton(text, 'Copy message', 'bubble-copy'),
+      it.rewind ? h('button', { type: 'button', class: 'rewind', testid: 'turn-rewind', title: 'Take the conversation back to before this message and edit it. The branch keeps its commits.', onclick: it.rewind }, 'rewind') : null))
 }
 
 // attachmentThumbs renders a you turn's images as thumbnails linking to
@@ -315,21 +396,59 @@ function attachmentThumbs (refs) {
       h('img', { src: attachmentURL(r.id), alt: r.name || 'attached image', loading: 'lazy' }))))
 }
 
-function toolRows (list) {
-  return h('ol', null, list.map(t => {
-    const label = String(t.label || '').replace(/\s+/g, ' ').trim()
-    const named = label.startsWith(t.tool + ' ') || label === t.tool
-    const rest = named ? label.slice(t.tool.length).trim() : label
-    return h('li', { class: t.status || null, title: t.output || null }, t.tool, ' ',
-      h('span', null, [rest, t.detail].filter(Boolean).join(' ')),
-      t.ms ? h('span', { class: 'ms' }, dur(t.ms)) : null,
-      t.status === 'fail' && t.output ? h('pre', { class: 'tool-out' }, t.output) : null)
-  }))
+// TOOL_KIND sorts a tool by what it does, for the row's mark and verb.
+const TOOL_KIND = [
+  [/^(edit|write|str_replace|apply_patch|patch|multiedit|create|notebookedit)/i, 'edit', '✎', 'Edited'],
+  [/^(read|view|cat|open)/i, 'read', '◱', 'Read'],
+  [/^(grep|glob|search|find|ls|list|rg)/i, 'search', '⌕', 'Searched'],
+  [/^(bash|shell|exec|run|command|terminal)/i, 'shell', '›_', 'Ran'],
+  [/^(web|fetch|http|browse)/i, 'web', '⇄', 'Fetched'],
+  [/^(todo|task)/i, 'task', '☐', 'Updated tasks'],
+  [/^(ask|question)/i, 'ask', '?', 'Asked']
+]
+function toolKind (tool) {
+  const t = String(tool || '')
+  const k = TOOL_KIND.find(([re]) => re.test(t))
+  return k ? { kind: k[1], mark: k[2], verb: k[3] } : { kind: 'other', mark: '◇', verb: t || 'tool' }
 }
 
+// toolRow is one call: its mark, a verb, what it touched, how long it took.
+// A call with output opens to show it (with a copy); one that touched a
+// file says which, so it can be found in the Diff tab.
+function toolRow (t) {
+  const label = String(t.label || '').replace(/\s+/g, ' ').trim()
+  const named = label.startsWith(t.tool + ' ') || label === t.tool
+  const rest = named ? label.slice(t.tool.length).trim() : label
+  const target = rest === t.detail || rest.includes(t.detail || '\0') ? rest : [rest, t.detail].filter(Boolean).join(' ')
+  const k = toolKind(t.tool)
+  const head = [
+    h('span', { class: 'mark', 'aria-hidden': 'true' }, k.mark),
+    h('b', null, k.kind === 'other' ? t.tool : k.verb),
+    h('span', { class: 'target', title: target }, target),
+    t.status === 'running' ? h('span', { class: 'spinner sm' }) : null,
+    t.ms ? h('span', { class: 'ms' }, dur(t.ms)) : null
+  ]
+  const cls = ['tool', `k-${k.kind}`, t.status || null]
+  if (!t.output) return h('li', { class: cls, testid: 'tool-row' }, h('div', { class: 'thead' }, ...head))
+  const out = String(t.output)
+  const cut = out.startsWith('…(truncated)')
+  const el = h('details', { class: 'tcall' },
+    h('summary', { class: 'thead' }, ...head),
+    h('div', { class: 'tout' },
+      h('div', { class: 'tbar' }, cut ? h('span', { class: 'cut' }, 'truncated') : null, copyButton(out, 'Copy output', 'tool-copy')),
+      h('pre', { class: ['tool-out', t.status === 'fail' && 'fail'], testid: 'tool-output' }, out)))
+  if (t.status === 'fail') el.open = true
+  return h('li', { class: cls, testid: 'tool-row' }, el)
+}
+
+// ACTIVITY_SHOWN is how many of an activity's newest steps show before
+// the older ones fold into "+N more".
+const ACTIVITY_SHOWN = 6
+
 // activity is everything the agent did between two messages — its tool calls
-// and thoughts, in order — folded into one row that says what it came to.
-// fold is the row's identity, what the person's fold is remembered by.
+// and thoughts, in order — as a list of steps, open by default, its summary
+// saying what it came to. fold is the row's identity, what the person's
+// fold is remembered by.
 export function activity (items, fold) {
   const calls = items.flatMap(i => i.tools || [])
   const thoughts = items.filter(i => i.t === 'message').length
@@ -340,19 +459,30 @@ export function activity (items, fold) {
   // doesn't spin: there, but not "busy", so a reply stays obviously safe
   // to send.
   const watching = calls.some(t => t.status === 'watching')
-  const parts = []
+  const parts = [h('b', null, 'Activity')]
   if (calls.length) parts.push(plural(calls.length, 'tool call'))
   if (fails) parts.push(h('span', { class: 'fails' }, `${fails} failed`))
   if (thoughts) parts.push(plural(thoughts, 'thought'))
   if (watching) parts.push(h('span', { class: 'watching' }, 'watching'))
   else if (inFlight) parts.push(h('span', { class: 'shimmer' }, String(inFlight.label || inFlight.tool).replace(/\s+/g, ' ').trim()))
+  const steps = items.flatMap(it => it.t === 'tools'
+    ? (it.tools || []).map(toolRow)
+    : [h('li', { class: 'tool thought', testid: 'thought-row' },
+        h('details', { class: 'tcall' },
+          h('summary', { class: 'thead' }, h('span', { class: 'mark', 'aria-hidden': 'true' }, '∴'), h('b', null, 'Thought'),
+            h('i', { class: 'target' }, firstLine(it.text))),
+          h('div', { class: 'thought-body' }, md(it.text))))])
+  const hidden = steps.length > ACTIVITY_SHOWN ? steps.slice(0, steps.length - ACTIVITY_SHOWN) : []
+  const list = h('ol', { class: 'steps' }, ...steps.slice(hidden.length))
+  if (hidden.length) {
+    const more = h('li', { class: 'more-steps' }, h('button', { type: 'button', testid: 'activity-more', onclick: () => more.replaceWith(...hidden) }, `+${hidden.length} more…`))
+    list.prepend(more)
+  }
   const el = h('details', { class: 'tools activity', testid: 'activity' },
     h('summary', null, parts.flatMap((p, i) => i ? [' · ', p] : [p])),
-    h('div', { class: 'body' }, items.map(it => it.t === 'tools'
-      ? toolRows(it.tools || [])
-      : h('div', { class: 'thought' }, md(it.text)))))
-  applyFold(el, fold, false)
-  return h('div', { class: 'indent' }, el)
+    h('div', { class: 'body' }, list))
+  applyFold(el, fold, true)
+  return el
 }
 
 function receipt (it) {
@@ -530,7 +660,7 @@ function tasks (list, kind) {
     h('ul', { class: 'body' }, ...list.map(t =>
       h('li', { class: ['task', t.status] }, `${TASK_MARK[t.status] || '○'} ${t.text}`))))
   applyFold(el, kind, done < list.length)
-  return h('div', { class: 'indent' }, el)
+  return el
 }
 
 // activityItems shapes a live run of tool and thinking turns the way the
@@ -555,7 +685,7 @@ function conversation (kind, c, role, stage) {
   let start = 0
   const flush = () => {
     if (!run.length) return
-    const sig = run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}` : `k|${(t.text || '').length}`).join(';')
+    const sig = run.map(t => t.tool ? `${t.tool.status}|${t.tool.label}|${t.tool.ms || 0}|${(t.tool.output || '').length}` : `k|${(t.text || '').length}`).join(';')
     const key = `${kind}:act:${start}`
     out.push(cached(key, sig, () => activity(activityItems(run), key)))
     run = []
@@ -572,21 +702,26 @@ function conversation (kind, c, role, stage) {
     const back = kind === 'freeform' && t.author === 'you' && !c.busy
       ? turns.slice(i).filter(x => x.author === 'you').length
       : 0
-    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${back}`
+    // a reply's turn took from the person's line before it to the reply
+    let ms = 0
+    if (t.author !== 'you' && t.time) {
+      const asked = turns.slice(0, i).reverse().find(x => x.author === 'you')
+      if (asked?.time) ms = Math.max(0, new Date(t.time) - new Date(asked.time))
+    }
+    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${back}|${c.model || ''}`
     const mkey = `${kind}:${i}`
     out.push(cached(mkey, sig, () => t.author === 'you'
-      ? you({ text: t.text, by: t.by, rewind: back ? () => rewind(state.sel, back) : null })
-      : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey })))
+      ? you({ text: t.text, by: t.by, time: t.time, rewind: back ? () => rewind(state.sel, back) : null })
+      : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey, time: t.time, ms, model: t.author === 'gummi' ? null : c.model })))
   })
   flush()
   if (c.streaming) {
-    out.push(h('div', { class: ['msg live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
-      h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),
+    out.push(h('div', { class: ['msg reply live-msg', stage && `st-${stage}`], testid: 'live-streaming' },
       // a message left half-written when its session stopped (paused,
       // parked, failed) says it was cut off, not that it is still coming
-      h('div', null, h('div', { class: 'who' }, h('b', null, role), c.busy
+      h('div', { class: 'who' }, h('b', null, role), c.busy
         ? h('span', { class: 'mono' }, 'writing')
-        : h('span', { class: 'mono badc', testid: 'live-interrupted' }, 'interrupted')), h('div', { class: 'body' }, md(c.streaming)))))
+        : h('span', { class: 'mono badc', testid: 'live-interrupted' }, 'interrupted')), h('div', { class: 'body' }, md(c.streaming))))
   }
   return out
 }

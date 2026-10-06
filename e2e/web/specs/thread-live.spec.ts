@@ -3,8 +3,8 @@ import { shot } from '../fixtures/shots';
 
 // The running turn is drawn apart from the settled thread, and it must
 // read like it: its prompt, tool calls, message and status line spaced as
-// the settled items are, and the status line's spinner in the avatar
-// column, on the first line of the words beside it.
+// the settled items are, and the status line's spinner on the reply's own
+// left edge, on the first line of the words beside it.
 
 test.use({ workspaceEnv: { GUMMI_E2E_SLOW_SECONDS: '30' } });
 
@@ -22,7 +22,6 @@ test('the live turn is spaced and aligned as the thread is', async ({ pairedPage
     const live = document.querySelector('#thread-live')!;
     const kids = [...live.children].map((e) => e.getBoundingClientRect());
     const gaps = kids.slice(1).map((r, i) => Math.round(r.top - kids[i].bottom));
-    const av = document.querySelector('[data-testid="live-streaming"] .av')!.getBoundingClientRect();
     const line = document.querySelector('[data-testid="live"]')!;
     const sp = line.querySelector('.spinner') as HTMLElement;
     const words = line.querySelector('.spinner + span')!.getBoundingClientRect();
@@ -31,8 +30,7 @@ test('the live turn is spaced and aligned as the thread is', async ({ pairedPage
     const spTop = sp.offsetTop - (line as HTMLElement).offsetTop;
     return {
       gaps,
-      spinnerCentre: line.getBoundingClientRect().left + spLeft + sp.offsetWidth / 2,
-      avCentre: av.left + av.width / 2,
+      spinnerLeft: line.getBoundingClientRect().left + spLeft,
       spinnerTop: spTop,
       lineHeight: parseFloat(getComputedStyle(line).lineHeight),
       wordsLeft: words.left,
@@ -40,9 +38,9 @@ test('the live turn is spaced and aligned as the thread is', async ({ pairedPage
     };
   });
   for (const g of geo.gaps) expect(g).toBeGreaterThanOrEqual(10);
-  expect(Math.abs(geo.spinnerCentre - geo.avCentre)).toBeLessThanOrEqual(1.5);
+  expect(Math.abs(geo.spinnerLeft - geo.bodyLeft)).toBeLessThanOrEqual(1.5);
   expect(geo.spinnerTop).toBeLessThan(geo.lineHeight);
-  expect(Math.abs(geo.wordsLeft - geo.bodyLeft)).toBeLessThanOrEqual(1.5);
+  expect(geo.wordsLeft).toBeGreaterThan(geo.bodyLeft);
   await shot(page, info, 'thread-live');
 });
 

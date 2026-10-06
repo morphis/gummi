@@ -239,13 +239,17 @@ type Composer struct {
 	// a freeform card's repository command files, then the card's own
 	// vocabulary (the actions its menu offers, named the way the TUI's "/"
 	// menu names them) — best first; the page offers them above the
-	// composer, and picking one puts "/name " in the field.
+	// composer, and picking one puts "/name " in the field. A line ending
+	// in "@word" is offered the worktree's files the word could name
+	// instead, and picking one replaces just that word with "@path ".
 	Completions []Completion `json:"completions,omitempty"`
 }
 
-// Completion is one command a composer line could be completed to.
+// Completion is one command (or, for an "@word", one file) a composer line
+// could be completed to.
 type Completion struct {
-	// Text is what picking it puts in the field: "/name ".
+	// Text is what picking it puts in the field: "/name ", or "@path " in
+	// place of the "@word" the line ends with.
 	Text   string `json:"text"`
 	Detail string `json:"detail,omitempty"`
 }

@@ -764,6 +764,10 @@ func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
 		if !strings.ContainsAny(word, " \t\n") {
 			out.Completions = append(out.Completions, m.cardSlashCompletions(r, word)...)
 		}
+	} else if word, ok := mentionWord(text); ok {
+		if dir, ok := filesDir(context.Background(), m.wt, r.F); ok {
+			out.Completions = fileCompletions(dir, word)
+		}
 	}
 	return out
 }

@@ -328,7 +328,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 #thread-live{display:flex;flex-direction:column;gap:14px}
 #thread-live:empty{display:none}
 .live{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:20px;padding:4px 0}
-.live > .spinner{margin:3px 7px 0}
+.live > .spinner{margin:3px 0 0}
 .live .spent{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--fg3)}
 .live-msg .body{color:var(--fg2)}
 .shimmer{background:linear-gradient(90deg,var(--fg3) 0%,var(--s-plan) 30%,var(--accent) 50%,var(--s-verify) 70%,var(--fg3) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sh 2.4s linear infinite;font-weight:500}
@@ -336,7 +336,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .spinner{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:spin .8s linear infinite;flex-shrink:0}
 .spinner.still{animation:none}
 /* a watched run with nothing in flight: a mark that does not read as a stuck spinner */
-.live > .idle{width:14px;margin:0 7px;text-align:center;color:var(--fg3);flex-shrink:0}
+.live > .idle{width:14px;margin:0;text-align:center;color:var(--fg3);flex-shrink:0}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* a running tool call, inside a group a busy session's own spinner already
    heads — its own mark so the two in-flight things on screen don't read
@@ -981,3 +981,63 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .plan .force .cmd button{margin-left:auto;color:var(--accent);font-family:var(--ui);font-size:12px;flex-shrink:0}
 .plan .btn[disabled]{opacity:.5;cursor:default}
 .land-method{align-self:flex-start;max-width:100%;font-size:13px;color:var(--fg2)}
+
+/* ---- the conversation's shape: the person's bubbles, the agent's replies ---- */
+.msg.mine{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.msg.mine .bubble{max-width:min(85%,620px);background:color-mix(in srgb,var(--accent) 10%,var(--sunk));border:1px solid color-mix(in srgb,var(--accent) 18%,transparent);border-radius:14px 14px 4px 14px;padding:8px 12px}
+.msg.mine .bubble .body{margin:0;white-space:pre-wrap}
+.msg.mine .bubble .body.clamped{max-height:15em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent)}
+.msg.mine .bubble .more{display:block;margin-top:4px;font-size:12px;color:var(--accent)}
+.msg.mine .who{font-size:11.5px;justify-content:flex-end}
+.msg.mine .who b{color:var(--fg3);font-weight:500}
+.msg.mine .who .rewind{margin-left:0}
+.msg.reply{display:block}
+.msg.reply > .who{margin-bottom:2px}
+.msg .foot{display:flex;gap:10px;align-items:center;margin-top:6px;font-size:11.5px;color:var(--fg3)}
+.msg .copy{padding:0 6px;border-radius:6px;font-size:11px;color:var(--fg3);opacity:0}
+.msg:hover .copy,.msg .copy:focus-visible{opacity:1}
+.msg .copy:hover{background:var(--line);color:var(--fg)}
+@media (hover:none){.msg .copy,.msg .who .rewind{opacity:1}}
+
+/* ---- activity: one row per step ---- */
+.tools.activity summary b{color:var(--fg2);font-weight:600}
+.tools.activity .body{padding:2px 6px 6px}
+.tools.activity ol.steps{list-style:none;margin:0;padding:0;font-family:inherit;font-size:12.5px}
+.tools.activity li.tool{padding:0}
+.tools.activity .thead{display:flex;gap:8px;align-items:center;padding:3px 4px;border-radius:6px;min-width:0;color:var(--fg2)}
+.tools.activity summary.thead{list-style:none;cursor:pointer;font-size:12.5px}
+.tools.activity summary.thead::before{content:none}
+.tools.activity summary.thead::-webkit-details-marker{display:none}
+.tools.activity summary.thead:hover{background:var(--sunk)}
+.tools.activity .thead .mark{width:18px;flex:none;text-align:center;font-family:var(--mono);font-size:11px;color:var(--fg3)}
+.tools.activity .thead b{font-weight:600;color:var(--fg);flex:none}
+.tools.activity .thead .target{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg3);font-family:var(--mono);font-size:12px}
+.tools.activity .thead i.target{font-family:inherit}
+.tools.activity .thead .ms{margin-left:auto;flex:none;color:var(--fg3);font-family:var(--mono);font-size:11px}
+.tools.activity li.fail .thead b,.tools.activity li.fail .mark{color:var(--err)}
+.tools.activity li.running .thead b{color:var(--accent)}
+.tools.activity .tout{margin:2px 0 6px 26px}
+.tools.activity .tbar{display:flex;gap:8px;justify-content:flex-end;font-size:11px;color:var(--fg3)}
+.tools.activity .tbar .copy{opacity:1}
+.tools.activity pre.tool-out{max-height:260px;overflow:auto;color:var(--fg2)}
+.tools.activity pre.tool-out.fail{color:var(--err)}
+.tools.activity .thought-body{margin:2px 0 6px 26px;color:var(--fg3);font-size:12.5px;font-style:italic}
+.tools.activity .more-steps button{padding:2px 4px 2px 30px;font-size:12px;color:var(--fg3)}
+.tools.activity .more-steps button:hover{color:var(--fg)}
+.spinner.sm{width:10px;height:10px}
+
+/* ---- above the composer: the way back down, and the changed files ---- */
+.dock-inner{position:relative}
+.to-bottom{position:absolute;top:-46px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--fg2);box-shadow:0 2px 8px rgb(0 0 0 / .15);z-index:2}
+.to-bottom:hover{color:var(--fg)}
+.changes{border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--fg2)}
+.changes summary{cursor:pointer;padding:5px 10px;list-style:none}
+.changes summary::-webkit-details-marker{display:none}
+.changes summary::before{content:"▸ ";font-size:10px}
+.changes[open] summary::before{content:"▾ "}
+.changes .add{color:var(--add-fg)}
+.changes .del{color:var(--del-fg)}
+.changes ul{list-style:none;margin:0;padding:2px 6px 6px;max-height:160px;overflow:auto;border-top:1px solid var(--line)}
+.changes li button{display:flex;gap:8px;width:100%;text-align:left;padding:2px 4px;border-radius:5px;font-family:var(--mono);font-size:12px}
+.changes li button:hover{background:var(--sunk)}
+.changes li .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}

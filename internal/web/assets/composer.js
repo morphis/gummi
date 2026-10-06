@@ -248,8 +248,10 @@ function current () {
 function complete (c) {
   if (!c) return
   const input = $('#composer-input')
-  input.value = c.text
-  set({ draft: c.text })
+  // a file replaces only the "@word" the line ends with
+  const text = c.text.startsWith('@') ? state.draft.replace(/@\S*$/, '') + c.text : c.text
+  input.value = text
+  set({ draft: text })
   offered = []
   autosize()
   input.focus()
@@ -265,8 +267,11 @@ function renderCompletions (c) {
   const box = $('#composer-complete')
   const draft = state.draft || ''
   if (c) offered = c.completions || []
-  else if (!/^\/\S*$/.test(draft)) offered = []
-  else offered = offered.filter((o) => o.text.toLowerCase().startsWith(draft.toLowerCase()))
+  else if (/^\/\S*$/.test(draft)) offered = offered.filter((o) => o.text.toLowerCase().startsWith(draft.toLowerCase()))
+  else if (/(^|\s)@\S*$/.test(draft)) {
+    const w = draft.match(/@(\S*)$/)[1].toLowerCase()
+    offered = offered.filter((o) => o.text.startsWith('@') && o.text.toLowerCase().includes(w))
+  } else offered = []
   if (pick >= offered.length) pick = 0
   clear(box)
   box.hidden = offered.length === 0
@@ -328,8 +333,8 @@ function renderSays () {
 function placeholder () {
   if (state.sessionDraft) return 'What should it do? The first message starts the session'
   const s = state.card?.session
-  if (s && state.card.stage === 'open') return `Message ${s.backend || 'the agent'}, or type a command`
-  return 'Message the agent, or type a command'
+  if (s && state.card.stage === 'open') return `Message ${s.backend || 'the agent'} — / for commands, @ for files`
+  return 'Message the agent — / for commands, @ for files'
 }
 
 async function submitDraft (text, atts = []) {

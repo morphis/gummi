@@ -29,13 +29,14 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
   await expect(page.getByTestId('thread')).toContainText('Done: noted it in NOTES.md.', { timeout: 30_000 });
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 10_000 });
   await expect(page.getByTestId('decision-question').filter({ hasText: 'working on a turn' })).toHaveCount(0);
-  // what the agent thought is there, folded behind its summary, and the
-  // call it made settled with an outcome rather than hanging unresolved
+  // what the agent did is listed open, one row per step: the thought
+  // previewed on its row, and the call it made settled with an outcome
+  // rather than hanging unresolved
   const activity = page.getByTestId('activity').last();
   await expect(activity).toContainText('thought');
-  await expect(activity).not.toHaveAttribute('open', '');
-  await activity.locator('summary').click();
-  await expect(activity).toContainText('The ask belongs in NOTES.md');
+  await expect(activity).toHaveAttribute('open', '');
+  await expect(activity.getByTestId('thought-row')).toContainText('The ask belongs in NOTES.md');
+  await expect(activity.getByTestId('tool-row').first()).toBeVisible();
   const live = (await api('GET', `/api/cards/${id}/live`)).json;
   const turns = JSON.stringify(live.freeform?.turns ?? []);
   expect(turns).toContain('"author":"thinking"');

@@ -120,7 +120,10 @@ type ToolCall struct {
 	// never reported one.
 	Status string `json:"status"`
 	Ms     int64  `json:"ms,omitempty"`
-	// Output is kept for a failed call only: the tail that says why.
+	// Output is the tail of what the call returned: on a settled thread
+	// item, a failed call's only (the part that says why); on a live
+	// turn, any settled call's, so the page can show it when the call is
+	// opened.
 	Output string `json:"output,omitempty"`
 }
 
@@ -214,6 +217,8 @@ type Turn struct {
 	// By names the person behind a "you" turn, when it carried a name.
 	By   string `json:"by,omitempty"`
 	Text string `json:"text,omitempty"`
+	// Time is when the turn was written, when the session recorded it.
+	Time time.Time `json:"time,omitzero"`
 	// Tool is set on a tool call's turn.
 	Tool *ToolCall `json:"tool,omitempty"`
 }

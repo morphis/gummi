@@ -224,7 +224,7 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 		msg := tr[i]
 		if msg.Author == engine.AuthorTool {
 			c := webToolCall(msg, i == inflight)
-			turns = append(turns, webapi.Turn{Author: "tool", Tool: &c})
+			turns = append(turns, webapi.Turn{Author: "tool", Tool: &c, Time: msg.At})
 			continue
 		}
 		if msg.Author == engine.AuthorTasks {
@@ -234,6 +234,7 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 			Author: threadfold.AuthorLabel(string(msg.Author), string(snap.Role)),
 			By:     state.PersonName(msg.By),
 			Text:   boundTail(threadfold.Sanitize(msg.Content), webapi.LiveText),
+			Time:   msg.At,
 		})
 	}
 	return turns, streaming, tool
@@ -251,9 +252,13 @@ func webToolCall(msg engine.Message, inflight bool) webapi.ToolCall {
 		tool, detail = strings.TrimSpace(t), strings.TrimSpace(d)
 	}
 	c := webapi.ToolCall{Tool: tool, Label: label, Detail: detail}
+	if !msg.At.IsZero() && msg.DoneAt.After(msg.At) {
+		c.Ms = msg.DoneAt.Sub(msg.At).Milliseconds()
+	}
 	switch msg.ToolStatus {
 	case engine.ToolOK:
 		c.Status = "ok"
+		c.Output = boundTail(threadfold.Sanitize(msg.ToolOutput), webapi.LiveText)
 	case engine.ToolFail:
 		c.Status = "fail"
 		c.Output = boundTail(threadfold.Sanitize(msg.ToolOutput), webapi.LiveText)
