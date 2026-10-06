@@ -105,6 +105,38 @@ test('a line sent mid-turn is queued and can be taken back', async ({ pairedPage
   await expect(page.getByTestId('thread')).toContainText('first queued line', { timeout: 30_000 });
 });
 
+// A line typed and sent while the one before it is still on its way is
+// neither wiped when that send answers nor dropped: it goes next.
+test('a line sent while the last is still on its way is not lost', async ({ pairedPage: page, server, api }, info) => {
+  test.setTimeout(90_000);
+  test.skip(info.project.name !== 'desktop', 'the composer’s rule is the same at every width');
+  const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the rounding' })).json?.id);
+  await page.goto(`${server.url}/#${id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
+
+  // hold the first send's answer until the second line has been typed
+  let release!: () => void;
+  const held = new Promise<void>((r) => { release = r });
+  await page.route(`**/api/cards/${id}/send`, async (route) => {
+    await held;
+    await route.continue();
+  }, { times: 1 });
+  const sent: string[] = [];
+  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/send')) sent.push(JSON.parse(r.postData() || '{}').text) });
+
+  const input = page.getByTestId('composer-input');
+  await input.fill('alpha line');
+  await input.press('Enter');
+  await expect.poll(() => sent).toEqual(['alpha line']);
+  await input.fill('beta line');
+  await input.press('Enter');
+  release();
+  await expect.poll(() => sent).toEqual(['alpha line', 'beta line']);
+  await expect(input).toHaveValue('');
+  await expect(page.getByTestId('thread')).toContainText('beta line', { timeout: 30_000 });
+});
+
 // Rewind takes the conversation back to before one of the person's
 // messages and puts it in the composer to edit; the branch is not rewound,
 // and the session says so.

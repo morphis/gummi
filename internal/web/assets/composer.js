@@ -27,6 +27,8 @@ let classify = true // POST …/composer is answered by this server
 let said = null // { id, text, says, route } for the open card
 let timer = 0
 let sending = false
+// enter was pressed again while a line was still being sent
+let again = false
 let ctxRef = {}
 let noteText = ''
 // attachments pending on the composer: {id, name, mediaType, size,
@@ -176,6 +178,16 @@ function renderChips () {
 
 // restoreComposer puts text back in the composer to be edited and sent.
 export function restoreComposer (text) { restore(text) }
+
+// clearSent takes a line that has gone out of the composer — and the
+// attachments that went with it — unless the person has typed another
+// line over it since, which stays.
+function clearSent (text, ids = []) {
+  if (state.draft.trim() === text) { clearComposer(); return }
+  attachments = attachments.filter((a) => !ids.includes(a.id))
+  renderChips()
+  renderSays()
+}
 
 function restore (text) {
   const input = $('#composer-input')
@@ -361,7 +373,10 @@ async function submit ({ asLine = false } = {}) {
   if (state.sessionDraft) return submitDraft(text, [...attachments])
   // the button's own rule: no card on screen (deleted, or not loaded
   // yet), nothing to send it to — the line stays where it is
-  if (!text || sending || !state.sel || !state.card) return
+  if (!text || !state.sel || !state.card) return
+  // enter on a line typed while the last one is still on its way: it goes
+  // once that one has answered, rather than being dropped
+  if (sending) { again = true; return }
   if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
   const id = state.sel
   if (d && !asLine) {
@@ -397,20 +412,23 @@ async function submit ({ asLine = false } = {}) {
       // on everything it offers, which is no answer to the word typed
       const word = unknownCommand(text, asked)
       if (!openActions(text)) return
-      clearComposer()
+      clearSent(text, body.attachments)
       if (word) setNote(`/${word} is not a command on ${id} — the card's menu shows what is.`, 'info')
       return
     }
-    clearComposer()
+    // what was sent leaves the composer; a line typed since stays in it
+    clearSent(text, body.attachments)
     setNote('')
     if (r?.card && state.sel === id) set({ card: r.card })
     const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the session', goalnote: 'Noted on the goal', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
     if (where) toast(where)
     ctxRef.refresh?.(id)
   } catch (err) {
+    // a line typed since this one failed waits for the person's own enter
+    again = false
     const e = err.data || {}
     if (err.status === 409 && e.error === 'busy') {
-      restore(e.text || text)
+      if (!state.draft.trim() || state.draft.trim() === text) restore(e.text || text)
       setNote('The agent is mid-turn — your line is back here. Send it again when this turn ends.')
     } else if (err.status === 409 && e.error === 'newcard') {
       setNote('That reads as separate work — it is in the new-card form.', 'info')
@@ -428,5 +446,6 @@ async function submit ({ asLine = false } = {}) {
   } finally {
     sending = false
     renderSays()
+    if (again) { again = false; submit() }
   }
 }
