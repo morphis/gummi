@@ -395,6 +395,76 @@ lowest common denominator for one-shot autonomous stages with any CLI agent.
 Shipped alongside the above: **claude** (Claude Code CLI, streaming
 stream-json) and **codex** (Codex CLI, `codex exec --json`).
 
+### 4.1a What a session discovers: skills, plugins, extensions
+
+Every backend CLI carries its own discovery — skill directories, plugins,
+extensions, user config — and gummi does not replace it. What gummi owes
+the operator is that the **same card on a different backend meets the same
+skills**. Today it does not, and this section is the contract the adapters
+are held to, with where each one stands against it.
+
+A skill can reach a card's session from three scopes:
+
+1. **Repo** — skill directories inside the card's worktree checkout
+   (`.claude/skills`, `.agents/skills`, `.github/skills`, or a CLI's own).
+2. **User** — the operator's home: per-CLI user skills, plugins,
+   extensions, user-level MCP servers and settings.
+3. **Forwarded** — workspace-root skills named in `skills.forward`
+   (`internal/engine/skills.go`), resolved to absolute directories and
+   handed over as `SessionOpts.SkillDirs`. A worktree is a sibling of the
+   repository, not inside it, so this is the only way a skill kept beside
+   `.gummi` reaches anything.
+
+**Where each adapter stands** (repo-scope paths for copilot and opencode
+are their CLIs' documented discovery, not measured by gummi; codex and pi
+skill flags are unverified):
+
+| backend | repo scope | user scope / plugins | forwarded |
+|---|---|---|---|
+| claude | `.claude/skills` only; and the `Skill` tool is on the `--tools` roster only when the worktree has `.claude/skills` or something was forwarded | `~/.claude` loads, but its skills and plugin skills cannot be invoked when the roster gate leaves `Skill` off; `--strict-mcp-config` shadows user MCP servers | a generated plugin on `--plugin-dir` — skills arrive as `gummi-skills:<name>` |
+| copilot | `.github/`, `.agents/`, `.claude/skills` | inherited whole | `SkillDirectories`, additive |
+| opencode | the CLI's own scan | inherited whole (`OPENCODE_CONFIG` merges over the global config) | `skills.paths`, additive |
+| codex | `.agents/skills` | `--ignore-user-config` | not supported — warned once per backend |
+| pi | the CLI's own scan | `--no-extensions` drops extensions; skills untouched | not supported — warned once per backend |
+| antigravity | agy's project scan | dropped entirely: `HOME` is redirected and only the OAuth token is seeded | symlinked into the redirected home's `.gemini/config/skills` |
+| headless | — | — | not supported — warned once per backend |
+
+**The contract.**
+
+- **Repo skills are always reachable, on every backend.** A skill the
+  repository carries in any of the three conventional roots is a skill the
+  card's session can invoke. Nothing gummi adds — a tool roster, a flag —
+  may hide one. *Gap:* claude's roster gate tests for `.claude/skills`
+  alone, so a repo using `.agents/skills` or `.github/skills` has skills on
+  copilot and none on claude.
+- **gummi's own skill never reaches a card, by any scope.** A card must
+  never be told how to start a second gummi (§16). `skills.forward`
+  refuses the name; that guards one scope of three. *Gap:* `gummi skill
+  install --scope user` writes it to `~/.claude/skills/gummi` and
+  `~/.copilot`, and a committed project-scope install rides in the
+  worktree — claude, copilot and opencode sessions load it from either.
+- **User scope is one decision, not seven.** Whether a card inherits the
+  operator's own customizations is a property of gummi, stated once and
+  honored by every adapter that can; an adapter that cannot (antigravity's
+  hardcoded `$HOME/.gemini` forces a redirected home) says so in `doctor`
+  rather than silently differing. *Open:* inherit-by-default (the agent
+  the operator already tuned) against isolate-by-default (a card's outcome
+  independent of whose machine ran it). Today copilot and opencode
+  inherit, claude inherits all but MCP, codex and pi isolate part, and
+  antigravity isolates all.
+- **Forwarding reaches every backend that has any way to take a
+  directory**, and warns — once, naming the backend — where none exists.
+  *Gap:* codex and pi; whether either CLI accepts extra skill paths is
+  unverified.
+- **A forwarded skill has one name.** The model, hints and docs refer to a
+  skill by its directory name on every backend. *Gap:* claude's plugin
+  namespaces it as `gummi-skills:<name>`.
+- **One search order.** Wherever gummi does the lookup — forwarding, a
+  roster gate, a filter — a name collision resolves the same way:
+  `.claude/skills`, `.agents/skills`, `.github/skills`, first wins, the
+  order `skills.forward` already uses. A CLI's own repo-scope order is its
+  business and is not papered over.
+
 ### 4.2 Orchestrator
 
 - **State machine** per card — the workflow is compiled in, not
