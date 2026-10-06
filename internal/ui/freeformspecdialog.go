@@ -18,12 +18,14 @@ import (
 // The card thread's half of "write a spec" (DESIGN §19.8): the web face's
 // dialog is session.js's modal, and this is the terminal's — the same
 // offer, the same seam. Opening the dialog fetches the handoff brief once,
-// off the loop: on a live session the fetch IS the brief turn, gummi
-// asking the session to write what the next card's architect will read,
-// so the dialog shows its own drafting state while it runs and the brief
-// arrives as an editable field pre-filled with it. Nothing mints without
-// the confirm, and the edited text — not the raw draft — is what the
-// minted card carries.
+// off the loop: on a live session the start is the brief turn, gummi
+// asking the session to write what the next card's architect will read.
+// The turn runs in the background, so the dialog shows its own drafting
+// state while it runs, and a closed dialog loses nothing: when the brief
+// lands the card's ready event refills an open dialog, or raises an alert
+// for a closed one. The brief arrives as an editable field pre-filled with
+// it. Nothing mints without the confirm, and the edited text — not the raw
+// draft — is what the minted card carries.
 
 // writespec dialog fields, in tab order. fieldButtons is the last stop,
 // so tab from it wraps back to the first field.
@@ -66,10 +68,11 @@ type freeformSpecDialog struct {
 	onSubmit func(f domain.Feature, title, brief, profile string, envelope int) tea.Cmd
 }
 
-// openWritespec opens the dialog and starts the fetch — the brief turn on
-// a live session — as one command. The dialog shows its drafting state
-// from the first frame; the arriving message fills the field or reports
-// why the draft could not be had.
+// openWritespec opens the dialog and starts the brief as one command: the
+// start hands the turn to the engine's lifetime, and the read that follows
+// reports it still drafting. The dialog shows its drafting state from the
+// first frame; the arriving message fills the field, keeps it drafting, or
+// reports why the draft could not be had.
 func (m *Shell) openWritespec(f domain.Feature) tea.Cmd {
 	eng, fid := m.engine, f.ID
 	var profiles []string
@@ -80,9 +83,36 @@ func (m *Shell) openWritespec(f domain.Feature) tea.Cmd {
 	}
 	m.Overlay.Push(newFreeformSpecDialog(f, profiles, m.envelopePrefill(), m.specFromSession))
 	return func() tea.Msg {
-		brief, source, err := eng.SessionHandoffBrief(context.Background(), fid)
-		return writespecDraftMsg{f: fid, brief: brief, source: source, err: err}
+		if err := eng.StartHandoffBrief(context.Background(), fid); err != nil {
+			return writespecDraftMsg{f: fid, err: err}
+		}
+		return readWritespecDraft(eng, fid)
 	}
+}
+
+// refetchWritespec reads the brief again, for a dialog told it has landed.
+func (m *Shell) refetchWritespec(fid domain.FeatureID) tea.Cmd {
+	eng := m.engine
+	return func() tea.Msg { return readWritespecDraft(eng, fid) }
+}
+
+// readWritespecDraft reads the card's handoff brief without starting or
+// waiting on anything: a brief still drafting comes back as pending.
+func readWritespecDraft(eng *engine.Engine, fid domain.FeatureID) writespecDraftMsg {
+	brief, source, err := eng.HandoffBrief(fid)
+	return writespecDraftMsg{f: fid, brief: brief, source: source, err: err}
+}
+
+// writespecFor finds the open writespec dialog for a card, wherever it sits
+// on the overlay stack: help or a confirm pushed over it must not hide the
+// brief from the dialog that is waiting on it. Nil when none is open.
+func (m *Shell) writespecFor(fid domain.FeatureID) *freeformSpecDialog {
+	for i := m.Overlay.Len() - 1; i >= 0; i-- {
+		if d, ok := m.Overlay.At(i).(*freeformSpecDialog); ok && d.f.ID == fid {
+			return d
+		}
+	}
+	return nil
 }
 
 // handleWritespecDraftMsg folds the fetch's outcome into the dialog that
@@ -90,11 +120,9 @@ func (m *Shell) openWritespec(f domain.Feature) tea.Cmd {
 // (the dialog dismissed, the card closed): anything else on the overlay
 // gets nothing.
 func (m *Shell) handleWritespecDraftMsg(msg writespecDraftMsg) {
-	d, ok := m.Overlay.Top().(*freeformSpecDialog)
-	if !ok || d.f.ID != msg.f {
-		return
+	if d := m.writespecFor(msg.f); d != nil {
+		d.apply(msg)
 	}
-	d.apply(msg)
 }
 
 func newFreeformSpecDialog(f domain.Feature, profiles []string, envelope int, onSubmit func(domain.Feature, string, string, string, int) tea.Cmd) *freeformSpecDialog {
@@ -107,7 +135,9 @@ func newFreeformSpecDialog(f domain.Feature, profiles []string, envelope int, on
 
 	brief := textarea.New()
 	brief.Placeholder = "the handoff brief — what was asked, decided, done, and what remains"
-	brief.CharLimit = engine.SpecBriefMax + 2000
+	// no character limit: the brief is the session's own words, and the
+	// field must hold all of them, whatever length the agent wrote
+	brief.CharLimit = 0
 	brief.ShowLineNumbers = false
 	brief.SetWidth(60)
 	brief.SetHeight(9)
@@ -129,9 +159,18 @@ func newFreeformSpecDialog(f domain.Feature, profiles []string, envelope int, on
 	}
 }
 
-// apply folds the fetch's outcome into the dialog: the brief lands in the
-// editable field, or the refusal is said where the drafting line was.
+// apply folds the read's outcome into the dialog: the brief lands in the
+// editable field, the dialog keeps drafting while the brief is still
+// being written, or the refusal is said where the drafting line was.
 func (d *freeformSpecDialog) apply(msg writespecDraftMsg) {
+	if msg.err == nil && msg.source == engine.BriefPending {
+		// a read issued before the brief landed can arrive after the ready
+		// event has filled the field: that late answer must not undo it
+		if d.brief.Value() == "" {
+			d.drafting = true
+		}
+		return
+	}
 	d.drafting = false
 	if msg.err != nil {
 		d.errText = sanitize(msg.err.Error())

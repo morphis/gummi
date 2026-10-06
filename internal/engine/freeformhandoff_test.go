@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/x/exp/golden"
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -29,14 +30,34 @@ done
 remaining
 - the flake's root cause is still unknown; the loop only masks it`
 
-// briefResponder is a fake Responder that answers the brief turn with
-// briefReply and every other turn with reply. started is closed when the
+// awaitBrief starts the session's brief and reads it until the turn has
+// landed: the read says pending while it drafts, and the test waits it out
+// the way a dialog does.
+func awaitBrief(e *Engine, id domain.FeatureID) (string, BriefSource, error) {
+	if err := e.StartHandoffBrief(context.Background(), id); err != nil {
+		return "", "", err
+	}
+	deadline := time.Now().Add(testWaitTimeout)
+	for {
+		brief, source, err := e.HandoffBrief(id)
+		if err != nil || source != BriefPending {
+			return brief, source, err
+		}
+		if time.Now().After(deadline) {
+			return "", source, fmt.Errorf("the brief was still drafting after %v", testWaitTimeout)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// briefResponder is a fake Responder that answers the brief turn with a
+// brief and every other turn with "looking at it". started is closed when the
 // brief turn reaches the backend, and release holds it there until closed,
 // so a test can look at the card while the turn runs.
-func briefResponder(reply string, started, release chan struct{}) func(agent.SessionOpts, string) []agent.Event {
+func briefResponder(started, release chan struct{}) func(agent.SessionOpts, string) []agent.Event {
 	return func(opts agent.SessionOpts, msg string) []agent.Event {
 		if !strings.Contains(msg, "handoff brief") {
-			return []agent.Event{{Kind: agent.EventMessage, Text: reply}, {Kind: agent.EventIdle}}
+			return []agent.Event{{Kind: agent.EventMessage, Text: "looking at it"}, {Kind: agent.EventIdle}}
 		}
 		if started != nil {
 			close(started)
@@ -68,7 +89,7 @@ func TestSessionHandoffBrief(t *testing.T) {
 	var briefOpts []agent.SessionOpts
 	started := make(chan struct{})
 	release := make(chan struct{})
-	ag := &agent.Fake{Responder: briefResponder("looking at it", started, release)}
+	ag := &agent.Fake{Responder: briefResponder(started, release)}
 	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
 	ag.OnNewSession = func(opts agent.SessionOpts) {
 		if !strings.Contains(strings.Join(opts.SystemHints, "\n"), "handoff summary") {
@@ -97,7 +118,7 @@ func TestSessionHandoffBrief(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		brief, source, err := e.SessionHandoffBrief(ctx, f.ID)
+		brief, source, err := awaitBrief(e, f.ID)
 		done <- result{brief, source, err}
 	}()
 
@@ -235,7 +256,7 @@ func TestSessionHandoffBriefRefusesMidTurn(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	_, _, err = e.SessionHandoffBrief(ctx, f.ID)
+	_, _, err = awaitBrief(e, f.ID)
 	if err == nil {
 		t.Fatal("the brief was taken while the session was mid-turn")
 	}
@@ -262,7 +283,7 @@ func TestSessionHandoffBriefRefusesMidTurn(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	_, _, err = e.SessionHandoffBrief(ctx, f.ID)
+	_, _, err = awaitBrief(e, f.ID)
 	if err == nil {
 		t.Fatal("the brief was taken while a question was unanswered")
 	}
@@ -275,11 +296,12 @@ func TestSessionHandoffBriefRefusesMidTurn(t *testing.T) {
 	waitFreeformIdle(t, ff)
 }
 
-// TestSessionHandoffBriefRefusesASecondBrief: the in-flight flag is
+// TestSessionHandoffBriefReadsPendingWhileDrafting: the in-flight flag is
 // claimed atomically — check and raise in one step — so two simultaneous
-// dialog opens cannot both pass the refusal and both run brief turns, and
-// the refused one never reaches the backend at all.
-func TestSessionHandoffBriefRefusesASecondBrief(t *testing.T) {
+// dialog opens cannot both run brief turns. A second start while one drafts
+// is a no-op that reaches no backend, and the read answers pending, not an
+// empty brief.
+func TestSessionHandoffBriefReadsPendingWhileDrafting(t *testing.T) {
 	ws, store, wt := newRepo(t)
 	ctx := context.Background()
 	f := freeformCard(10, "hold the brief")
@@ -319,11 +341,11 @@ func TestSessionHandoffBriefRefusesASecondBrief(t *testing.T) {
 	}
 	waitFreeformIdle(t, ff)
 
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := e.SessionHandoffBrief(ctx, f.ID)
-		done <- err
-	}()
+	// the first start returns at once: the turn runs on the engine's
+	// lifetime, and the card reads as drafting while it does
+	if err := e.StartHandoffBrief(ctx, f.ID); err != nil {
+		t.Fatalf("the first start: %v", err)
+	}
 	<-started
 	deadline := time.Now().Add(testWaitTimeout)
 	for !ff.Briefing() {
@@ -333,28 +355,24 @@ func TestSessionHandoffBriefRefusesASecondBrief(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// the second dialog open is refused, not spent: the claim is the
-	// guard, and the refused fetch never opened a brief session of its own
-	_, _, err = e.SessionHandoffBrief(ctx, f.ID)
-	if !errors.Is(err, agent.ErrBusy) {
-		t.Fatalf("the second brief was taken while the first ran, want a busy refusal: %v", err)
+	// a second start while the first drafts is not refused and spends
+	// nothing: no second brief session opens, and the read says pending
+	if err := e.StartHandoffBrief(ctx, f.ID); err != nil {
+		t.Fatalf("a second start while drafting was refused: %v", err)
 	}
-	if !strings.Contains(err.Error(), "already") {
-		t.Errorf("the refusal = %v, want it to say the card is drafting already", err)
+	if brief, source, err := e.HandoffBrief(f.ID); err != nil || source != BriefPending || brief != "" {
+		t.Fatalf("the read while drafting = %q (%s) err %v, want an empty pending read", brief, source, err)
 	}
 	optsMu.Lock()
 	n := len(briefOpts)
 	optsMu.Unlock()
 	if n != 1 {
-		t.Fatalf("the refused fetch opened %d brief sessions, want 1", n)
+		t.Fatalf("the second start opened %d brief sessions, want 1", n)
 	}
 
-	// the guard releases when the first turn ends
+	// the guard releases when the first turn ends, and the brief lands
 	close(release)
-	if err := <-done; err != nil {
-		t.Fatalf("the first brief: %v", err)
-	}
-	brief, source, err := e.SessionHandoffBrief(ctx, f.ID)
+	brief, source, err := awaitBrief(e, f.ID)
 	if err != nil || source != BriefLive {
 		t.Fatalf("the guard never released: brief=%q source=%q err=%v", brief, source, err)
 	}
@@ -396,7 +414,7 @@ func TestSessionHandoffBriefFallsBackAfterRestart(t *testing.T) {
 	if e2.Freeform(f.ID) == nil {
 		t.Fatal("the restored board lost the session")
 	}
-	brief, source, err := e2.SessionHandoffBrief(ctx, f.ID)
+	brief, source, err := awaitBrief(e2, f.ID)
 	if err != nil {
 		t.Fatalf("SessionHandoffBrief: %v", err)
 	}
@@ -520,5 +538,457 @@ func TestBriefCapTrimsOldestAsks(t *testing.T) {
 	}
 	if !strings.Contains(trimmed, "decided:") || !strings.Contains(trimmed, "done:") {
 		t.Errorf("the section shape did not survive the trim:\n%s", trimmed[:300])
+	}
+}
+
+// waitBriefReady reads the engine's event stream until the card's brief
+// has landed, and fails the test if it never does.
+func waitBriefReady(t *testing.T, e *Engine, id domain.FeatureID) {
+	t.Helper()
+	deadline := time.After(testWaitTimeout)
+	for {
+		select {
+		case ev := <-e.Events():
+			if ev.Kind == EventBriefReady && ev.Feature == id {
+				return
+			}
+		case <-deadline:
+			t.Fatal("the brief never signalled that it was ready")
+		}
+	}
+}
+
+// TestSessionHandoffBriefOutlivesItsCaller: the brief is a turn on the
+// engine's lifetime, so a start whose caller has gone — a dialog closed, a
+// page left — still lands on the record, and the ready signal says so to
+// whoever is listening next.
+func TestSessionHandoffBriefOutlivesItsCaller(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(11, "the brief outlives the dialog")
+	createFeature(t, store, f)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: briefResponder(started, release)}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	caller, cancel := context.WithCancel(ctx)
+	if err := e.StartHandoffBrief(caller, f.ID); err != nil {
+		t.Fatalf("StartHandoffBrief: %v", err)
+	}
+	// the caller is gone before the turn has even reached the backend
+	cancel()
+	<-started
+	close(release)
+	waitBriefReady(t, e, f.ID)
+
+	brief, source, err := e.HandoffBrief(f.ID)
+	if err != nil || source != BriefLive || !strings.Contains(brief, "root cause is still unknown") {
+		t.Fatalf("the brief did not land with its caller gone: source=%q err=%v\n%s", source, err, brief)
+	}
+}
+
+// TestSessionHandoffBriefIgnoresCallerCancel: a caller that cancels its
+// context the moment the start returns does not cancel the turn; the turn
+// answers, and the card reads the answer whole.
+func TestSessionHandoffBriefIgnoresCallerCancel(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(12, "the caller cancels at once")
+	createFeature(t, store, f)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: briefResponder(started, release)}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	caller, cancel := context.WithCancel(ctx)
+	if err := e.StartHandoffBrief(caller, f.ID); err != nil {
+		t.Fatalf("StartHandoffBrief: %v", err)
+	}
+	cancel()
+	<-started
+	close(release)
+	waitBriefReady(t, e, f.ID)
+	if _, source, err := e.HandoffBrief(f.ID); err != nil || source != BriefLive {
+		t.Fatalf("the caller's cancel reached the turn: source=%q err=%v", source, err)
+	}
+}
+
+// TestSessionHandoffBriefStopsOnClose: Close during the turn cancels it and
+// returns only once the turn has ended, and the failure is on the saved
+// record — the note lands before the conversation is saved.
+func TestSessionHandoffBriefStopsOnClose(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(13, "the engine closes mid-brief")
+	createFeature(t, store, f)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	ag := &agent.Fake{Responder: briefResponder(started, release)}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if err := e.StartHandoffBrief(ctx, f.ID); err != nil {
+		t.Fatalf("StartHandoffBrief: %v", err)
+	}
+	<-started
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// the record as a fresh engine reads it back from the store
+	e2 := New(Config{
+		Agents: singleAgent(agent.NewFake("unused — no live session to ask")),
+		Store:  store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true,
+	})
+	t.Cleanup(func() { e2.Close() })
+	if err := e2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snap, ok := e2.freeformTranscript(f.ID)
+	if !ok {
+		t.Fatal("the conversation was not saved")
+	}
+	if !failedBrief(snap.Transcript) {
+		t.Fatalf("the saved record does not end on the brief's failure note:\n%s", transcriptText(snap))
+	}
+}
+
+// TestSessionHandoffBriefStopsOnCloseWithALineQueued: a line sent while the
+// brief drafts waits in the queue; Close cancels the turn, and the queued
+// line is never sent to the backend, so nothing is written after the
+// teardown has begun.
+func TestSessionHandoffBriefStopsOnCloseWithALineQueued(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(14, "a line is queued when the engine closes")
+	createFeature(t, store, f)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	var sentMu sync.Mutex
+	var sent []string
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		sentMu.Lock()
+		sent = append(sent, msg)
+		sentMu.Unlock()
+		return briefResponder(started, release)(opts, msg)
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if err := e.StartHandoffBrief(ctx, f.ID); err != nil {
+		t.Fatalf("StartHandoffBrief: %v", err)
+	}
+	<-started
+	if err := ff.Send(ctx, "one more thing for the spec"); err != nil {
+		t.Fatal(err)
+	}
+	if q := ff.Queued(); len(q) != 1 {
+		t.Fatalf("the line sent while drafting is queued %d times, want once", len(q))
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// the record says the line was not sent, so the person is not left
+	// with a line the thread showed as queued and then dropped
+	e2 := New(Config{
+		Agents: singleAgent(agent.NewFake("unused — no live session to ask")),
+		Store:  store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true,
+	})
+	t.Cleanup(func() { e2.Close() })
+	if err := e2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	snap, ok := e2.freeformTranscript(f.ID)
+	if !ok {
+		t.Fatal("the conversation was not saved")
+	}
+	if !strings.Contains(transcriptText(snap), "was not sent, because gummi closed first: one more thing") {
+		t.Fatalf("the saved record does not say the queued line was not sent:\n%s", transcriptText(snap))
+	}
+
+	sentMu.Lock()
+	defer sentMu.Unlock()
+	for _, msg := range sent {
+		if strings.Contains(msg, "one more thing") {
+			t.Fatal("the queued line reached the backend after Close began")
+		}
+	}
+}
+
+// TestSessionHandoffBriefRemembersAFailure: a failed brief stands until the
+// person says something new. A second start spends nothing and the read
+// falls back to the assembled draft; a new line lets the next start try a
+// live brief again.
+func TestSessionHandoffBriefRemembersAFailure(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(15, "the backend cannot answer the brief")
+	createFeature(t, store, f)
+
+	var optsMu sync.Mutex
+	briefs := 0
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "handoff brief") {
+			return []agent.Event{{Kind: agent.EventError, Err: errors.New("the backend fell over")}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ag.OnNewSession = func(opts agent.SessionOpts) {
+		if strings.Contains(strings.Join(opts.SystemHints, "\n"), "handoff summary") {
+			optsMu.Lock()
+			briefs++
+			optsMu.Unlock()
+		}
+	}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	_, source, err := awaitBrief(e, f.ID)
+	if err != nil || source != BriefAssembled {
+		t.Fatalf("a failed brief read as %q (err %v), want the assembled draft", source, err)
+	}
+	// a start is a no-op on a failed brief; awaitBrief waits out whatever
+	// it started so the count can be trusted
+	if _, _, err := awaitBrief(e, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	optsMu.Lock()
+	again := briefs
+	optsMu.Unlock()
+	if again != 1 {
+		t.Fatalf("a start after a failed brief opened %d brief sessions, want 1 (remembered)", again)
+	}
+
+	if err := ff.Send(ctx, "try again, the backend is back"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if _, _, err := awaitBrief(e, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	optsMu.Lock()
+	after := briefs
+	optsMu.Unlock()
+	if after != 2 {
+		t.Fatalf("a start after a new line opened %d brief sessions, want 2", after)
+	}
+}
+
+// TestSessionHandoffBriefQueuesALineSentWhileDrafting: a line sent while the
+// brief drafts is not appended between the brief's prompt and its reply, and
+// is not sent to the backend alongside the brief turn. It is delivered after
+// the brief has landed, as the next turn.
+func TestSessionHandoffBriefQueuesALineSentWhileDrafting(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(16, "a line lands after the brief")
+	createFeature(t, store, f)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: briefResponder(started, release)}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if err := e.StartHandoffBrief(ctx, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if err := ff.Send(ctx, "and keep the fix small"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	waitBriefReady(t, e, f.ID)
+	waitFreeformIdle(t, ff)
+
+	tr := ff.Snapshot().Transcript
+	prompt, reply, line := -1, -1, -1
+	for i, m := range tr {
+		switch {
+		case m.Author == AuthorSystem && m.Content == briefTurnPrompt():
+			prompt = i
+		case m.Author == AuthorAssistant && strings.Contains(m.Content, "root cause is still unknown"):
+			reply = i
+		case m.Author == AuthorUser && m.Content == "and keep the fix small":
+			line = i
+		}
+	}
+	if prompt < 0 || reply != prompt+1 {
+		t.Fatalf("the brief's prompt and reply are not adjacent on the record:\n%s", transcriptText(ff.Snapshot()))
+	}
+	if line <= reply {
+		t.Fatalf("the queued line (at %d) was not sent after the brief (at %d):\n%s", line, reply, transcriptText(ff.Snapshot()))
+	}
+}
+
+// TestNextQueuedHoldsTheBriefFlagUntilTheQueueIsEmpty pins the step that
+// keeps a line typed while the brief's queue drains from overtaking it: the
+// batch comes out with the flag still up, so a line sent meanwhile is queued
+// behind it, and the flag drops only in the same locked step that finds the
+// queue empty.
+func TestNextQueuedHoldsTheBriefFlagUntilTheQueueIsEmpty(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(17, "queued lines drain in order")
+	createFeature(t, store, f)
+
+	ag := &agent.Fake{}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "first line"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	sess := ff.Session()
+
+	ff.setBriefing(true)
+	ff.enqueue(ctx, "one", nil)
+	ff.enqueue(ctx, "two", nil)
+
+	b, ok := ff.nextQueued(sess)
+	if !ok || b.text != "one\n\ntwo" {
+		t.Fatalf("nextQueued = %q, %v; want both lines joined", b.text, ok)
+	}
+	if !ff.Briefing() {
+		t.Fatal("the brief flag dropped while a batch was still being sent")
+	}
+	if _, ok := ff.nextQueued(sess); ok || ff.Briefing() {
+		t.Fatal("the flag should drop once the queue is empty")
+	}
+}
+
+// TestSendQueuedRecordsALineTheSendRefuses: a line queued while the brief
+// drafted is handed to the send once the brief lands. Here the envelope is
+// spent by then, so the send is refused before the line is recorded, and the
+// refusal must not drop the line without a trace: the record names it as not
+// sent, with its text, and the backend never hears it.
+func TestSendQueuedRecordsALineTheSendRefuses(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(18, "a refused line is named")
+	createFeature(t, store, f)
+
+	var sentMu sync.Mutex
+	var sent []string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		sentMu.Lock()
+		sent = append(sent, msg)
+		sentMu.Unlock()
+		return []agent.Event{{Kind: agent.EventMessage, Text: "looking at it"}, {Kind: agent.EventIdle}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e.Close() })
+
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "why does the retry test flake on CI?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	// the brief is drafting: a line sent now is queued behind it
+	ff.setBriefing(true)
+	if err := ff.Send(ctx, "one line the envelope cannot carry"); err != nil {
+		t.Fatal(err)
+	}
+	if q := ff.Queued(); len(q) != 1 {
+		t.Fatalf("the line is queued %d times while drafting, want once", len(q))
+	}
+
+	// the brief's spend exhausts the envelope and the backend is spent, so
+	// the send that delivers the queued line is refused
+	if err := store.AddSpend(ctx, f.ID, 1000, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	sess := ff.Session()
+	sess.markExhausted()
+	ff.sendQueued(ctx, sess)
+
+	if q := ff.Queued(); len(q) != 0 {
+		t.Fatalf("the refused line is still queued: %q", q)
+	}
+	if !strings.Contains(transcriptText(ff.Snapshot()), "was not sent, because it could not be sent (") ||
+		!strings.Contains(transcriptText(ff.Snapshot()), "one line the envelope cannot carry") {
+		t.Fatalf("the refused line is not named on the record:\n%s", transcriptText(ff.Snapshot()))
+	}
+	sentMu.Lock()
+	defer sentMu.Unlock()
+	for _, msg := range sent {
+		if strings.Contains(msg, "one line the envelope cannot carry") {
+			t.Fatal("the refused line reached the backend")
+		}
 	}
 }

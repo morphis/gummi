@@ -37,15 +37,15 @@ import (
 //     free, and never mistaken for the session's own words: the source is
 //     reported alongside the text.
 //
-// Both are bounded by SpecBriefMax, and the caller shows the draft to the
-// person for edit before anything mints — the brief is an input, not a
-// verdict.
+// The assembled draft is bounded by SpecBriefMax; the session's own brief
+// is handed back whole. The caller shows the brief to the person for edit
+// before anything mints — the brief is an input, not a verdict.
 
-// SpecBriefMax bounds how much of a session's conversation rides into the
-// spec card's brief: the architect needs what was asked and decided, not a
-// transcript, and the branch it continues carries what was done. The cap
-// trims the assembled draft's oldest asks first; a live brief is
-// hard-trimmed to it.
+// SpecBriefMax bounds the assembled brief draft: the architect needs what
+// was asked and decided, not a transcript, and the branch it continues
+// carries what was done. The cap trims the assembled draft's oldest asks
+// first. It is also the size the brief turn's prompt asks the agent to aim
+// for, as a hint only: a live brief is never cut to it.
 const SpecBriefMax = 6000
 
 // BriefSource says where a handoff brief came from, so a degraded draft is
@@ -58,6 +58,9 @@ const (
 	// BriefAssembled: laid out from the persisted transcript, because no
 	// live session could answer.
 	BriefAssembled BriefSource = "assembled"
+	// BriefPending: the session's own brief is still being written. Only
+	// HandoffBrief reports it, with an empty brief and no error.
+	BriefPending BriefSource = "pending"
 )
 
 // BriefDrafting is the busy word both faces show while the brief turn is
@@ -115,69 +118,104 @@ func (ff *FreeformSession) busyBriefing() bool {
 // backend forever.
 const briefTurnTimeout = 3 * time.Minute
 
-// SessionHandoffBrief returns the brief a "continue as a spec" handoff
-// gives the minted card's architect, and where it came from.
+// StartHandoffBrief starts the session's own brief for a "continue as a
+// spec" handoff, and returns at once. The turn runs on the engine's
+// lifetime rather than the caller's: it outlives the dialog or request that
+// asked for it, ends at briefTurnTimeout or when the engine closes, and
+// Close joins it. Its reply lands on the record whole, EventBriefReady says
+// it has landed, and HandoffBrief reads it.
 //
-// A live session is asked to write its own brief first: one synchronous
-// turn, refused while the session is mid-turn, blocked on an unanswered
-// question, or already drafting a brief — the same refusals any send
-// rides, the last on a per-card in-flight guard — and falling back to the
-// assembled draft when the backend fails to answer. A session with no live
-// backend (closed, or restored after a restart) is never asked; its
-// persisted transcript is all there is, and the draft is assembled from it.
-func (e *Engine) SessionHandoffBrief(ctx context.Context, id domain.FeatureID) (string, BriefSource, error) {
+// Refused, as any send is, while the session is mid-turn, blocked on an
+// unanswered question, or dirty. Spends nothing when there is no live
+// backend to ask, when the record already holds this conversation's brief,
+// or when the last brief failed and nothing has been said since. A brief
+// already drafting is not an error: the start is a no-op and the read says
+// it is pending.
+func (e *Engine) StartHandoffBrief(ctx context.Context, id domain.FeatureID) error {
 	// Refused before anything is spent: a brief for a spec that could not
 	// be written is a turn paid for nothing.
 	if err := e.WritespecRefusal(ctx, id); err != nil {
-		return "", "", err
+		return err
 	}
 	ff := e.Freeform(id)
-	if ff != nil {
-		if err := ff.briefRefusals(); err != nil {
-			return "", "", err
-		}
+	if ff == nil {
+		return nil
+	}
+	if err := ff.briefRefusals(); err != nil {
+		return err
+	}
+	// A live backend is asked; anything else — a session restored after a
+	// restart carries its conversation but no backend, and spawning one
+	// just to summarize it is not the deal — is answered from the
+	// persisted transcript when it is read.
+	sess := ff.Session()
+	if sess == nil || !sess.Live() {
+		return nil
+	}
+	snap := sess.Snapshot()
+	if len(snap.Transcript) == 0 {
+		return nil
 	}
 	// The dialog closed and opened again with nothing said in between:
-	// the brief on the record is still the conversation's, so it is
-	// handed back rather than written — and paid for — a second time.
-	if snap, ok := e.freeformTranscript(id); ok {
-		if brief, ok := answeredBrief(snap.Transcript); ok {
-			return trimBrief(brief), BriefLive, nil
-		}
+	// the brief on the record is still the conversation's, so it is not
+	// written — and paid for — a second time. Likewise a failed brief
+	// stands until the person says something new.
+	if _, ok := answeredBrief(snap.Transcript); ok {
+		return nil
 	}
-	if ff != nil {
-		sess := ff.Session()
-		// A live backend is asked; anything else — a session restored
-		// after a restart carries its conversation but no backend, and
-		// spawning one just to summarize it is not the deal — is answered
-		// from the persisted transcript.
-		if sess != nil && sess.Live() && len(sess.Snapshot().Transcript) > 0 {
-			brief, err := ff.liveBrief(ctx, sess)
-			if err == nil {
-				return trimBrief(brief), BriefLive, nil
-			}
-			if errors.Is(err, agent.ErrBusy) {
-				// refused, not failed: a second dialog open lost the
-				// in-flight guard while the first turn still runs, and
-				// the caller hears that rather than a degraded draft
-				// passed off as an answer.
-				return "", "", err
-			}
-			// The backend could not answer. The conversation is still the
-			// record, so the draft is assembled from it and the source says
-			// so — a degraded brief must never read as the session's words.
-		}
+	if failedBrief(snap.Transcript) {
+		return nil
+	}
+	// A brief already drafting loses the claim: the second start is a
+	// no-op, not a second paid turn.
+	if !ff.beginBriefing() {
+		return nil
+	}
+	if !e.goBrief(func() { ff.runBrief(sess) }) {
+		ff.setBriefing(false)
+		return errors.New("engine is closed")
+	}
+	return nil
+}
+
+// runBrief is the detached brief turn's body: the turn, then the lines
+// queued while it drafted, then the ready signal. The brief flag stays up
+// until the queue is empty, so the queued send goes out ahead of any line
+// sent after it. The send runs here, counted by the engine's brief wait,
+// rather than on drainQueue's own goroutine, so Close joins it before the
+// teardown.
+func (ff *FreeformSession) runBrief(sess *Session) {
+	e := ff.engine
+	// the turn's failure is already on the record (noteBriefFailure)
+	_, _ = ff.liveBrief(e.ctx, sess)
+	ff.sendQueued(e.ctx, sess)
+	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventBriefReady})
+}
+
+// HandoffBrief reads the brief a "continue as a spec" handoff gives the
+// minted card's architect. It starts nothing and never waits on a turn:
+// while the brief drafts it reports BriefPending with an empty brief and no
+// error, so a drafting state is never mistaken for an empty brief. The
+// recorded answer is handed back whole. Otherwise the brief is assembled
+// from the persisted transcript — for a closed card, a session that cannot
+// answer, and a failed turn alike — and the source says so, so a degraded
+// draft is never mistaken for the session's own words.
+func (e *Engine) HandoffBrief(id domain.FeatureID) (string, BriefSource, error) {
+	if ff := e.Freeform(id); ff != nil && ff.busyBriefing() {
+		return "", BriefPending, nil
 	}
 	snap, _ := e.freeformTranscript(id)
+	if brief, ok := answeredBrief(snap.Transcript); ok {
+		return brief, BriefLive, nil
+	}
 	return AssembledBrief(snap), BriefAssembled, nil
 }
 
 // briefRefusals carries the refusals any send to this session rides: a
-// turn in flight, a question the agent asked that nobody has answered,
-// and a brief turn of this card's own already drafting. All mean the
-// conversation is not settled enough to distill, and all fire before the
-// brief turn spends anything; a simultaneous dialog open that slips past
-// them still meets the in-flight guard's atomic claim in liveBrief.
+// turn in flight, and a question the agent asked that nobody has answered.
+// Both mean the conversation is not settled enough to distill, and both
+// fire before the brief turn spends anything.
 func (ff *FreeformSession) briefRefusals() error {
 	ff.mu.Lock()
 	sess := ff.sess
@@ -186,9 +224,6 @@ func (ff *FreeformSession) briefRefusals() error {
 		return nil
 	}
 	snap := sess.Snapshot()
-	if ff.busyBriefing() {
-		return busyRefusal(string(ff.id) + " is " + BriefDrafting + " already; open the dialog again once it is done")
-	}
 	if snap.Busy {
 		return busyRefusal(string(ff.id) + " is mid-turn; write the spec once this turn ends")
 	}
@@ -270,6 +305,24 @@ func answeredBrief(transcript []Message) (string, bool) {
 	return reply.Content, true
 }
 
+// briefFailurePrefix opens the note a failed brief turn leaves on the
+// record. failedBrief matches it, so the two cannot drift apart.
+const briefFailurePrefix = "the handoff brief turn did not answer ("
+
+// failedBrief reports whether a transcript ends on a brief turn that failed
+// with nothing said since: the gummi-authored line, then the note saying
+// why no reply followed. A new line in the thread moves that tail, so the
+// next start tries a live brief again.
+func failedBrief(transcript []Message) bool {
+	n := len(transcript)
+	if n < 2 {
+		return false
+	}
+	ask, note := transcript[n-2], transcript[n-1]
+	return ask.Author == AuthorSystem && ask.Content == briefTurnPrompt() &&
+		note.Author == AuthorSystem && strings.HasPrefix(note.Content, briefFailurePrefix)
+}
+
 // briefTurnPrompt is the gummi-authored line the brief turn rides on: what
 // is happening, and the contract the reply must answer. It is recorded on
 // the session's transcript as the system author — the way a stage kickoff
@@ -292,16 +345,13 @@ func briefTurnPrompt() string {
 // on the session immediately before the turn is sent, and the reply lands
 // beneath the line as the agent's own turn.
 //
-// The exchange is ordered so the thread never shows gummi drafting into
-// nothing: the in-flight flag is claimed before the backend is asked for a
-// session — the already-drafting refusal and its raise one locked step, so
-// two simultaneous dialog opens cannot both pass and both run brief turns
-// — the line is appended and the turn sent with nothing else writing to
-// the transcript in between; and if the turn then fails, a closing note
-// says so, so the closed card's record explains the unanswered line. A
-// failure before the send (no session to run the turn on) rolls the claim
-// back and records nothing: the line was never written, so there is
-// nothing left unanswered.
+// The caller owns the in-flight flag: StartHandoffBrief claims it and
+// releases it once the turn has ended. The exchange is ordered so the
+// thread never shows gummi drafting into nothing: the line is appended and
+// the turn sent with nothing else writing to the transcript in between; and
+// if the turn then fails, a closing note says so, so the record explains the
+// unanswered line. ctx is the engine's lifetime, not the caller's; the turn
+// is bounded by briefTurnTimeout within it.
 func (ff *FreeformSession) liveBrief(ctx context.Context, sess *Session) (string, error) {
 	e := ff.engine
 	ff.mu.Lock()
@@ -322,15 +372,6 @@ func (ff *FreeformSession) liveBrief(ctx context.Context, sess *Session) (string
 	if replay := freeformReplayHint(snap.Transcript, false); replay != "" {
 		hints = append(hints, replay)
 	}
-	// The claim is the refusal's check and its raise in one step: whoever
-	// loses it is the second of two simultaneous dialog opens, refused
-	// rather than spent. Released after the turn — win or lose — and
-	// rolled back by it when the backend never gave the turn a session.
-	if !ff.beginBriefing() {
-		return "", busyRefusal(string(ff.id) + " is " + BriefDrafting + " already; open the dialog again once it is done")
-	}
-	defer ff.setBriefing(false)
-
 	briefSess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:    workDir,
 		Role:       agent.RoleConsult,
@@ -371,7 +412,6 @@ func (ff *FreeformSession) liveBrief(ctx context.Context, sess *Session) (string
 	}
 	sess.appendAssistantReply(brief)
 	e.persist(sess)
-	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
 	return brief, nil
 }
 
@@ -426,8 +466,22 @@ func (s *Session) appendAssistantReply(text string) {
 // gummi-authored line is already on the transcript, so the record says why
 // no reply followed it rather than showing gummi drafting into nothing.
 func (ff *FreeformSession) noteBriefFailure(sess *Session, err error) {
-	sess.appendSystem("the handoff brief turn did not answer (" + err.Error() + ") — " +
+	sess.appendSystem(briefFailurePrefix + err.Error() + ") — " +
 		"the draft was assembled from this conversation instead")
+	ff.engine.persist(sess)
+}
+
+// noteUnsent records a line that was queued while the brief drafted but
+// could not be sent, and why: the engine closed first, or the send was
+// refused. It goes on the record, so the person sees that the line was not
+// sent and can send it again; on a close it lands before the teardown saves
+// the conversation.
+func (ff *FreeformSession) noteUnsent(text, why string) {
+	sess := ff.Session()
+	if sess == nil {
+		return
+	}
+	sess.appendSystem("a line sent while the handoff brief was drafting was not sent, because " + why + ": " + text)
 	ff.engine.persist(sess)
 }
 
@@ -571,14 +625,9 @@ func renderAssembled(asks, decided []string, reply string, droppedAsks, droppedD
 	return b.String()
 }
 
-// trimBrief hard-trims a live brief to SpecBriefMax, cutting at a rune
-// boundary and saying so.
-func trimBrief(brief string) string {
-	return trimBriefTo(brief, SpecBriefMax)
-}
-
-// trimBriefTo is trimBrief at an explicit bound: the trimmed text — its
-// cut marker included — never exceeds it.
+// trimBriefTo cuts an assembled draft to max bytes: the trimmed text, its
+// cut marker included, never exceeds max. Only the assembled draft is
+// bounded this way; a live brief is handed back whole.
 func trimBriefTo(brief string, max int) string {
 	brief = strings.TrimSpace(brief)
 	if len(brief) <= max {

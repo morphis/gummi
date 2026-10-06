@@ -1529,6 +1529,17 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		// a goal asked to be conducted: it entered implement, took a note,
 		// was sent back or stopped
 		return tea.Batch(m.goalTickCmd(ev.Feature), m.loadRows)
+	case engine.EventBriefReady:
+		// a freeform card's handoff brief has landed. An open writespec
+		// dialog for it reads the brief in, wherever it sits on the stack
+		// (help or a confirm pushed over it does not hide the brief);
+		// otherwise the person is told it is ready to review, since the
+		// dialog that asked for it is gone.
+		if m.writespecFor(ev.Feature) != nil {
+			return m.refetchWritespec(ev.Feature)
+		}
+		m.alert(ev.Feature, "handoff brief finished — write a spec to review it")
+		return nil
 	case engine.EventCardCreated:
 		// a card was minted or filed onto the open board by a caller that
 		// touches no session machinery — a goal's lead — the only

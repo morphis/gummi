@@ -11,5 +11,10 @@
   "Cold": {
     "brief": "asked:\n- rewrite the retry loop",
     "source": "assembled"
+  },
+  "Drafting": {
+    "brief": "",
+    "source": "",
+    "drafting": true
   }
 }

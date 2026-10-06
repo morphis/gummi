@@ -627,14 +627,31 @@ func TestFreeformWritespec(t *testing.T) {
 		t.Fatalf("tab while drafting landed on field %d, want the profile (the brief is not rendered yet)", d.focus)
 	}
 	close(release)
+	// the start answered at once, and the read that followed says the brief
+	// is still drafting: the dialog keeps drafting rather than filling from
+	// nothing or dropping out of its state
 	msg := <-fetchDone
 	model, cmd = m.Update(msg)
+	m = model.(*Shell)
+	m = pump(t, m, cmd)
+	if d, ok = m.Overlay.Top().(*freeformSpecDialog); !ok || !d.drafting {
+		t.Fatalf("a brief still drafting filled the dialog or dropped it (top %T)", m.Overlay.Top())
+	}
+	// the turn lands, and the card's ready event refills the open dialog
+	deadline := time.Now().Add(testWaitTimeout)
+	for ff.Briefing() {
+		if time.Now().After(deadline) {
+			t.Fatal("the brief turn never ended")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	model, cmd = m.Update(engineEventMsg{ev: engine.Event{Kind: engine.EventBriefReady, Feature: f.ID, Stage: domain.StageOpen}})
 	m = model.(*Shell)
 	m = pump(t, m, cmd)
 
 	d, ok = m.Overlay.Top().(*freeformSpecDialog)
 	if !ok || d.drafting {
-		t.Fatalf("the fetched draft never landed in the dialog (top %T)", m.Overlay.Top())
+		t.Fatalf("the ready brief never filled the open dialog (top %T)", m.Overlay.Top())
 	}
 	if !strings.Contains(d.brief.Value(), "write the test") {
 		t.Errorf("the dialog does not hold the session's brief:\n%s", d.brief.Value())
@@ -656,7 +673,7 @@ func TestFreeformWritespec(t *testing.T) {
 
 	// the spec exists, at plan, on a branch of its own cut from the
 	// session's tip; the session is closed and keeps its branch
-	deadline := time.Now().Add(testWaitTimeout)
+	deadline = time.Now().Add(testWaitTimeout)
 	var spec domain.Feature
 	for {
 		rows, err := m.store.ListFeatures(ctx)
@@ -851,5 +868,117 @@ func TestAQuestionOnAFreeformCardTakesTheLine(t *testing.T) {
 	c := m.classifyThreadLine(r, "Go up the middle", asking)
 	if got, says := m.webLineRoute(r, "Go up the middle", c); got != webapi.RouteAnswer || says != "answers the question above, in your words" {
 		t.Errorf("the web composer says %v %q, want an answer in the person's words", got, says)
+	}
+}
+
+// briefAlerts records the needs-you alerts a shell raises, so a test can
+// see the one a closed dialog's brief leaves behind.
+type briefAlerts struct {
+	mu   sync.Mutex
+	text []string
+}
+
+func (a *briefAlerts) NeedsYou(id domain.FeatureID, text string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.text = append(a.text, string(id)+": "+text)
+}
+
+// TestWritespecReadyAlertsWhenTheDialogIsClosed: a brief that lands with no
+// writespec dialog open tells the person it is ready to review, through the
+// same needs-you path every other attention event takes.
+func TestWritespecReadyAlertsWhenTheDialogIsClosed(t *testing.T) {
+	ag := agent.NewFake("on it")
+	m, _, _ := freeformAgentWorkspace(t, ag)
+	alerts := &briefAlerts{}
+	m.AddAttentionNotifier(alerts)
+	id := domain.FeatureID("FF-042")
+
+	model, cmd := m.Update(engineEventMsg{ev: engine.Event{Kind: engine.EventBriefReady, Feature: id, Stage: domain.StageOpen}})
+	m = model.(*Shell)
+	pump(t, m, cmd)
+	alerts.mu.Lock()
+	defer alerts.mu.Unlock()
+	if len(alerts.text) != 1 || !strings.Contains(alerts.text[0], "handoff brief finished") {
+		t.Fatalf("the ready brief raised %q, want one handoff-brief alert", alerts.text)
+	}
+}
+
+// stubOverlay is a dialog pushed over the writespec dialog, as help or a
+// confirm is.
+type stubOverlay struct{}
+
+func (stubOverlay) ID() string                                { return "stub" }
+func (stubOverlay) HandleKey(tea.KeyPressMsg) (bool, tea.Cmd) { return false, nil }
+func (stubOverlay) View(*theme.Styles, int, int) string       { return "" }
+
+// TestWritespecReadyFillsDialogUnderAnOverlay: a dialog with help pushed over
+// it still hears that its brief has landed. The ready event reads the brief
+// in and raises no alert, and the reply fills the dialog once help pops.
+func TestWritespecReadyFillsDialogUnderAnOverlay(t *testing.T) {
+	ag := agent.NewFake("on it")
+	m, _, _ := freeformAgentWorkspace(t, ag)
+	alerts := &briefAlerts{}
+	m.AddAttentionNotifier(alerts)
+	id := domain.FeatureID("FF-042")
+	d := newFreeformSpecDialog(domain.Feature{ID: id, Title: "a spec"}, nil, 0, nil)
+	m.Overlay.Push(d)
+	m.Overlay.Push(stubOverlay{})
+
+	model, cmd := m.Update(engineEventMsg{ev: engine.Event{Kind: engine.EventBriefReady, Feature: id, Stage: domain.StageOpen}})
+	m = model.(*Shell)
+	if cmd == nil {
+		t.Fatal("the ready event under an overlay did not read the brief in")
+	}
+	alerts.mu.Lock()
+	raised := len(alerts.text)
+	alerts.mu.Unlock()
+	if raised != 0 {
+		t.Fatalf("the ready event raised %d alert(s) while its dialog was open", raised)
+	}
+	m.handleWritespecDraftMsg(writespecDraftMsg{f: id, brief: "asked\n- the long brief", source: engine.BriefLive})
+	m.Overlay.Pop()
+	if top, ok := m.Overlay.Top().(*freeformSpecDialog); !ok || top.drafting || !strings.Contains(top.brief.Value(), "the long brief") {
+		t.Fatalf("the dialog under the overlay did not fill (top %T)", m.Overlay.Top())
+	}
+}
+
+// TestWritespecDialogKeepsALongBrief: the brief the session wrote reaches the
+// editable field whole, however long it is — the field has no character
+// limit to cut it at.
+func TestWritespecDialogKeepsALongBrief(t *testing.T) {
+	long := "asked\n- the retry flake\n\n" + strings.Repeat("decided\n- a long line the architect reads\n", 200) + "remaining\n- THE LAST LINE"
+	d := newFreeformSpecDialog(domain.Feature{ID: "FF-001", Title: "a spec"}, nil, 0, nil)
+	d.apply(writespecDraftMsg{f: "FF-001", brief: long, source: engine.BriefLive})
+	if got := d.brief.Value(); !strings.Contains(got, "THE LAST LINE") || len(got) < len(long) {
+		t.Fatalf("the field holds %d of the brief's %d characters", len(got), len(long))
+	}
+}
+
+// TestWritespecDialogRefusesToMintWhileDrafting: the confirm does not mint
+// while the brief is still drafting, whatever the field shows.
+func TestWritespecDialogRefusesToMintWhileDrafting(t *testing.T) {
+	minted := false
+	d := newFreeformSpecDialog(domain.Feature{ID: "FF-001", Title: "a spec"}, nil, 0, func(domain.Feature, string, string, string, int) tea.Cmd {
+		minted = true
+		return nil
+	})
+	if ok, _ := d.submit(); ok || minted {
+		t.Fatal("the dialog minted while the brief was still drafting")
+	}
+}
+
+// TestWritespecLatePendingReadKeepsTheBrief: a read issued before the brief
+// landed can answer pending after the ready event has filled the field. The
+// late answer must not put the dialog back into drafting.
+func TestWritespecLatePendingReadKeepsTheBrief(t *testing.T) {
+	d := newFreeformSpecDialog(domain.Feature{ID: "FF-001", Title: "a spec"}, nil, 0, nil)
+	d.apply(writespecDraftMsg{f: "FF-001", brief: "the whole brief", source: engine.BriefLive})
+	d.apply(writespecDraftMsg{f: "FF-001", source: engine.BriefPending})
+	if d.drafting {
+		t.Fatal("a pending read undid a brief already in the field")
+	}
+	if got := d.brief.Value(); got != "the whole brief" {
+		t.Fatalf("the field = %q, want the brief kept", got)
 	}
 }

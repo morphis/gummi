@@ -95,7 +95,10 @@ type FreeformSession struct {
 	// first, guarded by mu. They go to the agent together as the next
 	// turn once this one ends (drainQueue) — including a turn that ended
 	// because it was interrupted, which is how "stop, and do this
-	// instead" is said — and until then each can be taken back.
+	// instead" is said — and until then each can be taken back. A line
+	// sent while the handoff brief drafts waits the same way, and the
+	// brief's own goroutine sends it once the brief has landed (sendQueued),
+	// so it never interleaves with the brief turn.
 	queue []queuedTurn
 
 	// writeMu serializes one card's memory writes (freeformmemory.go):
@@ -548,6 +551,13 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 // A turn sent while the agent is still on the last one is queued rather
 // than refused: the person said it, and the agent should hear it next.
 func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []AttachmentRef) error {
+	return ff.sendTurn(ctx, msg, images, false)
+}
+
+// sendTurn is SendTurn. queued marks the batch sendQueued delivers after the
+// handoff brief: it passes the brief's own flag, which it is the one thing
+// that clears, and so is never queued behind itself.
+func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []AttachmentRef, queued bool) error {
 	sess, err := ff.ensureBackend(ctx)
 	if err != nil {
 		return err
@@ -570,7 +580,7 @@ func (ff *FreeformSession) SendTurn(ctx context.Context, msg string, images []At
 			return err
 		}
 	}
-	if sess.Busy() {
+	if sess.Busy() || (!queued && ff.busyBriefing()) {
 		ff.enqueue(ctx, msg, images)
 		return nil
 	}
@@ -685,32 +695,113 @@ func (ff *FreeformSession) Unqueue(i int) (text string, ok bool) {
 	return text, true
 }
 
-// drainQueue sends everything waiting as one turn, the way it reads to a
+// takeQueue takes everything waiting as one turn, the way it reads to a
 // person: several things said while the agent was busy, each its own
-// paragraph. It runs off the pump, since a send can block on the backend
-// the pump is draining. Not while a question is open: that is waiting on
-// an answer, and a queued line is not one.
-func (ff *FreeformSession) drainQueue(sess *Session) {
+// paragraph. It takes nothing while a question is open: that is waiting on
+// an answer, and a queued line is not one. ok is false when there is
+// nothing to send.
+func (ff *FreeformSession) takeQueue(sess *Session) (queuedBatch, bool) {
 	if sess.Snapshot().PendingAsk != nil {
-		return
+		return queuedBatch{}, false
 	}
 	ff.mu.Lock()
 	q := ff.queue
 	ff.queue = nil
 	ff.mu.Unlock()
+	return joinQueue(q)
+}
+
+// queuedBatch is the waiting lines joined into one turn: the first line's
+// context (who said it) and the text and images of all of them.
+type queuedBatch struct {
+	ctx    context.Context
+	text   string
+	images []AttachmentRef
+}
+
+// joinQueue joins lines into one batch, the way they read to a person.
+func joinQueue(q []queuedTurn) (queuedBatch, bool) {
 	if len(q) == 0 {
-		return
+		return queuedBatch{}, false
 	}
+	var b queuedBatch
 	texts := make([]string, len(q))
-	var images []AttachmentRef
 	for i, t := range q {
 		texts[i] = t.text
-		images = append(images, t.images...)
+		b.images = append(b.images, t.images...)
+	}
+	b.ctx = q[0].ctx
+	b.text = strings.Join(texts, "\n\n")
+	return b, true
+}
+
+// drainQueue sends the waiting lines off the pump, since a send can block
+// on the backend the pump is draining.
+func (ff *FreeformSession) drainQueue(sess *Session) {
+	b, ok := ff.takeQueue(sess)
+	if !ok {
+		return
 	}
 	go func() {
 		// an error is the session's own and already on it (SendTurn)
-		_ = ff.SendTurn(q[0].ctx, strings.Join(texts, "\n\n"), images)
+		_ = ff.SendTurn(b.ctx, b.text, b.images)
 	}()
+}
+
+// nextQueued takes the next batch of lines queued while the brief drafted,
+// or, once none is left, lowers the brief flag. Both happen in one locked
+// step: a line sent before the flag drops is queued behind the batch, and a
+// line sent after it finds the queue empty and goes direct, so no line
+// overtakes one said before it. It takes nothing while a question is open,
+// as takeQueue does; the lines wait for the turn that follows.
+func (ff *FreeformSession) nextQueued(sess *Session) (queuedBatch, bool) {
+	asking := sess.Snapshot().PendingAsk != nil
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	if asking || len(ff.queue) == 0 {
+		ff.briefing = false
+		return queuedBatch{}, false
+	}
+	q := ff.queue
+	ff.queue = nil
+	return joinQueue(q)
+}
+
+// sendQueued sends the lines queued while the brief drafted, in the
+// caller's goroutine on the caller's context, which the engine joins, and
+// lowers the brief flag once none is left. Once ctx is done the lines are
+// not sent, and the record says so instead, so they are not dropped without
+// a trace.
+func (ff *FreeformSession) sendQueued(ctx context.Context, sess *Session) {
+	for {
+		b, ok := ff.nextQueued(sess)
+		if !ok {
+			return
+		}
+		if ctx.Err() != nil {
+			ff.noteUnsent(b.text, "gummi closed first")
+			continue
+		}
+		// A refusal that comes before the line is recorded (the envelope is
+		// spent, a question is open, the image is unsupported) would drop
+		// it without a trace, so the record names it. A backend failure
+		// after the line is on the record is already on the session too;
+		// the note then says why the turn did not go.
+		if err := ff.sendTurn(WithActor(ctx, actorOf(b.ctx)), b.text, b.images, true); err != nil {
+			ff.noteUnsent(b.text, "it could not be sent ("+err.Error()+")")
+		}
+		if sess.Busy() {
+			// the batch's turn is in flight: the lines queued since wait
+			// for it, and the pump sends them when it ends. The flag drops
+			// first, so a turn that ends in this window is drained here
+			// rather than leaving its lines to wait for a turn never to come.
+			ff.setBriefing(false)
+			if !sess.Busy() {
+				ff.drainQueue(sess)
+			}
+			return
+		}
+	}
 }
 
 // Kickoff sends the card's brief as the session's first turn, and does

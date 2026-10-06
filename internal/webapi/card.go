@@ -406,17 +406,22 @@ var DecisionIndependentActions = []string{
 	"duplicate", "delete", "clean", "model", "commit",
 }
 
-// WritespecDraft is GET /api/cards/{id}/writespec-draft: the handoff brief
-// a writespec dialog opens on, fetched once when the dialog opens. It is
-// its own read because filling it is an agent turn — envelope spend,
-// seconds, an appended transcript exchange — never a side effect of
-// reading the card.
+// WritespecDraft is the handoff brief a writespec dialog opens on. Filling
+// it is an agent turn — envelope spend, minutes, an appended transcript
+// exchange — so starting it is POST /api/cards/{id}/writespec-draft, and
+// reading it is GET on the same path, which never starts anything. The
+// dialog POSTs once when it opens and GETs again when the card's update
+// says the brief has landed.
 type WritespecDraft struct {
 	// Brief is the draft itself: the session's own four-section answer
-	// (asked · decided · done · remaining) when a live session could
-	// answer, else the conversation laid out from the persisted transcript.
+	// (asked · decided · done · remaining) when a live session answered,
+	// else the conversation laid out from the persisted transcript.
 	Brief string `json:"brief"`
 	// Source says which kind of draft this is — "live" or "assembled" —
 	// so a degraded draft is never mistaken for the session's own words.
 	Source string `json:"source"`
+	// Drafting says the session's own brief is still being written: the
+	// brief and source are empty, and the dialog waits for the card's
+	// update before it reads again.
+	Drafting bool `json:"drafting,omitempty"`
 }

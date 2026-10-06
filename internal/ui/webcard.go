@@ -402,7 +402,7 @@ func writespecDraftable(f domain.Feature, agentWired bool) string {
 // refetched it. The refusals any send rides (mid-turn, an unanswered
 // question) come back from the engine and map to the busy conflict the
 // writespec action has always answered with.
-func (b *Bridge) WritespecDraft(ctx context.Context, id string) (webapi.WritespecDraft, error) {
+func (b *Bridge) WritespecDraft(ctx context.Context, id string, start bool) (webapi.WritespecDraft, error) {
 	var (
 		f      domain.Feature
 		reason string
@@ -428,20 +428,36 @@ func (b *Bridge) WritespecDraft(ctx context.Context, id string) (webapi.Writespe
 		}
 		return webapi.WritespecDraft{}, refuse(WebNotFound, "no card "+id+" on this board")
 	}
-	brief, source, err := m.engine.SessionHandoffBrief(ctx, f.ID)
+	// The start runs on the engine's own lifetime, never the request's: a
+	// page that leaves while the brief drafts must not cancel the turn.
+	if start {
+		if err := m.engine.StartHandoffBrief(context.Background(), f.ID); err != nil {
+			return webapi.WritespecDraft{}, writespecDraftError(err)
+		}
+	}
+	brief, source, err := m.engine.HandoffBrief(f.ID)
 	if err != nil {
-		if errors.Is(err, engine.ErrSessionDirty) {
-			return webapi.WritespecDraft{}, refuse(WebBadRequest, sanitize(err.Error()))
-		}
-		if errors.Is(err, agent.ErrBusy) {
-			return webapi.WritespecDraft{}, &WebError{
-				Code: WebConflict, Reason: webapi.ConflictBusy,
-				Text: sanitize(err.Error()),
-			}
-		}
-		return webapi.WritespecDraft{}, err
+		return webapi.WritespecDraft{}, writespecDraftError(err)
+	}
+	if source == engine.BriefPending {
+		return webapi.WritespecDraft{Drafting: true}, nil
 	}
 	return webapi.WritespecDraft{Brief: brief, Source: string(source)}, nil
+}
+
+// writespecDraftError maps the brief's refusals to the wire: a dirty
+// worktree is a bad request, a busy session a conflict.
+func writespecDraftError(err error) error {
+	if errors.Is(err, engine.ErrSessionDirty) {
+		return refuse(WebBadRequest, sanitize(err.Error()))
+	}
+	if errors.Is(err, agent.ErrBusy) {
+		return &WebError{
+			Code: WebConflict, Reason: webapi.ConflictBusy,
+			Text: sanitize(err.Error()),
+		}
+	}
+	return err
 }
 
 // webDropCleanCommit leaves a session's "commit" out of its menu while the

@@ -116,13 +116,17 @@ test('a session switches its model mid-conversation, and a stage card has no pic
 // Writing a spec moves a session into the workflow from its own head: the
 // dialog asks for a title, a profile and a budget, the session closes with
 // its branch kept, and the page lands on the new feature in its plan stage.
-test('a session is continued as a spec from its head', async ({ pairedPage: page, server, api }, info) => {
+test('a session is continued as a spec from its head', async ({ pairedPage: page, server, api, workspace }, info) => {
   test.setTimeout(120_000);
   const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
   const id = String(made.json?.id);
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
+  // the opening turn leaves its NOTES.md edit uncommitted, and a spec is
+  // refused while the session has uncommitted work: commit it as the person
+  // would before writing the spec
+  await workspace.exec('sh', ['-c', 'git add -A && (git diff --cached --quiet || git commit -q -m "Note the rounding")'], { cwd: workspace.worktree(id) });
 
   if (info.project.name === 'phone') {
     // no room in a phone's head: the card's menu carries it
@@ -136,6 +140,9 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
     await page.getByTestId('write-spec').click();
   }
   await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
+  // the brief drafts in the background: the start stays off until it has
+  // landed in the field, and only then can the spec be minted
+  await expect(page.getByTestId('spec-start')).toBeEnabled({ timeout: 30_000 });
   await page.getByTestId('spec-title').fill('Sum before rounding');
   await page.getByTestId('spec-profile').selectOption('e2e-alt');
   // a negative budget is refused in words, not started uncapped

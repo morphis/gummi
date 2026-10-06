@@ -179,13 +179,15 @@ func TestChangeKey(t *testing.T) {
 // where it came from.
 func TestWritespecShapes(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, struct {
-		Request ActionRequest
-		Live    WritespecDraft
-		Cold    WritespecDraft
+		Request  ActionRequest
+		Live     WritespecDraft
+		Cold     WritespecDraft
+		Drafting WritespecDraft
 	}{
-		Request: ActionRequest{Message: "Configurable sync retries", Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice", Number: &[]int{300}[0]},
-		Live:    WritespecDraft{Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice\n\ndone\n- the loop retries twice\n\nremaining\n- make the count configurable", Source: "live"},
-		Cold:    WritespecDraft{Brief: "asked:\n- rewrite the retry loop", Source: "assembled"},
+		Request:  ActionRequest{Message: "Configurable sync retries", Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice", Number: &[]int{300}[0]},
+		Live:     WritespecDraft{Brief: "asked\n- why the retry test flakes\n\ndecided\n- retry twice\n\ndone\n- the loop retries twice\n\nremaining\n- make the count configurable", Source: "live"},
+		Cold:     WritespecDraft{Brief: "asked:\n- rewrite the retry loop", Source: "assembled"},
+		Drafting: WritespecDraft{Drafting: true},
 	}))
 }
 

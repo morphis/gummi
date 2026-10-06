@@ -161,11 +161,9 @@ func TestTheWebConversationNamesTheDraftingBrief(t *testing.T) {
 	waitFreeformIdle(t, eng, f.ID)
 	m = pump(t, m, m.loadRows)
 
-	done := make(chan error, 1)
-	go func() {
-		_, _, err := eng.SessionHandoffBrief(ctx, f.ID)
-		done <- err
-	}()
+	if err := eng.StartHandoffBrief(ctx, f.ID); err != nil {
+		t.Fatalf("StartHandoffBrief: %v", err)
+	}
 	<-started
 	r, ok := m.rowByID(f.ID)
 	if !ok {
@@ -176,8 +174,11 @@ func TestTheWebConversationNamesTheDraftingBrief(t *testing.T) {
 		t.Fatalf("the conversation's busy verb = %+v, want %q", conv, engine.BriefDrafting)
 	}
 	close(release)
-	if err := <-done; err != nil {
-		t.Fatalf("SessionHandoffBrief: %v", err)
+	for deadline := time.Now().Add(testWaitTimeout); eng.Freeform(f.ID).Briefing(); {
+		if time.Now().After(deadline) {
+			t.Fatal("the brief turn never ended")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	if conv := m.webFreeform(r); conv == nil || conv.Busy || conv.Verb != "" {
 		t.Fatalf("after the brief turn the conversation still reads busy: %+v", conv)

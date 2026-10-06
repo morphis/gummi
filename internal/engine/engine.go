@@ -341,6 +341,18 @@ type Engine struct {
 	// through when teardown begins.
 	wg sync.WaitGroup
 
+	// ctx is the engine's own lifetime: a brief turn runs on it rather than
+	// on the caller that asked for the brief, so it outlives the dialog or
+	// request that started it. cancel ends it, and Close calls it. Only New
+	// sets them: an Engine built as a literal has no lifetime for a brief
+	// turn to run on, so the brief path is for engines from New alone.
+	ctx    context.Context
+	cancel context.CancelFunc
+	// briefs joins the detached brief turns (goBrief) and the queued sends
+	// they make, so Close waits for every one before the freeform teardown
+	// saves the conversation and drops the card lock.
+	briefs sync.WaitGroup
+
 	// mcpSeq is the atomic source of engine-side MCP call ids, so a
 	// session's in-flight dispatches are unique and never collide with a
 	// backend's own tool-call ids (disjoint namespaces).
@@ -463,7 +475,10 @@ func New(cfg Config) *Engine {
 		// asks the store whether a goal whose worktree is gone has ended
 		pool.SetGoalLookup(cfg.Store.GetFeature)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	e := &Engine{
+		ctx:            ctx,
+		cancel:         cancel,
 		cfg:            cfg,
 		now:            time.Now,
 		raw:            make(chan Event, 256),
@@ -2574,6 +2589,9 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	e.closed = true
+	if e.cancel != nil {
+		e.cancel()
+	}
 	sessions := make([]*Session, 0, len(e.live))
 	for _, s := range e.live {
 		sessions = append(sessions, s)
@@ -2598,6 +2616,11 @@ func (e *Engine) Close() error {
 	for _, c := range consults {
 		c.stopBackend()
 	}
+	// A brief turn canceled above writes its "did not answer" note and any
+	// line it sends from the queue. Both must be on the record before the
+	// teardown below saves the conversation and drops the card lock, so
+	// the brief turns are joined here, not after it.
+	e.briefs.Wait()
 	// A freeform session's teardown saves the conversation and drops the
 	// card lock with the backend — so another gummi process can drive the
 	// card once this board is gone, and so the person who comes back finds
@@ -2615,6 +2638,24 @@ func (e *Engine) Close() error {
 	e.closeStartedAgents()
 	close(e.stopped)
 	return nil
+}
+
+// goBrief runs fn detached on the engine's lifetime, joined by Close. It
+// reports false once the engine is closing: the check and the join's Add
+// share the lock Close sets closed under, so an Add never races the Wait.
+func (e *Engine) goBrief(fn func()) bool {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return false
+	}
+	e.briefs.Add(1)
+	e.mu.Unlock()
+	go func() {
+		defer e.briefs.Done()
+		fn()
+	}()
+	return true
 }
 
 // errSessionDied reports an agent session whose event stream ended without

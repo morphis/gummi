@@ -114,15 +114,22 @@ export function openModal ({ title, body, bodyEl, actions = [], wide = false, te
   const mbody = bodyEl || h('div', { class: 'mbody' }, body)
   let close = null
   const foot = actions.length
-    ? h('div', { class: 'mfoot' }, actions.map(a => h('button', {
-      class: ['btn', a.primary && 'pri', a.danger && 'danger'],
-      testid: a.testid,
-      type: 'button',
-      onclick: async () => {
-        const keep = await a.onClick?.()
-        if (keep !== false) close()
-      }
-    }, a.label)))
+    ? h('div', { class: 'mfoot' }, actions.map(a => {
+      const b = h('button', {
+        class: ['btn', a.primary && 'pri', a.danger && 'danger'],
+        testid: a.testid,
+        type: 'button',
+        onclick: async () => {
+          const keep = await a.onClick?.()
+          if (keep !== false) close()
+        }
+      }, a.label)
+      // a caller that must hold an action off (a dialog still drafting)
+      // starts it disabled and reaches the button through a.el
+      if (a.disabled) b.disabled = true
+      a.el = b
+      return b
+    }))
     : null
   const box = h('section', { class: ['modal', wide && 'wide'], role, 'aria-modal': 'true', 'aria-label': title, testid, tabindex: '-1' },
     // a div, not a header: inside a dialog a <header> is read as the

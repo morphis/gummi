@@ -81,7 +81,7 @@ func TestTheBriefTurnIsReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFreeformIdle(t, ff)
-	if _, _, err := e.SessionHandoffBrief(ctx, f.ID); err != nil {
+	if _, _, err := awaitBrief(e, f.ID); err != nil {
 		t.Fatal(err)
 	}
 	turns := ag.briefTurns()
@@ -122,12 +122,12 @@ func TestAnAnsweredBriefIsNotWrittenTwice(t *testing.T) {
 	}
 	waitFreeformIdle(t, ff)
 
-	first, src, err := e.SessionHandoffBrief(ctx, f.ID)
+	first, src, err := awaitBrief(e, f.ID)
 	if err != nil || src != BriefLive {
 		t.Fatalf("first brief: %v (%s)", err, src)
 	}
 	lines := len(ff.Snapshot().Transcript)
-	again, src, err := e.SessionHandoffBrief(ctx, f.ID)
+	again, src, err := awaitBrief(e, f.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestAnAnsweredBriefIsNotWrittenTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFreeformIdle(t, ff)
-	if _, _, err := e.SessionHandoffBrief(ctx, f.ID); err != nil {
+	if _, _, err := awaitBrief(e, f.ID); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(ag.briefTurns()); n != 2 {
@@ -184,7 +184,7 @@ func TestWritingASpecRefusesUncommittedWork(t *testing.T) {
 	}
 	waitFreeformIdle(t, ff)
 
-	_, _, err = e.SessionHandoffBrief(ctx, f.ID)
+	_, _, err = awaitBrief(e, f.ID)
 	if !errors.Is(err, ErrSessionDirty) {
 		t.Fatalf("the brief of a session with loose work = %v, want ErrSessionDirty", err)
 	}

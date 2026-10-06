@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -183,6 +185,88 @@ func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
 	}
 }
 
+// A read never starts the brief, and a start never waits on it. On a live
+// session with a transcript, a GET answers the assembled draft and runs no
+// turn. A POST answers drafting while the brief turn is still held open, a
+// second POST starts no second turn, and a read fills once the brief lands.
+func TestWritespecDraftStartsOnlyOnThePost(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	var briefTurns atomic.Int32
+	fake := agent.NewFake("done")
+	fake.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "handoff brief") {
+			briefTurns.Add(1)
+			<-release
+			return []agent.Event{
+				{Kind: agent.EventMessage, Text: "asked\n- find why the retry test flakes\n\nremaining\n- the flake's cause is still unknown"},
+				{Kind: agent.EventIdle},
+			}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}
+	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
+	// a held turn must be let go before the board shuts down, or Close waits on it
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Find why the retry test flakes", Backend: "codex", Model: "gpt-5"})
+	waitTranscript(t, h, s.ID, "done")
+	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the opening turn never ended")
+		}
+	}
+
+	// the read starts nothing: the assembled draft, and no brief turn
+	var read webapi.WritespecDraft
+	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &read); st != http.StatusOK || read.Drafting || read.Source != "assembled" {
+		t.Fatalf("a read on a live session = %d drafting=%v source=%q, want 200, not drafting, assembled", st, read.Drafting, read.Source)
+	}
+	if n := briefTurns.Load(); n != 0 {
+		t.Fatalf("a read started %d brief turns, want none", n)
+	}
+
+	// the start answers at once, drafting, while the turn is still held
+	var started webapi.WritespecDraft
+	if st := h.call(http.MethodPost, "/api/cards/"+s.ID+"/writespec-draft", nil, &started); st != http.StatusOK || !started.Drafting {
+		t.Fatalf("start = %d drafting=%v, want 200 and drafting", st, started.Drafting)
+	}
+	for deadline := time.Now().Add(10 * time.Second); briefTurns.Load() == 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the brief turn never reached the agent")
+		}
+	}
+
+	// a second start and a read both answer drafting, and neither starts a turn
+	var again, pending webapi.WritespecDraft
+	if st := h.call(http.MethodPost, "/api/cards/"+s.ID+"/writespec-draft", nil, &again); st != http.StatusOK || !again.Drafting {
+		t.Fatalf("second start = %d drafting=%v, want 200 and drafting", st, again.Drafting)
+	}
+	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &pending); st != http.StatusOK || !pending.Drafting {
+		t.Fatalf("read while drafting = %d drafting=%v, want 200 and drafting", st, pending.Drafting)
+	}
+	if n := briefTurns.Load(); n != 1 {
+		t.Fatalf("%d brief turns while drafting, want one", n)
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	var draft webapi.WritespecDraft
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		draft = webapi.WritespecDraft{}
+		if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &draft); st != http.StatusOK {
+			t.Fatalf("writespec-draft read = %d", st)
+		}
+		if !draft.Drafting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the brief never landed")
+		}
+	}
+	if draft.Source != "live" || !strings.Contains(draft.Brief, "the flake's cause is still unknown") {
+		t.Errorf("the landed draft = source %q, brief:\n%s — want the session's own brief", draft.Source, draft.Brief)
+	}
+}
+
 // Writing a spec from a session ends the session with its branch kept and
 // continues its work as a feature: the draft is fetched once when the
 // dialog opens — the session writing its own brief, asked by a
@@ -230,21 +314,37 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 	}
 	// the turn left clock.go loose, and nothing commits a session's work
 	// for it: the spec continues from the last commit, so the dialog
-	// refuses to open — before a brief turn is paid for — until the work
-	// is committed on purpose
+	// refuses to start the brief — before a brief turn is paid for — until
+	// the work is committed on purpose. The read alone starts nothing, so
+	// it answers the draft as it stands, with no brief drafting.
 	var refused webapi.Error
-	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &refused); st != http.StatusBadRequest ||
+	if st := h.call(http.MethodPost, "/api/cards/"+s.ID+"/writespec-draft", nil, &refused); st != http.StatusBadRequest ||
 		!strings.Contains(refused.Error, "uncommitted work") {
-		t.Fatalf("writespec-draft over loose work = %d %q, want 400 naming the uncommitted work", st, refused.Error)
+		t.Fatalf("writespec-draft start over loose work = %d %q, want 400 naming the uncommitted work", st, refused.Error)
+	}
+	var untouched webapi.WritespecDraft
+	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &untouched); st != http.StatusOK || untouched.Drafting {
+		t.Fatalf("a read over loose work = %d drafting=%v, want 200 and no brief drafting", st, untouched.Drafting)
 	}
 	h.action(s.ID, "commit", webapi.ActionRequest{Message: "sync: clock"})
 
-	// the draft is fetched once, at dialog open — its own read, never a
-	// side effect of reading the card: a second GET returns the brief
-	// again only because the dialog was opened again
+	// the dialog starts the brief with a POST, which answers at once —
+	// drafting, or the brief if it has already landed — and reads it with a
+	// GET once the card's update says so. Nothing waits on the turn.
 	var draft webapi.WritespecDraft
-	if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &draft); st != http.StatusOK {
-		t.Fatalf("writespec-draft = %d", st)
+	if st := h.call(http.MethodPost, "/api/cards/"+s.ID+"/writespec-draft", nil, &draft); st != http.StatusOK {
+		t.Fatalf("writespec-draft start = %d", st)
+	}
+	for deadline := time.Now().Add(10 * time.Second); draft.Drafting; {
+		if time.Now().After(deadline) {
+			t.Fatal("the brief never landed")
+		}
+		time.Sleep(10 * time.Millisecond)
+		// a fresh value each read: an omitted drafting field must read as false
+		draft = webapi.WritespecDraft{}
+		if st := h.call(http.MethodGet, "/api/cards/"+s.ID+"/writespec-draft", nil, &draft); st != http.StatusOK {
+			t.Fatalf("writespec-draft read = %d", st)
+		}
 	}
 	if draft.Source != "live" {
 		t.Errorf("the draft's source = %q, want live — the session answered", draft.Source)

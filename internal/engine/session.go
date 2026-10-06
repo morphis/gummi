@@ -37,6 +37,10 @@ const (
 	// EventQuestion fires when the agent asks the user a question via the
 	// ask_user client tool (Snapshot.PendingAsk populated).
 	EventQuestion EventKind = "question"
+	// EventBriefReady fires when a freeform card's handoff brief turn has
+	// ended, answered or not: a dialog waiting on it reads the brief in, and
+	// a person who has walked away is told it is ready.
+	EventBriefReady EventKind = "brief_ready"
 	// EventAnnotations fires when the agent resolves a diff review comment
 	// via the resolve_annotation client tool — an open diff surface should
 	// re-read its annotations so the open-count burns down live.

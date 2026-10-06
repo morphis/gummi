@@ -472,14 +472,15 @@ export function writeSpecButton (card) {
   return h('button', { class: 'btn hide-s', type: 'button', testid: 'write-spec', title: a.detail, onclick: () => openWriteSpec(card, a) }, 'Write a spec')
 }
 
-// openWriteSpec opens the dialog at once and fetches the handoff brief
-// once, while it is up — on a live session the fetch IS the brief turn,
-// gummi asking the session to write what the next card's architect will
-// read, and the thread's busy marker names it while it runs. The brief is
-// an editable field pre-filled with the draft, labeled by where it came
-// from; the field stays locked until the draft lands, so nothing typed
-// into it early is clobbered by the fill. Nothing mints before the draft
-// has landed and the person confirms.
+// openWriteSpec opens the dialog at once and starts the handoff brief. On a
+// live session the start IS the brief turn, gummi asking the session to
+// write what the next card's architect will read: it runs in the
+// background, the thread's busy marker names it, and the dialog reads it
+// again when the card's update says it has landed — so leaving the dialog,
+// or the page, loses nothing. The brief is an editable field filled with
+// the draft, labeled by where it came from. Nothing mints before the brief
+// has landed and the person confirms, and the start button stays off until
+// it has.
 export async function openWriteSpec (card, a) {
   if (!form) await loadForm(card.repo || '')
   const title = h('input', { value: card.title, testid: 'spec-title', autocomplete: 'off' })
@@ -496,64 +497,93 @@ export async function openWriteSpec (card, a) {
     (a.choices || []).length ? h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Profile'), profile, h('span', { class: 'fh' }, 'Every stage takes its agent and model from the profile.')) : null,
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Credits for the whole spec, apart from what the session spent. 0 is uncapped.')),
     err)
-  let draft = null
-  const draftReady = (async () => {
-    try {
-      draft = await get(cardPath(card.id, 'writespec-draft'))
-    } catch (e) {
-      note.textContent = e.data?.text || e.data?.error || e.message
-      return
-    }
-    // the field was locked while the fetch ran, so nothing typed early is
-    // clobbered; unlocked only now that the draft has landed
-    brief.value = draft.brief || ''
-    brief.disabled = false
+  const startAction = { label: 'Start the spec', primary: true, testid: 'spec-start', disabled: true, onClick: mint }
+  // filled: the brief has landed in the field, which is when a mint may
+  // read it. Set once and never cleared — a later read cannot unfill it.
+  let filled = false
+  let reading = false
+  // apply takes the brief as the page last read it: drafting keeps the
+  // dialog waiting, a brief fills the field, a failed read says why.
+  const apply = (d) => {
+    if (filled || !d || d.drafting) return
+    filled = true
     // the draft's own label: the session's words, or what the conversation
     // alone could lay out — a degraded brief is never mistaken for the
     // session's own words
-    note.textContent = draft.source === 'assembled'
+    brief.value = d.brief || ''
+    brief.disabled = false
+    if (startAction.el) startAction.el.disabled = false
+    note.textContent = d.source === 'assembled'
       ? 'assembled from the conversation — no live session could answer it'
       : 'the session’s own words — edit what the next card’s architect will read'
-  })()
+  }
+  const fail = (e) => { note.textContent = e.data?.text || e.data?.error || e.message }
+  // read GETs the brief as it stands; it never starts a turn. An update that
+  // arrives while a read is in flight sets again, and the read settles by
+  // reading once more: the brief can land during the GET, and the update
+  // that says so must not be the one dropped.
+  let again = false
+  const read = async () => {
+    if (filled) return
+    if (reading) { again = true; return }
+    reading = true
+    try {
+      apply(await get(cardPath(card.id, 'writespec-draft')))
+    } catch (e) {
+      fail(e)
+    } finally {
+      reading = false
+      if (again) { again = false; read() }
+    }
+  }
+  async function mint () {
+    err.hidden = true
+    if (!filled) {
+      // the brief is still drafting: nothing mints off an empty field
+      err.textContent = 'still drafting the handoff brief…'
+      err.hidden = false
+      return false
+    }
+    const b = budgetOf(budget.value)
+    if (b.err) { err.textContent = b.err; err.hidden = false; budget.focus(); return false }
+    const req = { message: title.value.trim(), brief: brief.value, number: b.n }
+    if (profile.value) req.profile = profile.value
+    if (state.card?.decision?.against?.token) req.against = state.card.decision.against.token
+    try {
+      const c = await post(cardPath(card.id, 'actions/writespec'), req)
+      await ctx.refreshBoard?.()
+      if (c?.id) await ctx.select(c.id)
+      toast(`${card.id} continues as ${c?.id || 'a spec'}`)
+    } catch (e) {
+      err.textContent = e.data?.text || e.data?.error || e.message
+      err.hidden = false
+      return false
+    }
+  }
+  // the card's update is the signal the brief has landed: read it then. The
+  // listener waits for the start to answer without error: a refused start
+  // started no brief, so an update that arrives meanwhile must not read an
+  // assembled draft into the dialog as though it were the session's own.
+  let unwatch = () => {}
+  let closed = false
   openModal({
     title: 'Write a spec',
     testid: 'write-spec-dialog',
     bodyEl: body,
     card: card.id,
-    actions: [
-      { label: 'Cancel' },
-      {
-        label: 'Start the spec',
-        primary: true,
-        testid: 'spec-start',
-        onClick: async () => {
-          err.hidden = true
-          if (!draft) {
-            // the brief turn is still running: wait for it rather than
-            // making the person click again
-            err.textContent = 'still drafting the handoff brief…'
-            err.hidden = false
-            await draftReady
-            if (!draft) return false // the fetch failed; its error is on the note
-            err.hidden = true
-          }
-          const b = budgetOf(budget.value)
-          if (b.err) { err.textContent = b.err; err.hidden = false; budget.focus(); return false }
-          const req = { message: title.value.trim(), brief: brief.value, number: b.n }
-          if (profile.value) req.profile = profile.value
-          if (state.card?.decision?.against?.token) req.against = state.card.decision.against.token
-          try {
-            const c = await post(cardPath(card.id, 'actions/writespec'), req)
-            await ctx.refreshBoard?.()
-            if (c?.id) await ctx.select(c.id)
-            toast(`${card.id} continues as ${c?.id || 'a spec'}`)
-          } catch (e) {
-            err.textContent = e.data?.text || e.data?.error || e.message
-            err.hidden = false
-            return false
-          }
-        }
-      }
-    ]
+    onClose: () => { closed = true; unwatch() },
+    actions: [{ label: 'Cancel' }, startAction]
   })
+  // the dialog is up: start the brief once, then show what it answered
+  try {
+    apply(await post(cardPath(card.id, 'writespec-draft')))
+    if (!closed) {
+      unwatch = on(['card'], () => { read() })
+      // a brief that landed before the listener attached has no update
+      // left to say so: one read covers it
+      read()
+    }
+  } catch (e) {
+    fail(e)
+  }
 }
