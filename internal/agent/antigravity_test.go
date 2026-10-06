@@ -120,7 +120,7 @@ func TestAntigravityRoundTrip(t *testing.T) {
 	}
 	defer ag.Close()
 	caps := ag.Capabilities()
-	if !caps.Resume || !caps.UsageEvents || !caps.MCPTools || !caps.SkillDirs || caps.WriteCage != WriteCageCwd {
+	if !caps.Resume || !caps.UsageEvents || !caps.MCPTools || caps.WriteCage != WriteCageCwd {
 		t.Errorf("capabilities = %+v", caps)
 	}
 	if caps.Interrupt || caps.ClientTools || caps.ReadOnlyEnforce || caps.Images || caps.NativeWatch || caps.Compact {

@@ -87,7 +87,7 @@ func (c *ClaudeCode) Name() string { return "claude" }
 // replacement for the ask_user convention path, so flipping it would
 // silently disable that convention.
 func (c *ClaudeCode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true, NativeWatch: true, Compact: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, Images: true, NativeWatch: true, Compact: true}
 }
 
 // CreditRate implements Agent. The Claude Code CLI reports its own
@@ -134,8 +134,7 @@ func claudeReadOnlyTools() []string {
 //
 // Skill is always on it. Skill IS a built-in, so --tools gates it, and
 // every skill the CLI discovers — the repository's, the operator's own
-// under ~/.claude, an installed plugin's, the .agents ones gummi hands it
-// (claude_skills.go) — is invoked through it. A roster without Skill does
+// under ~/.claude, an installed plugin's — is invoked through it. A roster without Skill does
 // not narrow what the session is shown; it leaves the skills listed and
 // unreachable. gummi does not curate what a backend discovers (DESIGN
 // §4.1a), so this list cannot be where that curation quietly happens.
@@ -267,25 +266,6 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		cfg := buildGummiMCPServerConfig(exe, opts.FeatureID, opts.MCPSockPath)
 		args = append(args, "--strict-mcp-config", "--mcp-config", string(cfg))
 	}
-	// Forwarded workspace skills and the .agents skills the CLI does not
-	// read on its own. The CLI can only be pointed at skills outside its
-	// own locations through a plugin, so gummi generates one
-	// (claude_skills.go) and loads it for this session alone. Nothing is
-	// written when there is nothing to hand over. The temp tree is removed
-	// at Close, and on every failure between here and a started child.
-	pluginDir, skillRoot, err := claudeMaterializeSkills(opts)
-	if err != nil {
-		return nil, err
-	}
-	started := false
-	defer func() {
-		if !started && skillRoot != "" {
-			_ = os.RemoveAll(skillRoot)
-		}
-	}()
-	if pluginDir != "" {
-		args = append(args, "--plugin-dir", pluginDir)
-	}
 	// Static allowlist: pre-approving a tool skips its permission checks
 	// entirely, so Edit, Write, and MultiEdit MUST stay off this list —
 	// allowlisting any of them would neutralize acceptEdits' cwd check
@@ -366,7 +346,6 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		stdin:       stdin,
 		stderr:      stderr,
 		workdir:     opts.WorkDir,
-		skillRoot:   skillRoot,
 		raw:         make(chan Event, 64),
 		events:      make(chan Event),
 		stop:        make(chan struct{}),
@@ -376,7 +355,6 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		turnTokens:  map[string]int64{},
 		resumeBase:  resumed,
 	}
-	started = true
 	go s.forward()
 	go s.read(stdout)
 
@@ -430,12 +408,8 @@ type claudeSession struct {
 	cmd     *exec.Cmd
 	cancel  context.CancelFunc
 	workdir string // opts.WorkDir, for repo-relative tool-call details
-	// skillRoot is the temp tree holding the generated skill plugin
-	// (claude_skills.go), removed at Close. Empty when nothing was
-	// forwarded, which is the ordinary case.
-	skillRoot string
-	stdin     io.WriteCloser
-	stderr    *capWriter // bounded tail of the child's stderr, for crash diagnostics
+	stdin   io.WriteCloser
+	stderr  *capWriter // bounded tail of the child's stderr, for crash diagnostics
 
 	raw      chan Event
 	events   chan Event
@@ -1216,9 +1190,6 @@ func (s *claudeSession) Close() error {
 		case <-time.After(3 * time.Second):
 		}
 		_ = s.reap() // reap (read() may already have)
-		if s.skillRoot != "" {
-			_ = os.RemoveAll(s.skillRoot)
-		}
 	})
 	return nil
 }

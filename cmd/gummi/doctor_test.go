@@ -31,44 +31,6 @@ func clearDoctorEnv(t *testing.T) {
 	}
 }
 
-// A forwarded skill is reported by resolving it the way the engine will,
-// so a name that will never reach a session fails here instead of going
-// missing at run time.
-func TestConfigLayeringChecksReportsForwardedSkills(t *testing.T) {
-	clearDoctorEnv(t)
-	wsDir := gitRepo(t)
-	wsPath := filepath.Join(wsDir, ".gummi", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(wsPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	skill := filepath.Join(wsDir, ".agents", "skills", "container-env")
-	if err := os.MkdirAll(skill, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: container-env\n---\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	body := "skills:\n  forward:\n    - container-env\n    - not-there\n"
-	if err := os.WriteFile(wsPath, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, sources, err := config.LoadLayered(filepath.Join(t.TempDir(), "missing.yaml"), wsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checks := configLayeringChecks(cfg, sources, "", wsPath, wsDir)
-
-	ok := checkByName(doctorReport{Checks: checks}, "config:skills.forward.container-env")
-	if ok.Status != statusOK || !strings.Contains(ok.Detail, skill) {
-		t.Errorf("resolved skill check = %+v, want ok naming %s", ok, skill)
-	}
-	bad := checkByName(doctorReport{Checks: checks}, "config:skills.forward.not-there")
-	if bad.Status != statusFail {
-		t.Errorf("unresolvable skill check = %+v, want fail", bad)
-	}
-}
-
 func TestConfigLayeringChecksSourceFiles(t *testing.T) {
 	clearDoctorEnv(t)
 	wsDir := gitRepo(t)

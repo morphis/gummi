@@ -238,13 +238,6 @@ type Config struct {
 	// Instructions are absolute paths to extra instruction files appended
 	// to the workspace environment card, in user-then-workspace order.
 	Instructions []string
-	// Skills names the workspace skills forwarded into card sessions —
-	// bare names resolved against the workspace's skill roots, or
-	// absolute paths. Empty (the ordinary case) forwards nothing and
-	// every session sees exactly what its backend discovers on its own.
-	// See internal/engine/skills.go for why a card cannot otherwise
-	// reach a skill kept beside .gummi.
-	Skills []string
 }
 
 // Engine orchestrates all live sessions and the autonomous runs.
@@ -396,16 +389,6 @@ type Engine struct {
 	profStamp   profileStamp
 	profErr     string
 	profReloads int
-
-	// skillsOnce resolves Config.Skills to absolute directories once per
-	// Engine lifetime (skillDirs holds the result); skillsMu guards
-	// skillWarned, the set of backends already told they cannot take a
-	// forwarded skill, so the notice is emitted once per backend rather
-	// than once per card. See internal/engine/skills.go.
-	skillsOnce  sync.Once
-	skillDirs   []string
-	skillsMu    sync.Mutex
-	skillWarned map[string]bool
 
 	// repoCards caches the repository orientation card per repository
 	// root, computed at most once per root per Engine lifetime. A
@@ -1854,10 +1837,6 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		// Where a backend keeps its per-card home: never named to the
 		// session, so following the hint above cannot reach it.
 		AgentHomeDir: e.agentHomeDirFor(f.ID),
-		// Workspace skills the operator forwarded. The worktree is a
-		// sibling of the repository, so nothing the workspace root holds
-		// is in this session's project scope unless it is named here.
-		SkillDirs: e.skillDirsFor(ag, backendLabel(backend)),
 	})
 	if specErr != nil {
 		mcpTeardown()

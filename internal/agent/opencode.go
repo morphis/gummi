@@ -63,7 +63,7 @@ func (o *Opencode) Name() string { return "opencode" }
 // reports per-step token/cost usage on its event bus, aborts a turn on
 // request, and reaches gummi's tools via its MCP child.
 func (o *Opencode) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, SkillDirs: true, Images: true, Compact: true}
+	return Capabilities{Resume: true, UsageEvents: true, Interrupt: true, MCPTools: true, ReadOnlyEnforce: true, WriteCage: WriteCagePaths, Images: true, Compact: true}
 }
 
 // CreditRate implements Agent. opencode reports its own USD cost per step
@@ -83,7 +83,7 @@ func (o *Opencode) ModelCatalog(ctx context.Context) ([]string, error) {
 // NewSession implements Agent. It spawns the session's server — the
 // process this session owns for its whole life, started with the
 // per-session config (worktree permission cage, the session's mcp.gummi
-// endpoint, forwarded skills, scratch/read allows, output-token cap) —
+// endpoint, scratch/read allows, output-token cap) —
 // and answers immediately: readiness is the first turn's wait, so a
 // wedged server surfaces there, as a turn failure, not a wedged start.
 func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, error) {
@@ -103,7 +103,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
 	}
-	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.SkillDirs, opts.ScratchDir, opts.Permission)
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.ScratchDir, opts.Permission)
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}

@@ -40,23 +40,18 @@ import "encoding/json"
 // requires process-level confinement, which is out of scope for this feature
 // (see FD-014 sandbox mode). opencode strips // comments from its JSON config,
 // so this note lives in the Go source only.
-// skillDirs is placed last, after the two bools, on purpose: it and
-// extraReadAllows are both []string, and separating them means a caller
-// that transposes the two fails to compile instead of silently opening a
-// read allowance where a skill path was meant.
-//
 // scratchDir (SessionOpts.ScratchDir) is the one place outside the
 // worktree the stage hints send a session to, so it is opened to every
 // file tool here: external_directory and read for all sessions, edit and
 // write unless readOnly. A cage that denied it answered the hint's own
 // instruction with a refusal, and a model that retried the refusal never
-// stopped. Last, like skillDirs, and for the same reason: the string
-// parameters ahead of it are too many to transpose silently.
+// stopped. Last, because the string parameters ahead of it are too many
+// to transpose silently.
 //
 // Every pattern map relies on opencode letting the LAST matching rule
 // win and on encoding/json writing keys sorted: "*" sorts before any
 // absolute path, so the catch-all deny lands first and each allow after.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, skillDirs []string, scratchDir string, permission Permission) ([]byte, error) {
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly bool, scratchDir string, permission Permission) ([]byte, error) {
 	worktreeOnly := worktreeCage(workdir)
 	var external any = "deny"
 	if scratchDir != "" {
@@ -97,13 +92,9 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 	perm["question"] = "deny"
 
 	out := map[string]any{"permission": perm}
-	// Skills forwarded from the workspace root. opencode's own discovery
-	// does not climb out of the worktree, so a skill beside .gummi is
-	// invisible without this; `skills.paths` is additive, so the
-	// worktree's own skills keep loading alongside them.
-	if len(skillDirs) > 0 {
-		out["skills"] = map[string]any{"paths": skillDirs}
-	}
+	// No `skills` key, ever: opencode merges this file over the operator's
+	// own config, so one here would replace their skills setup rather than
+	// add to it. Skill discovery is opencode's own (DESIGN §4.1a).
 	if mcpSock != "" && featureID != "" {
 		out["mcp"] = map[string]any{
 			"gummi": map[string]any{

@@ -83,14 +83,12 @@ func (a *Antigravity) Name() string { return "antigravity" }
 // id back via SessionOpts.ResumeID (`--conversation <id>`). UsageEvents
 // is the result line's cumulative usage, emitted as per-turn deltas.
 // MCPTools reports that gummi's tools are reached through the card home's
-// mcp_config.json, not through SessionOpts.Tools. SkillDirs reports that
-// forwarded dirs are symlinked into the card home's skill root before
-// the child spawns. WriteCage is cwd-only (agy, like codex, runs with no
+// mcp_config.json, not through SessionOpts.Tools. WriteCage is cwd-only (agy, like codex, runs with no
 // structural path cage). Everything not listed is false: no Interrupt,
 // no ClientTools, no ReadOnlyEnforce, no Images, no NativeWatch, no
 // Compact.
 func (a *Antigravity) Capabilities() Capabilities {
-	return Capabilities{Resume: true, UsageEvents: true, MCPTools: true, WriteCage: WriteCageCwd, SkillDirs: true}
+	return Capabilities{Resume: true, UsageEvents: true, MCPTools: true, WriteCage: WriteCageCwd}
 }
 
 // AntigravityRateEnv is the operator's token price for an antigravity
@@ -222,7 +220,7 @@ func (a *Antigravity) NewSession(_ context.Context, opts SessionOpts) (Session, 
 		s.teardown()
 		return nil, err
 	}
-	if err := materializeAntigravitySkills(home.dir, antigravitySkillDirs(opts.SkillDirs)); err != nil {
+	if err := materializeAntigravitySkills(home.dir, operatorAntigravitySkillDirs()); err != nil {
 		a.mu.Unlock()
 		s.teardown()
 		return nil, err

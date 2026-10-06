@@ -383,7 +383,7 @@ for when you want the native experience. Cheap to build, zero risk.
 
 **opencode adapter:** one `opencode serve` process per gummi session,
 started with the session's own config (the worktree permission cage, the
-session's MCP endpoint, forwarded skills), killed with it. Every action is
+session's MCP endpoint), killed with it. Every action is
 an HTTP call against that server — a turn is one message POST that blocks
 until the turn resolves while the server's event bus streams the same
 mapped activity a CLI process used to; an interrupt is a server-side
@@ -397,55 +397,45 @@ stream-json) and **codex** (Codex CLI, `codex exec --json`).
 
 ### 4.1a What a session discovers: skills, plugins, extensions
 
-**gummi does not curate what a backend discovers.** Every backend CLI
-carries its own discovery — skill directories, plugins, extensions, user
-config — and a card's session runs with all of it, at user scope and at
-repo scope, exactly as the operator's own run of that CLI would. A card on
-claude meets the operator's `~/.claude` skills and plugins; a card on
-opencode its `~/.config/opencode`; a card on codex its `config.toml`; a
-card on pi its extensions. This is what other multi-agent harnesses do
+**gummi does not curate what a backend discovers, and adds nothing to
+it.** Every backend CLI carries its own discovery — skill directories,
+plugins, extensions, user config — and a card's session runs with all of
+it, at user scope and at repo scope, exactly as the operator's own run of
+that CLI would. A card on claude meets the repository's `.claude/skills`
+and the operator's `~/.claude` skills and plugins; a card on opencode
+its own and `~/.config/opencode`'s; a card on codex its `config.toml`; a
+card on pi its extensions. A skill a CLI does not discover is a skill
+that CLI does not have — gummi does not paper over the difference with a
+convention of its own. This is what other multi-agent harnesses do
 (paseo runs claude with every setting source and codex with the real
 `CODEX_HOME`; openchamber mirrors opencode's discovery rather than
 narrowing it), and it is the only posture under which "the same agent the
 operator already tuned" is true.
 
-**One convention reaches every backend: `.agents/skills`**, in the
-repository (`<worktree>/.agents/skills`) and in the operator's home
-(`~/.agents/skills`). Put a skill there and it reaches a card whichever
-backend its role is pointed at (`internal/agent/agentsskills.go`):
+There used to be a third source, `skills.forward`: workspace-root skills
+gummi pointed each backend at, since a worktree is a sibling of the
+repository and nothing beside `.gummi` is in any backend's project scope.
+It is gone — four backends of seven could take it, under four different
+mechanisms — and a config that still names `skills:` is refused at load,
+by name, rather than loading and quietly losing them.
 
-| backend | how `.agents/skills` arrives |
-|---|---|
-| copilot | the CLI's own discovery |
-| opencode | the CLI's own discovery |
-| codex | the CLI's own discovery |
-| claude | the CLI never reads it: gummi links repo and user skills into the generated `gummi-skills` plugin (`--plugin-dir`), so they appear as `gummi-skills:<name>` |
-| antigravity | repo: agy's own scan. User: agy runs under a redirected `HOME`, so gummi links `~/.agents/skills` *and* `~/.gemini/config/skills` into the card home |
-| pi | the CLI's own discovery — unverified |
-| headless | not applicable: the adapter carries no skills |
-
-**Forwarded skills** (`skills.forward`, `internal/engine/skills.go`) are
-the third source: workspace-root skills, which no backend can see because a
-worktree is a sibling of the repository, not inside it. They reach claude,
-copilot, opencode and antigravity; codex, pi and headless warn once,
-naming the backend. A forwarded skill wins a name collision with an
-`.agents` one, and a repo `.agents` skill wins over a user one, wherever
-gummi does the linking.
-
-**What gummi still adds or removes, and why:**
+**Where gummi still touches discovery, and why:**
 
 - claude's tool roster always names `Skill`. `--tools` gates that
   built-in, and every discovered skill is invoked through it; a roster
   without it left skills listed and unreachable.
 - claude runs with `--strict-mcp-config`: a broken user-side MCP server
   must not crash a stage. Skills and plugins are not affected.
-- antigravity's redirected `HOME` exists because agy has no config-dir
-  flag and gummi must not write into the operator's `~/.gemini`. It is
-  isolation of writes, not of skills — hence the links above.
-- `gummi`'s own skill is refused by `skills.forward`. A user-scope
-  `gummi skill install` is still discovered natively by the CLIs that
-  read that scope; the stage hints, not discovery, are what tell a card
-  never to start a second gummi (§16).
+- antigravity runs under a redirected `HOME`, because agy has no
+  config-dir flag and gummi must not write into the operator's
+  `~/.gemini`. That is isolation of writes, not of skills: the card home's
+  `.gemini/config/skills` is reconciled on every session start to link
+  exactly the operator's own `~/.gemini/config/skills` entries, so a card
+  on agy loads what agy run by hand would. Every symlink there is gummi's;
+  a real entry is agy's and is never touched.
+- `gummi`'s own skill is not filtered. A user-scope `gummi skill install`
+  is discovered by the CLIs that read that scope; the stage hints, not
+  discovery, are what tell a card never to start a second gummi (§16).
 
 ### 4.2 Orchestrator
 

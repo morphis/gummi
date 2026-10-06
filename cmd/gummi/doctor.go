@@ -1354,23 +1354,6 @@ func configLayeringChecks(cfg config.Config, sources map[string]string, userPath
 		checks = append(checks, doctorCheck{Name: "config:instructions." + inst, Status: status, Detail: detail})
 	}
 
-	// Forwarded skills are reported by resolving them exactly as the
-	// engine will, so a name that will not reach a session is a failed
-	// check here rather than a skill that quietly never arrives. A
-	// workspace forwarding none stays silent — an opt-in surface reporting
-	// "(unset)" is noise.
-	for _, name := range cfg.Skills.Forward {
-		status, detail := statusOK, ""
-		dir, err := engine.ResolveForwardedSkill(wsRoot, name)
-		if err != nil {
-			status, detail = statusFail, err.Error()
-		} else {
-			detail = name + " → " + dir
-		}
-		detail += " (" + sourceLabel(sources["skills"]) + ")"
-		checks = append(checks, doctorCheck{Name: "config:skills.forward." + name, Status: status, Detail: detail})
-	}
-
 	// A hook line is a shell command, so most of it cannot be checked
 	// ahead of time — but the common shape is a path to a script, and a
 	// typo there is otherwise invisible forever: the dispatcher discards

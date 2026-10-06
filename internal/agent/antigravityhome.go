@@ -56,8 +56,9 @@ const (
 	// map, honoring each entry's args and env.
 	antigravityMCPConfigRelPath = ".gemini/config/mcp_config.json"
 	// antigravitySkillsRelDir is agy's global skill customization root,
-	// scanned alongside a project's own skill directories. Forwarded
-	// workspace skills are symlinked here, named by their basename.
+	// scanned alongside a project's own skill directories. The operator's
+	// own skills there are symlinked into a redirected home's copy, named
+	// by their basename.
 	antigravitySkillsRelDir = ".gemini/config/skills"
 )
 
@@ -314,61 +315,78 @@ func (h *antigravityHome) writeMCPConfig(exe string) error {
 	return nil
 }
 
-// antigravitySkillDirs is what a session's redirected home links in: the
-// forwarded skills, then the operator's own user-scope skills — those under
-// their real ~/.gemini/config/skills and ~/.agents/skills. The redirected
-// HOME exists to keep agy's writes out of the operator's config, not to
-// hide the operator's skills from it; without these links a card on agy
-// met none of them while the same card on every other backend met them
-// all (DESIGN §4.1a). Repo skills need nothing: agy scans the worktree's
-// own .agents/skills itself.
-func antigravitySkillDirs(forwarded []string) []string {
-	dirs := withAgentsSkills(forwarded, "")
-	if home, err := os.UserHomeDir(); err == nil {
-		dirs = append(dirs, skillDirsUnder(filepath.Join(home, filepath.FromSlash(antigravitySkillsRelDir)))...)
-	}
-	return dirs
-}
-
-// materializeAntigravitySkills symlinks a session's forwarded skill
-// directories into the home's skill customization root, named by their
-// basename — agy discovers them there and reads SKILL.md (and reference
-// files) through the link, so the targets keep their real paths.
-//
-// First-wins on a basename collision: an existing link pointing at a
-// live directory stays. The only removal is a link whose target
-// directory has vanished, which is re-pointed at the incoming dir. A
-// session with no skills touches nothing, so a session that forwards
-// none cannot strip the links of another session sharing its home.
-func materializeAntigravitySkills(home string, dirs []string) error {
-	if len(dirs) == 0 {
+// operatorAntigravitySkillDirs lists the operator's own agy user skills —
+// each skill directory under their real ~/.gemini/config/skills. The
+// redirected HOME exists to keep agy's writes out of the operator's
+// config, not to hide their skills from it: agy run by hand would load
+// these, so a card on agy links them into its home and loads them too
+// (DESIGN §4.1a). Repo skills need nothing; agy scans the worktree itself.
+func operatorAntigravitySkillDirs() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
 		return nil
 	}
 	root := filepath.Join(home, filepath.FromSlash(antigravitySkillsRelDir))
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		dir := filepath.Join(root, e.Name())
+		if info, err := os.Stat(filepath.Join(dir, "SKILL.md")); err == nil && info.Mode().IsRegular() {
+			out = append(out, dir)
+		}
+	}
+	return out
+}
+
+// materializeAntigravitySkills makes the home's skill root link exactly
+// dirs, each named by its basename — agy discovers them there and reads
+// SKILL.md (and reference files) through the link, so the targets keep
+// their real paths.
+//
+// Every symlink in the root is gummi's: agy writes real files, never
+// links. So the root is reconciled, not appended to: a link to a skill the
+// operator has since deleted, or left by an older gummi that forwarded
+// workspace skills, is removed, and a link pointing elsewhere is
+// re-pointed. A real file or directory is agy's or the operator's and is
+// never touched, even when it shadows one of dirs. Every session sharing a
+// home computes the same dirs, so concurrent reconciles agree.
+func materializeAntigravitySkills(home string, dirs []string) error {
+	root := filepath.Join(home, filepath.FromSlash(antigravitySkillsRelDir))
+	want := map[string]string{}
+	for _, dir := range dirs {
+		if name := filepath.Base(dir); dir != "" {
+			if _, dup := want[name]; !dup {
+				want[name] = dir
+			}
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("antigravity adapter: reading %s: %w", root, err)
+	}
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink == 0 {
+			delete(want, e.Name()) // a real entry: never replaced
+			continue
+		}
+		link := filepath.Join(root, e.Name())
+		if cur, err := os.Readlink(link); err == nil && cur == want[e.Name()] {
+			delete(want, e.Name()) // already right
+			continue
+		}
+		_ = os.Remove(link)
+	}
+	if len(want) == 0 {
+		return nil
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("antigravity adapter: creating %s: %w", root, err)
 	}
-	for _, dir := range dirs {
-		if dir == "" {
-			continue
-		}
-		info, err := os.Stat(dir)
-		if err != nil || !info.IsDir() {
-			// A forwarded dir that does not resolve is the engine's
-			// warning to raise (skills.go), not this loop's job; leave the
-			// root as it is.
-			continue
-		}
-		target := filepath.Join(root, filepath.Base(dir))
-		if cur, err := os.Readlink(target); err == nil {
-			if st, err := os.Stat(cur); err == nil && st.IsDir() {
-				continue // first-wins
-			}
-			_ = os.Remove(target) // dead target: re-point below
-		} else if _, err := os.Lstat(target); err == nil {
-			continue // a real file/dir with that name: first-wins, never removed
-		}
-		if err := os.Symlink(dir, target); err != nil && !os.IsExist(err) {
+	for name, dir := range want {
+		if err := os.Symlink(dir, filepath.Join(root, name)); err != nil && !os.IsExist(err) {
 			return fmt.Errorf("antigravity adapter: linking skill %s: %w", dir, err)
 		}
 	}

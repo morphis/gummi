@@ -585,104 +585,91 @@ func TestAntigravityMCPConfigWrittenBeforeSpawn(t *testing.T) {
 	}
 }
 
-// TestAntigravitySkillLinks: forwarded dirs are symlinked into the card
-// home's skill root before the child spawns, each resolving through to
-// the target's SKILL.md; a collision is first-wins; a dead link is
-// re-pointed; a session with no SkillDirs touches nothing (INV-8).
+// TestAntigravitySkillLinks: agy run by hand loads the operator's
+// ~/.gemini/config/skills, so a card's redirected home links each one in
+// before the child spawns, resolving through to the real SKILL.md. Repo
+// skills are left to agy's own scan of the worktree.
 func TestAntigravitySkillLinks(t *testing.T) {
-	_ = antigravityTokenFixture(t, "tok")
+	tokenPath := antigravityTokenFixture(t, "tok")
+	opHome := filepath.Dir(filepath.Dir(filepath.Dir(tokenPath)))
+	opSkills := filepath.Join(opHome, ".gemini", "config", "skills")
+	writeSkill(t, opSkills, "deploy", "deploy-body")
+	if err := os.MkdirAll(filepath.Join(opSkills, "not-a-skill"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "agy")
 	if err := os.WriteFile(bin, []byte("#!/usr/bin/env python3\n"+fakeAgyArgvEcho), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	writeSkill(t, filepath.Join(dir, ".agents", "skills"), "repo-skill", "repo-body")
 	ag, err := NewAntigravity(bin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ag.Close()
 
-	// two skill dirs outside the worktree, one shared basename
-	skillA := t.TempDir()
-	skillB := t.TempDir()
-	deployDir := filepath.Join(skillA, "deploy")
-	sharedDir := filepath.Join(skillB, "shared")
-	writeSkill(t, skillA, "deploy", "deploy-first")
-	writeSkill(t, skillB, "shared", "shared-B")
-	writeSkill(t, filepath.Join(dir, "kept"), "solo", "solo-body")
-
 	scratch := t.TempDir()
-	home := filepath.Join(scratch, "agy")
-	s1, err := ag.NewSession(context.Background(), SessionOpts{
+	s, err := ag.NewSession(context.Background(), SessionOpts{
 		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
-		SkillDirs: []string{deployDir, sharedDir},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(home, ".gemini", "config", "skills")
-	if got, err := os.Readlink(filepath.Join(root, "deploy")); err != nil || got != deployDir {
-		t.Errorf("deploy link = (%q, %v), want %q", got, err, deployDir)
+	defer s.Close()
+	root := filepath.Join(scratch, "agy", ".gemini", "config", "skills")
+	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"deploy"}) {
+		t.Errorf("skill root = %v, want only the operator's skill", got)
 	}
-	if got, err := os.Readlink(filepath.Join(root, "shared")); err != nil || got != sharedDir {
-		t.Errorf("shared link = (%q, %v), want %q", got, err, sharedDir)
-	}
-	if b, err := os.ReadFile(filepath.Join(root, "deploy", "SKILL.md")); err != nil || !strings.Contains(string(b), "deploy-first") {
+	if b, err := os.ReadFile(filepath.Join(root, "deploy", "SKILL.md")); err != nil || !strings.Contains(string(b), "deploy-body") {
 		t.Errorf("SKILL.md not reachable through the link: %q, %v", b, err)
 	}
+}
 
-	// first-wins: a later session forwarding a DIFFERENT dir with the
-	// same basename does not re-point the live link.
-	other := t.TempDir()
-	writeSkill(t, other, "deploy", "deploy-second")
-	otherDeploy := filepath.Join(other, "deploy")
-	s2, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
-		SkillDirs: []string{otherDeploy},
-	})
-	if err != nil {
+// TestAntigravitySkillReconcile: the root ends up linking exactly the
+// operator's skills. A stale link (a deleted skill, or one an older gummi
+// forwarded) goes, a link pointing elsewhere is re-pointed, and a real
+// entry agy or the operator made is never touched — even when it shadows
+// a wanted name.
+func TestAntigravitySkillReconcile(t *testing.T) {
+	home, src := t.TempDir(), t.TempDir()
+	root := filepath.Join(home, ".gemini", "config", "skills")
+	writeSkill(t, src, "keep", "k")
+	writeSkill(t, src, "move", "m")
+	writeSkill(t, src, "shadowed", "s")
+	elsewhere := t.TempDir()
+	writeSkill(t, elsewhere, "move", "old")
+	writeSkill(t, root, "shadowed", "agy-own") // a real dir
+	for name, target := range map[string]string{
+		"move":      filepath.Join(elsewhere, "move"),
+		"forwarded": filepath.Join(elsewhere, "forwarded"),
+		"dead":      filepath.Join(src, "gone"),
+	} {
+		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dirs := []string{filepath.Join(src, "keep"), filepath.Join(src, "move"), filepath.Join(src, "shadowed")}
+	if err := materializeAntigravitySkills(home, dirs); err != nil {
 		t.Fatal(err)
 	}
-	if b, err := os.ReadFile(filepath.Join(root, "deploy", "SKILL.md")); err != nil || !strings.Contains(string(b), "deploy-first") {
-		t.Errorf("collision re-pointed a live link: %q, %v", b, err)
+	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"keep", "move", "shadowed"}) {
+		t.Errorf("skill root = %v", got)
+	}
+	if got, _ := os.Readlink(filepath.Join(root, "move")); got != dirs[1] {
+		t.Errorf("move links to %q, want %q", got, dirs[1])
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "shadowed", "SKILL.md")); !strings.Contains(string(b), "agy-own") {
+		t.Errorf("a real entry was replaced: %q", b)
 	}
 
-	// a session with no SkillDirs touches nothing.
-	entries := antigravitySkillEntries(t, root)
-	s3, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
-	})
-	if err != nil {
+	// The operator deleting every skill empties the links, nothing else.
+	if err := materializeAntigravitySkills(home, nil); err != nil {
 		t.Fatal(err)
 	}
-	if after := antigravitySkillEntries(t, root); !slicesEqual(after, entries) {
-		t.Errorf("a skill-less session changed the root: %v → %v", entries, after)
-	}
-
-	// the only removal: a link whose target has vanished is re-pointed
-	// when a later session forwards a dir of the same basename.
-	_ = os.RemoveAll(skillA)
-	s4, err := ag.NewSession(context.Background(), SessionOpts{
-		WorkDir: dir, Permission: PermissionAllowAll, AgentHomeDir: scratch,
-		SkillDirs: []string{otherDeploy},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := os.Readlink(filepath.Join(root, "deploy")); err != nil || got != otherDeploy {
-		t.Errorf("dead link not re-pointed: (%q, %v), want %q", got, err, otherDeploy)
-	}
-	if b, err := os.ReadFile(filepath.Join(root, "deploy", "SKILL.md")); err != nil || !strings.Contains(string(b), "deploy-second") {
-		t.Errorf("re-pointed link does not resolve: %q, %v", b, err)
-	}
-
-	for _, s := range []*antigravitySession{s1.(*antigravitySession), s2.(*antigravitySession), s3.(*antigravitySession), s4.(*antigravitySession)} {
-		_ = s.Close()
-	}
-	// the solo skill the card never forwarded is untouched — its
-	// creation was out of gummi's hands.
-	if _, err := os.Stat(filepath.Join(home, ".gemini", "config", "skills", "solo")); !os.IsNotExist(err) {
-		t.Errorf("an unforwarded skill appeared: %v", err)
+	if got := antigravitySkillEntries(t, root); !slicesEqual(got, []string{"shadowed"}) {
+		t.Errorf("after reconciling to nothing: %v", got)
 	}
 }
 

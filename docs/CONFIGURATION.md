@@ -95,8 +95,9 @@ review.
   `GOCACHE` and `GOLANGCI_LINT_CACHE`, so cards share your module and
   build caches. `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` stay redirected,
   because agy reads them itself. gummi's tools reach the child through the card
-  home's `mcp_config.json`, and forwarded skills are symlinked into the
-  card home's skill root (`~/.gemini/config/skills` under the card home).
+  home's `mcp_config.json`, and your own agy skills
+  (`~/.gemini/config/skills`) are symlinked into the card home's copy of
+  that directory, so a card loads them as agy run by hand would.
   Usage is metered as per-turn deltas from agy's cumulative token totals;
   `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` prices them into credits, or the
   engine's default token pricing applies. Requires `permissions:
@@ -115,14 +116,10 @@ review.
 Each backend keeps its own discovery of skills, plugins and extensions,
 at user and at repo scope, exactly as when you run that CLI yourself; no
 adapter disables `AGENTS.md`, `CLAUDE.md`, project skills or the
-operator's own skills and plugins. On top of that, `.agents/skills` — in
-the repository and in `~/.agents/skills` — reaches a card on every
-backend that carries skills: copilot, opencode and codex read it
-themselves (pi too, unverified), and gummi hands
-it to claude (as a plugin, so those skills appear as
-`gummi-skills:<name>`) and to antigravity (linked into its per-card home,
-with your `~/.gemini/config/skills`). Put a skill there and it works
-whichever backend a role is pointed at. See DESIGN §4.1a.
+operator's own skills and plugins. gummi adds none of its own either: a
+skill reaches a card when the card's backend finds it — in the
+repository, or in your user directory for that agent. Which directories
+those are is each CLI's own business. See DESIGN §4.1a.
 
 The one operator-level thing gummi shadows is claude's MCP servers
 (`--strict-mcp-config`), so a broken user-side server cannot crash a
@@ -155,7 +152,6 @@ Scaffolded on first run. Every key is optional.
 | `substrates` | the external environments work is proved on — a test cluster, a device farm — each `{describe, probe, provision, reset, ttl, timeout}`; only `probe` is required. A plan cites one exactly as it cites an env prerequisite (`[env: <name>]`), so a name may not be both. Unlike one, a substrate can be brought up (`provision`) and put back to a known state (`reset`), it expires (`ttl`, a Go duration), and **one job holds it at a time** across every gummi process on the workspace. `timeout` bounds one provision or reset (default 45m, at most 6h). `gummi doctor` reports each one's state and holder. See DESIGN §17.7 |
 | `experiments` | the orchestrated live runs that prove work on a substrate, each `{describe, substrate, inputs, control, deploy, settle, run, collect, timeout}`; `substrate` and `run` are required. A goal's done-when item names one as its means of proof (`experiment: <name>`, optionally `assertions: [ids]`). Every command runs in the workspace root with `GUMMI_EVIDENCE` (a directory to write into — `results.ndjson` there, one `{"id","ok","detail"}` per line, is how a run reports its assertions), `GUMMI_TREE_<REPO>` and `GUMMI_HEAD_<REPO>` for each input (the unnamed default repo is `HOME`), `GUMMI_SUBSTRATE`, `GUMMI_EXPERIMENT`, `GUMMI_RUN`, `GUMMI_PURPOSE` and `GUMMI_ATTEMPT`. Exit 75 from any phase means *this run could not be judged*. `timeout` bounds each phase (default 30m). Operator configuration on purpose: a goal may change the rig it is tested on, and must not thereby change what counts as passing. See DESIGN §17.8 |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
-| `skills.forward` | workspace skills to forward into card sessions, as bare names (resolved against `.claude/skills`, `.agents/skills`, `.github/skills` at the workspace root, in that order) or absolute paths. A card runs in a worktree under `.gummi/worktrees/`, a sibling of the repository, so a skill kept beside `.gummi` is outside every backend's project scope and reaches nothing without this; a skill the repository itself ships is already in the worktree and needs no forwarding. Honored by the `opencode`, `copilot`, `claude` and `antigravity` backends (`agent.Capabilities.SkillDirs`); on a backend that cannot load skills from outside the worktree gummi says so on the card's activity feed rather than dropping them silently. gummi's own skill is refused — a card must never drive a second gummi |
 
 ## `.gummi/profiles.yaml`
 

@@ -15,7 +15,7 @@ func buildConfig(t *testing.T, extra []string) map[string]any {
 
 func buildConfigPerm(t *testing.T, extra []string, permission Permission) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, nil, "", permission)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, "", permission)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, nil, "", PermissionAllowAll)
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, "", PermissionAllowAll)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +137,7 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 // pattern map), while read stays open — the deny is structural, so
 // enforce/warn/off sandbox modes cannot re-arm the write tools.
 func TestBuildOpencodeConfigReadOnly(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, nil, "", PermissionAllowAll)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, "", PermissionAllowAll)
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -156,15 +156,14 @@ func TestBuildOpencodeConfigReadOnly(t *testing.T) {
 	}
 }
 
-// A session with no forwarded skills must emit no skills block at all:
-// opencode merges this file over the operator's own opencode.jsonc, so an
-// empty `skills` key here would overwrite a global skills config with
-// nothing — the config gummi writes is a per-session addition, never a
-// reset of what the operator set up.
-func TestOpencodeConfigOmitsSkillsWhenNoneForwarded(t *testing.T) {
+// The generated config never carries a skills block: opencode merges this
+// file over the operator's own opencode.jsonc, so a `skills` key here
+// would replace their skills config — the config gummi writes is a
+// per-session addition, never a reset of what the operator set up.
+func TestOpencodeConfigNeverSetsSkills(t *testing.T) {
 	m := buildConfig(t, nil)
 	if _, present := m["skills"]; present {
-		t.Errorf("skills block present with no forwarded dirs: %v", m["skills"])
+		t.Errorf("skills block present: %v", m["skills"])
 	}
 }
 
@@ -176,7 +175,7 @@ func TestBuildOpencodeConfigOpensTheScratchDir(t *testing.T) {
 	const scratch = "/ws/.gummi/state/scratch/FD-025"
 	perm := func(readOnly bool, extra []string) map[string]any {
 		t.Helper()
-		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, nil, scratch, PermissionAllowAll)
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, scratch, PermissionAllowAll)
 		if err != nil {
 			t.Fatalf("buildOpencodeConfig: %v", err)
 		}
@@ -209,37 +208,6 @@ func TestBuildOpencodeConfigOpensTheScratchDir(t *testing.T) {
 	p = perm(false, []string{"/ws/.gummi/specs/FD-025.md"})
 	if r, _ := p["read"].(map[string]any); r[scratch+"/**"] != "allow" {
 		t.Errorf("read = %v, want the scratch dir readable", p["read"])
-	}
-}
-
-// Forwarded skills reach opencode as `skills.paths`. The key is additive
-// on opencode's side (the worktree's own skills still load), which is why
-// forwarding is safe to turn on for a repo that carries skills already.
-func TestOpencodeConfigForwardsSkillPaths(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, false,
-		[]string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"}, "", PermissionAllowAll)
-	if err != nil {
-		t.Fatalf("buildOpencodeConfig: %v", err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("output not valid JSON: %v\n%s", err, raw)
-	}
-	skills, ok := m["skills"].(map[string]any)
-	if !ok {
-		t.Fatalf("skills block missing or wrong type: %v", m["skills"])
-	}
-	paths, ok := skills["paths"].([]any)
-	if !ok {
-		t.Fatalf("skills.paths missing or wrong type: %v", skills["paths"])
-	}
-	got := make([]string, 0, len(paths))
-	for _, p := range paths {
-		got = append(got, p.(string))
-	}
-	want := []string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("skills.paths = %v, want %v", got, want)
 	}
 }
 
@@ -294,7 +262,7 @@ func TestBuildOpencodeConfigGuardedOnlyAsksOnTopOfTheCage(t *testing.T) {
 // would otherwise reach it.
 func TestBuildOpencodeConfigDeniesTheQuestionTool(t *testing.T) {
 	for _, mode := range []Permission{PermissionAllowAll, PermissionGuarded} {
-		raw, err := buildOpencodeConfig("/tmp/wt", "", "", "/opt/gummi", nil, false, nil, "", mode)
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "", "/opt/gummi", nil, false, "", mode)
 		if err != nil {
 			t.Fatal(err)
 		}

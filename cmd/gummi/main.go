@@ -231,7 +231,6 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 	perm := agent.PermissionAllowAll
 	var sandboxMode string
 	var instructions []string
-	var forwardSkills []string
 	userPath, err := config.UserConfigPath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
@@ -249,7 +248,6 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		}
 		sandboxMode = cfg.Sandbox
 		instructions = cfg.Instructions
-		forwardSkills = cfg.Skills.Forward
 	}
 	// Adapter selection: GUMMI_AGENT picks the default backend, and any
 	// distinct `backend:` referenced across the loaded profiles is
@@ -283,7 +281,6 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		Model: model, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
-		Skills: forwardSkills,
 		// A session may run on any installed agent, not only the ones the
 		// profiles name (DESIGN §19.8); this is how the board starts one it
 		// did not launch.

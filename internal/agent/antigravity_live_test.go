@@ -353,27 +353,36 @@ func TestAntigravityLiveMCPWiring(t *testing.T) {
 	}
 }
 
-// TestAntigravityLiveSkillForwarding: a forwarded skill directory is
-// reachable through the card home's skill links during a real turn —
-// the discovery-and-symlink properties verified during planning, through
-// the adapter's stream-json session (INV-8's live half).
-func TestAntigravityLiveSkillForwarding(t *testing.T) {
+// TestAntigravityLiveOperatorSkills: a skill in the operator's own
+// ~/.gemini/config/skills is reachable from a card's redirected home
+// during a real turn, through the link the adapter makes.
+func TestAntigravityLiveOperatorSkills(t *testing.T) {
 	antigravityLiveGate(t)
-	ag, err := NewAntigravity("")
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ag.Close()
-
-	skill := t.TempDir()
+	root := filepath.Join(home, filepath.FromSlash(antigravitySkillsRelDir))
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	skill, err := os.MkdirTemp(root, "gummi-canary-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(skill)
 	name := filepath.Base(skill)
 	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"),
 		[]byte("---\nname: "+name+"\ndescription: a canary skill\n---\nThe secret phrase is ZEBRA-CANARY."), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	ag, err := NewAntigravity("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ag.Close()
 	sess, err := ag.NewSession(context.Background(), SessionOpts{
 		WorkDir: t.TempDir(), Permission: PermissionAllowAll, AgentHomeDir: antigravityLiveScratch(t),
-		SkillDirs: []string{skill},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -382,7 +391,7 @@ func TestAntigravityLiveSkillForwarding(t *testing.T) {
 	got := antigravityLiveReply(t, sess,
 		"One of your available skills is named "+name+". Read its instructions and reply with the secret phrase they contain, nothing else.")
 	if !strings.Contains(got, "ZEBRA-CANARY") {
-		t.Errorf("reply = %q, want the forwarded skill's body", got)
+		t.Errorf("reply = %q, want the operator skill's body", got)
 	}
 }
 

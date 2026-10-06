@@ -232,59 +232,16 @@ func TestLoadRejectsRelativeInstructionPath(t *testing.T) {
 	}
 }
 
-// A bare skill name and an absolute path are both legal; a relative path
-// with separators is not, because it would mean a different directory
-// depending on where gummi was started.
-func TestLoadSkillsForward(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(p, []byte("skills:\n  forward:\n    - container-env\n    - /opt/skills/hardware\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	c, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	want := []string{"container-env", "/opt/skills/hardware"}
-	if len(c.Skills.Forward) != 2 || c.Skills.Forward[0] != want[0] || c.Skills.Forward[1] != want[1] {
-		t.Errorf("skills.forward = %v, want %v", c.Skills.Forward, want)
-	}
-}
-
-func TestLoadRejectsRelativeSkillPath(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(p, []byte("skills:\n  forward:\n    - ./skills/env\n"), 0o600); err != nil {
+// The retired skills.forward key is refused by name, never ignored: a
+// config that forwarded skills must not load and quietly lose them.
+func TestLoadRejectsRemovedSkillsKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("skills:\n  forward:\n    - container-env\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(p)
-	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "relative path") {
-		t.Fatalf("expected relative-path error naming file, got: %v", err)
-	}
-}
-
-// skills.forward layers like instructions: both levels contribute, user
-// first. A merge that dropped one silently would leave the whole feature
-// inert, since nothing downstream can tell an unset list from a lost one.
-func TestLoadLayeredMergesSkillsForward(t *testing.T) {
-	dir := t.TempDir()
-	userPath := filepath.Join(dir, "user.yaml")
-	wsPath := filepath.Join(dir, "ws.yaml")
-	if err := os.WriteFile(userPath, []byte("skills:\n  forward:\n    - personal\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(wsPath, []byte("skills:\n  forward:\n    - container-env\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	merged, sources, err := LoadLayered(userPath, wsPath)
-	if err != nil {
-		t.Fatalf("LoadLayered: %v", err)
-	}
-	if len(merged.Skills.Forward) != 2 || merged.Skills.Forward[0] != "personal" || merged.Skills.Forward[1] != "container-env" {
-		t.Errorf("skills.forward = %v, want [personal container-env]", merged.Skills.Forward)
-	}
-	if want := userPath + "," + wsPath; sources["skills"] != want {
-		t.Errorf("sources[skills] = %q, want %q", sources["skills"], want)
+	if err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "skills: this key was removed") {
+		t.Fatalf("expected removed-key error naming file, got: %v", err)
 	}
 }
 

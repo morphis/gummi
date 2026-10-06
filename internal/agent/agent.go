@@ -169,15 +169,6 @@ type SessionOpts struct {
 	// means no per-card anchor: a backend that wants one falls back to a
 	// throwaway home of its own.
 	AgentHomeDir string
-	// SkillDirs are absolute skill-directory paths the session should load
-	// beyond whatever the backend discovers on its own. Every card runs in
-	// a worktree under <workspace>/.gummi/worktrees, a sibling of the
-	// managed repository, so a skill the operator keeps at the workspace
-	// root — next to .gummi, where a multi-repo board's cross-repo rules
-	// live — is outside every backend's project scope. This is how it gets
-	// in. Adapters without Capabilities().SkillDirs ignore it; the engine
-	// warns rather than letting the forwarding vanish.
-	SkillDirs []string
 	// ReadOnly marks an autonomous research session that must never
 	// mutate the main checkout (it runs in the repo root, no worktree).
 	// The adapter enforces it structurally — stripping every mutating
@@ -263,17 +254,6 @@ type Capabilities struct {
 	// a role at a backend: a role's worktree discipline is the backend's
 	// to keep, and the two tiers below are not the same guarantee.
 	WriteCage WriteCage
-	// SkillDirs reports that the adapter honors SessionOpts.SkillDirs —
-	// it can point the backend at skill directories outside WorkDir. It
-	// is a per-backend fact, not a gummi choice: opencode takes a
-	// `skills.paths` config key and copilot an SDK field, both additive;
-	// claude takes a generated plugin (claude_skills.go) whose skills are
-	// symlinked into it; and codex has no equivalent at all — its
-	// discovery walks cwd up to the repository root, which for a linked
-	// worktree is the worktree. An adapter that reports false ignores the field, and the
-	// operator is told so rather than left to wonder why a forwarded
-	// skill never arrived.
-	SkillDirs bool
 	// Images reports that the backend can take images natively with a
 	// turn — the session implements ImageSender and SendTurn actually
 	// reaches the model as multimodal input, not just a path the agent

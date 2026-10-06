@@ -368,10 +368,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
-		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
 		// The session lives past its turns, so the backend's own watch
 		// and backgrounded commands have somewhere to report back to.
-		Watch: true,
+		Watch:      true,
 		ScratchDir: e.scratchFilesDirFor(ff.id),
 		// The card's own backend home (antigravity keeps its config
 		// there), so the session's home — and the conversations it keeps
