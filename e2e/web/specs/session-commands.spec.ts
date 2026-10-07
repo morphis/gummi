@@ -53,5 +53,4 @@ test('a session takes /help, /cost, /compact and /clear on any agent', async ({ 
   await send('/clear');
   await expect(page.getByTestId('thread')).toContainText('Cleared the conversation', { timeout: 10_000 });
   await expect(page.getByTestId('thread')).not.toContainText('Compacted the conversation');
-  await expect(page.getByTestId('changes')).toBeVisible();
 });

@@ -14,8 +14,7 @@ import { $, h, clear, clock, dur, cr, ROLE, decisionWord, decisionColor, plural 
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { draftHero } from './session.js?v=__ASSET_V__'
-import { attachmentURL, post, get, cardPath } from './api.js?v=__ASSET_V__'
-import { setTab } from './panel.js?v=__ASSET_V__'
+import { attachmentURL, post, cardPath } from './api.js?v=__ASSET_V__'
 import { restoreComposer } from './composer.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 
@@ -39,47 +38,6 @@ export function initThread () {
   btn.addEventListener('click', () => {
     sc.scrollTo({ top: sc.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
   })
-  on(['sel', 'cardRev'], loadChanges)
-  // the card's head arrives after the selection: load once it says what
-  // kind of card this is
-  on(['card'], () => { if (state.card && state.card.id !== changesCard) loadChanges() })
-  on(['live'], () => {
-    // a turn that just ended has usually changed files
-    const busy = !!state.live?.freeform?.busy
-    if (wasBusy && !busy) loadChanges()
-    wasBusy = busy
-  })
-}
-
-// ---- the changed files ----
-// A session's working tree, summed up above the composer: how many files
-// the branch has changed and by how much, unfolding to the list. Each
-// opens the Diff tab.
-let wasBusy = false
-let changesFor = 0
-let changesCard = null
-async function loadChanges () {
-  const el = $('#changes')
-  const id = state.sel
-  changesCard = state.card?.id || null
-  const n = ++changesFor
-  if (!id || state.card?.stage !== 'open') { el.hidden = true; return }
-  let d
-  try { d = await get(cardPath(id, 'diff')) } catch { d = null }
-  if (n !== changesFor || id !== state.sel) return
-  const files = d?.files || []
-  el.hidden = !files.length
-  if (!files.length) return
-  const add = files.reduce((a, f) => a + (f.add || 0), 0)
-  const del = files.reduce((a, f) => a + (f.del || 0), 0)
-  const open = el.open
-  clear(el).append(
-    h('summary', { testid: 'changes-summary' }, h('b', null, plural(files.length, 'file')), ' changed',
-      h('span', { class: 'add' }, ` +${add}`), h('span', { class: 'del' }, ` −${del}`)),
-    h('ul', null, files.map(f => h('li', null,
-      h('button', { type: 'button', testid: 'changes-file', onclick: () => setTab('diff') }, h('span', { class: 'p' }, f.path),
-        h('span', { class: 'add' }, `+${f.add || 0}`), h('span', { class: 'del' }, `−${f.del || 0}`))))))
-  el.open = open
 }
 
 // ---- the person's folds ----
@@ -415,7 +373,7 @@ function toolKind (tool) {
 // toolRow is one call: its mark, a verb, what it touched, how long it took.
 // A call with output opens to show it (with a copy); one that touched a
 // file says which, so it can be found in the Diff tab.
-function toolRow (t) {
+function toolRow (t, fold) {
   const label = String(t.label || '').replace(/\s+/g, ' ').trim()
   const named = label.startsWith(t.tool + ' ') || label === t.tool
   const rest = named ? label.slice(t.tool.length).trim() : label
@@ -439,7 +397,7 @@ function toolRow (t) {
       h('pre', { class: ['tool-out', t.status === 'fail' && 'fail'], testid: 'tool-output' }, out)))
   // gummi's own answer to a session command (/cost, /context…) is what
   // was asked for: shown, not folded behind its row
-  if (t.status === 'fail' || /^gummi \//.test(t.tool)) el.open = true
+  applyFold(el, fold, t.status === 'fail' || /^gummi \//.test(t.tool))
   return h('li', { class: cls, testid: 'tool-row' }, el)
 }
 
@@ -467,13 +425,17 @@ export function activity (items, fold) {
   if (thoughts) parts.push(plural(thoughts, 'thought'))
   if (watching) parts.push(h('span', { class: 'watching' }, 'watching'))
   else if (inFlight) parts.push(h('span', { class: 'shimmer' }, String(inFlight.label || inFlight.tool).replace(/\s+/g, ' ').trim()))
-  const steps = items.flatMap(it => it.t === 'tools'
-    ? (it.tools || []).map(toolRow)
-    : [h('li', { class: 'tool thought', testid: 'thought-row' },
-        h('details', { class: 'tcall' },
-          h('summary', { class: 'thead' }, h('span', { class: 'mark', 'aria-hidden': 'true' }, '∴'), h('b', null, 'Thought'),
-            h('i', { class: 'target' }, firstLine(it.text))),
-          h('div', { class: 'thought-body' }, md(it.text))))])
+  // each step's fold is keyed by its place in the run, which only grows
+  let n = 0
+  const steps = items.flatMap(it => {
+    if (it.t === 'tools') return (it.tools || []).map(t => toolRow(t, fold && `${fold}#${n++}`))
+    const d = h('details', { class: 'tcall' },
+      h('summary', { class: 'thead' }, h('span', { class: 'mark', 'aria-hidden': 'true' }, '∴'), h('b', null, 'Thought'),
+        h('i', { class: 'target' }, firstLine(it.text))),
+      h('div', { class: 'thought-body' }, md(it.text)))
+    applyFold(d, fold && `${fold}#${n++}`, false)
+    return [h('li', { class: 'tool thought', testid: 'thought-row' }, d)]
+  })
   const hidden = steps.length > ACTIVITY_SHOWN ? steps.slice(0, steps.length - ACTIVITY_SHOWN) : []
   const list = h('ol', { class: 'steps' }, ...steps.slice(hidden.length))
   if (hidden.length) {

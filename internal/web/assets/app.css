@@ -1030,16 +1030,5 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .dock-inner{position:relative}
 .to-bottom{position:absolute;top:-46px;left:50%;transform:translateX(-50%);width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--fg2);box-shadow:0 2px 8px rgb(0 0 0 / .15);z-index:2}
 .to-bottom:hover{color:var(--fg)}
-.changes{border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--fg2)}
-.changes summary{cursor:pointer;padding:5px 10px;list-style:none}
-.changes summary::-webkit-details-marker{display:none}
-.changes summary::before{content:"▸ ";font-size:10px}
-.changes[open] summary::before{content:"▾ "}
-.changes .add{color:var(--add-fg)}
-.changes .del{color:var(--del-fg)}
-.changes ul{list-style:none;margin:0;padding:2px 6px 6px;max-height:160px;overflow:auto;border-top:1px solid var(--line)}
-.changes li button{display:flex;gap:8px;width:100%;text-align:left;padding:2px 4px;border-radius:5px;font-family:var(--mono);font-size:12px}
-.changes li button:hover{background:var(--sunk)}
-.changes li .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 .complete .cgroup{padding:6px 10px 2px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg4)}
 .tools.activity li.k-gummi pre.tool-out{color:var(--fg)}

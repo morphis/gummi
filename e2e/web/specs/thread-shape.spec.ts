@@ -47,13 +47,6 @@ test('a session thread has bubbles, reply footers, step rows and changed files',
     await expect(edit.getByTestId('tool-copy')).toBeVisible();
   }
 
-  // the files the session changed sit above the composer, and open the diff
-  const changes = page.getByTestId('changes');
-  await expect(changes).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId('changes-summary')).toContainText('1 file changed');
-  await page.getByTestId('changes-summary').click();
-  await expect(page.getByTestId('changes-file')).toContainText('NOTES.md');
-
   // "@" offers the worktree's files, and picking one replaces only the word
   await input.click();
   await input.fill('look at @NOT');
