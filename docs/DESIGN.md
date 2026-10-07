@@ -421,9 +421,12 @@ by name, rather than loading and quietly losing them.
 
 **Where gummi still touches discovery, and why:**
 
-- claude's tool roster always names `Skill`. `--tools` gates that
-  built-in, and every discovered skill is invoked through it; a roster
-  without it left skills listed and unreachable.
+- claude's tool roster is never narrowed for a session that writes: it is
+  shown the CLI's whole built-in surface (web, subagents, skills), and its
+  allowlist pre-approves the web and subagent tools so they work headless.
+  Only a read-only research session gets `--tools`, and that roster always
+  names `Skill`, which `--tools` gates and every discovered skill is invoked
+  through.
 - claude runs with `--strict-mcp-config`: a broken user-side MCP server
   must not crash a stage. Skills and plugins are not affected.
 - antigravity runs under a redirected `HOME`, because agy has no

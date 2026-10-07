@@ -373,7 +373,7 @@ func TestClaudeCodeArgsPlumbing(t *testing.T) {
 		"--input-format stream-json", "--output-format stream-json",
 		"--include-partial-messages", "--permission-mode acceptEdits",
 		"--model test-model", "--append-system-prompt hint one\n\nhint two",
-		"--allowedTools Bash Read Grep Glob mcp__gummi",
+		"--allowedTools " + claudeWritingAllowlist,
 		"cwd=" + wd, "envsock=" + ambientMCPSock(), "msg=ping",
 	} {
 		if !strings.Contains(msg, wantPart) {
@@ -578,9 +578,8 @@ func TestClaudeCodeBackgroundWorkOnlyForWatchSessions(t *testing.T) {
 	if !strings.Contains(ff, "bg=<unset>") {
 		t.Errorf("watch session lost background tasks: %s", ff)
 	}
-	want := "--tools " + strings.Join(append(claudeStageTools(), "Monitor"), ",")
-	if !strings.Contains(ff, want) || !strings.Contains(ff, "--allowedTools Bash Read Grep Glob Monitor mcp__gummi") {
-		t.Errorf("watch session missing Monitor (want %q and it allowlisted): %s", want, ff)
+	if strings.Contains(ff, "--tools") || !strings.Contains(ff, "--allowedTools "+claudeWritingAllowlist+" Monitor") {
+		t.Errorf("watch session missing Monitor on its allowlist, or narrowed: %s", ff)
 	}
 
 	// read-only research is never a watch session, whatever it is asked
@@ -847,7 +846,7 @@ func TestClaudeCodeArgsMCPWiring(t *testing.T) {
 	}
 
 	// The allowlist is appended last: exactly the same tokens, in order.
-	wantTools := []string{"Bash", "Read", "Grep", "Glob", "mcp__gummi"}
+	wantTools := strings.Fields(claudeWritingAllowlist)
 	ai := -1
 	for i, f := range fields {
 		if f == "--allowedTools" {
@@ -968,7 +967,7 @@ func TestClaudeCodeArgsNoMCPWithoutFeature(t *testing.T) {
 			if !strings.Contains(msg, "--permission-mode acceptEdits") {
 				t.Errorf("missing --permission-mode acceptEdits: %s", msg)
 			}
-			if !strings.Contains(msg, "--allowedTools Bash Read Grep Glob mcp__gummi") {
+			if !strings.Contains(msg, "--allowedTools "+claudeWritingAllowlist) {
 				t.Errorf("missing allowlist: %s", msg)
 			}
 		})
@@ -1031,23 +1030,16 @@ func claudeRosterArgv(t *testing.T, script string, opts SessionOpts) string {
 	return msg
 }
 
-// A CLI that understands --tools is told which built-ins to show, so a
-// stage session is not handed (and charged for) a surface its allowlist
-// would deny anyway — and so gummi's MCP tools stay in the prompt instead
-// of behind a per-session lookup turn.
-func TestClaudeCodeNarrowsToolRoster(t *testing.T) {
+// A session that writes is shown the CLI's whole built-in surface, and
+// its allowlist covers the web and subagents so they are usable headless.
+func TestClaudeCodeDoesNotNarrowWritingSessions(t *testing.T) {
 	msg := claudeRosterArgv(t, claudeRosterHelpScript, SessionOpts{Model: "test-model"})
-	want := "--tools " + strings.Join(claudeStageTools(), ",")
-	if !strings.Contains(msg, want) {
-		t.Errorf("argv missing %q: %s", want, msg)
+	if strings.Contains(msg, "--tools") {
+		t.Errorf("writing session had its roster narrowed: %s", msg)
 	}
-	// the roster narrows what is shown; it must not widen what is allowed
-	if !strings.Contains(msg, "--allowedTools Bash Read Grep Glob mcp__gummi") {
-		t.Errorf("roster replaced the allowlist: %s", msg)
-	}
-	for _, bad := range []string{"WebFetch", "WebSearch", "Task"} {
-		if strings.Contains(msg, bad) {
-			t.Errorf("roster names %q, which the allowlist denies: %s", bad, msg)
+	for _, want := range []string{"WebSearch", "WebFetch", "Task", "Agent"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("allowlist missing %q: %s", want, msg)
 		}
 	}
 }
@@ -1084,16 +1076,12 @@ func TestClaudeCodeSkipsRosterWhenUnsupported(t *testing.T) {
 	}
 }
 
-// Skill is a built-in, so --tools gates it, and every skill the CLI
-// discovers — the operator's own, a plugin's, the repository's — is
-// invoked through it. Leaving it off the roster left those skills listed
-// and unreachable, so every session kind names it (DESIGN §4.1a). It is
-// shown, never allowlisted — the CLI auto-approves it — and gummi adds no
-// skills of its own, so no --plugin-dir is ever passed.
+// Skill is a built-in, so --tools gates it: the one narrowed roster, the
+// read-only one, names it so discovered skills stay reachable (DESIGN
+// §4.1a). It is shown, never allowlisted — the CLI auto-approves it — and
+// gummi adds no skills of its own, so no --plugin-dir is ever passed.
 func TestClaudeRosterAlwaysOffersSkill(t *testing.T) {
 	for name, opts := range map[string]SessionOpts{
-		"stage":     {Model: "test-model", WorkDir: t.TempDir()},
-		"watch":     {Model: "test-model", Watch: true},
 		"read-only": {ReadOnly: true},
 	} {
 		msg := claudeRosterArgv(t, claudeRosterHelpScript, opts)

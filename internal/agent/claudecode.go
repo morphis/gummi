@@ -113,47 +113,37 @@ func claudeReadOnlyTools() []string {
 
 // The tool ROSTER is a different lever from the allowlist above, and the
 // two answer different questions. The allowlist says what a session may
-// DO; the roster says what it is TOLD EXISTS. Left alone, the CLI shows a
-// stage session its whole built-in surface — cron, notifications, remote
-// triggers, notebook editing, the web — every definition riding every
-// request, none of it reachable from a session whose job is to edit one
-// file under an allowlist of four tools. Two things follow, both measured
-// against the CLI in its stream-json mode: the prompt carries roughly 8k
-// tokens of tool definitions nobody can use, and the roster is wide enough
-// that the CLI defers gummi's own MCP tools behind a lookup, so every
-// single session opens by spending a turn searching for the four tools it
-// was started to call.
+// DO; the roster says what it is TOLD EXISTS.
 //
-// So the roster is exactly the permitted surface: the tools the allowlist
-// pre-approves, plus the edit tools acceptEdits approves inside the
-// worktree. A tool a session may not use is not described to it.
+// A session that writes gets no roster: gummi embraces the agent as the
+// CLI ships it, so the web, subagents, skills, notebooks and whatever the
+// CLI adds next are all on the table, and a session never has to say it
+// "has no web search". Narrowing the roster there was gummi curating a
+// backend's surface (DESIGN §4.1a), and it showed up as an agent that
+// could not do what the same CLI does anywhere else. The allowlist below
+// pre-approves the web and subagent tools too, because a headless session
+// has nobody to answer a permission prompt and would otherwise be denied.
 //
-// claudeStageTools is that roster for a normal (worktree, acceptEdits)
-// stage session. MCP tools are not built-ins and are unaffected by
+// A ReadOnly research session is different: it has no worktree and no
+// write cage, so its surface is structural. claudeReadOnlyRoster names the
+// navigation tools its allowlist permits, nothing that writes, and Skill:
+// Skill IS a built-in, so --tools gates it, and every skill the CLI
+// discovers is invoked through it. A skill's instructions run through the
+// same narrowed tools as the session's own — it cannot write where the
+// session cannot. MCP tools are not built-ins and are unaffected by
 // --tools; gummi's own reach the session through --mcp-config either way.
 //
-// Skill is always on it. Skill IS a built-in, so --tools gates it, and
-// every skill the CLI discovers — the repository's, the operator's own
-// under ~/.claude, an installed plugin's — is invoked through it. A roster
-// without Skill does not narrow what the session is shown; it leaves the
-// skills listed and unreachable. gummi does not curate what a backend
-// discovers (DESIGN §4.1a), so this list cannot be where that curation
-// quietly happens.
-func claudeStageTools() []string {
-	return []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write", "MultiEdit", "NotebookEdit", "Skill"}
-}
-
-// claudeReadOnlyRoster is the same idea for a ReadOnly research session:
-// the navigation tools its allowlist permits, nothing that writes, and
-// Skill for the reason above. Skill is auto-approved rather than
-// allowlisted, and a skill's instructions run through the same narrowed
-// tools as the session's own — it cannot write where the session cannot.
-// Bash is named bare here because --tools takes tool names, not the
-// argument-scoped forms --allowedTools takes; the allowlist above is what
-// narrows Bash to read-only git, and it still does.
+// Bash is named bare in the roster because --tools takes tool names, not
+// the argument-scoped forms --allowedTools takes; the allowlist above is
+// what narrows Bash to read-only git, and it still does.
 func claudeReadOnlyRoster() []string {
 	return []string{"Read", "Grep", "Glob", "Bash", "Skill"}
 }
+
+// claudeWritingAllowlist pre-approves what a writing session may use beyond
+// its edits (acceptEdits covers those): the shell, navigation, the web and
+// subagents. Agent is the current name of Task; an unknown name is inert.
+const claudeWritingAllowlist = "Bash Read Grep Glob WebSearch WebFetch Task Agent mcp__gummi"
 
 // claudeHelpTimeout bounds the one-off --help probe below.
 const claudeHelpTimeout = 10 * time.Second
@@ -276,30 +266,19 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 	// above. And never pass --add-dir for the main checkout: it lifts the
 	// write cage alongside the read allowance. Both invariants are
 	// load-bearing; breaking either silently re-opens the write hole.
-	// The roster (what the session is shown) is narrowed before the
-	// allowlist (what it may do), and never instead of it: --tools filters
-	// built-ins only, so dropping this line would widen the prompt, never
-	// the permissions.
-	if c.supportsToolRoster() {
-		roster := claudeStageTools()
-		if opts.ReadOnly {
-			roster = claudeReadOnlyRoster()
-		} else if opts.Watch {
-			// The adapter reports NativeWatch, so the engine offers a
-			// freeform session no watch of its own: leaving Monitor off the
-			// roster left that session with no watch at all.
-			roster = append(roster, "Monitor")
-		}
-		args = append(args, "--tools", strings.Join(roster, ","))
+	// Only a ReadOnly session has its roster narrowed (see above); --tools
+	// filters built-ins only, so it never widens the permissions.
+	if opts.ReadOnly && c.supportsToolRoster() {
+		args = append(args, "--tools", strings.Join(claudeReadOnlyRoster(), ","))
 	}
 	switch {
 	case opts.ReadOnly:
 		args = append(args, "--allowedTools", strings.Join(claudeReadOnlyTools(), " "))
 	case opts.Watch:
 		// Monitor runs a command the way Bash does, and Bash is already here.
-		args = append(args, "--allowedTools", "Bash Read Grep Glob Monitor mcp__gummi")
+		args = append(args, "--allowedTools", claudeWritingAllowlist+" Monitor")
 	default:
-		args = append(args, "--allowedTools", "Bash Read Grep Glob mcp__gummi")
+		args = append(args, "--allowedTools", claudeWritingAllowlist)
 	}
 
 	// spawn OUTSIDE the lock (fork/exec must not serialize session creation
