@@ -68,8 +68,17 @@ func bg067FlooredVerify(t *testing.T) (b *Bridge, eng *engine.Engine, f domain.F
 	if err := b.Do(context.Background(), func(m *Shell) tea.Cmd { return m.runStage(f) }); err != nil {
 		t.Fatal(err)
 	}
+	// The stop can be on the card a beat before the floor is stamped on the
+	// session, so wait for the floor's own reason to be on it.
 	waitCard(t, b, string(f.ID), "verify stop", func(c webapi.Card) bool {
-		return c.Decision != nil && c.Decision.Kind == webapi.DecisionVerify
+		if c.Decision == nil || c.Decision.Kind != webapi.DecisionVerify {
+			return false
+		}
+		surface := c.Decision.Question
+		for _, o := range c.Decision.Options {
+			surface += " " + o.Label + " " + o.Detail
+		}
+		return strings.Contains(surface, "promises are not met")
 	})
 	return b, eng, f, root, artifact
 }
