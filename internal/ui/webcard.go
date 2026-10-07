@@ -331,6 +331,18 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	st.card.Actions = m.webActions(r)
 	st.card.Composer = m.webComposer(r, "")
 	st.card.Session = m.webSessionOf(r.F)
+	if r.F.Delegate.Enabled() {
+		var cards []domain.Feature
+		for _, c := range m.rows {
+			if c.F.ParentID == r.F.ID {
+				cards = append(cards, c.F)
+			}
+		}
+		st.card.Delegation = &webapi.Delegation{
+			Budget: r.F.Delegate.Budget, ConfirmAll: r.F.Delegate.ConfirmAll,
+			Left: domain.DelegateAvailable(r.F, cards),
+		}
+	}
 	return st, true
 }
 

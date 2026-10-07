@@ -99,7 +99,10 @@ CREATE TABLE IF NOT EXISTS features (
 	session_model   TEXT NOT NULL DEFAULT '',
 	main_checkout   INTEGER NOT NULL DEFAULT 0,
 	verified_rev    TEXT NOT NULL DEFAULT '',
-	continued_as    TEXT NOT NULL DEFAULT ''
+	continued_as    TEXT NOT NULL DEFAULT '',
+	parent_id       TEXT NOT NULL DEFAULT '',
+	delegate_budget INTEGER NOT NULL DEFAULT 0,
+	delegate_all    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 -- features_stack is created by the column migrations, not here: this
@@ -822,6 +825,13 @@ var migrations = []string{
 	// written from it (domain.Feature.ContinuedAs). Empty is every other
 	// card, and every session closed before the column existed.
 	`ALTER TABLE features ADD COLUMN continued_as TEXT NOT NULL DEFAULT ''`,
+	// A freeform card's delegation (domain.Delegation) and the freeform
+	// card a delegated card belongs to (domain.Feature.ParentID). Every
+	// empty default reads as "no delegation", so no row needs a value.
+	`ALTER TABLE features ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN delegate_budget INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE features ADD COLUMN delegate_all INTEGER NOT NULL DEFAULT 0`,
+	`CREATE INDEX IF NOT EXISTS features_parent ON features(parent_id)`,
 }
 
 // Close releases the database.
@@ -859,8 +869,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode,
 			base, branch_scheme, branch, stack_id, stack_pos,
-			session_backend, session_model, main_checkout)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			session_backend, session_model, main_checkout,
+			parent_id, delegate_budget, delegate_all)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -874,7 +885,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
 		string(f.Mode),
 		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
-		f.SessionBackend, f.SessionModel, f.MainCheckout)
+		f.SessionBackend, f.SessionModel, f.MainCheckout,
+		string(f.ParentID), f.Delegate.Budget, f.Delegate.ConfirmAll)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -900,7 +912,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
 	base, branch_scheme, branch, stack_id, stack_pos,
-	session_backend, session_model, main_checkout, verified_rev, continued_as`
+	session_backend, session_model, main_checkout, verified_rev, continued_as,
+	parent_id, delegate_budget, delegate_all`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -924,7 +937,7 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 	var f domain.Feature
 	var id, stage, created, updated, kind, verified, handedOff, severity string
 	var goalID, goalDropped, foundBy, goalWrapUp, mode string
-	var stackID, continuedAs string
+	var stackID, continuedAs, parentID string
 	// The five skip_* columns are vestigial: SkipFlags went with the
 	// three-graph era (there is one graph and nothing left to skip), but
 	// the columns stay so an older gummi can still read the database and
@@ -941,12 +954,14 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
 		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
-		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.VerifiedRev, &continuedAs)
+		&f.SessionBackend, &f.SessionModel, &f.MainCheckout, &f.VerifiedRev, &continuedAs,
+		&parentID, &f.Delegate.Budget, &f.Delegate.ConfirmAll)
 	if err != nil {
 		return f, err
 	}
 	f.StackID = domain.StackID(stackID)
 	f.ContinuedAs = domain.FeatureID(continuedAs)
+	f.ParentID = domain.FeatureID(parentID)
 	f.Mode = domain.ResearchMode(mode)
 	f.GoalID = domain.FeatureID(goalID)
 	f.FoundBy = domain.FeatureID(foundBy)

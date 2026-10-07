@@ -587,3 +587,49 @@ export async function openWriteSpec (card, a) {
     fail(e)
   }
 }
+
+// ---- delegation ----
+
+// delegateButton opens the session's delegation: the credits it may give
+// workflow cards it creates. Off until the person sets a budget — a session
+// without one is not offered the card tools at all.
+export function delegateButton (card) {
+  if (!card?.session || card.stage === 'done') return null
+  const d = card.delegation
+  const label = d ? `Delegating · ${Math.max(0, Math.round(d.left))} left` : 'Delegate'
+  return h('button', { class: ['btn', 'hide-s', d && 'on'], type: 'button', testid: 'delegate', title: 'Let this session create workflow cards under a budget', onclick: () => openDelegate(card) }, label)
+}
+
+export function openDelegate (card) {
+  const d = card.delegation || { budget: 0, confirmAll: false }
+  const budget = h('input', { type: 'number', min: '0', step: '50', value: String(d.budget || ''), testid: 'delegate-budget' })
+  const all = h('input', { type: 'checkbox', testid: 'delegate-all' })
+  all.checked = !!d.confirmAll
+  const err = h('p', { class: 'spec-err', role: 'alert', testid: 'delegate-error', hidden: true })
+  const body = h('div', { class: 'mbody spec-body' },
+    h('p', { class: 'spec-about' }, 'The session may then create feature and bug cards that fork from this branch, run the whole workflow, and land back here when it asks. Each card is put to you first.'),
+    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Credits across every card it creates. 0 turns delegation off.')),
+    h('label', { class: 'field' }, all, h('span', null, ' Don’t ask me about each card')),
+    err)
+  openModal({
+    title: 'Delegate to cards',
+    testid: 'delegate-dialog',
+    bodyEl: body,
+    card: card.id,
+    actions: [{ label: 'Cancel' }, {
+      label: 'Save',
+      primary: true,
+      testid: 'delegate-save',
+      onClick: async () => {
+        try {
+          await post(cardPath(card.id, 'delegation'), { budget: Number(budget.value) || 0, confirm_all: all.checked })
+          return true
+        } catch (e) {
+          err.hidden = false
+          err.textContent = e.data?.error || e.message
+          return false
+        }
+      }
+    }]
+  })
+}

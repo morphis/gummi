@@ -548,6 +548,15 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 		if f.Stage == domain.StageDone {
 			return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
 		}
+		if f.IsFreeform() {
+			cards, err := d.store.DelegatedCards(ctx, id)
+			if err != nil {
+				return d.fail(ctx, string(id), err)
+			}
+			if open := domain.UnlandedDelegates(cards); len(open) > 0 {
+				return d.fail(ctx, string(id), fmt.Errorf("%s: %w (%v)", id, domain.ErrUnlandedDelegates, open))
+			}
+		}
 		// Two floors, one predicate: a card in the workflow lands on a
 		// verified branch; a freeform card lands on a human's read of its
 		// diff (domain.Feature.MayLand says which and why). The unresolved-

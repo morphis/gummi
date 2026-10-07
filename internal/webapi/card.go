@@ -29,6 +29,9 @@ type Card struct {
 	// resolved the way its next turn will resolve them; nil on a card in
 	// the workflow, whose stages take theirs from its profile.
 	Session *SessionModel `json:"session,omitempty"`
+	// Delegation is what a session's person has let it spend on cards it
+	// creates; nil while they have not opted it in.
+	Delegation *Delegation `json:"delegation,omitempty"`
 	// Files is where the page may open the card's worktree files from;
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`
@@ -433,4 +436,13 @@ type WritespecDraft struct {
 	// brief and source are empty, and the dialog waits for the card's
 	// update before it reads again.
 	Drafting bool `json:"drafting,omitempty"`
+}
+
+// Delegation is a session's delegation (domain.Delegation): the credits it
+// may give cards it creates, whether the person is still asked about each
+// one, and what is left to give.
+type Delegation struct {
+	Budget     int     `json:"budget"`
+	ConfirmAll bool    `json:"confirmAll"`
+	Left       float64 `json:"left"`
 }

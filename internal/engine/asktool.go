@@ -83,6 +83,12 @@ type Ask struct {
 	// D18) — so it carries none, and the surfaces that offer it say why
 	// rather than presenting a bare chat row as all the agent offered.
 	Restored bool `json:"-"`
+	// onAnswer, when set, turns the person's answer into what the agent's
+	// blocked call returns: the tool that asked acts on the answer itself
+	// (card_create mints the card) and tells the agent what happened. It
+	// lives only in this process — an ask restored after a restart has
+	// none, and the agent then gets the person's answer as plain text.
+	onAnswer func(answer string) string
 }
 
 // AskOption is one selectable answer.
@@ -650,6 +656,8 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 		e.handleWatchTool(s, tc)
 	case memoryReadToolName, memoryWriteToolName:
 		e.handleMemoryTool(s, tc)
+	case cardCreateToolName, cardListToolName, cardLandToolName:
+		e.handleDelegateTool(s, tc)
 	default:
 		e.resolveNow(s, tc.ID, fmt.Sprintf("unknown tool %q — proceed without it", tc.Name))
 	}
@@ -792,12 +800,20 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 		e.bounceAsk(s, tc.ID, reason)
 		return
 	}
+	e.installAsk(s, tc.ID, ask)
+}
+
+// installAsk puts a parsed ask to the person: the pending question, its
+// durable decision row and the event that surfaces it. ask_user is one
+// caller; a tool that needs the person's yes first (card_create, under a
+// freeform card's delegation) is the other.
+func (e *Engine) installAsk(s *Session, callID string, ask *Ask) {
 	// mint the decision id before the ask installs: the pump goroutine owns
 	// the ask's identity until takePendingAsk hands it over, and minting
 	// after install would race the answer that reads it.
 	ask.DecisionID = decisionIDFor(s, ask)
 	if !s.trySetPendingAsk(ask) {
-		e.bounceAsk(s, tc.ID, "the user is still answering your previous question — "+
+		e.bounceAsk(s, callID, "the user is still answering your previous question — "+
 			"ask one question at a time; re-ask this after that answer arrives")
 		return
 	}
@@ -1428,6 +1444,9 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// first, so the bridge's blocked call resumes exactly like a native
 	// one. The turn carries the answer text; the transcript above already
 	// recorded it, so delivery must not append it a second time.
+	if byCall && ask.onAnswer != nil {
+		answer = ask.onAnswer(answer)
+	}
 	if byCall {
 		// Only treat the bridge's blocked call as resolved when it is
 		// actually live. A buffered send alone proves nothing: the backend

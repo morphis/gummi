@@ -170,6 +170,10 @@ type Input struct {
 	// never sets it: the fix is a word in the title, and the person
 	// should be the one to type it.
 	Unattended bool
+	// Parent mints the card under a freeform card's delegation: its branch
+	// forks from the freeform branch and lands back on it, and its envelope
+	// is carved out of that card's delegation budget. Excludes Goal.
+	Parent domain.FeatureID
 	// FoundBy records the card that filed this one: a goal that found the
 	// work along the way, or a finished card whose follow-up this is.
 	// Provenance only — it blocks and schedules nothing. Ignored when
@@ -407,6 +411,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if in.Kind == domain.KindBug {
 		f.Severity = in.Severity
 	}
+	f.ParentID = in.Parent
 	if in.Goal != "" {
 		f.GoalID = in.Goal
 	} else {

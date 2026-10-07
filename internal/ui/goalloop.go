@@ -561,3 +561,23 @@ func (m *Shell) abandonGoal(f domain.Feature) tea.Cmd {
 		return noticeMsg{text: string(f.ID) + " abandoned — its branch is kept", reload: true, clearInbox: f.ID}
 	}
 }
+
+// delegateStartCmd moves a card a freeform session just created onto its
+// first stage and hands it to the ordinary run path, as goalStartCmd does
+// for a goal's card.
+func (m *Shell) delegateStartCmd(id domain.FeatureID) tea.Cmd {
+	store := m.store
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := store.GetFeature(ctx, id)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		if f.Stage == domain.StageTodo {
+			if f, err = store.Transition(ctx, f.ID, domain.StagePlan, engine.ActorDelegate); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+		}
+		return goalStartMsg{f: f, note: "Created by " + string(f.ParentID) + "'s session; this card lands on " + string(f.ParentID) + "'s branch."}
+	}
+}

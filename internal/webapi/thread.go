@@ -261,6 +261,15 @@ type Conversation struct {
 	Watches []string `json:"watches,omitempty"`
 }
 
+// DelegationRequest is POST /api/cards/{id}/delegation's body: the
+// credits a freeform card's session may give cards it creates (zero
+// withdraws the delegation), and whether the person stops being asked
+// about each one.
+type DelegationRequest struct {
+	Budget     int  `json:"budget"`
+	ConfirmAll bool `json:"confirm_all"`
+}
+
 // RewindRequest is POST /api/cards/{id}/rewind's body: how many of the
 // person's own messages back to go, 1 being the last.
 type RewindRequest struct {

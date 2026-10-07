@@ -654,6 +654,29 @@ def stage_verify(turn, kickoff):
 
 
 def freeform_turn(turn, text):
+    if "[delegate]" in text:
+        # a session with a delegation budget hands work to a workflow
+        # card: card_create blocks until the person says yes or no
+        result = call_tool("card_create", args={
+            "kind": "FD",
+            "description": "Add a greeting helper\n\nHanded off by the session.",
+            "envelope": 300,
+        })
+        turn.say("card_create: %s" % result.strip())
+        return
+    if "[cards]" in text:
+        turn.say("card_list: %s" % call_tool("card_list", args={}).strip())
+        return
+    land = re.search(r"\[land ([A-Z]{2}-\d+)\]", text)
+    if land:
+        # the landing refuses a worktree with tracked changes: the
+        # session commits its own work first, as the tool asks
+        wd = turn.ctx["workdir"]
+        if subprocess.run(["git", "-C", wd, "status", "--porcelain", "--untracked-files=no"],
+                          capture_output=True, text=True).stdout.strip():
+            git(wd, "commit", "-qam", "chore: the session's own notes")
+        turn.say("card_land: %s" % call_tool("card_land", args={"card": land.group(1)}).strip())
+        return
     if "[watch]" in text:
         # a Monitor watch the turn leaves open: no result comes for it, so
         # the card reads as watching once the turn is over

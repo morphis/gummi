@@ -347,6 +347,14 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		extra = append(extra, memoryReadTool(), memoryWriteTool())
 		tools = append(tools, memoryReadTool(), memoryWriteTool())
 		hints = append(hints, freeformMemoryHint)
+		// The card tools (delegate.go) only once the person has given the
+		// card a delegation budget: a session that is never shown them
+		// cannot decide to file a card for every change.
+		if f.Delegate.Enabled() {
+			extra = append(extra, delegateTools()...)
+			tools = append(tools, delegateTools()...)
+			hints = append(hints, freeformDelegateHint)
+		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, flavorStage, extra...)
 		if merr != nil {
 			cancel()

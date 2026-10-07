@@ -93,6 +93,15 @@ func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *ne
 		if m.freeformTurnBusy(r) {
 			return string(f.ID) + ": a turn is in flight — stop it, or let it finish, before landing"
 		}
+		var held []domain.Feature
+		for _, c := range m.rows {
+			if c.F.ParentID == f.ID {
+				held = append(held, c.F)
+			}
+		}
+		if open := domain.UnlandedDelegates(held); len(open) > 0 {
+			return string(f.ID) + ": " + domain.ErrUnlandedDelegates.Error() + " (" + joinIDs(open) + ") — land them with card_land first"
+		}
 		if n := r.OpenDiffComments; n > 0 {
 			return fmt.Sprintf("%s: %d open diff comment%s — resolve %s or send %s back before landing", f.ID, n, plural(n), them(n), them(n))
 		}

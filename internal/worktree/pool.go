@@ -309,10 +309,15 @@ func (p *Pool) Names() []string {
 // returns the cached manager for that repo, creating it on first use. A
 // stored-but-unconfigured repo name is a resolution-time error. A card that
 // belongs to a goal resolves to the manager rooted at the goal's worktree
-// instead, so its branch forks from and lands on the goal branch.
+// instead, so its branch forks from and lands on the goal branch, and a
+// card a freeform session created resolves to the manager rooted at that
+// freeform card's worktree, for the same reason.
 func (p *Pool) ManagerFor(ctx context.Context, f *domain.Feature) (*Manager, error) {
 	if f.GoalID != "" {
 		return p.managerForGoalCard(ctx, f)
+	}
+	if f.ParentID != "" {
+		return p.managerForDelegatedCard(ctx, f)
 	}
 	return p.ManagerForName(ctx, f.Repo)
 }
@@ -788,4 +793,16 @@ func (p *Pool) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]str
 		return nil, err
 	}
 	return wt.ProvenanceWarnings(ctx, f)
+}
+
+// managerForDelegatedCard resolves a card a freeform session created: the
+// manager rooted at the freeform card's own worktree while it exists, so
+// the card forks from and lands on the freeform branch; its repository's
+// manager once the freeform card has landed and its worktree is gone.
+func (p *Pool) managerForDelegatedCard(ctx context.Context, f *domain.Feature) (*Manager, error) {
+	dir := filepath.Join(p.root, ".gummi", "worktrees", string(f.ParentID))
+	if _, err := os.Stat(dir); err == nil {
+		return p.goalManagerAt(ctx, dir)
+	}
+	return p.ManagerForName(ctx, f.Repo)
 }

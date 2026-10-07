@@ -810,6 +810,14 @@ func (m *Shell) conducted(f domain.Feature) bool {
 // name lives; loadRows resolves the same rule from the features it is
 // already holding, since the rows it is building are not on the Shell yet.
 func (m *Shell) goalBranchOf(f domain.Feature) string {
+	if f.ParentID != "" {
+		// a card a freeform session created forks from and lands on that
+		// card's branch while it is open (worktree.Pool.ManagerFor)
+		if i := m.rowIndex(f.ParentID); i >= 0 && m.rows[i].F.Stage != domain.StageDone {
+			return m.rows[i].F.BranchName()
+		}
+		return ""
+	}
 	if f.GoalID == "" {
 		return ""
 	}
@@ -1677,6 +1685,12 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		}
 		m.alert(ev.Feature, "handoff brief finished — write a spec to review it")
 		return nil
+	case engine.EventDelegateCreated:
+		// a freeform session created a card under its delegation: it was
+		// minted on autopilot, and the board starts it the way a goal's
+		// start does — the session that asked for it is not the one to
+		// drive it.
+		return tea.Batch(m.loadRows, m.delegateStartCmd(ev.Feature))
 	case engine.EventCardCreated:
 		// a card was minted or filed onto the open board by a caller that
 		// touches no session machinery — a goal's lead — the only

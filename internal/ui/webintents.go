@@ -423,6 +423,28 @@ func (b *Bridge) Rewind(ctx context.Context, id string, back int) (webapi.Rewoun
 	return webapi.Rewound{Text: text}, nil
 }
 
+// SetDelegation is POST /api/cards/{id}/delegation: the person opts a
+// freeform card's session in to creating cards (engine.SetDelegation), or
+// out again.
+func (b *Bridge) SetDelegation(ctx context.Context, id string, req webapi.DelegationRequest) error {
+	fid := webID(id)
+	var serr error
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if m.engine == nil {
+			serr = fmt.Errorf("no engine is running")
+			return nil
+		}
+		serr = m.engine.SetDelegation(ctx, fid, domain.Delegation{Budget: req.Budget, ConfirmAll: req.ConfirmAll})
+		return m.loadRows
+	}); err != nil {
+		return err
+	}
+	if serr != nil {
+		return refuse(WebConflict, serr.Error())
+	}
+	return nil
+}
+
 // Unqueue is POST /api/cards/{id}/queue/{n}/take: a line said to a
 // freeform card mid-turn, taken back before the agent hears it
 // (engine.FreeformSession.Unqueue). One that has gone already is a 409,

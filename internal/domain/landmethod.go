@@ -28,9 +28,10 @@ func ParseLandMethod(s string) (LandMethod, error) {
 
 // LandMethods lists the methods a local landing of f may use. A goal's
 // history is one commit per card under the goal's own merge commit, so a
-// card that belongs to a goal (or is one) lands as a squash only.
+// card that belongs to a goal (or is one) lands as a squash only, and so
+// does a card a freeform session created, on the freeform branch.
 func (f *Feature) LandMethods() []LandMethod {
-	if f.IsGoal() || f.InGoal() {
+	if f.IsGoal() || f.InGoal() || f.Delegated() {
 		return []LandMethod{LandSquash}
 	}
 	return []LandMethod{LandSquash, LandMerge}

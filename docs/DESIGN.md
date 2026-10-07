@@ -4006,6 +4006,40 @@ launchd — there is no headless freeform driver for it to run yet
 (`run`/`resume` refuse freeform, §19.5; `gummi ff` is deferred, §19.7).
 Per-fire history beyond the row's one last outcome is a later need.
 
+### 19.10 Delegation: a session that creates workflow cards
+
+A person may let a session hand pieces of its work to workflow cards
+(`domain.Delegation`, `engine/delegate.go`). The cards are a goal's cards
+without the goal (§17): each forks from the session's branch and lands
+back on it as one squash commit (`worktree.Pool.ManagerFor` routes on
+`ParentID`), and what each holds of the delegation is the goal ledger's
+rule — an unfinished card holds the larger of its envelope and its spend,
+a landed one only its spend (`domain.DelegateHeld`, §17.3).
+
+- **Opt-in, and asked.** A session is offered `card_create`, `card_list`
+  and `card_land`, and told about them, only once its person has set a
+  delegation budget. Tools are fixed when a backend starts, so setting or
+  withdrawing the budget stops an idle backend and the next turn resumes
+  the conversation with the new tool set. Every `card_create` is put to
+  the person first — this one, this one and all that follow, or no — and
+  the budget caps the session whichever they answer. Without both guards
+  a session that can file cards drifts into filing one for every change.
+- **The workflow floor is the card's own.** A created card runs on
+  autopilot through plan, implement and verify with its critiques, and
+  stops at a verified branch. Nothing about its parent softens that.
+- **It lands when the session says so.** The freeform worktree is the
+  agent's live checkout, and a squash onto it refuses tracked changes, so
+  a verified card waits until the session commits its own work and calls
+  `card_land`. A conflict comes back to the session.
+- **The parent waits for its cards.** A freeform card may not land while
+  a card it created is still open (neither landed nor closed): that card's branch
+  forks from a branch that would be gone. Its work reaches main through
+  the person's read of the freeform card's diff (§19.1), the same floor
+  everything else on that branch crosses.
+- **Not in a goal.** A delegated card never also belongs to a goal (two
+  ledgers would hold the same credits), and only feature and bug cards
+  are delegated: research has no branch to land.
+
 ## 20. The web face — the board in a browser
 
 `gummi web` serves the board to a browser as a page of its own: cards on

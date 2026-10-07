@@ -54,6 +54,10 @@ const (
 	// the session machinery — a goal's lead — so no other Event would
 	// ever cover it. A UI surface should reload rows.
 	EventCardCreated EventKind = "card_created"
+	// EventDelegateCreated fires when a freeform session created a card
+	// under its delegation (Feature is the new card). The driving loop
+	// starts it on autopilot, the way a goal's start does for its cards.
+	EventDelegateCreated EventKind = "delegate_created"
 	// EventGoal asks the driving loop to tick a goal (Feature is the goal):
 	// it has work to conduct — it just entered implement, you added a note,
 	// it was sent back or stopped.

@@ -323,9 +323,13 @@ func (m *Shell) loadRows() tea.Msg {
 	// are not on the Shell yet, so a first load would have every goal
 	// card's member read as landing on the trunk (Shell.goalBranchOf).
 	goalBranches := map[domain.FeatureID]string{}
+	openSessions := map[domain.FeatureID]string{}
 	for _, f := range feats {
 		if name := goalLandingBranch(f); name != "" {
 			goalBranches[f.ID] = name
+		}
+		if f.IsFreeform() && f.Stage != domain.StageDone {
+			openSessions[f.ID] = f.BranchName()
 		}
 	}
 	rows := make([]featureRow, 0, len(feats))
@@ -336,6 +340,11 @@ func (m *Shell) loadRows() tea.Msg {
 			// it (§18.2), so the words on its verbs name that branch. A
 			// stacked card above the bottom ignores its own choice.
 			row.BaseBranch = f.Base
+		}
+		if name := openSessions[f.ParentID]; name != "" {
+			// a card a freeform session created lands on that session's
+			// branch while it is open (worktree.Pool.ManagerFor)
+			row.BaseBranch = name
 		}
 		if name := goalBranches[f.GoalID]; name != "" {
 			// The same lookup answers both questions, because it is the

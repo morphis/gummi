@@ -355,6 +355,18 @@ type Feature struct {
 	// just sent it to. MayLandAfterAll refuses it. Freeform-only, and set
 	// once, on the hand-off that continued it.
 	ContinuedAs FeatureID
+	// ParentID is the freeform card whose session created this card under
+	// its delegation, empty for every other card. Like a goal's card, a
+	// delegated card's branch forks from the freeform card's branch and
+	// lands back on it, so its work reaches main only through the person's
+	// read of the freeform card's diff. It never also belongs to a goal:
+	// two budgets would hold the same credits.
+	ParentID FeatureID
+	// Delegate is a freeform card's delegation: what its session may give
+	// cards it creates. Zero on every other card, and on a freeform card
+	// whose person has not opted in — the session is then not offered the
+	// card tools at all.
+	Delegate Delegation
 	// GateApproval is who crosses this card's gates on an unattended
 	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
@@ -1089,6 +1101,9 @@ func (f *Feature) Validate() error {
 		if _, err := ParseFeatureID(string(f.GoalID)); err != nil || f.GoalID.Kind() != KindGoal {
 			return fmt.Errorf("feature %s: goal %q is not a goal id", f.ID, f.GoalID)
 		}
+	}
+	if err := f.validateDelegation(); err != nil {
+		return err
 	}
 	if f.FoundBy != "" {
 		// Any card id, not a goal's: the field means "this came out of
