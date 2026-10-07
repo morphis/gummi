@@ -244,7 +244,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .link{color:var(--accent);cursor:pointer;text-decoration:none;border-bottom:1px dotted currentColor;background:none}
 
 .thread{flex:1;overflow-y:auto;padding:20px 20px 12px;min-height:0}
-.thread-inner{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.thread-inner{width:100%;display:flex;flex-direction:column;gap:14px}
 .thread-items{display:flex;flex-direction:column;gap:14px}
 .sg{display:flex;flex-direction:column}
 .sg > summary{list-style:none;cursor:pointer}
@@ -378,7 +378,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 
 /* dock: decision + composer */
 .dock{padding:0 20px 16px;background:var(--panel)}
-.dock-inner{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+.dock-inner{width:100%;display:flex;flex-direction:column;gap:8px}
 .decision{border:1px solid color-mix(in srgb,var(--dc) 45%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--dc) 5%,var(--panel));overflow:hidden;
   /* the thread yields first, but never all of it: the decision is capped.
      Past the cap the question yields first, down to a two-line floor and
