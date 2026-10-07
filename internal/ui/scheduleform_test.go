@@ -550,3 +550,29 @@ func TestTheScheduleDialogPreviewsBeforeSave(t *testing.T) {
 		t.Fatalf("the preview read %+v, want the unknown-zone refusal", d2.preview)
 	}
 }
+
+// TestTheCardMenuOpensAHeartbeatAimedAtTheCard: the card's own heartbeat
+// row opens the dialog as a heartbeat on that card, and saving it stores
+// the row and turns it on.
+func TestTheCardMenuOpensAHeartbeatAimedAtTheCard(t *testing.T) {
+	m := scheduleFormBoard(t)
+	card := m.rows[len(m.rows)-1].F
+	m = pump(t, m, m.openHeartbeatForm(card))
+	d, ok := m.Overlay.Top().(*scheduleForm)
+	if !ok {
+		t.Fatalf("the schedule dialog is not on top: %T", m.Overlay.Top())
+	}
+	if !d.kindIsHeartbeat() || d.target.Value() != string(card.ID) {
+		t.Fatalf("the dialog opened as kind %v target %q, want a heartbeat on the card", d.kind, d.target.Value())
+	}
+	d.prompt.SetValue("check CI, keep going")
+	done, cmd := d.submit()
+	if !done {
+		t.Fatalf("save refused: %s", d.errText)
+	}
+	m = pump(t, m, cmd)
+	sc := scheduleRowReads(t, m, strings.ToLower(string(card.ID))+"-heartbeat")
+	if !sc.Enabled || sc.NextRun.IsZero() || sc.Target != card.ID {
+		t.Errorf("stored row = enabled %v next %v target %s, want it on and aimed at %s", sc.Enabled, sc.NextRun, sc.Target, card.ID)
+	}
+}

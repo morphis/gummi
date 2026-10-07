@@ -172,3 +172,33 @@ test('the schedule form previews its cadence, picks a pair from the catalog, and
 
   await shot(page, info, 'schedules-form');
 });
+
+// A session's own menu carries the heartbeat: it opens the Schedules view
+// with the form already aimed at that card, and saving it switches it on
+// (the Schedules view's own add leaves a definition off).
+test('a session\'s menu opens a heartbeat aimed at it, and saving turns it on', async ({ pairedPage: page, server, api }, info) => {
+  test.setTimeout(120_000);
+  const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
+  const id = String(made.json?.id);
+  await page.goto(`${server.url}/#${id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
+
+  await page.getByTestId('card-actions').click();
+  await page.getByTestId('action-heartbeat').click();
+  await expect(page.getByTestId('view-schedules')).toBeVisible();
+
+  // the form is open, a heartbeat, aimed at this card, named after it
+  await expect(page.getByTestId('schedule-form')).toBeVisible();
+  await expect(page.getByTestId('schedule-form-target')).toHaveValue(id);
+  await expect(page.getByTestId('schedule-form-name')).toHaveValue(`${id.toLowerCase()} heartbeat`);
+  await expect(page.getByTestId('schedule-form-every')).toHaveValue('1h');
+  await page.getByTestId('schedule-form-prompt').fill('check the rounding, keep going');
+  await page.getByTestId('schedule-form-submit').click();
+
+  const row = page.getByTestId(`schedule-${id.toLowerCase()}-heartbeat`);
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute('data-enabled', 'true');
+  await expect(page.getByTestId(`schedule-${id.toLowerCase()}-heartbeat-state`)).toHaveText('on');
+  await shot(page, info, 'schedules-card-heartbeat');
+});

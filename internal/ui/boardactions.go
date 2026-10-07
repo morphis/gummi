@@ -465,6 +465,13 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 			return m.openWritespec(r.F)
 		}
 		return nil
+	case "heartbeat":
+		// the freeform card's recurring turn (cardactions.go): the
+		// schedule dialog, already a heartbeat aimed at this card
+		if r, ok := m.selected(); ok {
+			return m.openHeartbeatForm(r.F)
+		}
+		return nil
 	case "ask":
 		// arms the same channel typing `ask` on the composer does
 		// (threadinput.go's routeVerb) — this is just the inventory's own

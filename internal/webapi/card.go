@@ -173,6 +173,10 @@ const (
 	// GET /api/cards/{id}/writespec-draft), its profile (ActionRequest.
 	// Profile, from Choices) and its budget (ActionRequest.Number).
 	ActionNeedsSpec ActionNeeds = "spec"
+	// ActionNeedsSchedule: a heartbeat for this card. The page opens its
+	// schedule form aimed at the card and writes through /api/schedules;
+	// the action itself takes no request.
+	ActionNeedsSchedule ActionNeeds = "schedule"
 )
 
 // Action is one entry in a card's menu.

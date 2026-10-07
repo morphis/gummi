@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -553,6 +554,50 @@ func (m *Shell) openScheduleForm(edit *domain.Schedule) tea.Cmd {
 	}
 	m.Overlay.Push(d)
 	return d.probeModels()
+}
+
+// openHeartbeatForm pushes the dialog already a heartbeat aimed at f, so
+// the card's own menu is a way into the Schedules view's form rather than
+// a second one. Saving turns it on: the person asked for this card to be
+// come back to, and has just read the cadence and the prompt.
+func (m *Shell) openHeartbeatForm(f domain.Feature) tea.Cmd {
+	if m.store == nil {
+		m.notice = noticeMsg{text: "this board has no store to keep schedules in", isErr: true}
+		return nil
+	}
+	d := newScheduleForm(m, nil)
+	for i, k := range scheduleKinds {
+		if k == domain.ScheduleHeartbeat {
+			d.kind = i
+		}
+	}
+	d.target.SetValue(string(f.ID))
+	d.name.SetValue(strings.ToLower(string(f.ID)) + " heartbeat")
+	d.every.SetValue("1h")
+	d.onSave = m.scheduleSaveAndEnable
+	d.refresh()
+	m.Overlay.Push(d)
+	return nil
+}
+
+// scheduleSaveAndEnable stores a new definition and turns it on with the
+// first fire its cadence computes from now.
+func (m *Shell) scheduleSaveAndEnable(sc *domain.Schedule) tea.Cmd {
+	store, now := m.store, m.now()
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := store.CreateSchedule(ctx, sc); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		next, err := schedule.NextRun(sc.Cron, sc.Timezone, now)
+		if err == nil {
+			err = store.SetScheduleEnabled(ctx, sc.ID, true, next)
+		}
+		if err != nil {
+			return noticeMsg{text: sanitize(fmt.Sprintf("schedule %s added but not enabled: %v", sc.ID, err)), isErr: true, reload: true}
+		}
+		return noticeMsg{text: sanitize(fmt.Sprintf("schedule %s enabled — first fire %s", sc.ID, next.Format(time.DateTime))), reload: true}
+	}
 }
 
 // scheduleSaveCreate stores a new definition. The store inserts it

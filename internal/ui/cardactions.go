@@ -498,6 +498,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
+			// keyless like the other setting changes: it defines a
+			// heartbeat (DESIGN §19.9) aimed at this card and turns it on,
+			// the same schedule the Schedules view defines by hand
+			"heartbeat", "", "heartbeat", "come back to this session on a cadence — a recurring turn, spent from its own budget", false,
+			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
+		},
+		{
 			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,
 			needsWT && r.Landed,
 		},

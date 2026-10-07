@@ -737,6 +737,10 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 				a.Choices = append(a.Choices, webapi.Choice{Value: p.Name, Label: p.Name, Detail: backend + " · " + model})
 			}
 		}
+	case "heartbeat":
+		// the page opens its own schedule form for this card; the
+		// definition is written through /api/schedules, not this action
+		a.Needs = webapi.ActionNeedsSchedule
 	case "model":
 		a.Needs = webapi.ActionNeedsModel
 		if s := m.webSessionOf(r.F); s != nil {

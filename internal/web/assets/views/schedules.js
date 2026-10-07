@@ -103,7 +103,10 @@ registerView('schedules', {
   title: 'Schedules',
   css: 'views/schedules.css',
   mount (body, ctx) {
-    const v = { data: null, err: null, formOpen: false, editing: null, catalog: null, busy: false, asking: null, notice: null }
+    // a card's own menu opens this view with params.heartbeat set: the form
+    // is already open, aimed at that card, and saving turns it on
+    const seed = ctx.params?.heartbeat ? { target: String(ctx.params.heartbeat) } : null
+    const v = { data: null, err: null, formOpen: !!seed, editing: null, catalog: null, busy: false, asking: null, notice: null }
     body.classList.add('sch')
 
     const list = h('div', { class: 'sch-list', testid: 'schedules-list' })
@@ -175,6 +178,7 @@ registerView('schedules', {
       formSlot.append(scheduleForm(ctx, {
         row: v.editing,
         catalog: v.catalog,
+        seed: v.editing ? null : seed,
         done: () => { closeForm(); load() }
       }))
     }
@@ -309,11 +313,11 @@ async function toggleOff (ctx, sc, reload) {
 
 // ---- the form: one of it creates, the same of it edits ----
 
-function scheduleForm (ctx, { row, catalog, done }) {
+function scheduleForm (ctx, { row, catalog, done, seed }) {
   const editing = !!row
-  const kind = { value: row?.kind || 'mint' }
+  const kind = { value: row?.kind || (seed ? 'heartbeat' : 'mint') }
   const err = h('div', { class: 'sch-form-error', role: 'alert', testid: 'schedule-form-error' })
-  const name = h('input', { type: 'text', testid: 'schedule-form-name', placeholder: 'nightly triage', required: true, value: row?.name || '' })
+  const name = h('input', { type: 'text', testid: 'schedule-form-name', placeholder: 'nightly triage', required: true, value: row?.name || (seed ? `${seed.target.toLowerCase()} heartbeat` : '') })
   const every = h('input', { type: 'text', testid: 'schedule-form-every', placeholder: '1h, 15m, @daily', value: editing ? '' : '1h' })
   const cron = h('input', { type: 'text', testid: 'schedule-form-cron', placeholder: '0 5 * * *', value: row?.cron || '' })
   const tz = h('input', {
@@ -322,7 +326,7 @@ function scheduleForm (ctx, { row, catalog, done }) {
   })
   const prompt = h('textarea', { rows: 2, testid: 'schedule-form-prompt', placeholder: 'what the session is asked to do' })
   if (row?.prompt) prompt.value = row.prompt
-  const target = h('input', { type: 'text', testid: 'schedule-form-target', placeholder: 'FF-001', class: 'mono', value: row?.target || '' })
+  const target = h('input', { type: 'text', testid: 'schedule-form-target', placeholder: 'FF-001', class: 'mono', value: row?.target || seed?.target || '' })
   const repo = h('input', { type: 'text', testid: 'schedule-form-repo', placeholder: 'workspace default', value: row?.repo || '' })
   const backendPick = { name: row?.backend || '' }
   const backend = choose(
@@ -452,7 +456,10 @@ function scheduleForm (ctx, { row, catalog, done }) {
           // an edit turns the row off: its last result no longer applies
           results.delete(row.id)
         } else {
-          await ctx.api.post('/api/schedules', body)
+          const made = await ctx.api.post('/api/schedules', body)
+          // from a card's menu the person has just read the cadence and the
+          // prompt: saving is also switching it on
+          if (seed && made?.id) await ctx.api.post(`/api/schedules/${encodeURIComponent(made.id)}/enable`, {})
         }
       } catch (e) {
         err.append(errorBox(e, 'schedule-form-error-detail'))
