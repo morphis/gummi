@@ -140,8 +140,10 @@ func TestUnprovenNoneIsNotAFile(t *testing.T) {
 	}
 	// A real path still lands, and so does a file that merely looks like one.
 	for _, c := range []struct{ in, want string }{
-		{"UNPROVEN: doc/reference/instance_units.md — prose, no check reads it",
-			"doc/reference/instance_units.md"},
+		{
+			"UNPROVEN: doc/reference/instance_units.md — prose, no check reads it",
+			"doc/reference/instance_units.md",
+		},
 		{"UNPROVEN: none.go — no test builds it", "none.go"},
 	} {
 		got := UnprovenFiles(c.in)

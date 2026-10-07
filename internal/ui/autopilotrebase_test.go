@@ -29,8 +29,10 @@ func TestAnAutopilotCardStartsItsLandingRebase(t *testing.T) {
 	}
 
 	m = pump(t, m, func() tea.Msg {
-		return landConflictMsg{id: "FD-001", files: []string{"README.md"},
-			notice: noticeMsg{text: "FD-001: squash merge conflicts", isErr: true}}
+		return landConflictMsg{
+			id: "FD-001", files: []string{"README.md"},
+			notice: noticeMsg{text: "FD-001: squash merge conflicts", isErr: true},
+		}
 	})
 	if top := m.Overlay.Top(); top != nil && top.ID() == "agent-rebase" {
 		t.Fatal("an autopilot card waited on the agent-rebase confirm")

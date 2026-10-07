@@ -208,8 +208,10 @@ func (b *boardHarness) card(num int, title string, stage domain.Stage) domain.Fe
 	if err != nil {
 		b.t.Fatal(err)
 	}
-	f := domain.Feature{ID: domain.FeatureID(fmt.Sprintf("FD-%03d", num)), Num: num, Title: title, Slug: slug,
-		Kind: domain.KindFeature, Stage: stage, BranchScheme: domain.BranchSchemeKind}
+	f := domain.Feature{
+		ID: domain.FeatureID(fmt.Sprintf("FD-%03d", num)), Num: num, Title: title, Slug: slug,
+		Kind: domain.KindFeature, Stage: stage, BranchScheme: domain.BranchSchemeKind,
+	}
 	if err := b.store.CreateFeature(context.Background(), &f); err != nil {
 		b.t.Fatal(err)
 	}
@@ -583,7 +585,6 @@ func TestBugImportThroughTheBoard(t *testing.T) {
 		t.Fatalf("a failing gh = %+v, want its words as the answer's error", bugs)
 	}
 }
-
 
 func TestSettingsNameThroughTheBoard(t *testing.T) {
 	b := newBoardHarness(t)

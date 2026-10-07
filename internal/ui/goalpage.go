@@ -68,7 +68,7 @@ func (m *Shell) openGoalPage(f domain.Feature) tea.Cmd {
 	}
 }
 
-func (m *Shell) goalPageLoaded(msg goalPageLoadedMsg) tea.Cmd {
+func (m *Shell) goalPageLoaded(msg goalPageLoadedMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	if msg.err != nil {
 		m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 		return nil

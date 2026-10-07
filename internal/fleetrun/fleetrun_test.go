@@ -431,14 +431,20 @@ func TestTokensAreChargedWhereTheCreditsAre(t *testing.T) {
 		ev(c, domain.StageImplement, state.EventStageExit, exitPayloadFor(6), inside.Add(time.Hour)),
 	)
 	rows := []state.StageSpend{
-		{Stage: domain.StagePlan, Session: "s1", Role: "architect", Model: "m",
-			Credits: 4, InputTokens: 5000, OutputTokens: 900, UpdatedAt: pre},
-		{Stage: domain.StageImplement, Session: "s2", Role: "implementer", Model: "m",
-			Credits: 6, InputTokens: 1000, CachedTokens: 400, OutputTokens: 200, UpdatedAt: inside},
+		{
+			Stage: domain.StagePlan, Session: "s1", Role: "architect", Model: "m",
+			Credits: 4, InputTokens: 5000, OutputTokens: 900, UpdatedAt: pre,
+		},
+		{
+			Stage: domain.StageImplement, Session: "s2", Role: "implementer", Model: "m",
+			Credits: 6, InputTokens: 1000, CachedTokens: 400, OutputTokens: 200, UpdatedAt: inside,
+		},
 		// A one-shot: no session key, so no pass holds it. Its row's last
 		// sample dates it, inside the window.
-		{Stage: domain.StageImplement, Role: "scribe", Model: "m",
-			Credits: 1, InputTokens: 300, OutputTokens: 50, UpdatedAt: inside},
+		{
+			Stage: domain.StageImplement, Role: "scribe", Model: "m",
+			Credits: 1, InputTokens: 300, OutputTokens: 50, UpdatedAt: inside,
+		},
 	}
 	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Events: c.Events, Spend: rows})
 	c.Feature.Spend = domain.Spend{Credits: 11}

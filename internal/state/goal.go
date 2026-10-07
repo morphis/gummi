@@ -379,7 +379,11 @@ func (s *Store) ReopenGoalDropped(ctx context.Context, card domain.FeatureID, ac
 			back = domain.Stage(from)
 		}
 	}
-	rows.Close()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close() //nolint:sqlclosecheck // closed early: the next statement needs the connection
+		return "", err
+	}
+	_ = rows.Close()
 	now := at.UTC().Format(timeFmt)
 	if _, err := tx.ExecContext(ctx, `UPDATE features SET stage = ?, updated_at = ? WHERE id = ?`,
 		string(back), now, string(card)); err != nil {

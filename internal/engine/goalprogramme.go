@@ -116,8 +116,10 @@ func (e *Engine) ContinueGoal(ctx context.Context, goalID, prevID domain.Feature
 			return err
 		}
 	}
-	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalContinued, Ref: string(prevID), By: "user",
-		Detail: fmt.Sprintf("continues %s (%s); what it knew came with it", prevID, prev.Title)})
+	e.goalLog(ctx, goalID, state.GoalPayload{
+		Action: state.GoalContinued, Ref: string(prevID), By: "user",
+		Detail: fmt.Sprintf("continues %s (%s); what it knew came with it", prevID, prev.Title),
+	})
 	return nil
 }
 

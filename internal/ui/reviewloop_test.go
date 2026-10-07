@@ -1203,12 +1203,13 @@ func TestParkedDesignGateHasNoWayForward(t *testing.T) {
 	m = press(t, m, open)
 	m = press(t, m, open)
 	settleChat(t, eng)
-	m = drainEngineLoop(t, m)
+	_ = drainEngineLoop(t, m)
 	if runs.Load() != runsAtPark {
 		t.Skip("a session ran: the gate now has a way forward")
 	}
 	t.Errorf("'start the architect' ran no session (invocations stayed at %d) — the gate has no way forward", runsAtPark)
 }
+
 func pressAdvance(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	draftRequiredSections(t, m)

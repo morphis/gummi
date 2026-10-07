@@ -489,10 +489,14 @@ func TestReportNamesSpendThatBelongsToNoPass(t *testing.T) {
 	// the lead's turns and a one-shot scribe pass: rollup rows under
 	// session keys no stage session ever opened
 	spend = append(spend,
-		state.StageSpend{Stage: domain.StageImplement, Session: "lead-1", Role: "lead",
-			Model: "m", Credits: 50.38, UpdatedAt: base},
-		state.StageSpend{Stage: domain.StageImplement, Session: "oneshot-1", Role: "scribe",
-			Model: "m", Credits: 18.29, UpdatedAt: base},
+		state.StageSpend{
+			Stage: domain.StageImplement, Session: "lead-1", Role: "lead",
+			Model: "m", Credits: 50.38, UpdatedAt: base,
+		},
+		state.StageSpend{
+			Stage: domain.StageImplement, Session: "oneshot-1", Role: "scribe",
+			Model: "m", Credits: 18.29, UpdatedAt: base,
+		},
 	)
 	run := Report(Input{Feature: card(87.87, 2000), Events: evs, Spend: spend})
 

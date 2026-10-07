@@ -26,8 +26,10 @@ func TestAGoalThatContinuesAnotherWaitsForItAndInheritsWhatItKnew(t *testing.T) 
 	}
 
 	id, _ := domain.NewID(domain.KindGoal, 9)
-	second := domain.Feature{ID: id, Num: 9, Kind: domain.KindGoal, Title: "Export syncs", Slug: "export-syncs",
-		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 4000}, CreatedAt: first.CreatedAt, UpdatedAt: first.CreatedAt}
+	second := domain.Feature{
+		ID: id, Num: 9, Kind: domain.KindGoal, Title: "Export syncs", Slug: "export-syncs",
+		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 4000}, CreatedAt: first.CreatedAt, UpdatedAt: first.CreatedAt,
+	}
 	putFeature(t, store, second)
 	withWorktree(t, wt, second)
 	doc := strings.Replace(testGoalDoc, "lanes: 1\n", "lanes: 1\nafter: "+string(first.ID)+"\n", 1)

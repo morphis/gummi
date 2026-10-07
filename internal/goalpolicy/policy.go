@@ -702,9 +702,11 @@ func Decide(in Input) []Action {
 			// with work in flight is worth a person's attention.
 			if c, ok := largestHolder(cards); ok && workInFlight(cards) {
 				short := int(math.Ceil(-ledger.Available))
-				out = append(out, Action{Kind: NeedBudget, Card: c.ID, To: c.Envelope + short,
+				out = append(out, Action{
+					Kind: NeedBudget, Card: c.ID, To: c.Envelope + short,
 					Reason: fmt.Sprintf("the goal's cards hold %.0f credits more than it has left and it needs about %d more to go on",
-						-ledger.Available, short)})
+						-ledger.Available, short),
+				})
 				needBudget = true
 			} else {
 				// Nothing live to keep, so there is nothing to ask for
@@ -810,8 +812,10 @@ func Decide(in Input) []Action {
 				// Nothing left worth giving: the envelope is spent, and
 				// only a person raises it. The goal stops and says what it
 				// needs — it does not choose work to abandon.
-				out = append(out, Action{Kind: NeedBudget, Card: c.ID, To: ask,
-					Reason: fmt.Sprintf("%s has spent %.0f of %d and needs about %d to go on", c.ID, c.Spent, c.Envelope, ask)})
+				out = append(out, Action{
+					Kind: NeedBudget, Card: c.ID, To: ask,
+					Reason: fmt.Sprintf("%s has spent %.0f of %d and needs about %d to go on", c.ID, c.Spent, c.Envelope, ask),
+				})
 				needBudget = true
 			case Stuck:
 				if in.LeadAvailable && c.LeadTries < MaxLeadTriesStuck {
@@ -943,8 +947,10 @@ func Decide(in Input) []Action {
 		}
 		for _, c := range cards {
 			if state[c.ID] == Blocked && !owed {
-				return []Action{{Kind: Stall, Card: c.ID,
-					Reason: fmt.Sprintf("%s cannot be verified in this environment: %s", c.ID, c.Reason)}}
+				return []Action{{
+					Kind: Stall, Card: c.ID,
+					Reason: fmt.Sprintf("%s cannot be verified in this environment: %s", c.ID, c.Reason),
+				}}
 			}
 		}
 	}
@@ -1095,15 +1101,21 @@ func proveFirst(in Input) (acts []Action, wait bool) {
 			wait = true
 		case x.Proven:
 		case x.ControlFailed:
-			return []Action{{Kind: Stall, Experiment: x.Name,
-				Reason: fmt.Sprintf("%s cannot judge anything: %s", x.Name, x.Why)}}, true
+			return []Action{{
+				Kind: Stall, Experiment: x.Name,
+				Reason: fmt.Sprintf("%s cannot judge anything: %s", x.Name, x.Why),
+			}}, true
 		case x.Inconclusive >= MaxInconclusive:
-			return []Action{{Kind: Stall, Experiment: x.Name,
-				Reason: fmt.Sprintf("%s judged nothing %d times running, most recently: %s", x.Name, x.Inconclusive, x.Why)}}, true
+			return []Action{{
+				Kind: Stall, Experiment: x.Name,
+				Reason: fmt.Sprintf("%s judged nothing %d times running, most recently: %s", x.Name, x.Inconclusive, x.Why),
+			}}, true
 		case !in.Substrate.CanProve():
-			return []Action{{Kind: NeedSubstrate, Experiment: x.Name,
+			return []Action{{
+				Kind: NeedSubstrate, Experiment: x.Name,
 				Reason: fmt.Sprintf("the goal has spent %d of %d runs and %.0f of %d substrate minutes, and cannot afford the run of %s it has to make to be judged",
-					in.Substrate.RunsSpent, in.Substrate.Runs, in.Substrate.MinutesSpent, in.Substrate.Minutes, x.Name)}}, true
+					in.Substrate.RunsSpent, in.Substrate.Runs, in.Substrate.MinutesSpent, in.Substrate.Minutes, x.Name),
+			}}, true
 		default:
 			acts = append(acts, Action{Kind: Run, Experiment: x.Name, Reason: "verify"})
 			wait = true
@@ -1344,8 +1356,10 @@ func reclaimFromWaiting(cards []Card, need float64) ([]Action, bool) {
 			break
 		}
 		take := min(r.spare, left)
-		out = append(out, Action{Kind: Shrink, Card: r.id, To: r.env - take,
-			Reason: "shrunk to what the goal can still fund"})
+		out = append(out, Action{
+			Kind: Shrink, Card: r.id, To: r.env - take,
+			Reason: "shrunk to what the goal can still fund",
+		})
 		left -= take
 	}
 	return out, true

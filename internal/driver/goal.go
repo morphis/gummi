@@ -453,7 +453,7 @@ func (d *Driver) goalDone(ctx context.Context, f domain.Feature) *goalDoneEvent 
 // resumeGoal applies a resume's goal-only decisions. handled reports that
 // the resume ended here (an error or an outcome); otherwise the caller
 // drives on.
-func (d *Driver) resumeGoal(ctx context.Context, f domain.Feature, in ResumeInput) (Outcome, bool, error) {
+func (d *Driver) resumeGoal(ctx context.Context, f domain.Feature, in ResumeInput) (Outcome, bool, error) { //nolint:unparam // the outcome slot is part of the resume contract shared with the other resume paths
 	if d.opts.Envelope > f.Budget.Envelope {
 		from := f.Budget.Envelope
 		if err := d.eng.RaiseGoalBudget(ctx, f.ID, d.opts.Envelope); err != nil {
@@ -587,8 +587,10 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 	sha, err := d.eng.LandGoal(ctx, f.ID, message, d.actor)
 	if err != nil {
 		if errors.Is(err, engine.ErrGoalSentBack) {
-			d.out.emit(escalationEvent{Event: "escalation", ID: string(f.ID), Stage: string(domain.StageImplement), Reason: err.Error(),
-				Resume: string(f.ID), Next: d.resumeCmd(string(f.ID))})
+			d.out.emit(escalationEvent{
+				Event: "escalation", ID: string(f.ID), Stage: string(domain.StageImplement), Reason: err.Error(),
+				Resume: string(f.ID), Next: d.resumeCmd(string(f.ID)),
+			})
 			return Outcome{Status: StatusEscalation, ID: string(f.ID)}, nil
 		}
 		return d.fail(ctx, string(f.ID), err)
@@ -600,8 +602,10 @@ func (d *Driver) mergeGoal(ctx context.Context, f domain.Feature, message string
 			landed++
 		}
 	}
-	d.out.emit(mergedGoalEvent{Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha,
-		Cards: landed, Repos: mergedRepos(r.Repos)})
+	d.out.emit(mergedGoalEvent{
+		Event: "merged", ID: string(f.ID), Branch: f.BranchName(), Commit: sha,
+		Cards: landed, Repos: mergedRepos(r.Repos),
+	})
 	return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
 }
 
@@ -699,8 +703,10 @@ func (d *Driver) goalReviewUnactionable(ctx context.Context, f domain.Feature, r
 	if f.Goal.Partial == "" {
 		_ = d.store.SetGoalPartial(ctx, f.ID, goalReviewPartial(reason))
 	}
-	d.out.emit(stageEvent{Event: "stage", ID: string(f.ID), Stage: string(f.Stage),
-		Result: "review not actionable — " + reason})
+	d.out.emit(stageEvent{
+		Event: "stage", ID: string(f.ID), Stage: string(f.Stage),
+		Result: "review not actionable — " + reason,
+	})
 	if got, err := d.store.GetFeature(ctx, f.ID); err == nil {
 		f = got
 	}

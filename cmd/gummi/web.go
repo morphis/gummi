@@ -130,7 +130,7 @@ func runWeb(fl cliFlags, args []string) error {
 	}
 	defer h.Close()
 
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listening on %s: %w", addr, err)
 	}

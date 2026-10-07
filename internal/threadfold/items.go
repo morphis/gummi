@@ -307,8 +307,10 @@ func Items(events []state.CardEvent, opt Options) []Item {
 		case state.EventMessage:
 			var p MessagePayload
 			_ = json.Unmarshal([]byte(ev.Payload), &p)
-			it := Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), At: ev.At, Stage: ev.Stage,
-				Author: AuthorLabel(p.Author, seg.Role), Text: Sanitize(p.Content)}
+			it := Item{
+				Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), At: ev.At, Stage: ev.Stage,
+				Author: AuthorLabel(p.Author, seg.Role), Text: Sanitize(p.Content),
+			}
 			if p.Author == string(engine.AuthorUser) {
 				it.T, it.Via, it.By = ItemYou, ViaSteered, state.PersonName(p.By)
 				it.Attachments = attachmentRefs(p.Images)
@@ -326,8 +328,10 @@ func Items(events []state.CardEvent, opt Options) []Item {
 				continue // collapsed into the gate or ask row that answers it
 			}
 			if i == current {
-				emit(Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), T: ItemDecision, At: ev.At, Stage: ev.Stage,
-					Decision: &Decision{ID: p.ID, Kind: p.Kind, Question: Sanitize(p.Question)}})
+				emit(Item{
+					Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), T: ItemDecision, At: ev.At, Stage: ev.Stage,
+					Decision: &Decision{ID: p.ID, Kind: p.Kind, Question: Sanitize(p.Question)},
+				})
 				continue
 			}
 			// Dated forward to whatever superseded it: while it was the
@@ -451,8 +455,10 @@ func attachmentRefs(refs []state.AttachmentRef) []engine.AttachmentRef {
 func consultItem(ev state.CardEvent) Item {
 	var p MessagePayload
 	_ = json.Unmarshal([]byte(ev.Payload), &p)
-	it := Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), At: ev.At, Stage: ev.Stage,
-		Text: Sanitize(p.Content), Via: ViaConsult}
+	it := Item{
+		Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), At: ev.At, Stage: ev.Stage,
+		Text: Sanitize(p.Content), Via: ViaConsult,
+	}
 	if p.Author == string(engine.AuthorUser) {
 		it.T, it.Author, it.By = ItemYou, AuthorLabel(p.Author, ""), state.PersonName(p.By)
 		it.Attachments = attachmentRefs(p.Images)

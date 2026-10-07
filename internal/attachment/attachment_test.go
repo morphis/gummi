@@ -55,8 +55,8 @@ func TestPutSniffsAndDedupes(t *testing.T) {
 		t.Fatalf("store dir has %d entries, want 2 (image + name sidecar): %v", len(entries), entries)
 	}
 	names := []string{entries[0].Name(), entries[1].Name()}
-	if !((names[0] == ref1.ID+".png" && names[1] == ref1.ID+".png.name") ||
-		(names[1] == ref1.ID+".png" && names[0] == ref1.ID+".png.name")) {
+	if (names[0] != ref1.ID+".png" || names[1] != ref1.ID+".png.name") &&
+		(names[1] != ref1.ID+".png" || names[0] != ref1.ID+".png.name") {
 		t.Errorf("stored entries = %v, want %q and %q", names, ref1.ID+".png", ref1.ID+".png.name")
 	}
 }

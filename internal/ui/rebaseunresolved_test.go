@@ -29,7 +29,8 @@ func TestAnUnresolvedAgentRebaseKeepsThePassedVerify(t *testing.T) {
 		call := &agent.ToolCall{ID: "v-1", Name: "submit_verdict", Args: []byte(`{"verdict":"pass","summary":"green"}`)}
 		return []agent.Event{
 			{Kind: agent.EventClientToolCall, ToolCall: call},
-			{Kind: agent.EventMessage, Text: "Checks green.\nVERDICT: pass"}, {Kind: agent.EventIdle},
+			{Kind: agent.EventMessage, Text: "Checks green.\nVERDICT: pass"},
+			{Kind: agent.EventIdle},
 		}
 	}}
 	// the log is what a card's page reads once its session is gone

@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"testing"
-
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"

@@ -41,6 +41,16 @@ linters:
         linters:
           - gosec
           - errcheck
+      # Tests run against in-process servers and throwaway repos that live
+      # as long as the test: a request or command context buys nothing, the
+      # response helpers read and close the body where bodyclose cannot see
+      # it, and a fixture helper's parameters are there to keep call sites
+      # readable.
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - noctx
+          - unparam
 
 issues:
   max-issues-per-linter: 0

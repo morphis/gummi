@@ -817,8 +817,10 @@ func TestForkDriftNamesTheBranchItForkedFrom(t *testing.T) {
 	if got := rewound.Error(); !strings.Contains(got, "reflog") {
 		t.Fatalf("a rewound main keeps its remedy: %q", got)
 	}
-	moved := &ForkDriftError{FeatureID: "FD-004", Branch: "feat/y", Recorded: "abc1234", MainHead: "def5678",
-		ForkedFrom: "goal/ship-it"}
+	moved := &ForkDriftError{
+		FeatureID: "FD-004", Branch: "feat/y", Recorded: "abc1234", MainHead: "def5678",
+		ForkedFrom: "goal/ship-it",
+	}
 	got := moved.Error()
 	if strings.Contains(got, "reflog") {
 		t.Fatalf("nothing happened to main here — no reflog advice: %q", got)

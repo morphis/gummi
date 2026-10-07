@@ -78,7 +78,7 @@ func (lt *leadTurn) notebookRead(goal domain.Feature, a leadArgs) (string, error
 	}
 	for _, r := range nb.Reference() {
 		if r.Name == what && !r.Missing {
-			raw, err := os.ReadFile(filepath.Join(nb.ReferenceDir(), filepath.FromSlash(r.Name))) //nolint:gosec // a name the notebook itself listed
+			raw, err := os.ReadFile(filepath.Join(nb.ReferenceDir(), filepath.FromSlash(r.Name)))
 			if err != nil {
 				return "", err
 			}
@@ -89,7 +89,7 @@ func (lt *leadTurn) notebookRead(goal domain.Feature, a leadArgs) (string, error
 }
 
 func readOr(path, empty string) (string, error) {
-	raw, err := os.ReadFile(path) //nolint:gosec // inside the notebook
+	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return empty, nil
 	}

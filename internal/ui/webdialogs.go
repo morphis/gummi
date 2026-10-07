@@ -261,7 +261,7 @@ func (d *cardForm) webAnswer(_ *Shell, _ *webInput) webAnswer {
 // Linking a pull request takes the URL or number the request carried. With
 // none it submits what the dialog opened on — the one open pull request its
 // probe found for the branch, or nothing, which resolves the same way.
-func (d *prLinkDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
+func (d *prLinkDialog) webAnswer(_ *Shell, in *webInput) webAnswer { //nolint:unparam // the dialog interface requires webAnswer
 	if spec := strings.TrimSpace(in.message); spec != "" {
 		if why := tooLong(d.input.CharLimit, "that pull request", spec); why != "" {
 			return webAnswer{refused: why}

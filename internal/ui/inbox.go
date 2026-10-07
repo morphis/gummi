@@ -79,7 +79,7 @@ func (b *inbox) add(id domain.FeatureID, kind attnKind, text string) bool {
 }
 
 // addEscalated is add with the escalation flag set.
-func (b *inbox) addEscalated(id domain.FeatureID, kind attnKind, text string) bool {
+func (b *inbox) addEscalated(id domain.FeatureID, kind attnKind, text string) bool { //nolint:unparam // kind is the lane; a gate is the only escalation today
 	return b.put(attnItem{Feature: id, Kind: kind, Text: text, Escalated: true})
 }
 

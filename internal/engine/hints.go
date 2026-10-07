@@ -992,7 +992,7 @@ verdict attached.` + verdict)
 // for what it cost). gummi's document tools write the artifact at its
 // workspace home and cannot reach the repository, so the read-only
 // contract never had a reason to take them, and they are served.
-func mediatedTools(f domain.Feature, flavor runFlavor) string {
+func mediatedTools(_ domain.Feature, flavor runFlavor) string {
 	switch flavor {
 	case flavorCritique:
 		// A critique judges; it does not rewrite. stageTools serves it

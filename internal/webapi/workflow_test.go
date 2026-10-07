@@ -67,8 +67,10 @@ func TestCardWorkflowShapes(t *testing.T) {
 		Create:    CreateCardRequest{Kind: "research:diagnosis", Title: "Slow board", DependsOn: []string{"FD-001"}, StackOn: "FD-002", Autopilot: true},
 		Resume:    ResumeRequest{Cards: []string{"FD-004"}},
 		Board: Board{Repo: "gummi", Today: Today{Spent: 41.5}, Viewers: []Viewer{}, Rows: []Row{
-			{ID: "FD-013", Kind: "feature", Title: "Row cache", Stage: "plan", Status: StatusRunning,
-				Running: &RowRunning{Verb: "planning", Pausing: true}, Stack: &RowStack{ID: "ST-1", Name: "rows", Pos: 1, Of: 2}, Waits: []string{"FD-012"}},
+			{
+				ID: "FD-013", Kind: "feature", Title: "Row cache", Stage: "plan", Status: StatusRunning,
+				Running: &RowRunning{Verb: "planning", Pausing: true}, Stack: &RowStack{ID: "ST-1", Name: "rows", Pos: 1, Of: 2}, Waits: []string{"FD-012"},
+			},
 		}, Resume: &ResumeOffer{Cards: []CardRef{{ID: "FD-004", Title: "Export", Stage: "implement"}}, Since: "2h ago"}},
 	}))
 }

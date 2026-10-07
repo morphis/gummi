@@ -31,7 +31,7 @@ import (
 // beginOneShot marks a session-less pass as running for f and returns the
 // function that ends it. Safe to nest: discovery and baseline both call
 // it, and a card re-entered at a later gate counts again.
-func (e *Engine) beginOneShot(f domain.Feature, role string) func() {
+func (e *Engine) beginOneShot(f domain.Feature, role string) func() { //nolint:unparam // role names the kind of one-shot; the scribe is the only caller today
 	e.mu.Lock()
 	if e.oneShots == nil {
 		e.oneShots = map[domain.FeatureID]int{}

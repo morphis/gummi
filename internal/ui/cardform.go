@@ -1036,12 +1036,13 @@ func foldChoices(s *theme.Styles, cells []string, sel, width, maxLines int) []st
 	if len(cells) == 0 {
 		return nil
 	}
-	lines, lineOf := packChoices(cells, width)
+	lines, _ := packChoices(cells, width)
 	if len(lines) <= maxLines {
 		return lines
 	}
 	// the tail's room has to come out of the cells' budget, so pack again
 	// against the narrower width before choosing the window.
+	var lineOf []int
 	lines, lineOf = packChoices(cells, width-ansi.StringWidth(choiceTail(s, len(cells))))
 	if len(lines) <= maxLines {
 		return lines

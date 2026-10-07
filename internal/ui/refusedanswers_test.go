@@ -20,8 +20,10 @@ func answerIDs(acts []nextAction) []string {
 // shut by an unmet dependency does not offer the approval the server
 // refuses; it leads with what the card waits on.
 func TestADependencyBlockedGateLeadsWithWhatItWaitsOn(t *testing.T) {
-	in := nextInput{stage: domain.StagePlan, kind: domain.KindFeature, exited: true, verdict: verdictPass,
-		depBlockers: []domain.FeatureID{"FD-013"}}
+	in := nextInput{
+		stage: domain.StagePlan, kind: domain.KindFeature, exited: true, verdict: verdictPass,
+		depBlockers: []domain.FeatureID{"FD-013"},
+	}
 	acts := stageActions(in)
 	if len(acts) == 0 || acts[0].id != "wait" || !strings.Contains(acts[0].label, "FD-013") {
 		t.Fatalf("answers = %v, want a lead row naming FD-013", answerIDs(acts))
@@ -37,8 +39,10 @@ func TestADependencyBlockedGateLeadsWithWhatItWaitsOn(t *testing.T) {
 // has not landed says it lands after that one, instead of offering the
 // landing the merge refuses.
 func TestAStackedCardWaitsForTheCardBelowIt(t *testing.T) {
-	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, exited: true, verdict: verdictPass,
-		stackBlocker: "FD-012"}
+	in := nextInput{
+		stage: domain.StageVerify, kind: domain.KindFeature, exited: true, verdict: verdictPass,
+		stackBlocker: "FD-012",
+	}
 	acts := stageActions(in)
 	if len(acts) == 0 || acts[0].id != "wait" || !strings.Contains(acts[0].label, "lands after FD-012") {
 		t.Fatalf("answers = %v, want a lead row saying it lands after FD-012", answerIDs(acts))
@@ -69,15 +73,19 @@ func TestAStackedCardWaitsForTheCardBelowIt(t *testing.T) {
 // that just failed — and the notice names the act, not a terminal key.
 func TestALandingConflictOffersTheRebase(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
-	model, _ := m.update(landConflictMsg{id: "FD-005", files: []string{"fd005.go"},
-		notice: noticeMsg{text: "FD-005: squash merge conflicts in fd005.go — undone, main checkout clean — rebase it onto main to resolve them, then land again", isErr: true}})
+	model, _ := m.update(landConflictMsg{
+		id: "FD-005", files: []string{"fd005.go"},
+		notice: noticeMsg{text: "FD-005: squash merge conflicts in fd005.go — undone, main checkout clean — rebase it onto main to resolve them, then land again", isErr: true},
+	})
 	m = model.(*Shell)
 	if m.landConflicts["FD-005"] == nil {
 		t.Fatal("the conflict was not recorded")
 	}
 
-	in := nextInput{stage: domain.StageVerify, kind: domain.KindFeature, exited: true, verdict: verdictPass,
-		landConflicts: m.landConflicts["FD-005"]}
+	in := nextInput{
+		stage: domain.StageVerify, kind: domain.KindFeature, exited: true, verdict: verdictPass,
+		landConflicts: m.landConflicts["FD-005"],
+	}
 	acts := stageActions(in)
 	if len(acts) == 0 || acts[0].id != "rebase" {
 		t.Fatalf("answers = %v, want the rebase to lead", answerIDs(acts))

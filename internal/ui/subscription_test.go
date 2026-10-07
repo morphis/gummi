@@ -1,14 +1,15 @@
 package ui
 
 import (
-	"charm.land/bubbles/v2/cursor"
-	"charm.land/bubbles/v2/textarea"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"charm.land/bubbles/v2/cursor"
+	"charm.land/bubbles/v2/textarea"
 
 	tea "charm.land/bubbletea/v2"
 )

@@ -43,8 +43,8 @@ import (
 type closeOutPhase int
 
 const (
-	// phaseLand walks the cards whose branches are ready.
-	phaseLand closeOutPhase = iota
+	// The zero phase walks the cards whose branches are ready.
+	_ closeOutPhase = iota
 	// phaseSweep is the cleanup that follows, once nothing is left to land.
 	phaseSweep
 )

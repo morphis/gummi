@@ -370,8 +370,10 @@ func (m *Shell) chipKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if p.goOnEnter {
 			return m.takeReading(r), true
 		}
-		m.notice = noticeMsg{text: string(r.F.ID) + ": that spends credits — press y to go, or esc to keep the line here",
-			web: string(r.F.ID) + ": that spends credits — go, or keep the line here"}
+		m.notice = noticeMsg{
+			text: string(r.F.ID) + ": that spends credits — press y to go, or esc to keep the line here",
+			web:  string(r.F.ID) + ": that spends credits — go, or keep the line here",
+		}
 		return nil, true
 	case "y":
 		return m.takeReading(r), true

@@ -39,8 +39,10 @@ func goalAtPlan(t *testing.T, store *state.Store, wt *worktree.Manager, doc stri
 	t.Helper()
 	id, _ := domain.NewID(domain.KindGoal, 1)
 	now := time.Now()
-	g := domain.Feature{ID: id, Num: 1, Kind: domain.KindGoal, Title: "Export works offline", Slug: "export-works-offline",
-		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: envelope}, CreatedAt: now, UpdatedAt: now}
+	g := domain.Feature{
+		ID: id, Num: 1, Kind: domain.KindGoal, Title: "Export works offline", Slug: "export-works-offline",
+		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: envelope}, CreatedAt: now, UpdatedAt: now,
+	}
 	putFeature(t, store, g)
 	// the seq counter must not hand GL-001's number to a minted card
 	if err := os.WriteFile(filepath.Join(wt.Root(), ".gummi", "seq"), []byte("1\n"), 0o600); err != nil {

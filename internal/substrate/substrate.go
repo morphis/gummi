@@ -383,7 +383,7 @@ const maxOutput = 16 << 10
 func RunShell(ctx context.Context, dir, cmd string, timeout time.Duration, env []string, log io.Writer, started ...func(pgid int, start uint64)) (string, int, error) {
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	c := exec.CommandContext(rctx, "sh", "-c", cmd) //nolint:gosec // operator config from outside the worktree
+	c := exec.CommandContext(rctx, "sh", "-c", cmd)
 	c.Dir = dir
 	c.Env = append(os.Environ(), env...)
 	var buf bytes.Buffer

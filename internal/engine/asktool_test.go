@@ -50,9 +50,10 @@ func clientToolFake(args json.RawMessage) *agent.Fake {
 }
 
 func TestAskUserSurfacesAndResolves(t *testing.T) {
-	args := askArgs(t, Ask{ChangesSection: "Problem",
-		Question: "Persist where?",
-		Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
+	args := askArgs(t, Ask{
+		ChangesSection: "Problem",
+		Question:       "Persist where?",
+		Options:        []AskOption{{Label: "per-device"}, {Label: "synced"}},
 	})
 	ag := clientToolFake(args)
 	e := newEngine(t, ag)
@@ -178,10 +179,11 @@ func TestParallelAsksBounceExtras(t *testing.T) {
 }
 
 func TestAskUserCapturesToSpec(t *testing.T) {
-	args := askArgs(t, Ask{ChangesSection: "Problem",
-		Question:   "Persist where?",
-		Options:    []AskOption{{Label: "per-device"}, {Label: "synced"}},
-		SpecAnchor: "## Chosen approach",
+	args := askArgs(t, Ask{
+		ChangesSection: "Problem",
+		Question:       "Persist where?",
+		Options:        []AskOption{{Label: "per-device"}, {Label: "synced"}},
+		SpecAnchor:     "## Chosen approach",
 	})
 	ag := clientToolFake(args)
 	e := newEngine(t, ag)
@@ -216,10 +218,11 @@ func TestAskUserCapturesToSpec(t *testing.T) {
 // jargon ("spec capture skipped").
 func TestAskUserBadAnchorStillAnswers(t *testing.T) {
 	f := feature(1, "Dark mode", domain.StagePlan)
-	args := askArgs(t, Ask{ChangesSection: "Problem",
-		Question:   "Persist where?",
-		Options:    []AskOption{{Label: "per-device"}},
-		SpecAnchor: "no such line anywhere",
+	args := askArgs(t, Ask{
+		ChangesSection: "Problem",
+		Question:       "Persist where?",
+		Options:        []AskOption{{Label: "per-device"}},
+		SpecAnchor:     "no such line anywhere",
 	})
 	e := newEngine(t, clientToolFake(args))
 	e.now = fixedNow
@@ -311,10 +314,11 @@ func TestBadAnchorWithNoSectionFallsBackToTheDocumentEnd(t *testing.T) {
 func TestAskUserAnchorNotUniqueStillAnswers(t *testing.T) {
 	f := feature(1, "Dark mode", domain.StagePlan)
 	const anchor = "duplicated on purpose"
-	args := askArgs(t, Ask{ChangesSection: "Problem",
-		Question:   "Persist where?",
-		Options:    []AskOption{{Label: "per-device"}},
-		SpecAnchor: anchor,
+	args := askArgs(t, Ask{
+		ChangesSection: "Problem",
+		Question:       "Persist where?",
+		Options:        []AskOption{{Label: "per-device"}},
+		SpecAnchor:     anchor,
 	})
 	e := newEngine(t, clientToolFake(args))
 	e.now = fixedNow
@@ -1514,9 +1518,10 @@ func TestAnswerRecordsActorFromGateApproval(t *testing.T) {
 		{domain.GateAttended, state.ActorUser, state.ActorUser},
 		{"", state.ActorUser, state.ActorUser},
 	} {
-		args := askArgs(t, Ask{ChangesSection: "Problem",
-			Question: "Persist where?",
-			Options:  []AskOption{{Label: "per-device"}, {Label: "synced"}},
+		args := askArgs(t, Ask{
+			ChangesSection: "Problem",
+			Question:       "Persist where?",
+			Options:        []AskOption{{Label: "per-device"}, {Label: "synced"}},
 		})
 		ag := clientToolFake(args)
 		ws, store, wt := newRepo(t)

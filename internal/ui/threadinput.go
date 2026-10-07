@@ -1320,7 +1320,7 @@ type consultSentMsg struct {
 // every line it accepts goes straight to that card's consult session
 // (submitThreadLine's DrivenAbroad branch), never through the verb
 // vocabulary, so there is nothing here left to withhold.
-func (m *Shell) inputBlock(s *theme.Styles, r featureRow, w int) string {
+func (m *Shell) inputBlock(_ *theme.Styles, r featureRow, w int) string {
 	if r.DrivenAbroad {
 		m.threadInput.Placeholder = drivenAbroadPlaceholderText
 	} else if r.conducted() {

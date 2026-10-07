@@ -19,8 +19,10 @@ func TestAFlooredCritiquePassIsNotCalledPassedOrUnclear(t *testing.T) {
 		if strings.Contains(words, "no clear verdict") || !strings.Contains(words, floor) {
 			t.Errorf("verdict %v floored by %q reads %q", v, floor, words)
 		}
-		in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, exited: true, attn: attnGate, escalated: true,
-			verdict: v, verdictFloorReason: floor}
+		in := nextInput{
+			stage: domain.StageImplement, kind: domain.KindFeature, exited: true, attn: attnGate, escalated: true,
+			verdict: v, verdictFloorReason: floor,
+		}
 		for _, a := range stageActions(in) {
 			if strings.Contains(a.detail, "the critique passed") {
 				t.Errorf("verdict %v: row %q says %q", v, a.label, a.detail)

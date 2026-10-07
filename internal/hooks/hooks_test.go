@@ -64,11 +64,6 @@ func readLine(t *testing.T, path string) string {
 	return strings.TrimSpace(string(b))
 }
 
-func testDispatcher(t *testing.T, hooks []Hook) *Dispatcher {
-	t.Helper()
-	return New(hooks, t.TempDir(), nil)
-}
-
 func TestDispatcherRunsScript(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "runs.log")
@@ -208,8 +203,10 @@ func TestDispatcherEnrichesFromFeatures(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "body.json")
 	feats := stubFeatures{{
-		f: domain.Feature{ID: "BG-007", Num: 7, Kind: domain.KindBug, Title: "Crash on empty input",
-			Slug: "crash-on-empty-input", Stage: domain.StageImplement, BranchScheme: domain.BranchSchemeKind},
+		f: domain.Feature{
+			ID: "BG-007", Num: 7, Kind: domain.KindBug, Title: "Crash on empty input",
+			Slug: "crash-on-empty-input", Stage: domain.StageImplement, BranchScheme: domain.BranchSchemeKind,
+		},
 	}}
 	d := New([]Hook{{Run: `cat > ` + out}}, dir, feats)
 	defer d.Close()
@@ -473,8 +470,10 @@ func TestPayloadCarriesRepo(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "body.json")
 	feats := stubFeatures{{
-		f: domain.Feature{ID: "FD-011", Num: 11, Kind: domain.KindFeature, Title: "Multi",
-			Slug: "multi", Stage: domain.StageVerify, Repo: "lxd", BranchScheme: domain.BranchSchemeKind},
+		f: domain.Feature{
+			ID: "FD-011", Num: 11, Kind: domain.KindFeature, Title: "Multi",
+			Slug: "multi", Stage: domain.StageVerify, Repo: "lxd", BranchScheme: domain.BranchSchemeKind,
+		},
 	}}
 	d := New([]Hook{{Run: `cat > ` + out}}, dir, feats)
 	defer d.Close()

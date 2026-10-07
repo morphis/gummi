@@ -178,8 +178,10 @@ func TestTheReentryChipIsAConfirmDecision(t *testing.T) {
 	ctx := context.Background()
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
-		m.setChip(&reentryReading{id: f.ID, line: "the flag was never in the spec",
-			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: "the flag was never in the spec"}})
+		m.setChip(&reentryReading{
+			id: f.ID, line: "the flag was never in the spec",
+			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: "the flag was never in the spec"},
+		})
 		return nil
 	}); err != nil {
 		t.Fatal(err)

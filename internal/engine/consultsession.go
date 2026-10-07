@@ -251,10 +251,10 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		// The workspace root, never a worktree: a consult session has no
 		// write access to earn one, and its one file-shaped answer
 		// (card_diff) comes back as tool output text, not a checkout.
-		WorkDir:        e.cfg.Workspace.Root,
-		Role:           agent.RoleConsult,
-		Model:          c.rc.Model,
-		Permission:     consultPermission,
+		WorkDir:    e.cfg.Workspace.Root,
+		Role:       agent.RoleConsult,
+		Model:      c.rc.Model,
+		Permission: consultPermission,
 		// Read-only wherever the backend can enforce it: a consult runs in
 		// the main checkout with no worktree and no cage of its own, so
 		// only the stripped tool surface keeps it from writing there.
@@ -263,7 +263,7 @@ func (c *ConsultSession) spawn(ctx context.Context, seed []Message) error {
 		OutputTokenMax: c.rc.OutputTokenMax,
 		FeatureID:      string(c.id),
 		MCPSockPath:    mcpPath,
-		ScratchDir: e.scratchFilesDirFor(c.id),
+		ScratchDir:     e.scratchFilesDirFor(c.id),
 		// The card's own backend home: a backend that keeps a per-card
 		// config home (antigravity) keeps a consult home of its own in it,
 		// beside the stage sessions'.

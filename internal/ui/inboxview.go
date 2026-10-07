@@ -238,7 +238,7 @@ func inboxRowText(stage domain.Stage, text string) string {
 // right-hand HH:MM), oldest first, and — under the selected row only —
 // the suggestion line m.suggestFor derives for it, mirroring backlogView's
 // chrome (backlog.go) so the two tabs read as the same surface.
-func (m *Shell) inboxView(w, h int) string {
+func (m *Shell) inboxView(w, _ int) string {
 	s := m.styles
 	items := inboxOldestFirst(m.inbox.list())
 	if len(items) == 0 {

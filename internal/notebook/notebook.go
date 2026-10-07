@@ -113,7 +113,7 @@ func (n *Notebook) path(name string) string { return filepath.Join(n.dir, name) 
 
 // AddReference copies src into the notebook's reference directory.
 func (n *Notebook) AddReference(src string) error {
-	in, err := os.Open(src) //nolint:gosec // a path the owner named
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
@@ -278,7 +278,7 @@ func (n *Notebook) Record(f Finding) (Finding, error) {
 		for i := range all {
 			if all[i].N == f.Supersedes {
 				if all[i].Status == Superseded {
-					return f, fmt.Errorf("F-%d was already superseded by F-%d", all[i].N, all[i].SupersededBy)
+					return f, fmt.Errorf("finding F-%d was already superseded by F-%d", all[i].N, all[i].SupersededBy)
 				}
 				found = true
 			}
@@ -314,7 +314,7 @@ func (n *Notebook) Import(from *Notebook, goal string) error {
 		if rf.Missing {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(from.ReferenceDir(), filepath.FromSlash(rf.Name))) //nolint:gosec // another notebook's own file
+		raw, err := os.ReadFile(filepath.Join(from.ReferenceDir(), filepath.FromSlash(rf.Name)))
 		if err != nil {
 			return err
 		}

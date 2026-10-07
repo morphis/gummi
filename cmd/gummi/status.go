@@ -283,7 +283,7 @@ func goalReport(ctx context.Context, store *state.Store, wt *worktree.Pool, ws s
 		return nil
 	}
 	eng := engine.New(engine.Config{Store: store, Pool: wt, Workspace: ws})
-	defer eng.Close()
+	defer func() { _ = eng.Close() }()
 	r, err := eng.GoalReport(ctx, f.ID)
 	if err != nil {
 		return nil

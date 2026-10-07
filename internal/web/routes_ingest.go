@@ -92,7 +92,7 @@ func readIngestUpload(w http.ResponseWriter, r *http.Request, req *webapi.Ingest
 		writeError(w, http.StatusBadRequest, "bad upload: "+err.Error())
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	body, err := io.ReadAll(io.LimitReader(f, maxIngestDocument+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad upload: "+err.Error())

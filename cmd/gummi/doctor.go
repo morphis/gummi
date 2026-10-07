@@ -387,7 +387,7 @@ const nestingGuidance = "steer to a cost-tiered profile: frontier models for arc
 // native store now (Claude Code login, `opencode auth`, headless child's
 // env), so an interactive-login backend degrades to "unknown" with the exact
 // command a human runs (G2); a headless backend delegates to its own child.
-func authCheck(bi backendInfo, opts doctorOpts) doctorCheck {
+func authCheck(bi backendInfo, _ doctorOpts) doctorCheck {
 	if bi.headless {
 		return doctorCheck{Name: "auth:" + bi.name, Status: statusOK, Detail: "handled by the headless command (" + bi.bin + ")"}
 	}
@@ -1606,7 +1606,7 @@ func repoLabel(name string) string {
 // asserting a fail it did not actually establish (mirroring reach's own
 // unknown-never-blocks rule).
 func gitIdentityCheck(name, root string) doctorCheck {
-	out, err := exec.CommandContext(context.Background(), "git", "-C", root, "var", "GIT_AUTHOR_IDENT").Output() //nolint:gosec // read-only identity probe against a validated repo root
+	out, err := exec.CommandContext(context.Background(), "git", "-C", root, "var", "GIT_AUTHOR_IDENT").Output()
 	if err != nil {
 		ee, ok := err.(*exec.ExitError)
 		if !ok {

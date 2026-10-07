@@ -51,7 +51,7 @@ func (m *Shell) WebLive(id string) (webapi.Live, bool) {
 	if r.DrivenAbroad {
 		fd := r.Foreign
 		live.Elsewhere = &webapi.Elsewhere{
-			PID: fd.PID, Stage: string(fd.Stage), Role: fd.Role, Agent: fd.Agent, Model: fd.Model,
+			PID: fd.PID, Stage: fd.Stage, Role: fd.Role, Agent: fd.Agent, Model: fd.Model,
 			Since: fd.Since, Updated: fd.Updated, Busy: fd.Busy,
 		}
 		if fd.Busy && live.Since.IsZero() {
@@ -280,7 +280,7 @@ func webToolCall(msg engine.Message, inflight bool) webapi.ToolCall {
 
 // boundTail keeps the last n bytes of s, cut at a rune boundary: the end
 // of a message is the part still being written.
-func boundTail(s string, n int) string {
+func boundTail(s string, n int) string { //nolint:unparam // n is the cap; the live text limit is the only one today
 	if len(s) <= n {
 		return s
 	}

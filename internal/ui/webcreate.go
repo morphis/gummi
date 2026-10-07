@@ -237,8 +237,10 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	}
 	// a bug's report, under the headings the form's placeholder teaches
 	for _, sec := range [][2]string{
-		{"Steps to reproduce", req.Repro}, {"Expected", req.Expected},
-		{"Actual", req.Actual}, {"Environment", req.Env},
+		{"Steps to reproduce", req.Repro},
+		{"Expected", req.Expected},
+		{"Actual", req.Actual},
+		{"Environment", req.Env},
 	} {
 		if s := strings.TrimSpace(sec[1]); s != "" {
 			body = append(body, "## "+sec[0]+"\n\n"+s)

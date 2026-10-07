@@ -39,10 +39,10 @@ func (s *Server) checkHost(next http.Handler) http.Handler {
 
 func (s *Server) hostAllowed(r *http.Request) bool {
 	host := hostName(r.Host)
-	switch {
-	case host == "":
+	switch host {
+	case "":
 		return false
-	case host == "localhost":
+	case "localhost":
 		return true
 	}
 	if ip, err := netip.ParseAddr(host); err == nil {

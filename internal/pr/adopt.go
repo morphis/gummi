@@ -100,8 +100,8 @@ func Head(ctx context.Context, ghBinary string, ref domain.PullRequestRef, repoD
 func sanitizeRefPart(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		switch {
-		case r == '/' || r == '\\' || r == ' ' || r == '~' || r == '^' || r == ':' || r == '?' || r == '*' || r == '[' || r == '@':
+		switch r {
+		case '/', '\\', ' ', '~', '^', ':', '?', '*', '[', '@':
 			b.WriteByte('-')
 		default:
 			b.WriteRune(r)

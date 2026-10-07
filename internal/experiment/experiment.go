@@ -677,7 +677,7 @@ func envName(repo string) string {
 }
 
 func readAssertions(path string) []Assertion {
-	f, err := os.Open(path) //nolint:gosec // inside the run's own directory
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}

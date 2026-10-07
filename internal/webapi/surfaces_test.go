@@ -22,7 +22,8 @@ func TestGoalShape(t *testing.T) {
 			State: "running", Met: 1, DoneWhen: 3, Landed: 2, Cards: 4, Spent: 410,
 		}}},
 		Page: Goal{
-			Report: engine.GoalReport{ID: "GL-001", Title: "Stable board", Stage: "implement", Lanes: 2,
+			Report: engine.GoalReport{
+				ID: "GL-001", Title: "Stable board", Stage: "implement", Lanes: 2,
 				Budget:   engine.GoalReportBudget{Envelope: 3000, Total: 410},
 				DoneWhen: []engine.DoneWhenStatus{{ID: "DW-1", Says: "the board loads", How: "check: go test ./...", Status: engine.DoneWhenMet}},
 				Cards:    []engine.GoalReportCard{{ID: "FD-004", Kind: "feature", Title: "Loader", State: "landed", Stage: "done", Envelope: 600, Spent: 212}},
@@ -105,7 +106,6 @@ func TestBugsShape(t *testing.T) {
 		Created: BugsCreated{Created: []CardRef{{ID: "BG-002", Title: "Crash on empty board", Stage: "todo"}}},
 	}))
 }
-
 
 // TestSessionModelsShape: what a session's model picker is offered, and
 // the pair a session card reports it runs on (DESIGN §19.8).

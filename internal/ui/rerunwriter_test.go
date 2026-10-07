@@ -74,7 +74,7 @@ func TestRunningTheWriterAtACleanDesignGateRunsIt(t *testing.T) {
 	before := rec.count()
 
 	m = pump(t, m, m.fixedSendBack(m.rows[0], "run", ""))
-	m = drainEngineLoop(t, m)
+	_ = drainEngineLoop(t, m)
 
 	if rec.count() == before {
 		t.Fatal("start the architect at a clean design gate ran nothing")
@@ -91,7 +91,7 @@ func TestALineForTheWriterAtACleanDesignGateReachesIt(t *testing.T) {
 
 	const line = "rename the function to Wave as the note says"
 	m = pump(t, m, m.runStageWithNote(m.rows[0].F, line))
-	m = drainEngineLoop(t, m)
+	_ = drainEngineLoop(t, m)
 
 	if rec.count() == before {
 		t.Fatal("the line's run never started the architect")

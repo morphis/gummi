@@ -93,7 +93,7 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 		return nil, err
 	}
 	h.store = store
-	h.onClose(func() { store.Close() })
+	h.onClose(func() { _ = store.Close() })
 	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
 	if err != nil {
 		return nil, err

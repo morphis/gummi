@@ -140,11 +140,6 @@ func bundleHash(files []skillFile) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func sha256hex(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
-}
-
 // renderSkill assembles the full SKILL.md: YAML frontmatter (name +
 // description for agent discovery, gummi_version informational, and the
 // gummi_skill_hash drift stamp) over the body. The version lives only in

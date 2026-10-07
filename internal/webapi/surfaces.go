@@ -181,7 +181,7 @@ type StackMember struct {
 	// Adopted marks a branch gummi did not cut (DESIGN §10 D22): it
 	// exists before the card has a worktree on it.
 	Adopted bool `json:"adopted,omitempty"`
-	Landed bool `json:"landed,omitempty"`
+	Landed  bool `json:"landed,omitempty"`
 	// HandedOff marks a card that closed without landing: its branch was
 	// kept for someone else to push. It is not Landed, though the cards
 	// above it stop forking from it all the same.

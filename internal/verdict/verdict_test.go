@@ -156,8 +156,10 @@ func TestBlockedByEnvironmentIsTheVerifiersOwnWord(t *testing.T) {
 	if !BlockedByEnvironment(said) {
 		t.Fatal("the verifier said this machine cannot run the plan")
 	}
-	floored := engine.Snapshot{VerdictFloor: "blocked",
-		Transcript: []engine.Message{{Author: engine.AuthorAssistant, Content: "all good\nVERDICT: pass"}}}
+	floored := engine.Snapshot{
+		VerdictFloor: "blocked",
+		Transcript:   []engine.Message{{Author: engine.AuthorAssistant, Content: "all good\nVERDICT: pass"}},
+	}
 	if SessionVerdict(floored) != Blocked || BlockedByEnvironment(floored) {
 		t.Fatal("a pass gummi refused reads Blocked, and is not the environment's doing")
 	}

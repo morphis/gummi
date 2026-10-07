@@ -626,7 +626,7 @@ func hands(evs []state.CardEvent, baseline []state.CheckResult) Hands {
 // "check <name>: <outcome>" and carry no tool name, so the two tests
 // together are what tells gummi's own run apart from an agent's call to a
 // tool that happens to be called "check".
-func checkName(p state.ToolPayload, ev state.CardEvent) (string, bool) {
+func checkName(p state.ToolPayload, _ state.CardEvent) (string, bool) {
 	if p.Tool != "" || !strings.HasPrefix(p.Label, "check ") {
 		return "", false
 	}

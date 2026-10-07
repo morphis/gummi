@@ -87,7 +87,7 @@ func (s *Server) setDeviceCookie(w http.ResponseWriter, r *http.Request, token s
 	if token == "" {
 		maxAge = -1
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the connection: a plain-HTTP loopback listener cannot carry it
 		Name:     cookieName,
 		Value:    token,
 		Path:     "/",

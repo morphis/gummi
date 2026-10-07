@@ -15,8 +15,10 @@ import (
 // stopping there — and not "pick it back up — the run is paused", which
 // was the only answer it used to have.
 func TestAFailedStageOffersRetryProfileAndStop(t *testing.T) {
-	in := nextInput{stage: domain.StageImplement, kind: domain.KindResearch, sess: engine.StatePaused,
-		attn: attnFailure, attnText: "backend \"headless\" cannot enforce a read-only research session", profiles: true}
+	in := nextInput{
+		stage: domain.StageImplement, kind: domain.KindResearch, sess: engine.StatePaused,
+		attn: attnFailure, attnText: "backend \"headless\" cannot enforce a read-only research session", profiles: true,
+	}
 	var ids []string
 	for _, a := range stageActions(in) {
 		ids = append(ids, a.id)

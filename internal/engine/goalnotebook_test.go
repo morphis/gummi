@@ -99,8 +99,10 @@ func TestAGoalsNotebookReachesItsCards(t *testing.T) {
 // to the lead before it lands: only the lead can put it where the cards
 // after it will see it.
 func TestACardsDiscoveriesGoToTheLeadBeforeItLands(t *testing.T) {
-	in := goalpolicy.Input{Stage: domain.StageImplement, Envelope: 4000, Reserve: 600, Lanes: 2, LeadAvailable: true,
-		Cards: []goalpolicy.Card{{ID: "RS-002", State: goalpolicy.Verified, Envelope: 500, Discoveries: 2}}}
+	in := goalpolicy.Input{
+		Stage: domain.StageImplement, Envelope: 4000, Reserve: 600, Lanes: 2, LeadAvailable: true,
+		Cards: []goalpolicy.Card{{ID: "RS-002", State: goalpolicy.Verified, Envelope: 500, Discoveries: 2}},
+	}
 	got := goalpolicy.Decide(in)
 	if len(got) != 1 || got[0].Kind != goalpolicy.Lead || !strings.Contains(got[0].Reasons[0], "notebook_finding") {
 		t.Fatalf("%v", got)

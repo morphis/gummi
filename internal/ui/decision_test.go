@@ -628,10 +628,7 @@ func TestThreadDecisionStructuredAskAnswersWithProse(t *testing.T) {
 
 	press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	deadline := time.After(testWaitTimeout)
-	for {
-		if eng.Get("FD-001").Snapshot().PendingAsk == nil {
-			break
-		}
+	for eng.Get("FD-001").Snapshot().PendingAsk != nil {
 		select {
 		case <-deadline:
 			t.Fatal("the typed line never answered the structured ask")

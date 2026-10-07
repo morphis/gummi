@@ -25,8 +25,10 @@ import (
 func goalRow(num int, title string, stage domain.Stage) featureRow {
 	id, _ := domain.NewID(domain.KindGoal, num)
 	slug, _ := domain.Slugify(title)
-	return featureRow{F: domain.Feature{ID: id, Num: num, Kind: domain.KindGoal, Title: title, Slug: slug, Stage: stage,
-		CreatedAt: fixedTime, UpdatedAt: fixedTime}}
+	return featureRow{F: domain.Feature{
+		ID: id, Num: num, Kind: domain.KindGoal, Title: title, Slug: slug, Stage: stage,
+		CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}}
 }
 
 func goalBoard() *Shell {
@@ -240,8 +242,10 @@ func goalWorkspace(t *testing.T) (*Shell, *engine.Engine, *state.Store, domain.F
 
 	ctx := context.Background()
 	id, _ := domain.NewID(domain.KindGoal, 1)
-	g := domain.Feature{ID: id, Num: 1, Kind: domain.KindGoal, Title: "export works offline", Slug: "export-works-offline",
-		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 4000}, CreatedAt: fixedTime, UpdatedAt: fixedTime}
+	g := domain.Feature{
+		ID: id, Num: 1, Kind: domain.KindGoal, Title: "export works offline", Slug: "export-works-offline",
+		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 4000}, CreatedAt: fixedTime, UpdatedAt: fixedTime,
+	}
 	if err := store.CreateFeature(ctx, &g); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +324,7 @@ func TestBoardConductsAGoal(t *testing.T) {
 	if gr.Goal == nil {
 		t.Fatal("a goal row carries its report")
 	}
-	m = pump(t, m, m.submitThreadLine(gr, "also check Windows paths"))
+	_ = pump(t, m, m.submitThreadLine(gr, "also check Windows paths"))
 	log, _ := store.GoalLog(ctx, g.ID)
 	var noted bool
 	for _, en := range log {

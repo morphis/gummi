@@ -648,8 +648,10 @@ func TestRS_DocVerifyDialog_RendersReport(t *testing.T) {
 	}
 	d := newDocVerifyDialog(f, report)
 	out := d.View(theme.New(theme.GummiDark()), 80, 24)
-	for _, want := range []string{"foo.go:10", "line out of range", "what about x?", "no slice or out-of-scope line answers it", "open threads: 2",
-		"unmapped questions", "## Slices", "## Out of scope"} {
+	for _, want := range []string{
+		"foo.go:10", "line out of range", "what about x?", "no slice or out-of-scope line answers it", "open threads: 2",
+		"unmapped questions", "## Slices", "## Out of scope",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view missing %q:\n%s", want, out)
 		}

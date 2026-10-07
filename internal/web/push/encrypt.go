@@ -102,7 +102,7 @@ func encrypt(keys Keys, plaintext []byte, as *ecdh.PrivateKey, salt []byte) ([]b
 	out := make([]byte, 0, 16+4+1+len(asPublic)+len(plaintext)+1+gcm.Overhead())
 	out = append(out, salt...)
 	out = binary.BigEndian.AppendUint32(out, recordSize)
-	out = append(out, byte(len(asPublic)))
+	out = append(out, byte(len(asPublic))) //nolint:gosec // an uncompressed P-256 point: 65 bytes
 	out = append(out, asPublic...)
 
 	// One record, so the sequence number is 0 and the nonce is used as

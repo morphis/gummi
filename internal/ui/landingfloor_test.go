@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
 )

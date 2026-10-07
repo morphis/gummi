@@ -58,7 +58,7 @@ func cliBase(ctx context.Context, pool *worktree.Pool, f domain.Feature) string 
 	return pool.BaseBranch(ctx, f.Repo)
 }
 
-func printLog(w io.Writer, f domain.Feature, l branchlog.Log) {
+func printLog(w io.Writer, _ domain.Feature, l branchlog.Log) {
 	for _, r := range l.Rows {
 		var tags []string
 		if r.Checkpoint {
@@ -166,7 +166,7 @@ func readRewritePlan(src string) (webapi.RewriteRequest, error) {
 	if src == "-" {
 		raw, err = io.ReadAll(os.Stdin)
 	} else {
-		raw, err = os.ReadFile(src) //nolint:gosec // a path the operator named
+		raw, err = os.ReadFile(src)
 	}
 	if err != nil {
 		return req, fmt.Errorf("reading the plan: %w", err)

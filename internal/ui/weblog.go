@@ -121,8 +121,10 @@ func (d *WebDocs) PlanRewrite(ctx context.Context, req webapi.RewriteRequest) (w
 	if err != nil {
 		return webapi.RewritePreview{}, logError(d.f.ID, err)
 	}
-	out := webapi.RewritePreview{Changed: prev.Changed, Pushed: prev.Pushed, Noop: prev.Noop,
-		Commits: make([]webapi.LogCommit, 0, len(prev.Entries))}
+	out := webapi.RewritePreview{
+		Changed: prev.Changed, Pushed: prev.Pushed, Noop: prev.Noop,
+		Commits: make([]webapi.LogCommit, 0, len(prev.Entries)),
+	}
 	for _, r := range branchlog.Rows(prev.Entries) {
 		out.Commits = append(out.Commits, webLogCommit(r))
 	}

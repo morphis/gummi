@@ -114,8 +114,10 @@ func TestHandOffDetailNamesDependents(t *testing.T) {
 // that nothing here rebased it.
 func TestHandOffDetailNamesDrift(t *testing.T) {
 	f := domain.Feature{ID: "FD-042", Slug: "json-export", Kind: domain.KindFeature}
-	drift := &worktree.ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(),
-		Recorded: "a8854cb68f693f0043cdb12564bdfdd85ae63df2", MainHead: "3fed2f2", Base: "add-improvements-v2"}
+	drift := &worktree.ForkDriftError{
+		FeatureID: f.ID, Branch: f.BranchName(),
+		Recorded: "a8854cb68f693f0043cdb12564bdfdd85ae63df2", MainHead: "3fed2f2", Base: "add-improvements-v2",
+	}
 	d := handOffDetail(f, "add-improvements-v2", nil, drift)
 	for _, want := range []string{"add-improvements-v2 moved", "a8854cb", "kept as is", "rebase it yourself"} {
 		if !strings.Contains(d, want) {

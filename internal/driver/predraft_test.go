@@ -74,8 +74,10 @@ func TestDriveStopsAtVerifiedWithALandingMessage(t *testing.T) {
 func TestDriveNarratesNoDraftItWillNotMake(t *testing.T) {
 	h := newHarness(t, true, map[domain.Stage]stageFn{})
 	d := h.driver(Options{})
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "a goal's card", Slug: "a-goals-card",
-		Stage: domain.StageVerify, GoalID: domain.FeatureID("GL-001")}
+	f := domain.Feature{
+		ID: "FD-001", Num: 1, Title: "a goal's card", Slug: "a-goals-card",
+		Stage: domain.StageVerify, GoalID: domain.FeatureID("GL-001"),
+	}
 
 	d.predraftLanding(context.Background(), f)
 

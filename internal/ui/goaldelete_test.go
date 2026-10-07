@@ -36,12 +36,16 @@ func goalWithCards(t *testing.T, m *Shell) (domain.Feature, []domain.Feature) {
 		commitIn(t, tree.Dir, "goal-"+repo+".txt")
 	}
 	cards := []domain.Feature{
-		{ID: "FD-010", Num: 10, Title: "local cache", Slug: "local-cache",
+		{
+			ID: "FD-010", Num: 10, Title: "local cache", Slug: "local-cache",
 			Stage: domain.StageImplement, Repo: "a", GoalID: goal.ID,
-			CreatedAt: fixedTime, UpdatedAt: fixedTime},
-		{ID: "FD-011", Num: 11, Title: "offline flag", Slug: "offline-flag",
+			CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		},
+		{
+			ID: "FD-011", Num: 11, Title: "offline flag", Slug: "offline-flag",
 			Stage: domain.StageImplement, Repo: "b", GoalID: goal.ID,
-			CreatedAt: fixedTime, UpdatedAt: fixedTime},
+			CreatedAt: fixedTime, UpdatedAt: fixedTime,
+		},
 	}
 	for i := range cards {
 		if err := m.store.CreateFeature(ctx, &cards[i]); err != nil {

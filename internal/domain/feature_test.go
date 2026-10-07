@@ -474,8 +474,10 @@ func TestBranchNameKindScheme(t *testing.T) {
 		{KindBug, "BG-007", 7, "bug/dark-mode"},
 		{KindGoal, "GL-004", 4, "goal/dark-mode"},
 	} {
-		f := Feature{ID: FeatureID(tc.id), Num: tc.num, Kind: tc.kind,
-			Slug: "dark-mode", BranchScheme: BranchSchemeKind}
+		f := Feature{
+			ID: FeatureID(tc.id), Num: tc.num, Kind: tc.kind,
+			Slug: "dark-mode", BranchScheme: BranchSchemeKind,
+		}
 		if got := f.BranchName(); got != tc.want {
 			t.Errorf("%s BranchName() = %q, want %q", tc.kind, got, tc.want)
 		}

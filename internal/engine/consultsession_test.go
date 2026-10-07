@@ -124,7 +124,7 @@ func TestConsultToolScopedToBoundCard(t *testing.T) {
 // opts.Tools — the consult session's own capability branch.
 func TestConsultMCPToolsWiring(t *testing.T) {
 	r := &recorder{Fake: agent.NewFake("ok")}
-	r.Fake.Caps = agent.Capabilities{MCPTools: true, UsageEvents: true, Interrupt: true}
+	r.Caps = agent.Capabilities{MCPTools: true, UsageEvents: true, Interrupt: true}
 	e := newEngine(t, r)
 	f := feature(3, "mcp consult", domain.StageImplement)
 

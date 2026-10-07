@@ -362,8 +362,10 @@ func TestTwoAutopilotCardsBothRun(t *testing.T) {
 		return []agent.Event{{Kind: agent.EventIdle}}
 	}}
 	card := func(n int, slug string) domain.Feature {
-		return domain.Feature{ID: domain.FeatureID(fmt.Sprintf("FD-%03d", n)), Num: n, Title: slug, Slug: slug,
-			Stage: domain.StageImplement, GateApproval: domain.GateAutopilot}
+		return domain.Feature{
+			ID: domain.FeatureID(fmt.Sprintf("FD-%03d", n)), Num: n, Title: slug, Slug: slug,
+			Stage: domain.StageImplement, GateApproval: domain.GateAutopilot,
+		}
 	}
 	feats := []domain.Feature{card(1, "one"), card(2, "two")}
 	b, _, eng, _ := headlessBoardWith(t, ag, feats, func(*engine.Config) {})

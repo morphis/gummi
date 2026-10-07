@@ -411,9 +411,10 @@ func TestMirrorTwoGenerationsDoNotCollide(t *testing.T) {
 // durably written by the time AnswerAs returns.
 func answeredAsk(t *testing.T, by string) (e *Engine, store *state.Store, ws state.Workspace, wt *worktree.Manager, f domain.Feature) {
 	t.Helper()
-	args := askArgs(t, Ask{ChangesSection: "Problem",
-		Question: "Proceed with the plan?",
-		Options:  []AskOption{{Label: "Yes, move on"}, {Label: "revise"}},
+	args := askArgs(t, Ask{
+		ChangesSection: "Problem",
+		Question:       "Proceed with the plan?",
+		Options:        []AskOption{{Label: "Yes, move on"}, {Label: "revise"}},
 	})
 	ws, store, wt = newRepo(t)
 	e = persistEngine(t, clientToolFake(args), ws, store, wt)

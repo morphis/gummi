@@ -17,19 +17,31 @@ func TestJudgedLineShapes(t *testing.T) {
 		verdict  string
 		evidence string
 	}{
-		{"the contract's own shape",
-			"DW-1: met — the evidence", "DW-1", "met", "the evidence"},
-		{"bulleted",
-			"- DW-2: not met — no card built it", "DW-2", "not met", "no card built it"},
-		{"parenthetical gloss and emphasis, as GL-001's verifier wrote it",
+		{
+			"the contract's own shape",
+			"DW-1: met — the evidence", "DW-1", "met", "the evidence",
+		},
+		{
+			"bulleted",
+			"- DW-2: not met — no card built it", "DW-2", "not met", "no card built it",
+		},
+		{
+			"parenthetical gloss and emphasis, as GL-001's verifier wrote it",
 			"- DW-6 (shared ground untouched, checks not weakened): **met** — git diff shows only build.go",
-			"DW-6", "met", "git diff shows only build.go"},
-		{"emphasis alone",
-			"- DW-3: *not met* — the session never established", "DW-3", "not met", "the session never established"},
-		{"en dash",
-			"- DW-4 (ECMP): met – two equal-cost routes", "DW-4", "met", "two equal-cost routes"},
-		{"lowercase id",
-			"- dw-5: met — check passed", "dw-5", "met", "check passed"},
+			"DW-6", "met", "git diff shows only build.go",
+		},
+		{
+			"emphasis alone",
+			"- DW-3: *not met* — the session never established", "DW-3", "not met", "the session never established",
+		},
+		{
+			"en dash",
+			"- DW-4 (ECMP): met – two equal-cost routes", "DW-4", "met", "two equal-cost routes",
+		},
+		{
+			"lowercase id",
+			"- dw-5: met — check passed", "dw-5", "met", "check passed",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := judgedLineRe.FindStringSubmatch(tc.line)

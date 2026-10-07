@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -145,7 +146,7 @@ func trackedOnly(root string, paths []string) []string {
 		rel = append(rel, filepath.ToSlash(r))
 	}
 	args := append([]string{"-C", root, "ls-files", "-z", "--"}, rel...)
-	out, err := exec.Command("git", args...).Output()
+	out, err := exec.CommandContext(context.Background(), "git", args...).Output()
 	if err != nil {
 		return paths // not a repository, or no git: hash what is there
 	}

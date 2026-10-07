@@ -429,8 +429,10 @@ func TestWhyItStoppedNamesEveryBlocker(t *testing.T) {
 		t.Errorf("blocked-gate why with a second blocker = %q, want it to name the diff too", acts[0].why)
 	}
 
-	all3 := nextInput{stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate,
-		openSpecQs: 2, openDiffComments: 1, undrafted: []string{"Chosen approach"}}
+	all3 := nextInput{
+		stage: domain.StagePlan, kind: domain.KindFeature, attn: attnGate,
+		openSpecQs: 2, openDiffComments: 1, undrafted: []string{"Chosen approach"},
+	}
 	got := whyItStopped(all3)
 	if !strings.Contains(got, "2 comments in the spec") || !strings.Contains(got, "1 on the diff") ||
 		!strings.Contains(got, "Chosen approach left blank in the spec") || !strings.HasSuffix(got, "are holding the gate shut.") {

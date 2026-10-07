@@ -80,7 +80,7 @@ func (m *Shell) openStats(f domain.Feature) tea.Cmd {
 	}
 }
 
-func (m *Shell) statsLoaded(msg statsLoadedMsg) tea.Cmd {
+func (m *Shell) statsLoaded(msg statsLoadedMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	if msg.err != nil {
 		m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 		return nil
@@ -91,15 +91,6 @@ func (m *Shell) statsLoaded(msg statsLoadedMsg) tea.Cmd {
 	}
 	m.stats = &statsView{f: msg.f, report: msg.report, scroll: scroll}
 	return nil
-}
-
-func (rv *statsView) bindings() []binding {
-	return []binding{
-		{key: "j/k", label: "scroll", help: "scroll the run"},
-		{key: "r", label: "reload", help: "read the card's record again", bar: true},
-		{key: "?", label: "help", bar: true},
-		{key: "esc", label: "back", help: "back to the thread", bar: true},
-	}
 }
 
 func (m *Shell) handleStatsKey(key string) tea.Cmd {

@@ -309,8 +309,7 @@ func Fold(in Input) Report {
 			}
 		}
 	}
-	rep.PeakLanes, rep.Busiest, rep.BusiestLen, rep.BusiestAgent =
-		concurrency(rep.Lanes, in.Window, rep.RateSpan, busiestLen(in.Window))
+	rep.PeakLanes, rep.Busiest, rep.BusiestLen, rep.BusiestAgent = concurrency(rep.Lanes, in.Window, rep.RateSpan, busiestLen(in.Window))
 	rep.Top = topCards(rep.Lanes, 3)
 	rep.AllTime = allTime(in.Rows)
 	return rep

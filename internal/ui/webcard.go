@@ -552,7 +552,7 @@ func (m *Shell) webRevision(ctx context.Context, f domain.Feature, rev string) (
 		if path == "" {
 			return "none", "no " + artifactNoun(f.Kind) + " yet"
 		}
-		b, err := os.ReadFile(path) //nolint:gosec // the card's own artifact
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return "unreadable", artifactNoun(f.Kind) + " unreadable"
 		}

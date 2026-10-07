@@ -633,7 +633,7 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 	for fails.Next() {
 		var payload string
 		if err := fails.Scan(&payload); err != nil {
-			fails.Close()
+			_ = fails.Close() //nolint:sqlclosecheck // closed early: the next statement needs the connection
 			return err
 		}
 		var p ToolPayload
@@ -642,10 +642,10 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 		}
 	}
 	if err := fails.Err(); err != nil {
-		fails.Close()
+		_ = fails.Close()
 		return err
 	}
-	fails.Close()
+	_ = fails.Close()
 
 	type rewrite struct {
 		seq     int64
@@ -663,7 +663,7 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 		var seq int64
 		var status, payload string
 		if err := rows.Scan(&seq, &status, &payload); err != nil {
-			rows.Close()
+			_ = rows.Close() //nolint:sqlclosecheck // closed early: the next statement needs the connection
 			return err
 		}
 		var p ToolPayload
@@ -681,10 +681,10 @@ func (s *Store) pruneStageDetail(ctx context.Context, id domain.FeatureID, stage
 		todo = append(todo, rewrite{seq, string(next)})
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return err
 	}
-	rows.Close()
+	_ = rows.Close()
 	if len(todo) == 0 {
 		return nil
 	}

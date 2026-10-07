@@ -76,7 +76,7 @@ const compactPrompt = "Summarize this conversation so far, for a fresh session o
 // runBuiltin answers a built-in that is not a turn for the agent. handled
 // is false for one that is (/compact on any backend), which sendTurn
 // sends on its way.
-func (ff *FreeformSession) runBuiltin(ctx context.Context, c ProjectCommand, args string, cmds []ProjectCommand) (handled bool, err error) {
+func (ff *FreeformSession) runBuiltin(ctx context.Context, c ProjectCommand, _ string, cmds []ProjectCommand) (handled bool, err error) {
 	switch c.Name {
 	case clearCommand.Name:
 		return true, ff.Clear()

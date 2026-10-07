@@ -143,8 +143,10 @@ func TestEveryCreditOfTheCounterLandsSomewhere(t *testing.T) {
 		{
 			name: "a backend's helper call, filed under the pass's key by another role", counter: 11,
 			evs: passEvs,
-			spend: []state.StageSpend{passRow,
-				{Stage: domain.StageImplement, Session: keyOf(enter), Role: "helper", Model: "h", Credits: 1, UpdatedAt: later}},
+			spend: []state.StageSpend{
+				passRow,
+				{Stage: domain.StageImplement, Session: keyOf(enter), Role: "helper", Model: "h", Credits: 1, UpdatedAt: later},
+			},
 			want: map[string]float64{"helper": 1}, wantAt: map[string]time.Time{"helper": later}, wantPass: 10,
 		},
 		{
@@ -358,12 +360,18 @@ func TestWorkingSpansAreTheIntervalLessItsAsks(t *testing.T) {
 		want []Span
 	}{
 		{"no question", nil, []Span{{at(0), at(time.Hour)}}},
-		{"one in the middle", []Span{{at(10 * time.Minute), at(20 * time.Minute)}},
-			[]Span{{at(0), at(10 * time.Minute)}, {at(20 * time.Minute), at(time.Hour)}}},
+		{
+			"one in the middle",
+			[]Span{{at(10 * time.Minute), at(20 * time.Minute)}},
+			[]Span{{at(0), at(10 * time.Minute)}, {at(20 * time.Minute), at(time.Hour)}},
+		},
 		{"one still open", []Span{{From: at(50 * time.Minute)}}, []Span{{at(0), at(50 * time.Minute)}}},
 		{"one before and past both edges", []Span{{at(-time.Hour), at(2 * time.Hour)}}, nil},
-		{"two overlapping", []Span{{at(5 * time.Minute), at(15 * time.Minute)}, {at(10 * time.Minute), at(20 * time.Minute)}},
-			[]Span{{at(0), at(5 * time.Minute)}, {at(20 * time.Minute), at(time.Hour)}}},
+		{
+			"two overlapping",
+			[]Span{{at(5 * time.Minute), at(15 * time.Minute)}, {at(10 * time.Minute), at(20 * time.Minute)}},
+			[]Span{{at(0), at(5 * time.Minute)}, {at(20 * time.Minute), at(time.Hour)}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -47,13 +47,18 @@ func TestALaneAddsUpToItsCard(t *testing.T) {
 		rows      []state.StageSpend
 	}{
 		{"passes only", 12, 0, true, []state.StageSpend{passRow}},
-		{"a verify one-shot beside the passes", 14, 0, true, []state.StageSpend{passRow,
-			{Stage: domain.StageVerify, Role: "scribe", Model: "m", Credits: 2, UpdatedAt: lead}}},
-		{"a goal's lead", 48, 0, true, []state.StageSpend{passRow,
-			{Stage: domain.StageImplement, Role: "lead", Model: "m", Credits: 36, UpdatedAt: lead}}},
+		{"a verify one-shot beside the passes", 14, 0, true, []state.StageSpend{
+			passRow,
+			{Stage: domain.StageVerify, Role: "scribe", Model: "m", Credits: 2, UpdatedAt: lead},
+		}},
+		{"a goal's lead", 48, 0, true, []state.StageSpend{
+			passRow,
+			{Stage: domain.StageImplement, Role: "lead", Model: "m", Credits: 36, UpdatedAt: lead},
+		}},
 		{"a freeform card, which logs no passes", 48, 0, false, []state.StageSpend{
 			{Stage: domain.StageOpen, Session: "1", Role: "implementer", Model: "m", Credits: 36, UpdatedAt: enter},
-			{Stage: domain.StageOpen, Session: "2", Role: "implementer", Model: "m", Credits: 12, UpdatedAt: lead}}},
+			{Stage: domain.StageOpen, Session: "2", Role: "implementer", Model: "m", Credits: 12, UpdatedAt: lead},
+		}},
 		{"a decomposition at ingest", 15, 3, true, []state.StageSpend{passRow}},
 	}
 	for _, tc := range cases {
@@ -167,12 +172,20 @@ func TestRunningIsTheBoardsWord(t *testing.T) {
 		busy map[domain.FeatureID]bool
 		want map[domain.FeatureID]bool
 	}{
-		{"no board: the open pass runs, the asking one needs you", nil,
-			map[domain.FeatureID]bool{working.Feature.ID: true}},
-		{"the board says neither runs (a dead process left the pass open)", map[domain.FeatureID]bool{},
-			map[domain.FeatureID]bool{}},
-		{"the board says the one it says", map[domain.FeatureID]bool{asking.Feature.ID: true},
-			map[domain.FeatureID]bool{asking.Feature.ID: true}},
+		{
+			"no board: the open pass runs, the asking one needs you", nil,
+			map[domain.FeatureID]bool{working.Feature.ID: true},
+		},
+		{
+			"the board says neither runs (a dead process left the pass open)",
+			map[domain.FeatureID]bool{},
+			map[domain.FeatureID]bool{},
+		},
+		{
+			"the board says the one it says",
+			map[domain.FeatureID]bool{asking.Feature.ID: true},
+			map[domain.FeatureID]bool{asking.Feature.ID: true},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

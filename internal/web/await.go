@@ -64,7 +64,7 @@ func (s *Server) answer(w http.ResponseWriter, out ui.WebOutcome) {
 }
 
 // intent runs fn through the board and answers with its outcome.
-func (s *Server) intent(w http.ResponseWriter, r *http.Request, fn func(m *ui.Shell) (tea.Cmd, error)) (ui.WebOutcome, bool) {
+func (s *Server) intent(w http.ResponseWriter, r *http.Request, fn func(m *ui.Shell) (tea.Cmd, error)) (ui.WebOutcome, bool) { //nolint:unparam // the outcome is the page-facing result of an intent; callers use it as needed
 	out, err := s.opt.Board.Await(r.Context(), fn)
 	if err != nil {
 		s.fail(w, err)

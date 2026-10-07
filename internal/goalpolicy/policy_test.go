@@ -648,8 +648,10 @@ func TestARegressionIsBisectedThenToldToTheLead(t *testing.T) {
 	in.LeadAvailable = true
 	in.Cards = []Card{{ID: "FD-002", State: Landed, Envelope: 500, Spent: 300}, {ID: "FD-009", State: Running, Envelope: 500}}
 	in.Substrate = SubstrateBudget{Runs: 20}
-	x := Experiment{Name: "matrix", Proven: true, Failed: true, LeadSaw: true, Regressed: []string{"egress"},
-		Candidates: 4, BisectNext: 1, RegressionWhy: "egress held and no longer does"}
+	x := Experiment{
+		Name: "matrix", Proven: true, Failed: true, LeadSaw: true, Regressed: []string{"egress"},
+		Candidates: 4, BisectNext: 1, RegressionWhy: "egress held and no longer does",
+	}
 	in.Experiments = []Experiment{x}
 	if got, want := acts(in), "run matrix @1: bisect"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -799,8 +801,10 @@ func TestSolvencyDoesNotDependOnWhichCardsAreRunning(t *testing.T) {
 		for i := 1; i <= running; i++ {
 			cards[i].State = Running
 		}
-		return Input{Stage: domain.StageImplement, Envelope: 1800, OwnSpent: 470,
-			Reserve: 140, Lanes: 4, Cards: cards, LeadAvailable: true}
+		return Input{
+			Stage: domain.StageImplement, Envelope: 1800, OwnSpent: 470,
+			Reserve: 140, Lanes: 4, Cards: cards, LeadAvailable: true,
+		}
 	}
 	for _, running := range []int{0, 1, 2} {
 		in := mk(running)

@@ -151,9 +151,11 @@ type GoalReportExperiment struct {
 }
 
 func reportExperiment(x GoalExperiment) GoalReportExperiment {
-	out := GoalReportExperiment{Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem,
+	out := GoalReportExperiment{
+		Name: x.Name, Substrate: x.Substrate, Items: x.Items, Problem: x.Problem,
 		Green: x.Green, Regressed: x.Regressed, Culprit: x.Culprit,
-		ControlConfigured: x.ControlConfigured}
+		ControlConfigured: x.ControlConfigured,
+	}
 	for _, r := range x.Runs {
 		// A run that never took the substrate says nothing about the rig,
 		// one way or the other: it was held, or it could not fit before an

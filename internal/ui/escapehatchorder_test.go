@@ -1,10 +1,10 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"strings"
 
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/ui/theme"

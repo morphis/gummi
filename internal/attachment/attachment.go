@@ -121,7 +121,7 @@ func (s *Store) Put(r io.Reader, name string) (Ref, error) {
 	id := hex.EncodeToString(sum[:])
 	ref := Ref{ID: id, Name: name, MediaType: mediaType, Size: int64(len(data))}
 
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(s.Dir, 0o750); err != nil {
 		return Ref{}, err
 	}
 	path := filepath.Join(s.Dir, ref.filename())

@@ -330,7 +330,7 @@ func (m *Shell) watchedRevs(ctx context.Context) map[domain.FeatureID]watchRev {
 			}
 		}
 		if path := m.artifactFile(f); path != "" {
-			if b, err := os.ReadFile(path); err == nil { //nolint:gosec // the card's own artifact
+			if b, err := os.ReadFile(path); err == nil {
 				rev.spec = spec.Rev(b)
 			}
 		}

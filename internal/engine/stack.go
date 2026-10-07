@@ -257,10 +257,11 @@ func (e *Engine) stackRestackOne(ctx context.Context, view StackView, a stack.Ac
 	// measured on a commit it no longer forks from (rebaseline.go). The
 	// re-measure runs the repo's checks, so it goes off the tick.
 	e.wg.Add(1)
+	bg := context.WithoutCancel(ctx)
 	go func() {
 		defer e.wg.Done()
-		if note := e.rebaselineNote(context.Background(), f); note != "" {
-			e.cardNote(context.Background(), f.ID, f.Stage, note)
+		if note := e.rebaselineNote(bg, f); note != "" {
+			e.cardNote(bg, f.ID, f.Stage, note)
 			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
 		}
 	}()

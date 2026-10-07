@@ -365,8 +365,10 @@ func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudg
 		if err := eng.SendBackGoal(ctx, f.ID, "", actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s topped up to %d credits — %s carries on", f.ID, to, need.Card),
-			reload: true, clearInbox: f.ID}
+		return noticeMsg{
+			text:   fmt.Sprintf("%s topped up to %d credits — %s carries on", f.ID, to, need.Card),
+			reload: true, clearInbox: f.ID,
+		}
 	}
 }
 

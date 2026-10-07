@@ -41,7 +41,7 @@ const (
 // guarantees that. The page itself is never cached, so the versioned links
 // it carries are always this binary's. A module importing another writes
 // `import … from './x.js?v=__ASSET_V__'` for the same reason.
-const assetVersionToken = "__ASSET_V__"
+const assetVersionToken = "__ASSET_V__" //nolint:gosec // a placeholder in the page text, not a credential
 
 // asset is one prepared file: its bytes, its type, and a validator over
 // the content.

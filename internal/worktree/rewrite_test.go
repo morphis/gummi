@@ -70,13 +70,13 @@ func TestRewriteRewordsAndSquashesKeepingTheTree(t *testing.T) {
 func TestRewriteKeepsTheAuthorAndUntouchedCommits(t *testing.T) {
 	root := newRepo(t)
 	m, f, p, base := checkpointedFeature(t, root)
-	c := shas(t, m, base, f, root)
 	mustGit(t, p, "commit", "-q", "--amend", "--no-edit", "--author=Ada <ada@example.com>", "--date=2020-01-02T03:04:05Z")
-	c = shas(t, m, base, f, root)
+	c := shas(t, m, base, f, root)
 
 	// reword only the last: the first two survive as the same commits
 	_, err := m.Rewrite(ctx, f, base, RewritePlan{Groups: []RewriteGroup{
-		{Commits: []string{c[0]}}, {Commits: []string{c[1]}},
+		{Commits: []string{c[0]}},
+		{Commits: []string{c[1]}},
 		{Commits: []string{c[2]}, Message: "fix(x): third"},
 	}}, false)
 	if err != nil {

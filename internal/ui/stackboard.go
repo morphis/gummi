@@ -69,22 +69,6 @@ func (m *Shell) stackNewCard(ctx context.Context, f domain.Feature, onto domain.
 	return id, nil
 }
 
-// stackOf names the stack a card belongs to, from the loaded rows, with
-// the store as the fallback for a card the board has not loaded.
-func (m *Shell) stackOf(id domain.FeatureID) domain.StackID {
-	for _, r := range m.rows {
-		if r.F.ID == id {
-			return r.F.StackID
-		}
-	}
-	if m.store != nil && id != "" {
-		if f, err := m.store.GetFeature(context.Background(), id); err == nil {
-			return f.StackID
-		}
-	}
-	return ""
-}
-
 // queueStackTick asks for a stack to be ticked once this update
 // finishes. Coalesced, so a burst of events over one stack is one tick —
 // the shape drainGoalTicks has, for the same reason.

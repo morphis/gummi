@@ -14,13 +14,6 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 )
 
-// diffCell sanitizes an untrusted diff line (it is agent/repo-authored
-// code, so OSC-52 and other control sequences are stripped, DESIGN
-// threat list) and truncates it to width w.
-func diffCell(line string, w int) string {
-	return ansi.Truncate(sanitize(line), max(w, 8), "…")
-}
-
 // diffViewRender draws the diff surface into the main pane.
 func (m *Shell) diffViewRender(w, h int) string {
 	dv := m.diff

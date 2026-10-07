@@ -71,7 +71,7 @@ func spawnDetached(dir string) error {
 		return err
 	}
 	defer logf.Close()
-	cmd := exec.Command(self, "__experiment", "--dir", dir) //nolint:gosec // our own binary, a directory we made
+	cmd := exec.CommandContext(context.Background(), self, "__experiment", "--dir", dir)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {

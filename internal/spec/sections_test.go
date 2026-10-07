@@ -393,8 +393,10 @@ func TestUndraftedSectionsFeatureTemplate(t *testing.T) {
 	f := &domain.Feature{ID: "FD-001", Num: 1, Title: "Test feature", Slug: "test-feature", Stage: domain.StageTodo}
 	tpl := Template(f)
 
-	sections := []string{"Problem", "Out of scope", "Considered approaches", "Chosen approach",
-		"Implementation notes", "Progress", "Review", "Verification plan"}
+	sections := []string{
+		"Problem", "Out of scope", "Considered approaches", "Chosen approach",
+		"Implementation notes", "Progress", "Review", "Verification plan",
+	}
 	undrafted := UndraftedSections(tpl, sections)
 
 	// All sections should be undrafted in a blank template
@@ -413,8 +415,10 @@ func TestUndraftedSectionsBugTemplate(t *testing.T) {
 	f := &domain.Feature{ID: "BG-001", Num: 1, Title: "Test bug", Slug: "test-bug", Stage: domain.StageTodo}
 	tpl := BugTemplate(f)
 
-	sections := []string{"Summary", "Reproduction", "Expected vs actual", "Environment",
-		"Root cause", "Fix", "Review", "Verification"}
+	sections := []string{
+		"Summary", "Reproduction", "Expected vs actual", "Environment",
+		"Root cause", "Fix", "Review", "Verification",
+	}
 	undrafted := UndraftedSections(tpl, sections)
 
 	// All sections should be undrafted in a blank template

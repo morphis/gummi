@@ -225,8 +225,10 @@ func TestALineOnAnotherCardLeavesThisCardsChip(t *testing.T) {
 		leave := m.enterCard(f.ID, true)
 		defer leave()
 		m.syncDecision(m.openDecision(r))
-		m.setChip(&reentryReading{id: f.ID, line: "the flag was never in the spec",
-			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: "the flag was never in the spec"}})
+		m.setChip(&reentryReading{
+			id: f.ID, line: "the flag was never in the spec",
+			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: "the flag was never in the spec"},
+		})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -297,8 +299,10 @@ func TestASecondLineKeepsTheChipsLine(t *testing.T) {
 		leave := m.enterCard(f.ID, true)
 		defer leave()
 		m.syncDecision(m.openDecision(r))
-		m.setChip(&reentryReading{id: f.ID, line: first,
-			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: first}})
+		m.setChip(&reentryReading{
+			id: f.ID, line: first,
+			out: reentry.Outcome{Action: reentry.Rewind, Target: domain.StagePlan, Path: []domain.Stage{domain.StagePlan}, Reason: "requirement_missing", Note: first},
+		})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -331,8 +335,10 @@ func TestAProceedChipAsksOnTheWebAsYDoes(t *testing.T) {
 	ctx := context.Background()
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
 	pending := func(m *Shell) {
-		m.setChip(&reentryReading{id: f.ID, line: "looks good, go on",
-			out: reentry.Outcome{Action: reentry.Advance, Target: domain.StageImplement, Note: "looks good, go on", Confirm: true, Reason: "proceed"}})
+		m.setChip(&reentryReading{
+			id: f.ID, line: "looks good, go on",
+			out: reentry.Outcome{Action: reentry.Advance, Target: domain.StageImplement, Note: "looks good, go on", Confirm: true, Reason: "proceed"},
+		})
 	}
 	// the TUI's enter on the chip
 	var tuiStage domain.Stage
@@ -381,8 +387,10 @@ func TestProseOnAHandedOffGoalNeverLandsIt(t *testing.T) {
 	}
 	store := m0.store
 	id, _ := domain.NewID(domain.KindGoal, 2)
-	g := domain.Feature{ID: id, Num: 2, Kind: domain.KindGoal, Title: "export works offline", Slug: "export-works-offline",
-		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 4000}}
+	g := domain.Feature{
+		ID: id, Num: 2, Kind: domain.KindGoal, Title: "export works offline", Slug: "export-works-offline",
+		Stage: domain.StagePlan, Budget: domain.Budget{Envelope: 4000},
+	}
 	if err := store.CreateFeature(ctx, &g); err != nil {
 		t.Fatal(err)
 	}

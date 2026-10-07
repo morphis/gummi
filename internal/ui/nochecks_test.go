@@ -32,8 +32,10 @@ func TestAPassWithNoChecksSaysWhatItRestsOn(t *testing.T) {
 func TestDiscoveryThatLeavesNoChecksIsSaidOnce(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "t")
 	id := domain.FeatureID("FD-002")
-	sf := &engine.ScribeFailure{Pass: "check discovery", Model: "claude-haiku-4.5", Backend: "claude",
-		Err: errors.New("There's an issue with the selected model (claude-haiku-4.5)")}
+	sf := &engine.ScribeFailure{
+		Pass: "check discovery", Model: "claude-haiku-4.5", Backend: "claude",
+		Err: errors.New("There's an issue with the selected model (claude-haiku-4.5)"),
+	}
 
 	model, _ := m.Update(checksDiscoveredMsg{id: id, err: sf, missing: true})
 	m = model.(*Shell)
@@ -67,8 +69,10 @@ func TestDiscoveryThatLeavesNoChecksIsSaidOnce(t *testing.T) {
 // A research verify the document floor failed says so, instead of
 // pointing at a finding in the document that nobody wrote.
 func TestAResearchVerifyFailedByTheFloorSaysWhich(t *testing.T) {
-	in := nextInput{stage: domain.StageVerify, kind: domain.KindResearch, verdict: verdictFail,
-		verdictFloorReason: "the document floor failed — 0 open threads, 0 broken citations, 5 unmapped questions"}
+	in := nextInput{
+		stage: domain.StageVerify, kind: domain.KindResearch, verdict: verdictFail,
+		verdictFloorReason: "the document floor failed — 0 open threads, 0 broken citations, 5 unmapped questions",
+	}
 	got := verifyStopped(in, "research document")
 	if !strings.Contains(got, "5 unmapped questions") || !strings.Contains(got, "send it back") {
 		t.Errorf("floor-failed research verify = %q", got)

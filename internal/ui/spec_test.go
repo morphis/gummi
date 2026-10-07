@@ -303,7 +303,7 @@ func TestSpecViewSeparatesBlockingThreads(t *testing.T) {
 	// them "agent notes (non-blocking)" over empty checkboxes made a new
 	// card look like abandoned work (round 3 §5.6).
 	ai := strings.Index(out, "prompts the stages will answer")
-	if bi < 0 || ri < 0 || ai < 0 || !(bi < ri && ri < ai) {
+	if bi < 0 || ri < 0 || ai < 0 || (bi >= ri || ri >= ai) {
 		t.Errorf("group order wrong (blocks=%d reviewer=%d agent=%d):\n%s", bi, ri, ai, out)
 	}
 	if !strings.Contains(out, "is that the right default?") {

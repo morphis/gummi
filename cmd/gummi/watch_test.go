@@ -132,10 +132,7 @@ func TestFollowLiveStreams(t *testing.T) {
 	go func() { done <- followLive(ctx, &b, path, false, false) }()
 
 	deadline := time.After(3 * time.Second)
-	for {
-		if strings.Contains(b.String(), "hello from the other process") {
-			break
-		}
+	for !strings.Contains(b.String(), "hello from the other process") {
 		select {
 		case <-deadline:
 			t.Fatalf("the message never rendered:\n%s", b.String())

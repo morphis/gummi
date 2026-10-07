@@ -150,4 +150,3 @@ func TestAttachmentNotInWorktree(t *testing.T) {
 		t.Errorf("stored path %q looks like it landed inside a card's worktree", path)
 	}
 }
-

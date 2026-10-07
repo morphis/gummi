@@ -227,7 +227,7 @@ func (m *Shell) boardBusy() map[domain.FeatureID]bool {
 	return out
 }
 
-func (m *Shell) wsStatsLoaded(msg wsStatsLoadedMsg) tea.Cmd {
+func (m *Shell) wsStatsLoaded(msg wsStatsLoadedMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	if m.wsstats == nil {
 		return nil
 	}
@@ -543,7 +543,7 @@ func (m *Shell) wsHeadlineLines(rep *fleetrun.Report) []string {
 		}
 		parts = append(parts, s.CardTitle.Render(head))
 		if rep.RateSpan > 0 {
-			parts = append(parts, fmt.Sprintf("%.1f/h", rep.Credits/(rep.RateSpan.Hours())))
+			parts = append(parts, fmt.Sprintf("%.1f/h", rep.Credits/rep.RateSpan.Hours()))
 		}
 	}
 	if tok := rep.Tokens.Total(); tok > 0 {
@@ -863,7 +863,7 @@ func wsStageLabel(st domain.Stage) string {
 // wsLegend is the timeline's key, rendered from what the lanes drew —
 // the flags the raster collected — so an empty legend never promises a
 // mark nobody can see.
-func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, width int) string {
+func (m *Shell) wsLegend(_ *fleetrun.Report, flags wsLegendFlags, width int) string {
 	s := m.styles
 	var parts []string
 	for _, st := range wsLegendStages {

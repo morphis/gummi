@@ -159,7 +159,7 @@ func (m *Shell) checkSessionPick(backend, model string) string {
 	if err := engine.CheckSessionModel(backend, model); err != nil {
 		return err.Error()
 	}
-	if !(m.engine != nil && m.engine.HasAgent(backend)) && !agentInstalled(backend) {
+	if (m.engine == nil || !m.engine.HasAgent(backend)) && !agentInstalled(backend) {
 		return backend + " is not installed on this host"
 	}
 	return ""

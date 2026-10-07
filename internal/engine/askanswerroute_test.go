@@ -164,8 +164,10 @@ func TestAnAnswerThatCannotLandLeavesNoRecord(t *testing.T) {
 // and which autopilot may never make. The exchange opens the run the
 // top-up starts instead.
 func TestAnAnswerDoesNotRunPastABudgetStop(t *testing.T) {
-	args := askArgs(t, Ask{ChangesSection: "Problem", Question: "Persist where?",
-		Options: []AskOption{{Label: "per-device"}, {Label: "synced"}}})
+	args := askArgs(t, Ask{
+		ChangesSection: "Problem", Question: "Persist where?",
+		Options: []AskOption{{Label: "per-device"}, {Label: "synced"}},
+	})
 	var mu sync.Mutex
 	var sent []string
 	ag := &agent.Fake{Caps: agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}}

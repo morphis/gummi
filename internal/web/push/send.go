@@ -188,7 +188,7 @@ func validTopic(t string) error {
 		return fmt.Errorf("push: topic %q is longer than 32 characters", t)
 	}
 	for _, c := range t {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' {
 			return fmt.Errorf("push: topic %q has a character outside the base64url alphabet", t)
 		}
 	}

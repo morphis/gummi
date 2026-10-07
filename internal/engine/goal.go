@@ -495,8 +495,10 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	in.NeedOwner = v.NeedsOwner.Question
 	for _, t := range v.Tranches {
 		if !t.Closed {
-			in.Tranches = append(in.Tranches, goalpolicy.Tranche{Title: t.Title, Envelope: t.Envelope, Given: t.Given,
-				Ready: t.Ready, LeadSaw: t.Ready && lastLeadAt.After(t.SettledAt)})
+			in.Tranches = append(in.Tranches, goalpolicy.Tranche{
+				Title: t.Title, Envelope: t.Envelope, Given: t.Given,
+				Ready: t.Ready, LeadSaw: t.Ready && lastLeadAt.After(t.SettledAt),
+			})
 		}
 	}
 	for i := range v.Cards {
@@ -595,7 +597,7 @@ func (e *Engine) goalWrapReason(log []state.GoalEntry) string {
 
 // goalCardState classifies one goal card for the conductor. lastTouch is
 // the seq of the newest goal log entry that acted on the card.
-func (e *Engine) goalCardState(ctx context.Context, c domain.Feature, marks state.CardMarks, open []state.OpenDecision, lastTouch int64, touchedAt, now time.Time) (goalpolicy.CardState, string) {
+func (e *Engine) goalCardState(_ context.Context, c domain.Feature, marks state.CardMarks, open []state.OpenDecision, lastTouch int64, touchedAt, now time.Time) (goalpolicy.CardState, string) {
 	if c.GoalDropped() {
 		return goalpolicy.Dropped, ""
 	}
@@ -972,8 +974,10 @@ func (e *Engine) GoalTick(ctx context.Context, goalID domain.FeatureID) (GoalTic
 	res.Actions, res.NeedsOwner = acts, view.NeedsOwner
 	for _, a := range acts {
 		if err := e.goalExecute(ctx, view, a, &res); err != nil {
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadNote, Card: a.Card, By: ActorGoal,
-				Detail: fmt.Sprintf("%s failed: %v", a.Kind, err)})
+			e.goalLog(ctx, goal.ID, state.GoalPayload{
+				Action: state.GoalLeadNote, Card: a.Card, By: ActorGoal,
+				Detail: fmt.Sprintf("%s failed: %v", a.Kind, err),
+			})
 			return res, err
 		}
 	}
@@ -1004,8 +1008,10 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 			case goalpolicy.LiveGaveUp:
 				why = "its runs kept judging nothing: " + gc.LiveWhy
 			}
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadNote, Card: a.Card, By: ActorGoal,
-				Detail: fmt.Sprintf("%s lands without its proof on the substrate — %s", a.Card, why)})
+			e.goalLog(ctx, goal.ID, state.GoalPayload{
+				Action: state.GoalLeadNote, Card: a.Card, By: ActorGoal,
+				Detail: fmt.Sprintf("%s lands without its proof on the substrate — %s", a.Card, why),
+			})
 		}
 		starts, err := e.goalLand(ctx, goal, gc.Feature)
 		res.Start = append(res.Start, starts...)
@@ -1038,8 +1044,10 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		for _, t := range view.Tranches {
 			if t.Title == a.Reason && !t.Closed {
 				back := max(0, float64(t.Envelope)-t.Given)
-				e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTrancheClosed, Ref: t.Title, To: int(back), By: ActorGoal,
-					Detail: fmt.Sprintf("%d card(s) created from it; %.0f credits return to the goal", len(t.Cards), back)})
+				e.goalLog(ctx, goal.ID, state.GoalPayload{
+					Action: state.GoalTrancheClosed, Ref: t.Title, To: int(back), By: ActorGoal,
+					Detail: fmt.Sprintf("%d card(s) created from it; %.0f credits return to the goal", len(t.Cards), back),
+				})
 			}
 		}
 		res.Again = true
@@ -1079,12 +1087,16 @@ func (e *Engine) goalExecute(ctx context.Context, view GoalView, a goalpolicy.Ac
 		if err != nil {
 			// not the conductor's failure to pass up: the run is on record
 			// as not run, and the next tick reads that like any other
-			e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalLeadNote, By: ActorGoal,
-				Detail: fmt.Sprintf("a %s run of %s could not start: %v", a.Reason, a.Experiment, err)})
+			e.goalLog(ctx, goal.ID, state.GoalPayload{
+				Action: state.GoalLeadNote, By: ActorGoal,
+				Detail: fmt.Sprintf("a %s run of %s could not start: %v", a.Reason, a.Experiment, err),
+			})
 			return nil
 		}
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRun, Card: a.Card, Ref: run.ID, Item: a.Experiment, By: ActorGoal,
-			Detail: fmt.Sprintf("%s run of %s on %s", run.Purpose, a.Experiment, describeHeads(run.Heads))})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{
+			Action: state.GoalRun, Card: a.Card, Ref: run.ID, Item: a.Experiment, By: ActorGoal,
+			Detail: fmt.Sprintf("%s run of %s on %s", run.Purpose, a.Experiment, describeHeads(run.Heads)),
+		})
 		return nil
 	case goalpolicy.Lead:
 		starts, err := e.runLeadTurn(ctx, view, a.Reasons)
@@ -1147,8 +1159,10 @@ func (e *Engine) RaiseGoalSubstrate(ctx context.Context, goalID domain.FeatureID
 	if runs == cur.Runs && minutes == cur.Minutes {
 		return nil
 	}
-	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalSubstrateBudget, From: cur.Runs, To: runs, Minutes: minutes, By: personOf(ctx),
-		Detail: fmt.Sprintf("raised from %d runs / %d minutes", cur.Runs, cur.Minutes)})
+	e.goalLog(ctx, goalID, state.GoalPayload{
+		Action: state.GoalSubstrateBudget, From: cur.Runs, To: runs, Minutes: minutes, By: personOf(ctx),
+		Detail: fmt.Sprintf("raised from %d runs / %d minutes", cur.Runs, cur.Minutes),
+	})
 	e.send(Event{Feature: goalID, Stage: goal.Stage, Kind: EventGoal})
 	return nil
 }
@@ -1422,8 +1436,10 @@ func (e *Engine) goalShrink(ctx context.Context, goal domain.Feature, gc GoalCar
 	if err := e.RaiseEnvelope(ctx, gc.Feature.ID, to); err != nil {
 		return err
 	}
-	e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalRaised, Card: gc.Feature.ID,
-		From: from, To: to, Detail: reason, By: by})
+	e.goalLog(ctx, goal.ID, state.GoalPayload{
+		Action: state.GoalRaised, Card: gc.Feature.ID,
+		From: from, To: to, Detail: reason, By: by,
+	})
 	return nil
 }
 
@@ -1644,11 +1660,15 @@ func (e *Engine) GoalResumed(ctx context.Context, goalID domain.FeatureID) error
 		case state.GoalStalled:
 			switch {
 			case log[i].Card != "":
-				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: personOf(ctx),
-					Detail: "picked back up after waiting on " + string(log[i].Card) + "'s environment"})
+				e.goalLog(ctx, goalID, state.GoalPayload{
+					Action: state.GoalResumed, By: personOf(ctx),
+					Detail: "picked back up after waiting on " + string(log[i].Card) + "'s environment",
+				})
 			case log[i].Ref != "":
-				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: personOf(ctx),
-					Detail: "picked back up after " + strings.TrimPrefix(log[i].Ref, "experiment:") + " could not be believed"})
+				e.goalLog(ctx, goalID, state.GoalPayload{
+					Action: state.GoalResumed, By: personOf(ctx),
+					Detail: "picked back up after " + strings.TrimPrefix(log[i].Ref, "experiment:") + " could not be believed",
+				})
 			}
 			return nil
 		}
@@ -1671,11 +1691,15 @@ func (e *Engine) tidyGoalTree(ctx context.Context, goal domain.Feature, dir stri
 	case err != nil && len(restored) == 0:
 		return // an operation in progress, or a tree that cannot be read: leave it
 	case err != nil:
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTidied, By: ActorGoal,
-			Detail: "could not put the goal tree back after running the checks: " + err.Error()})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{
+			Action: state.GoalTidied, By: ActorGoal,
+			Detail: "could not put the goal tree back after running the checks: " + err.Error(),
+		})
 	case len(restored) > 0:
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTidied, By: ActorGoal,
-			Detail: "running the checks changed " + strings.Join(restored, ", ") + " in the goal tree; restored"})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{
+			Action: state.GoalTidied, By: ActorGoal,
+			Detail: "running the checks changed " + strings.Join(restored, ", ") + " in the goal tree; restored",
+		})
 	}
 }
 
@@ -2348,8 +2372,10 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	} else if budget.Agreed() && !substrateBudgetFrom(mustGoalLog(ctx, e, goal.ID), nil, e.now()).Agreed() {
 		// once: a crossing resumed half-way must not reset a budget a
 		// person has raised since
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalSubstrateBudget, To: budget.Runs, Minutes: budget.Minutes, By: personOf(ctx),
-			Detail: "agreed with the plan"})
+		e.goalLog(ctx, goal.ID, state.GoalPayload{
+			Action: state.GoalSubstrateBudget, To: budget.Runs, Minutes: budget.Minutes, By: personOf(ctx),
+			Detail: "agreed with the plan",
+		})
 	}
 	// Where the goal itself belongs is settled here, from the plan, before
 	// a single card exists: the goal was minted into a provisional repo
@@ -2424,8 +2450,10 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 		case r.IsTBD():
 			tranches += r.Envelope
 			if !opened[r.Title] { // a crossing resumed half-way opens it once
-				e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalTranche, Ref: r.Title, To: r.Envelope, By: ActorGoal,
-					Detail: fmt.Sprintf("held for cards nobody can name until %s has settled", strings.Join(r.DependsOn, ", "))})
+				e.goalLog(ctx, goal.ID, state.GoalPayload{
+					Action: state.GoalTranche, Ref: r.Title, To: r.Envelope, By: ActorGoal,
+					Detail: fmt.Sprintf("held for cards nobody can name until %s has settled", strings.Join(r.DependsOn, ", ")),
+				})
 			}
 		case r.ID == "":
 			want = append(want, r.Envelope)

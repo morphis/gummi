@@ -1478,7 +1478,7 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	// A goal's review is the exception: its checks include the done-when
 	// commands, which a partial goal fails by definition — the review judges
 	// the combined diff, and verify is where an unmet item counts.
-	if len(liveFailures) > 0 && !(s.Feature.IsGoal() && s.Critique) {
+	if len(liveFailures) > 0 && (!s.Feature.IsGoal() || !s.Critique) {
 		s.setVerdictFloor(FloorChecks, "blocked", fmt.Sprintf("check %s failed", strings.Join(liveFailures, ", ")))
 	}
 	// What the branch SHIPS, read from the tree rather than from the diff.

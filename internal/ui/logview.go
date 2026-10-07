@@ -96,7 +96,7 @@ func (m *Shell) openLog(f domain.Feature) tea.Cmd {
 	}
 }
 
-func (m *Shell) logLoaded(msg logLoadedMsg) tea.Cmd {
+func (m *Shell) logLoaded(msg logLoadedMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	if msg.err != nil {
 		m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 		return nil
@@ -263,7 +263,7 @@ func (m *Shell) loadLogPatch(f domain.Feature, sha string) tea.Cmd {
 	}
 }
 
-func (m *Shell) logPatchLoaded(msg logPatchMsg) tea.Cmd {
+func (m *Shell) logPatchLoaded(msg logPatchMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	lv := m.logv
 	if lv == nil || lv.f.ID != msg.id {
 		return nil
@@ -297,7 +297,7 @@ func (m *Shell) prepareRewrite(f domain.Feature, plan worktree.RewritePlan) tea.
 	}
 }
 
-func (m *Shell) logPrepared(msg logPreparedMsg) tea.Cmd {
+func (m *Shell) logPrepared(msg logPreparedMsg) tea.Cmd { //nolint:unparam // a message handler: every handler returns the follow-up command
 	if msg.err != nil {
 		m.notice = noticeMsg{text: string(msg.f.ID) + " rewrite refused: " + sanitize(msg.err.Error()), isErr: true}
 		return nil
