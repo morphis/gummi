@@ -510,9 +510,11 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 	}
 	var seed []Message
 	var resumeID string
+	var open *Ask
 	if sess != nil {
 		snap := sess.Snapshot()
 		seed = snap.Transcript
+		open = snap.PendingAsk
 		// The conversation the last backend was keeping, so a backend that
 		// can pick its own up is asked to. It survives a restart because
 		// the row carries it (restoreFreeformLocked).
@@ -532,6 +534,16 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 	ff.mu.Lock()
 	sess = ff.sess
 	ff.mu.Unlock()
+	// An open question outlives its backend: a person may answer after the
+	// backend idled out. The respawned session did not ask it, so it
+	// carries the question cut from any call, as reattachForAnswer does;
+	// without it the answer finds "no open question", the card stops
+	// showing one, and a line typed instead goes in as an ordinary turn.
+	if open != nil {
+		carried := *open
+		carried.CallID, carried.Outlived = "", false
+		sess.trySetPendingAsk(&carried)
+	}
 	return sess, nil
 }
 

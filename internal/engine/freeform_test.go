@@ -1224,3 +1224,51 @@ func TestAFreeformLineWhileAskOpenIsRefusedNotTurned(t *testing.T) {
 		}
 	}
 }
+
+// TestAFreeformQuestionSurvivesItsBackendIdlingOut: a person may answer a
+// question long after the backend that asked it idled out. The respawned
+// session has to hold the question, so the answer reaches the agent as a
+// turn; before it did, the answer was refused with "no open question" and
+// the card stopped showing one, so the next line typed went in as plain
+// prose and the agent was never told what was decided.
+func TestAFreeformQuestionSurvivesItsBackendIdlingOut(t *testing.T) {
+	ag := agent.NewFake("ack")
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	f := freeformCard(3, "wire up the picker")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "start"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	old := ff.Session()
+	old.setPendingAsk(&Ask{Question: "Which picker?", DecisionID: "call:1:mcp-1", Outlived: true})
+
+	ff.onIdleTimeout()
+	if old.Live() {
+		t.Fatal("the idle timeout left the backend up")
+	}
+
+	if err := e.Answer(ctx, f.ID, "the dropdown"); err != nil {
+		t.Fatalf("answering after the backend idled out: %v", err)
+	}
+	if ff.Session().Snapshot().PendingAsk != nil {
+		t.Error("the question is still open after it was answered")
+	}
+	var turn string
+	for _, m := range ff.Session().Snapshot().Transcript {
+		if m.Author == AuthorUser {
+			turn = m.Content
+		}
+	}
+	if turn != "the dropdown" {
+		t.Errorf("the answer is not in the thread as the last user line, got %q", turn)
+	}
+}
