@@ -977,9 +977,9 @@ func mergeHelp(kind domain.Kind, base string, choice bool) string {
 	}
 	what := landWhy(choice, "squash-merge branch into "+base, "land branch into "+base)
 	if kind == domain.KindFreeform {
-		// prepareMerge's final checkpoint: a session's loose work is
-		// committed before it lands, and the reader should know first
-		return what + " — anything still uncommitted is committed first, as a final checkpoint (" + landMessageNote(choice) + ")"
+		// prepareMerge refuses loose work on a session: its commits are
+		// the person's own, and the reader should know before pressing
+		return what + " — uncommitted work has to be committed first, with your own message (" + landMessageNote(choice) + ")"
 	}
 	return what + " (" + landMessageNote(choice) + ")"
 }

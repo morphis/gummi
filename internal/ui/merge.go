@@ -227,7 +227,17 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 					f.ID, blocker, blocker)}
 			}
 		}
-		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
+		if f.IsFreeform() {
+			// A freeform card may land as a merge commit, which keeps every
+			// commit on the branch in main's history: a canned checkpoint
+			// subject would be there for good. Its commits are the person's
+			// own, so loose work is theirs to commit with a message.
+			if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
+				return mergeReadyMsg{f: f, err: err}
+			} else if dirty {
+				return mergeReadyMsg{f: f, err: errors.New(looseWorkRefusal(f))}
+			}
+		} else if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
 			return mergeReadyMsg{f: f, err: err}
 		}
 		// what lands is the tip after that checkpoint, which is itself new
@@ -454,4 +464,10 @@ type commitDraftPersistedMsg struct {
 // squash-merge, and only then move the feature to Done.
 type mergeThenDoneMsg struct {
 	f domain.Feature
+}
+
+// looseWorkRefusal is why a freeform card with uncommitted work does not
+// land yet, and the two ways to make it.
+func looseWorkRefusal(f domain.Feature) string {
+	return string(f.ID) + " has uncommitted work in its worktree — commit it with a message of your own first (the commit action, or `gummi commit " + string(f.ID) + " -m <message>`), or discard it"
 }

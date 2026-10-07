@@ -618,7 +618,16 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string,
 
 	// commit any final uncommitted worktree work (matching the TUI's
 	// prepareMerge) so only committed work merges.
-	if _, err := wt.CommitAll(ctx, &f, string(id)+": final checkpoint"); err != nil {
+	if f.IsFreeform() {
+		// a freeform card may land as a merge commit, which keeps every
+		// commit on its branch in history: loose work is committed by the
+		// person, with a message, never under a canned checkpoint subject
+		if dirty, err := wt.Dirty(ctx, &f); err != nil {
+			return d.fail(ctx, string(id), err)
+		} else if dirty {
+			return d.fail(ctx, string(id), fmt.Errorf("%s has uncommitted work in its worktree — commit it with `gummi commit %s -m <message>` first, or discard it", id, id))
+		}
+	} else if _, err := wt.CommitAll(ctx, &f, string(id)+": final checkpoint"); err != nil {
 		return d.fail(ctx, string(id), err)
 	}
 	// the verified floor is about what lands, so it is read on the tip the

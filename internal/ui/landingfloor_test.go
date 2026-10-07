@@ -2,6 +2,9 @@ package ui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -86,5 +89,42 @@ func TestAnUnverifiedCardDoesNotLandFromTheBoard(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if headSHA(t, root) != before {
 		t.Errorf("a card at implement landed on main (MayLand: %v; notice %q)", f.MayLand(), m.notice.text)
+	}
+}
+
+// A freeform card may land as a merge commit, which keeps every commit on
+// its branch in main's history, so loose work is never swept into a canned
+// checkpoint: the landing is refused until the person commits it.
+func TestALooseFreeformCardDoesNotLandUnderACheckpointCommit(t *testing.T) {
+	m, root := newWorkspace(t)
+	m.SetCopilotHint(false)
+	m = pump(t, m, m.Init())
+	m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+	m = typeString(t, m, "Drop the leaked pty fd")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	ctx := context.Background()
+	fs, _ := m.store.ListFeatures(ctx)
+	f := fs[0]
+	wt, err := m.wt.Ensure(ctx, &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitWork(t, root, string(f.ID))
+	if err := os.WriteFile(filepath.Join(wt, "loose.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	tip := gitOut(t, wt, "rev-parse", "HEAD")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.sel = 0
+	m = press(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); ok {
+		t.Fatal("loose work on a freeform card went to the landing dialog")
+	}
+	if !m.notice.isErr || !strings.Contains(m.notice.text, "uncommitted work") {
+		t.Errorf("no refusal naming the loose work (notice %q)", m.notice.text)
+	}
+	if got := gitOut(t, wt, "rev-parse", "HEAD"); got != tip {
+		t.Errorf("a checkpoint commit was made on the branch: %s -> %s", tip, got)
 	}
 }

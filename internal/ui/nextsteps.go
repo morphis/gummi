@@ -1111,7 +1111,7 @@ func stageAnswers(in nextInput) []nextAction {
 		acts := []nextAction{
 			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
 			nextStep("merge", "m", "land it on "+in.landBase(),
-				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — anything still uncommitted is committed first, as a final checkpoint; "+msgNote),
+				landWhy(in.mergeChoice, "squash-merge the branch", "land the branch")+" — uncommitted work has to be committed first, with your own message; "+msgNote),
 			nextStep("handoff", "h", "hand off",
 				"close the card and keep the branch exactly as it is"),
 		}
