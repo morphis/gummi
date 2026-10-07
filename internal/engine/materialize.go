@@ -239,6 +239,11 @@ func (e *Engine) requireRepo(repo string) error {
 	if e.pool != nil && e.pool.Known(repo) {
 		return nil
 	}
+	if e.pool != nil {
+		if err := e.pool.ClashError(repo); err != nil {
+			return err
+		}
+	}
 	if repo == "" {
 		return fmt.Errorf("no default repository configured; name one with --repo (a configured `repos:` entry) or set `repo:` in .gummi/config.yaml")
 	}

@@ -42,6 +42,13 @@ type Config struct {
 	// absent and Repos is set. Each value must resolve inside the workspace
 	// and be a git toplevel (enforced by ResolveRepos).
 	Repos map[string]string `yaml:"repos"`
+	// Discover lists globs, relative to the workspace root, whose git
+	// checkouts join the selectable set under their folder name, rescanned
+	// whenever a name is asked for that the set does not hold yet. Like
+	// Repos it leaves the workspace with no default; the two combine, a
+	// pinned name winning. With no Repo, Repos or Discover and a workspace
+	// root that is not itself a checkout, DefaultDiscover is scanned.
+	Discover []string `yaml:"discover"`
 	// Env is the operator-configured environment prerequisite map. Each
 	// entry names a prerequisite that may be referenced by [env: <name>]
 	// tags in a verification plan; gummi probes each entry's Probe command
@@ -450,6 +457,9 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	if len(user.Repos) > 0 {
 		return Config{}, nil, fmt.Errorf("%s: repos is workspace-only and cannot be set in the user config", userPath)
 	}
+	if len(user.Discover) > 0 {
+		return Config{}, nil, fmt.Errorf("%s: discover is workspace-only and cannot be set in the user config", userPath)
+	}
 
 	sources := map[string]string{}
 	var merged Config
@@ -486,6 +496,13 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["repos"] = workspacePath
 	} else {
 		sources["repos"] = "default"
+	}
+
+	if len(ws.Discover) > 0 {
+		merged.Discover = ws.Discover
+		sources["discover"] = workspacePath
+	} else {
+		sources["discover"] = "default"
 	}
 
 	merged.Env = make(map[string]EnvPrereq, len(user.Env)+len(ws.Env))
@@ -600,18 +617,62 @@ type NamedRepo struct {
 // repo itself). An absent `repo:`/`repos:` yields exactly the workspace
 // root as the sole (default) repository, so upgrading needs no config edit.
 func ResolveRepos(ws string, c Config) (defaultRoot string, named []NamedRepo, err error) {
+	set, err := ResolveRepoSet(ws, c)
+	return set.Default, set.Named, err
+}
+
+// ResolveRepoSet is ResolveRepos with discovery's leftovers: alongside the
+// default and the named set it reports the folder names discovery could
+// not hand out (RepoSet.Ambiguous). Discovery runs when `discover:` is set,
+// or when nothing is configured and the workspace root is not itself a
+// checkout; an implicit scan that finds nothing is the same error an
+// unconfigured non-checkout root always was.
+func ResolveRepoSet(ws string, c Config) (RepoSet, error) {
 	// Setting both `repo:` and `repos:` is a config error: they are two
 	// ways to define the default repository, and composing them would need
 	// rules for whether (and under what name) the `repo:` path joins the
 	// selectable set. Erroring keeps one source of truth and fails at load
-	// rather than letting the default repository shift silently.
+	// rather than letting the default repository shift silently. `discover:`
+	// is a third way to define the set, so it is refused beside `repo:` too.
 	if c.Repo != "" && len(c.Repos) > 0 {
-		return "", nil, fmt.Errorf("config error: set either `repo:` or `repos:`, not both (got repo:%q and repos:{%s})", c.Repo, strings.Join(sortedKeys(c.Repos), ", "))
+		return RepoSet{}, fmt.Errorf("config error: set either `repo:` or `repos:`, not both (got repo:%q and repos:{%s})", c.Repo, strings.Join(sortedKeys(c.Repos), ", "))
 	}
-	ws, err = filepath.Abs(ws)
+	if c.Repo != "" && len(c.Discover) > 0 {
+		return RepoSet{}, fmt.Errorf("config error: set either `repo:` or `discover:`, not both (got repo:%q)", c.Repo)
+	}
+	abs, err := filepath.Abs(ws)
 	if err != nil {
-		return "", nil, err
+		return RepoSet{}, err
 	}
+	patterns := c.Discover
+	if c.Repo == "" && len(c.Repos) == 0 && len(patterns) == 0 && !isGitRoot(abs) {
+		patterns = DefaultDiscover
+	}
+	def, pinned, err := resolvePinned(abs, c, len(patterns) > 0)
+	if err != nil {
+		return RepoSet{}, err
+	}
+	set := RepoSet{Default: def, Named: pinned}
+	if len(patterns) == 0 {
+		return set, nil
+	}
+	found, err := discoverRepos(abs, patterns)
+	if err != nil {
+		return RepoSet{}, err
+	}
+	discovered, ambiguous := nameDiscovered(found, pinned)
+	if len(c.Repos) == 0 && len(c.Discover) == 0 && len(discovered) == 0 && len(ambiguous) == 0 {
+		return RepoSet{}, fmt.Errorf("config error: repo %q at %s is not the root of a git repository, and no checkout was found under it; configure a git toplevel inside the workspace", "", abs)
+	}
+	set.Named = append(set.Named, discovered...)
+	sort.Slice(set.Named, func(i, j int) bool { return set.Named[i].Name < set.Named[j].Name })
+	set.Ambiguous = ambiguous
+	return set, nil
+}
+
+// resolvePinned resolves the `repo:` and `repos:` keys. discovering marks a
+// workspace whose set discovery fills, which has no default of its own.
+func resolvePinned(ws string, c Config, discovering bool) (defaultRoot string, named []NamedRepo, err error) {
 	resolve := func(rel string) (string, error) {
 		var root string
 		if rel == "" {
@@ -634,7 +695,7 @@ func ResolveRepos(ws string, c Config) (defaultRoot string, named []NamedRepo, e
 		if err != nil {
 			return "", nil, err
 		}
-	} else if len(c.Repos) == 0 {
+	} else if len(c.Repos) == 0 && !discovering {
 		// No repo: and no repos: — the workspace root is the sole default,
 		// so a single-repo upgrade needs no config edit.
 		defaultRoot, err = resolve("")
@@ -735,6 +796,18 @@ permissions: allow-all
 # repos:
 #   lxd: git/lxd
 #   incus: git/incus
+#
+# discover: — globs relative to the workspace root; every git checkout they
+# match joins the selectable set under its folder name, and a name gummi
+# does not know yet triggers a rescan, so a fresh clone is usable without
+# a restart. It combines with repos: (a pinned name wins) and, like repos:,
+# leaves the workspace with no default. Two checkouts sharing a folder name
+# get neither: pin one under repos: to name it. Hidden directories, linked
+# worktrees and submodules are never matched. When repo:, repos: and
+# discover: are all absent and the workspace root is not itself a
+# checkout, gummi scans ["*", "*/*"].
+# discover:
+#   - git/*
 
 # hooks: — scripts run when the board changes (the notification surface
 # beside GUMMI_NOTIFY's bell/desktop). Each entry is a shell command line

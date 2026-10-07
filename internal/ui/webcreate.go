@@ -95,10 +95,15 @@ func (m *Shell) webFormRepo(d *cardForm, repo string) string {
 		return ""
 	}
 	if !slices.Contains(d.repo.options(), repo) || !d.repo.shown() {
+		if m.wt != nil {
+			if err := m.wt.ClashError(repo); err != nil {
+				return err.Error()
+			}
+		}
 		return "repository " + strconv.Quote(repo) + " is not configured"
 	}
 	d.repo.selectName(repo)
-	d.setBaseCands(m.repoBranches[d.repo.name()], m.baseBranches[d.repo.name()])
+	d.setRepoData(m.baseBranches, m.repoBranches)
 	return ""
 }
 
@@ -109,9 +114,9 @@ func (m *Shell) webFormRepo(d *cardForm, repo string) string {
 // happens here, off the loop; WebForm built the same rows inline from
 // SessionSuggestions alone.
 func (b *Bridge) Form(ctx context.Context, repo string) (webapi.Form, error) {
-	// the branch lists are a git read the loop must not make (the same
-	// call routes_create.go's handler made inline)
-	b.RefreshBranches(ctx)
+	// the repository and branch lists are a git read the loop must not make
+	// (the same call routes_create.go's handler made inline)
+	b.RefreshRepos(ctx)
 	var (
 		f     webapi.Form
 		werr  error
@@ -317,16 +322,20 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	return ""
 }
 
-// RefreshBranches reads the repositories' branches again — off the
-// board's loop, since it runs git — and hands them to the board, so the
-// new-card form offers what the repository has now.
-func (b *Bridge) RefreshBranches(ctx context.Context) {
-	var wt *worktree.Pool
-	if b.Do(ctx, func(m *Shell) tea.Cmd { wt = m.wt; return nil }) != nil || wt == nil {
+// RefreshRepos reads the repositories again — the discovered set first, then
+// each repository's branches — off the board's loop, since it runs git, and
+// installs the snapshot on the board. A clone made since launch is then a
+// choice in the form the caller is about to open, with its branches.
+func (b *Bridge) RefreshRepos(ctx context.Context) {
+	var (
+		wt  *worktree.Pool
+		seq uint64
+	)
+	if b.Do(ctx, func(m *Shell) tea.Cmd { wt, seq = m.wt, m.nextRepoSeq(); return nil }) != nil || wt == nil {
 		return
 	}
-	base, repo := readBranches(ctx, wt)
-	_ = b.Do(ctx, func(m *Shell) tea.Cmd { m.baseBranches, m.repoBranches = base, repo; return nil })
+	snap := readRepos(ctx, wt, seq)
+	_ = b.Do(ctx, func(m *Shell) tea.Cmd { m.installRepos(snap); return nil })
 }
 
 // CreateCard is POST /api/cards: the new-card form, filled in and
@@ -344,9 +353,8 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 	if strings.TrimSpace(req.Title) == "" && !session {
 		return webapi.Card{}, refuse(WebBadRequest, "a card needs a title")
 	}
-	if req.Adopt != "" || req.Base != "" {
-		b.RefreshBranches(ctx)
-	}
+	// the name the request carries may be a clone made since launch
+	b.RefreshRepos(ctx)
 	// only "create & autopilot" answers the autopilot switch its flow
 	// opens; a plain create leaves any such dialog for a person
 	in := webInput{actor: state.PersonActor(person)}

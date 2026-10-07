@@ -24,7 +24,7 @@ func (m *Shell) openCardForm(ct domain.CardType) *cardForm {
 	d := newCardForm(ct, m.profileNames, m.repoNames, m.repoHasDefault(), m.lastRepo, m.afterCands(), m.envelopePrefill(), m.createCard)
 	// Offer the branches the chosen repo actually has, with the one it
 	// currently has out marked as the default.
-	d.setBaseCands(m.repoBranches[d.repo.name()], m.baseBranches[d.repo.name()])
+	d.setRepoData(m.baseBranches, m.repoBranches)
 	if m.wt != nil {
 		d.originFor = m.repoOriginFor
 	}

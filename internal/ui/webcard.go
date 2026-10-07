@@ -351,6 +351,9 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 		ok bool
 		m  *Shell
 	)
+	// a card whose repository can still move is offered the clones made since
+	// launch; the set is read off the loop before the card's actions are built
+	b.refreshReposFor(ctx, webID(id))
 	if err := b.Do(ctx, func(s *Shell) tea.Cmd { st, ok = s.webCard(webID(id)); m = s; return nil }); err != nil {
 		return webapi.Card{}, err
 	}
@@ -735,9 +738,31 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 }
 
 // repoPickable mirrors boardVerb's o: a card whose repository can still
-// move — not a goal, no worktree yet, and somewhere else to move it to.
+// move, and somewhere else to move it to.
 func (m *Shell) repoPickable(r featureRow) bool {
-	return !r.F.IsGoal() && !r.HasWorktree && len(m.repoNames) > 0 && !r.watchOnly()
+	return m.repoMovable(r) && len(m.repoNames) > 0
+}
+
+// repoMovable is repoPickable without the names: a card whose repository can
+// still move — not a goal, no worktree yet, not watch-only.
+func (m *Shell) repoMovable(r featureRow) bool {
+	return !r.F.IsGoal() && !r.HasWorktree && !r.watchOnly()
+}
+
+// refreshReposFor reads the repositories off the loop before the card id's
+// repository action is offered or run, when the set is discovered and the
+// card's repository can still move. A fixed set, a card past that point, and a
+// card not on the board pay nothing.
+func (b *Bridge) refreshReposFor(ctx context.Context, id domain.FeatureID) {
+	var refresh bool
+	if err := b.Do(ctx, func(s *Shell) tea.Cmd {
+		i := s.rowIndex(id)
+		refresh = s.wt != nil && s.wt.Discovering() && i >= 0 && s.repoMovable(s.rows[i])
+		return nil
+	}); err != nil || !refresh {
+		return
+	}
+	b.RefreshRepos(ctx)
 }
 
 // webComposer says what the composer would do with text — an empty line

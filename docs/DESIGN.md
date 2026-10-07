@@ -1557,6 +1557,25 @@ Decided in the design interview (2026-07-03):
       it and skip the tab stop — but they still render the row, because
       naming the repository is the only way the dialog says where the
       card lands. Silence there reads as `repos:` having been ignored.
+    - `discover: [glob, …]` — *added 2026-10-06*. Every git
+      checkout the globs match joins the `repos:`-style set under its
+      **folder name**; it combines with `repos:` (a pinned name wins) and
+      is refused beside `repo:`. With none of the three keys and a
+      workspace root that is not itself a checkout, gummi scans
+      `["*", "*/*"]` — the layout that used to be an error. Only a real
+      `.git` directory counts: a `.git` file is a linked worktree (every
+      card's own) or a submodule. A card stores its repo by name, so a
+      name must never move: two checkouts sharing a folder name get
+      **neither**, and `doctor` and the resolution error say which to pin.
+      A pool with no default rescans on a name it does not know (at most
+      every 2s), so a fresh clone needs no restart; the default repository
+      is fixed at launch. A discovered set is also rescanned when a dialog
+      that offers repositories opens, and the web card's repository action
+      rescans before it is offered. Those reads run off the board's loop
+      and refresh each repository's branches with the names, so the dialog
+      offers a clone's own branches, and its checked-out branch as the
+      default base. Reads are ordered: a snapshot older than the installed
+      one is dropped, so a slow read cannot overwrite a fresher one.
 
     `worktree.Pool` caches one `Manager` per repo root and resolves a card
     through `ManagerFor`; worktrees still live under the *workspace* root,

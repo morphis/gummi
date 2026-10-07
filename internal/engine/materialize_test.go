@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 func sampleResult() domain.IngestResult {
@@ -177,6 +178,22 @@ func TestMaterializeNamesRepo(t *testing.T) {
 		if err != nil || got.Repo != "b" {
 			t.Errorf("feature[%d] persisted repo = %q (err=%v), want b", i, got.Repo, err)
 		}
+	}
+}
+
+// TestRequireRepoNamesAClash: a folder name that several checkouts share is
+// refused as that clash, listing every path, not as an unconfigured name.
+func TestRequireRepoNamesAClash(t *testing.T) {
+	e := multiRepoEngine(t)
+	clash := map[string][]string{"a": {"/x/a", "/y/a"}}
+	if err := e.pool.SetDiscover(func() ([]worktree.NamedRepo, map[string][]string, error) {
+		return nil, clash, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := e.RequireRepo("a")
+	if err == nil || !strings.Contains(err.Error(), "/x/a, /y/a") || strings.Contains(err.Error(), "not configured") {
+		t.Errorf("RequireRepo(a) = %v, want the clash listing /x/a and /y/a", err)
 	}
 }
 

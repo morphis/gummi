@@ -104,3 +104,28 @@ func repoPickerOptions(s *theme.Styles, candidates []string, idx, width int) []s
 	}
 	return foldChoices(s, cells, idx, width, choiceMaxLines)
 }
+
+// setRepoChoices re-offers the candidates after a rescan (repoChoices). The
+// highlight stays on the same name; when that name has gone it falls back to
+// the card's own repository, then to the first candidate, as newRepoPickerDialog
+// starts it.
+func (d *repoPickerDialog) setRepoChoices(names []string, _ map[string]string, _ map[string][]string) {
+	cur := ""
+	if d.idx < len(d.candidates) {
+		cur = d.candidates[d.idx]
+	}
+	d.candidates = append([]string(nil), names...)
+	d.idx = 0
+	for _, want := range []string{cur, d.feature.Repo} {
+		found := false
+		for i, n := range d.candidates {
+			if n == want {
+				d.idx, found = i, true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+}

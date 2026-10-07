@@ -626,6 +626,9 @@ func (m *Shell) requireRepo(name string) error {
 	if name == "" {
 		return errors.New(repoUnchosenErr)
 	}
+	if err := m.wt.ClashError(name); err != nil {
+		return err
+	}
 	return fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml", name)
 }
 

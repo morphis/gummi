@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"image/color"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
@@ -61,13 +63,18 @@ type Shell struct {
 	wt    *worktree.Pool
 	// baseBranches names, per repo (the empty key is the workspace
 	// default), the branch that repo's main checkout has out — the branch
-	// a card lands on. Resolved once in Attach and never re-read: it is
-	// copy, it is wanted in render paths that must not shell out to git,
-	// and a trunk does not get renamed under a running board. Read it
-	// through baseBranch, never directly — a missing entry has to answer
-	// with a name.
+	// a card lands on. Read in Attach and again by each repository read
+	// (installRepos): it is copy, it is wanted in render paths that must not
+	// shell out to git, and a trunk rarely changes under a running board.
+	// Read it through baseBranch, never directly — a missing entry has to
+	// answer with a name.
 	baseBranches map[string]string
 	ws           state.Workspace
+	// repoSeq issues the sequence numbers of repository reads (nextRepoSeq);
+	// repoInstalled is the newest one installed (installRepos). Both are
+	// what keep an older read from overwriting a newer one.
+	repoSeq       atomic.Uint64
+	repoInstalled uint64
 
 	rows []featureRow
 	sel  int
@@ -221,9 +228,9 @@ type Shell struct {
 	// whose branch moved wakes its stack, and the engine replays the
 	// cards above it. Coalesced per stack, drained by Update.
 	stackTickQueue map[domain.StackID]bool
-	// repoBranches is each repo's local branch list, read once at attach
-	// beside baseBranches and for the same reason: the creation dialog's
-	// base row is rendered, and rendering may not run git.
+	// repoBranches is each repo's local branch list, read beside
+	// baseBranches (installRepos) and for the same reason: the creation
+	// dialog's base row is rendered, and rendering may not run git.
 	repoBranches map[string][]string
 	// stackRows is each stacked card's position and staleness, derived in
 	// loadRows (it asks git) and read by cardLine (which may not).
@@ -584,21 +591,147 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace
 	m.roundStore = store
 }
 
+// repoSnapshot is one read of the workspace's repositories: the names a
+// discovered set holds, each repository's checked-out branch, and the
+// branches it has. seq orders reads: installRepos keeps only a snapshot
+// newer than the one it installed last, so a slow read cannot overwrite a
+// fresher one.
+type repoSnapshot struct {
+	seq        uint64
+	discovered bool // names are the pool's rescanned set; false keeps the board's own
+	names      []string
+	base       map[string]string
+	branches   map[string][]string
+}
+
+// readRepos rescans a discovered named set (Pool.Refresh, a no-op for a
+// fixed one; a failed rescan keeps the set the pool had), then reads every
+// repository's branches. The rescan comes first, so a clone it finds gets
+// its branches in the same snapshot. It runs git and walks the disk, so the
+// board's loop calls it only through an off-loop read (rescanRepos,
+// Bridge.RefreshRepos) — and once at Attach, before the loop runs.
+func readRepos(ctx context.Context, wt *worktree.Pool, seq uint64) repoSnapshot {
+	if err := wt.Refresh(); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi: rescanning repositories:", err)
+	}
+	base, branches := readBranches(ctx, wt)
+	snap := repoSnapshot{seq: seq, base: base, branches: branches}
+	if wt.Discovering() {
+		snap.discovered, snap.names = true, wt.Names()
+	}
+	return snap
+}
+
+// nextRepoSeq issues the sequence number for a repository read. It is taken
+// when the read is dispatched, never when it lands.
+func (m *Shell) nextRepoSeq() uint64 { return m.repoSeq.Add(1) }
+
+// installRepos installs snap unless a newer snapshot is already in place,
+// and reports whether it did. Only then do the dialogs re-offer their
+// choices (setRepoChoices).
+func (m *Shell) installRepos(snap repoSnapshot) bool {
+	if snap.seq <= m.repoInstalled {
+		return false
+	}
+	m.repoInstalled = snap.seq
+	if snap.discovered {
+		m.repoNames = snap.names
+	}
+	m.baseBranches, m.repoBranches = snap.base, snap.branches
+	return true
+}
+
 // resolveBaseBranches reads each configured repository's current branch
 // name and its branches, at attach. Every name a card can carry is
 // resolved here so baseBranch below is a map lookup: it is called from
-// render paths, and a render path may not run git. The web face reads
-// them again, off the loop, whenever a new-card form is opened or sent
-// (Bridge.RefreshBranches): a board served for days would otherwise never
-// offer a branch cut after launch to adopt or fork from.
+// render paths, and a render path may not run git. Later reads go through
+// rescanRepos, off the loop, so a board served for days still offers a
+// branch cut after launch to adopt or fork from. Attach's read rescans a
+// discovered set once more; that is harmless, since Attach has just built
+// the set, and a fixed set's rescan is a no-op.
 func (m *Shell) resolveBaseBranches() {
 	if m.wt == nil {
 		return
 	}
-	m.baseBranches, m.repoBranches = readBranches(context.Background(), m.wt)
+	m.installRepos(readRepos(context.Background(), m.wt, m.nextRepoSeq()))
 }
 
-// readBranches is what resolveBaseBranches installs: each repository's
+// rescanRepos returns the off-loop read of the repositories, answered as a
+// reposReadMsg, when the set is discovered; nil otherwise, so a fixed
+// workspace runs nothing. reopen, when set, is the card whose repository
+// picker should open once a clone is found (the set-repo verb with no
+// repositories known yet).
+func (m *Shell) rescanRepos(reopen domain.FeatureID) tea.Cmd {
+	if m.wt == nil || !m.wt.Discovering() {
+		return nil
+	}
+	wt, seq := m.wt, m.nextRepoSeq()
+	return func() tea.Msg {
+		return reposReadMsg{snap: readRepos(context.Background(), wt, seq), reopenPicker: reopen}
+	}
+}
+
+// reposReadMsg answers a rescanRepos read. reopenPicker names a card whose
+// repository picker to open when the set is now non-empty.
+type reposReadMsg struct {
+	snap         repoSnapshot
+	reopenPicker domain.FeatureID
+}
+
+// repoChoices is a dialog that offers repositories and their branches. A
+// rescan that installs a newer snapshot re-offers them through it.
+type repoChoices interface {
+	setRepoChoices(names []string, base map[string]string, branches map[string][]string)
+}
+
+// landRepos installs a rescan's snapshot and re-offers the choices of every
+// open dialog that offers repositories. A snapshot that is not newer than the
+// installed one changes nothing.
+func (m *Shell) landRepos(msg reposReadMsg) {
+	if !m.installRepos(msg.snap) {
+		return
+	}
+	for i := 0; i < m.Overlay.Len(); i++ {
+		if d, ok := m.Overlay.At(i).(repoChoices); ok {
+			d.setRepoChoices(m.repoNames, m.baseBranches, m.repoBranches)
+		}
+	}
+	if msg.reopenPicker != "" && !m.overlayHasRepoPicker(msg.reopenPicker) {
+		m.openRepoPicker(msg.reopenPicker)
+	}
+}
+
+// overlayHasRepoPicker reports whether the repository picker for card id is
+// already open.
+func (m *Shell) overlayHasRepoPicker(id domain.FeatureID) bool {
+	for i := 0; i < m.Overlay.Len(); i++ {
+		if d, ok := m.Overlay.At(i).(*repoPickerDialog); ok && d.feature.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// openRepoPicker opens the set-repo picker for card id on the names the board
+// now has, or shows the notice when there are none.
+func (m *Shell) openRepoPicker(id domain.FeatureID) {
+	i := m.rowIndex(id)
+	if i < 0 {
+		return
+	}
+	if r := m.rows[i]; r.F.IsGoal() || r.HasWorktree {
+		return
+	}
+	if len(m.repoNames) == 0 {
+		m.notice = noticeMsg{text: "no other repositories configured"}
+		return
+	}
+	m.Overlay.Push(newRepoPickerDialog(m.rows[i].F, m.repoNames, func(repo string) tea.Cmd {
+		return m.setRepo(id, repo)
+	}))
+}
+
+// readBranches is what installRepos installs: each repository's
 // checked-out branch, and the branches it has. It runs git.
 func readBranches(ctx context.Context, wt *worktree.Pool) (map[string]string, map[string][]string) {
 	base := map[string]string{"": wt.BaseBranch(ctx, "")}
@@ -1829,9 +1962,21 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a web request's read or intent (bridge.go), run between two
 		// messages like any other; it reports its own changes.
 		cmd = req.run(m)
+	} else if rm, ok := msg.(reposReadMsg); ok {
+		m.landRepos(rm)
 	} else {
+		before := m.Overlay.Len()
 		model, cmd = m.update(msg)
 		m.emitChanges(msg)
+		// a dialog that offers repositories opened by this message asks for
+		// a rescan; it runs off the loop and re-offers the choices when it
+		// lands (rescanRepos), so the dialog is not behind a clone made
+		// since launch.
+		if m.Overlay.Len() > before {
+			if _, ok := m.Overlay.Top().(repoChoices); ok {
+				cmd = tea.Batch(cmd, m.rescanRepos(""))
+			}
+		}
 	}
 	if tick := m.drainGoalTicks(); tick != nil {
 		cmd = tea.Batch(cmd, tick)
@@ -3442,9 +3587,16 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				return nil
 			}
 			if len(m.repoNames) == 0 {
+				// nothing to offer yet: a discovered set may have one now, and
+				// the picker opens when it lands (landRepos)
+				if rescan := m.rescanRepos(r.F.ID); rescan != nil {
+					return rescan
+				}
 				m.notice = noticeMsg{text: "no other repositories configured"}
 				return nil
 			}
+			// the picker opens on the set the board has; a rescan on this
+			// press (Update) re-offers a clone made since launch
 			m.Overlay.Push(newRepoPickerDialog(r.F, m.repoNames, func(repo string) tea.Cmd {
 				return m.setRepo(r.F.ID, repo)
 			}))

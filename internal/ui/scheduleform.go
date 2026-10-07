@@ -673,3 +673,8 @@ func (d *scheduleForm) previewLine(s *theme.Styles, width int) string {
 	}
 	return ansi.Wrap(strings.Join(parts, "  ·  "), width, "  ")
 }
+
+// setRepoChoices re-offers the repositories after a rescan (repoChoices).
+func (d *scheduleForm) setRepoChoices(names []string, _ map[string]string, _ map[string][]string) {
+	d.repo.rechoose(names)
+}

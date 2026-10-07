@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -48,11 +50,19 @@ func (e *repoNotConfiguredError) Unwrap() error { return ErrRepoNotConfigured }
 type Pool struct {
 	root        string // workspace root, shared by every cached manager
 	defaultRoot string
-	byName      map[string]string // configured name -> resolved repo root
 	fs          ForkPointStore
 	exclude     bool // run EnsureGummiExcluded on creation (mutating commands)
 	mu          sync.Mutex
+	byName      map[string]string // configured name -> resolved repo root; under mu
 	byRoot      map[string]*Manager
+	// discover rescans the named set; nil when the set is fixed config.
+	// ambiguous is its last report of the folder names nobody got.
+	discover  Discover
+	ambiguous map[string][]string
+	// scanned is when a miss last rescanned: a card still holding a name
+	// that is gone is asked about on every board tick, and must not walk
+	// the disk each time.
+	scanned time.Time
 	// goalLookup resolves a goal card by id, so a card whose goal worktree
 	// is gone can tell an ended goal from a broken one (see goal.go).
 	goalLookup GoalLookup
@@ -155,20 +165,112 @@ func WrapSingle(m *Manager) *Pool {
 	}
 }
 
+// Discover rescans the workspace's named repositories: the named set and
+// the folder names it could not hand out (config.RepoSet's Named and
+// Ambiguous). The default repository is fixed at launch and never rescanned.
+type Discover func() (named []NamedRepo, ambiguous map[string][]string, err error)
+
+// SetDiscover makes the named set discovered rather than fixed: d runs now,
+// and again whenever a name is asked for that the set does not hold, so a
+// checkout cloned after launch is usable without a restart.
+func (p *Pool) SetDiscover(d Discover) error {
+	p.mu.Lock()
+	p.discover = d
+	p.mu.Unlock()
+	return p.Refresh()
+}
+
+// Discovering reports whether the named set is rescanned (SetDiscover).
+func (p *Pool) Discovering() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.discover != nil
+}
+
+// Refresh rescans the named set when it is discovered; a no-op otherwise.
+// A name that disappears is dropped like one removed from `repos:`, so a
+// card still holding it gets ErrRepoNotConfigured; managers already built
+// stay cached by root.
+func (p *Pool) Refresh() error {
+	p.mu.Lock()
+	d := p.discover
+	p.mu.Unlock()
+	if d == nil {
+		return nil
+	}
+	named, ambiguous, err := d()
+	if err != nil {
+		return err
+	}
+	byName := make(map[string]string, len(named))
+	for _, n := range named {
+		abs, aerr := filepath.Abs(n.Root)
+		if aerr != nil {
+			return fmt.Errorf("repo %q: %w", n.Name, aerr)
+		}
+		byName[n.Name] = abs
+	}
+	p.mu.Lock()
+	p.byName = byName
+	p.ambiguous = ambiguous
+	p.mu.Unlock()
+	return nil
+}
+
+// missRescanEvery bounds how often a miss rescans the disk.
+const missRescanEvery = 2 * time.Second
+
+// lookup resolves a non-empty name against the named set, rescanning on a
+// miss when the set is discovered (at most once per missRescanEvery).
+func (p *Pool) lookup(name string) (string, bool) {
+	p.mu.Lock()
+	root, ok := p.byName[name]
+	rescan := !ok && p.discover != nil && time.Since(p.scanned) >= missRescanEvery
+	if rescan {
+		p.scanned = time.Now()
+	}
+	p.mu.Unlock()
+	if !rescan {
+		return root, ok
+	}
+	if err := p.Refresh(); err != nil {
+		fmt.Fprintln(os.Stderr, "gummi: rescanning repositories:", err)
+		return "", false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	root, ok = p.byName[name]
+	return root, ok
+}
+
+// ClashError is the refusal for a name that several checkouts share, which
+// discovery leaves unnamed, listing every path it could mean. It is nil for a
+// name nobody clashes on. It reads the last scan and never rescans, so a
+// caller that has already asked Known gets the clash, not "not configured".
+func (p *Pool) ClashError(name string) error {
+	p.mu.Lock()
+	clash := p.ambiguous[name]
+	p.mu.Unlock()
+	if len(clash) == 0 {
+		return nil
+	}
+	return &repoNotConfiguredError{msg: fmt.Sprintf("repository %q is ambiguous: %s all share that folder name; pin the one you mean under `repos:` in .gummi/config.yaml", name, strings.Join(clash, ", "))}
+}
+
 // DefaultName is the empty string: the conventional name for the workspace
 // default repository, used by creation surfaces to mean "no explicit choice".
 func (p *Pool) DefaultName() string { return "" }
 
 // Known reports whether name is a configured repository. The empty name
 // (the workspace default) is known only when a default exists; any other
-// name must be a key of the configured `repos:` set. Creation surfaces use
-// it to reject an unselectable repo at creation, before any drive-time
-// resolution.
+// name must be a key of the configured `repos:` set, or one discovery
+// finds on a rescan. Creation surfaces use it to reject an unselectable
+// repo at creation, before any drive-time resolution.
 func (p *Pool) Known(name string) bool {
 	if name == "" {
 		return p.defaultRoot != ""
 	}
-	_, ok := p.byName[name]
+	_, ok := p.lookup(name)
 	return ok
 }
 
@@ -193,6 +295,8 @@ func (p *Pool) ProvisionalRepo() string {
 // Names returns the sorted configured repo names (excluding the empty
 // default), for the creation surfaces that offer an explicit selector.
 func (p *Pool) Names() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	names := make([]string, 0, len(p.byName))
 	for n := range p.byName {
 		names = append(names, n)
@@ -226,8 +330,11 @@ func (p *Pool) ManagerForName(ctx context.Context, name string) (*Manager, error
 		}
 		root = p.defaultRoot
 	} else {
-		r, ok := p.byName[name]
+		r, ok := p.lookup(name)
 		if !ok {
+			if err := p.ClashError(name); err != nil {
+				return nil, err
+			}
 			return nil, &repoNotConfiguredError{msg: fmt.Sprintf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or recreate the card against a configured repository", name)}
 		}
 		root = r

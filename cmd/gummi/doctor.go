@@ -160,6 +160,18 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 		for _, n := range namedRepos {
 			add("repo:"+n.Name, statusOK, "git repository at "+n.Root+" (workspace at "+wsRoot+")", "")
 		}
+		// discovery's leftovers: folder names more than one checkout claims
+		if set, err := loadRepoSet(wsRoot); err == nil {
+			names := make([]string, 0, len(set.Ambiguous))
+			for name := range set.Ambiguous {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				add("repo:"+name, statusWarn, "discovered checkouts share the folder name: "+strings.Join(set.Ambiguous[name], ", "),
+					"pin the one you mean under `repos:` in .gummi/config.yaml; cards cannot name an ambiguous repository")
+			}
+		}
 	}
 
 	// 1b. git identity — one check per managed repository (the default

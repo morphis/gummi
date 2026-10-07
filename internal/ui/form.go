@@ -249,3 +249,25 @@ func (p *repoPicker) selectName(name string) {
 	// is the right outcome for a card whose parent points somewhere the
 	// workspace no longer knows about.
 }
+
+// rechoose replaces the offered names after a rescan. The selection stays
+// on the same name while that name is still offered; an unset selection
+// stays unset; a name that has gone falls back the way newRepoPicker starts
+// one (unset when several are offered, else the only one).
+func (p *repoPicker) rechoose(names []string) {
+	name, chosen := p.name(), p.chosen()
+	p.names = names
+	p.idx = 0
+	if p.multi() {
+		p.idx = repoUnset
+	}
+	if !chosen {
+		return
+	}
+	for i, n := range p.options() {
+		if n == name {
+			p.idx = i
+			return
+		}
+	}
+}

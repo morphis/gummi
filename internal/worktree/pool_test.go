@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -243,5 +244,55 @@ func TestPoolCollapseDelegates(t *testing.T) {
 	}
 	if n := mustGit(t, root, "rev-list", "--count", base+".."+f.BranchName()); n != "1" {
 		t.Errorf("commits beyond base = %s, want 1", n)
+	}
+}
+
+// TestPoolDiscoverPicksUpALateClone: a discovered pool rescans on a miss,
+// so a repository that appears after launch resolves without a restart,
+// and a clashed name says which checkouts clash.
+func TestPoolDiscoverPicksUpALateClone(t *testing.T) {
+	ctx := context.Background()
+	ws := t.TempDir()
+	repoA := filepath.Join(ws, "git", "a")
+	if err := os.MkdirAll(repoA, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repoA, "init", "-q", "-b", "main")
+
+	named := []NamedRepo{{Name: "a", Root: repoA}}
+	ambiguous := map[string][]string{}
+	p, err := NewPool(ctx, ws, "", nil, &memForkStore{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetDiscover(func() ([]NamedRepo, map[string][]string, error) {
+		return named, ambiguous, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Known("a") || !p.Discovering() {
+		t.Fatal("the first scan should know a")
+	}
+
+	repoB := filepath.Join(ws, "git", "b")
+	if err := os.MkdirAll(repoB, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, repoB, "init", "-q", "-b", "main")
+	named = append(named, NamedRepo{Name: "b", Root: repoB})
+	ambiguous["c"] = []string{"/x/c", "/y/c"}
+	if m, err := p.ManagerForName(ctx, "b"); err != nil {
+		t.Fatalf("a late clone should resolve on a miss: %v", err)
+	} else if m.RepoRoot() != repoB {
+		t.Errorf("repo root = %q, want %q", m.RepoRoot(), repoB)
+	}
+	if got := p.Names(); len(got) != 2 {
+		t.Errorf("names = %v, want a and b", got)
+	}
+
+	p.scanned = time.Time{}
+	_, err = p.ManagerForName(ctx, "c")
+	if !errors.Is(err, ErrRepoNotConfigured) || !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("err = %v, want an ambiguous ErrRepoNotConfigured", err)
 	}
 }

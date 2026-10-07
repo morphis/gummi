@@ -478,8 +478,47 @@ func buildAgents(profiles config.Profiles) (map[string]agent.Agent, error) {
 // each manager is created — the default eagerly, named repos lazily on
 // first use. Exclusion is a no-op for a repo that does not contain .gummi,
 // and exclusion problems warn rather than block the launch.
+//
+// A workspace with no default repository has its named set rescanned
+// (worktree.Pool.SetDiscover): a `discover:` checkout cloned, or a `repos:`
+// entry added, after launch is reachable without a restart.
 func newPool(ctx context.Context, ws, defaultRoot string, named []worktree.NamedRepo, fs worktree.ForkPointStore, exclude bool) (*worktree.Pool, error) {
-	return worktree.NewPool(ctx, ws, defaultRoot, named, fs, exclude)
+	pool, err := worktree.NewPool(ctx, ws, defaultRoot, named, fs, exclude)
+	if err != nil || defaultRoot != "" {
+		return pool, err
+	}
+	if err := pool.SetDiscover(func() ([]worktree.NamedRepo, map[string][]string, error) {
+		set, err := loadRepoSet(ws)
+		if err != nil {
+			return nil, nil, err
+		}
+		return toNamedRepos(set.Named), set.Ambiguous, nil
+	}); err != nil {
+		return nil, err
+	}
+	return pool, nil
+}
+
+// loadRepoSet loads ws's layered config and resolves its repository set.
+func loadRepoSet(ws string) (config.RepoSet, error) {
+	userPath, err := config.UserConfigPath()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gummi:", err)
+		userPath = ""
+	}
+	cfg, _, err := config.LoadLayered(userPath, filepath.Join(ws, ".gummi", "config.yaml"))
+	if err != nil {
+		return config.RepoSet{}, err
+	}
+	return config.ResolveRepoSet(ws, cfg)
+}
+
+func toNamedRepos(list []config.NamedRepo) []worktree.NamedRepo {
+	var named []worktree.NamedRepo
+	for _, n := range list {
+		named = append(named, worktree.NamedRepo{Name: n.Name, Root: n.Root})
+	}
+	return named
 }
 
 // ensureWorkspace returns the .gummi workspace at ws, creating it (and
@@ -530,7 +569,8 @@ func findGummiRoot(dir string) (root string, ok bool) {
 // already has a .gummi directory, falling back to cwd itself when none
 // exists yet — the pre-init state that `gummi init` and other callers that
 // tolerate an absent workspace rely on. The repo roots come from
-// config.yaml's `repo:` and `repos:` keys, defaulting to the workspace root.
+// config.yaml's `repo:`, `repos:` and `discover:` keys, defaulting to the
+// workspace root — or to the checkouts under it when it is not one itself.
 // A configured root that escapes the workspace, or that is not a git
 // toplevel, is a resolution-time config error naming the offending repo.
 func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.NamedRepo, err error) {
@@ -538,23 +578,11 @@ func resolveAllRoots(cwd string) (ws, defaultRoot string, named []worktree.Named
 	if found, ok := findGummiRoot(cwd); ok {
 		ws = found
 	}
-	userPath, err := config.UserConfigPath()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "gummi:", err)
-		userPath = ""
-	}
-	cfg, _, err := config.LoadLayered(userPath, filepath.Join(ws, ".gummi", "config.yaml"))
+	set, err := loadRepoSet(ws)
 	if err != nil {
 		return "", "", nil, err
 	}
-	def, list, err := config.ResolveRepos(ws, cfg)
-	if err != nil {
-		return "", "", nil, err
-	}
-	for _, n := range list {
-		named = append(named, worktree.NamedRepo{Name: n.Name, Root: n.Root})
-	}
-	return ws, def, named, nil
+	return ws, set.Default, toNamedRepos(set.Named), nil
 }
 
 // resolveRoots resolves the workspace root and the default managed repo

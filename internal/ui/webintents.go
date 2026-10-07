@@ -468,6 +468,10 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	default:
 		return nil, refuse(WebBadRequest, "mode is autopilot or attended, not "+strconv.Quote(req.Mode))
 	}
+	if action == "repo" {
+		// the repository the action offers may be a clone made since launch
+		b.refreshReposFor(ctx, domain.FeatureID(id))
+	}
 	release, err := b.answerTurn(ctx, id)
 	if err != nil {
 		return nil, err

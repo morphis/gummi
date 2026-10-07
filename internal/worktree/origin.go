@@ -45,6 +45,5 @@ func (p *Pool) RootForName(name string) (root string, ok bool) {
 	if name == "" {
 		return p.defaultRoot, p.defaultRoot != ""
 	}
-	root, ok = p.byName[name]
-	return root, ok
+	return p.lookup(name)
 }

@@ -257,3 +257,8 @@ func (d *ingestForm) View(s *theme.Styles, w, h int) string {
 	b.WriteString("\n" + s.Faint.Render(strings.Join(wrapHint(hint, width), "\n")))
 	return s.DialogFrame.Render(b.String())
 }
+
+// setRepoChoices re-offers the repositories after a rescan (repoChoices).
+func (d *ingestForm) setRepoChoices(names []string, _ map[string]string, _ map[string][]string) {
+	d.repo.rechoose(names)
+}

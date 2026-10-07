@@ -67,6 +67,10 @@ type cardForm struct {
 	base       string
 	baseCands  []string
 	baseCursor int
+	// checkedOut and branchesOf are the board's per-repo branch facts
+	// (setRepoData), kept so a repo picked by hand offers its own branches.
+	checkedOut map[string]string
+	branchesOf map[string][]string
 	// adopt is an existing branch to mint this card ONTO rather than
 	// cutting one for it (DESIGN §10 D22). Empty — the default, and what
 	// every card does — means gummi cuts the branch.
@@ -551,12 +555,12 @@ func (d *cardForm) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		return d.fallThrough(key)
 	case cardStopRepo:
 		if delta, ok := selectCycleDelta(k); ok {
-			d.repo.cycle(delta)
+			d.moveRepo(func() { d.repo.cycle(delta) })
 			d.errText = ""
 			return false, nil
 		}
 		if n := digitKey(key); n > 0 && n <= len(d.repo.options()) {
-			d.repo.idx = n - 1
+			d.moveRepo(func() { d.repo.idx = n - 1 })
 			d.errText = ""
 			return false, nil
 		}
@@ -1911,4 +1915,42 @@ func (d *cardForm) cycleStack(dir int) {
 	}
 	c := vis[i-1]
 	d.stackOnto, d.stackLabel = c.ID, c.Title
+}
+
+// setRepoData hands the form the board's branch facts (each repo's checked-out
+// branch and its branch list) and offers the selected repo's base candidates.
+func (d *cardForm) setRepoData(checkedOut map[string]string, branches map[string][]string) {
+	d.checkedOut, d.branchesOf = checkedOut, branches
+	d.setBaseCands(branches[d.repo.name()], checkedOut[d.repo.name()])
+}
+
+// moveRepo runs move, a change of the repo row made by hand, and when it
+// lands on a different repo offers that repo's own branches. Choosing the
+// repo already selected leaves the base row as it was.
+func (d *cardForm) moveRepo(move func()) {
+	before := d.repo.name()
+	move()
+	if d.repo.name() != before {
+		d.setRepoData(d.checkedOut, d.branchesOf)
+	}
+}
+
+// setRepoChoices re-offers the repositories after a rescan (repoChoices). The
+// base cursor stays on the branch it was on when that branch still exists,
+// and an explicit base the user chose is kept.
+func (d *cardForm) setRepoChoices(names []string, base map[string]string, branches map[string][]string) {
+	prev := ""
+	if d.baseCursor < len(d.baseCands) {
+		prev = d.baseCands[d.baseCursor]
+	}
+	explicit := d.base
+	d.repo.rechoose(names)
+	d.setRepoData(base, branches)
+	for i, b := range d.baseCands {
+		if b == prev {
+			d.baseCursor = i
+			break
+		}
+	}
+	d.base = explicit
 }
