@@ -664,3 +664,49 @@ func TestAStaleAutopilotLanesKeyIsIgnored(t *testing.T) {
 		t.Errorf("sandbox = %q, want warn: the other keys still load", c.Sandbox)
 	}
 }
+
+func TestSetNameKeepsTheRestOfTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".gummi", "config.yaml")
+	if err := SetName(path, "  east  "); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil || c.Name != "east" {
+		t.Fatalf("Load = %+v, %v", c, err)
+	}
+	raw, _ := os.ReadFile(path)
+	raw = append([]byte("# keep me\n"), raw...)
+	raw = append(raw, []byte("permissions: guarded # and me\n")...)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetName(path, "west"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	for _, want := range []string{"# keep me", "permissions: guarded # and me", "name: west"} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("config lost %q:\n%s", want, got)
+		}
+	}
+	if err := SetName(path, ""); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := Load(path); c.Name != "" || c.Permissions != "guarded" {
+		t.Errorf("after clearing: %+v", c)
+	}
+	if err := SetName(path, "two\nlines"); err == nil {
+		t.Error("a name with a newline was accepted")
+	}
+}
+
+func TestNameIsWorkspaceOnly(t *testing.T) {
+	dir := t.TempDir()
+	user, ws := filepath.Join(dir, "u.yaml"), filepath.Join(dir, "w.yaml")
+	if err := os.WriteFile(user, []byte("name: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := LoadLayered(user, ws); err == nil {
+		t.Fatal("a name in the user config was accepted")
+	}
+}

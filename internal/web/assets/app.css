@@ -103,6 +103,7 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(
 .top{display:flex;align-items:center;gap:10px;padding:0 12px 0 8px;border-bottom:1px solid var(--line);background:var(--rail);min-width:0}
 .brand{font-family:var(--brand);font-weight:600;font-size:19px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
 .brand i{width:10px;height:10px;border-radius:50%;background:var(--s-plan);box-shadow:8px 0 0 var(--s-impl),16px 0 0 var(--s-verify);margin-right:18px}
+.brand .inst{font-family:var(--mono,monospace);font-weight:500;font-size:12px;letter-spacing:0;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--fg2,var(--fg3));max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ws{display:flex;align-items:center;gap:8px;color:var(--fg2);min-width:0;white-space:nowrap}
 .ws .sep{color:var(--fg4)}
 .ws .branch.mono{color:var(--fg3)}

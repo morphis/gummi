@@ -24,6 +24,9 @@ export function initTop ({ nextNeeding, palette, keysHelp, toggleRail }) {
 function renderCounts () {
   const b = state.board
   $('#ws-repo').textContent = b?.repo || state.session?.repo || ''
+  const name = b?.name || ''
+  $('#ws-name').textContent = name
+  $('#ws-name').hidden = !name
   $('#ws-head').textContent = b?.head || ''
   $('#ws-head').hidden = !b?.head
   $('.ws .sep.branch').hidden = !b?.head
@@ -31,7 +34,10 @@ function renderCounts () {
   $('#p-run').textContent = b?.counts?.running ?? 0
   $('#p-running').classList.toggle('quiet', !b?.counts?.running)
   $('#p-today').textContent = cr(b?.today?.spent)
-  document.title = b?.counts?.needs ? `(${b.counts.needs}) gummi · ${b.repo}` : `gummi · ${b?.repo || ''}`
+  // a named instance leads the tab title: several boards open side by side
+  // are told apart by it
+  const who = [b?.name, b?.repo].filter(Boolean).join(' · ')
+  document.title = b?.counts?.needs ? `(${b.counts.needs}) gummi · ${who}` : `gummi · ${who}`
 }
 
 function renderConn () {

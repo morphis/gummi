@@ -8,6 +8,9 @@ type Board struct {
 	// out branch.
 	Repo string `json:"repo"`
 	Head string `json:"head,omitempty"`
+	// Name is what this gummi instance is called (config.yaml's name),
+	// omitted when it has none.
+	Name string `json:"name,omitempty"`
 	// Today is what the board spent since local midnight.
 	Today Today `json:"today"`
 	// Counts are the header's two numbers.
@@ -161,4 +164,21 @@ type RowStack struct {
 type RowGoal struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+// Settings is GET /api/settings and PUT /api/settings' answer: the
+// workspace's own knobs. Name is what this instance is called, empty when
+// it is unnamed; Repo is the workspace folder's name, which the page
+// shows in its place until a name is set.
+type Settings struct {
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+	// MaxName is the longest name the workspace accepts, in characters.
+	MaxName int `json:"maxName"`
+}
+
+// SettingsRequest is PUT /api/settings' body. An empty Name clears the
+// name.
+type SettingsRequest struct {
+	Name string `json:"name"`
 }

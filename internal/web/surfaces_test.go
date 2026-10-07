@@ -585,6 +585,23 @@ func TestBugImportThroughTheBoard(t *testing.T) {
 }
 
 
+func TestSettingsNameThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodPut, "/api/settings", webapi.SettingsRequest{Name: " east "}, &got)
+	if got.Name != "east" || got.MaxName == 0 {
+		t.Fatalf("settings = %+v", got)
+	}
+	var board webapi.Board
+	b.must(http.StatusOK, http.MethodGet, "/api/board", nil, &board)
+	if board.Name != "east" {
+		t.Fatalf("board name = %q", board.Name)
+	}
+	if code := b.call(http.MethodPut, "/api/settings", webapi.SettingsRequest{Name: strings.Repeat("x", 99)}, nil); code != http.StatusBadRequest {
+		t.Fatalf("a too long name = %d, want 400", code)
+	}
+}
+
 func TestDoctorThroughTheBoard(t *testing.T) {
 	b := newBoardHarness(t)
 	var d webapi.Doctor

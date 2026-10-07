@@ -133,6 +133,7 @@ func (m *Shell) globalCommands() []command {
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
 		{id: "L", name: "schedules", label: "Schedules and heartbeats", key: "L", available: attached},
 		{id: "S", name: "sort", label: "Sort todo by severity", key: "S", available: attached},
+		{id: "settings", name: "settings", label: "Settings — name this gummi instance", key: "", available: true},
 		{id: "?", name: "keys", label: "Show the keys for this surface", key: helpKeyFor(m.cardOpen), available: true},
 		{id: "q", name: "quit", label: "Quit gummi", key: "q", available: true},
 	}
@@ -275,6 +276,9 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		return m.quitCmd()
 	case "?":
 		m.Overlay.Push(m.helpOverlay())
+		return nil
+	case "settings":
+		m.openSettings()
 		return nil
 	case "run":
 		// The keyless run is the implement stage's "send it back": it

@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
@@ -23,6 +24,7 @@ import (
 func (m *Shell) WebBoard() webapi.Board {
 	b := webapi.Board{
 		Repo:    filepath.Base(m.ws.Root),
+		Name:    m.name,
 		Viewers: []webapi.Viewer{},
 		Rows:    make([]webapi.Row, 0, len(m.rows)),
 	}
@@ -261,4 +263,36 @@ func (m *Shell) webResumeOffer() *webapi.ResumeOffer {
 		out.Cards = append(out.Cards, webapi.CardRef{ID: string(c.Feature.ID), Title: c.Feature.Title, Stage: string(c.Feature.Stage)})
 	}
 	return out
+}
+
+// WebSettings is GET /api/settings: what the settings dialog holds.
+func (m *Shell) WebSettings() webapi.Settings {
+	return webapi.Settings{Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen}
+}
+
+// Settings is GET /api/settings.
+func (b *Bridge) Settings(ctx context.Context) (webapi.Settings, error) {
+	var out webapi.Settings
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out = m.WebSettings(); return nil }); err != nil {
+		return webapi.Settings{}, err
+	}
+	return out, nil
+}
+
+// SetSettings is PUT /api/settings: the same write the terminal's
+// settings dialog makes. A name the workspace refuses is a bad request.
+func (b *Bridge) SetSettings(ctx context.Context, req webapi.SettingsRequest) (webapi.Settings, error) {
+	var out webapi.Settings
+	var refused error
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if err := m.setName(req.Name); err != nil {
+			refused = webErr(WebBadRequest, "%s", err.Error())
+			return nil
+		}
+		out = m.WebSettings()
+		return nil
+	}); err != nil {
+		return webapi.Settings{}, err
+	}
+	return out, refused
 }

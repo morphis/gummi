@@ -20,6 +20,11 @@ import (
 
 // Config is the parsed .gummi/config.yaml.
 type Config struct {
+	// Name is what this gummi instance is called: shown in the TUI's status
+	// bar and the web page's header and tab title, so several boards
+	// running side by side can be told apart. Workspace-only — a name in
+	// the user config would be every instance's name. Empty means unnamed.
+	Name string `yaml:"name"`
 	// Permissions is "allow-all" (default) or "guarded" (DESIGN §4.4).
 	Permissions string `yaml:"permissions"`
 	// Sandbox is the workspace-wide default for the tool-coverage
@@ -327,6 +332,13 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(raw, &c); err != nil {
 		return Config{}, fmt.Errorf("parsing %s: %w", path, err)
 	}
+	if c.Name != "" {
+		name, err := ValidateName(c.Name)
+		if err != nil {
+			return Config{}, fmt.Errorf("%s: name: %w", path, err)
+		}
+		c.Name = name
+	}
 	switch c.Permissions {
 	case "", "allow-all", "guarded":
 	default:
@@ -457,12 +469,22 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 	if len(user.Repos) > 0 {
 		return Config{}, nil, fmt.Errorf("%s: repos is workspace-only and cannot be set in the user config", userPath)
 	}
+	if user.Name != "" {
+		return Config{}, nil, fmt.Errorf("%s: name is workspace-only and cannot be set in the user config", userPath)
+	}
 	if len(user.Discover) > 0 {
 		return Config{}, nil, fmt.Errorf("%s: discover is workspace-only and cannot be set in the user config", userPath)
 	}
 
 	sources := map[string]string{}
 	var merged Config
+
+	merged.Name = ws.Name
+	if ws.Name != "" {
+		sources["name"] = workspacePath
+	} else {
+		sources["name"] = "default"
+	}
 
 	if ws.Permissions != "" {
 		merged.Permissions = ws.Permissions

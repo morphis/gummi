@@ -27,7 +27,8 @@ export const VIEW_LABELS = {
   schedules: 'Schedules',
   ingest: 'Import spec',
   bugs: 'Import bugs',
-  doctor: 'Doctor'
+  doctor: 'Doctor',
+  settings: 'Settings'
 }
 
 export function registerView (name, def) { views.set(name, def) }

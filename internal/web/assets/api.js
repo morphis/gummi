@@ -83,6 +83,7 @@ export async function api (method, path, body) {
 export const get = (path) => api('GET', path)
 export const post = (path, body = {}) => api('POST', path, body)
 export const del = (path) => api('DELETE', path)
+export const put = (path, body = {}) => api('PUT', path, body)
 export const patch = (path, body = {}) => api('PATCH', path, body)
 
 // cardPath builds /api/cards/<id>/<rest> with the id escaped.

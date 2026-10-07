@@ -25,6 +25,7 @@ func TestBoardShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Board{
 		Repo:    "gummi",
 		Head:    "main",
+		Name:    "east",
 		Today:   Today{Spent: 41.5},
 		Counts:  Counts{Needs: 1, Running: 1},
 		Viewers: []Viewer{{Person: "Simon", Device: "iPhone · Safari", DeviceID: "a1b2c3d4", Since: at}},
@@ -232,4 +233,8 @@ func TestFormShape(t *testing.T) {
 		Envelope:   2000,
 		Sessions:   SessionModels{Default: SessionModel{Backend: "copilot", Model: "gpt-5"}, Agents: []SessionAgent{}, Recent: []SessionModel{}},
 	}))
+}
+
+func TestSettingsShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Settings{Name: "east", Repo: "gummi", MaxName: 40}))
 }

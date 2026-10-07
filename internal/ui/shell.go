@@ -70,6 +70,9 @@ type Shell struct {
 	// answer with a name.
 	baseBranches map[string]string
 	ws           state.Workspace
+	// name is what this instance is called (config.yaml's name), "" when
+	// unnamed.
+	name string
 	// repoSeq issues the sequence numbers of repository reads (nextRepoSeq);
 	// repoInstalled is the newest one installed (installRepos). Both are
 	// what keep an older read from overwriting a newer one.
@@ -585,6 +588,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 // board functionality.
 func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace) {
 	m.store, m.wt, m.ws = store, wt, ws
+	m.loadName()
 	m.resolveBaseBranches()
 	// the rounds persistence seam defaults to the real store; tests may
 	// swap in a failing store to prove the fail-closed path.
@@ -4692,7 +4696,7 @@ func (m *Shell) mainView(w, h int) string {
 
 func (m *Shell) statusView(w int) string {
 	pills := []statusbar.Pill{
-		{Text: "gummi", Kind: statusbar.KindMode},
+		{Text: m.brand(), Kind: statusbar.KindMode},
 		{Text: m.boardCounts(), Kind: statusbar.KindNeutral},
 	}
 	if run := m.runCounts(); run != "" {
@@ -4779,4 +4783,13 @@ func (m *Shell) markMergePrep(id domain.FeatureID) {
 		m.mergePrep = map[domain.FeatureID]bool{}
 	}
 	m.mergePrep[id] = true
+}
+
+// brand is the status bar's first pill: gummi, and the instance's name
+// when it has one.
+func (m *Shell) brand() string {
+	if m.name == "" {
+		return "gummi"
+	}
+	return "gummi · " + m.name
 }

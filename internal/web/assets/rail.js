@@ -208,7 +208,8 @@ function renderFoot (unpair, newSession) {
       item('schedules', 'Schedules', 'clock'),
       item('ingest', 'Import spec', 'import'),
       item('bugs', 'Import bugs', 'bug'),
-      item('doctor', 'Doctor', 'doctor')
+      item('doctor', 'Doctor', 'doctor'),
+      item('settings', 'Settings', 'doctor')
     ]
     items.push('sep', { label: 'Notifications on this device', icon: 'bell', testid: 'menu-push', onClick: openPush })
     if (!state.session?.openAccess) items.push({ label: 'Unpair this browser', icon: 'unpair', danger: true, testid: 'menu-unpair', onClick: unpair })

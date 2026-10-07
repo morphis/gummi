@@ -1,6 +1,7 @@
 {
   "repo": "gummi",
   "head": "main",
+  "name": "east",
   "today": {
     "spent": 41.5
   },
