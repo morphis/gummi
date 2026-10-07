@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/attachment"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
@@ -380,6 +382,15 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		// and backgrounded commands have somewhere to report back to.
 		Watch:      true,
 		ScratchDir: e.scratchFilesDirFor(ff.id),
+		// Image bytes a backend returns are kept in the workspace's
+		// attachment store, which the page already draws.
+		ImageSink: func(data []byte, name string) string {
+			ref, err := e.Attachments().Put(bytes.NewReader(data), name)
+			if err != nil {
+				return ""
+			}
+			return attachment.Link(ref)
+		},
 		// The card's own backend home (antigravity keeps its config
 		// there), so the session's home — and the conversations it keeps
 		// there — survive a restart, which ResumeID below depends on.

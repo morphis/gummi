@@ -163,6 +163,10 @@ type SessionOpts struct {
 	// Adapters with a path cage let the session read and write it;
 	// adapters without one ignore it.
 	ScratchDir string
+	// ImageSink stores image bytes a backend produced and returns the
+	// markdown that shows them (empty when it could not). Nil means the
+	// session has nowhere to keep them, and an image block is dropped.
+	ImageSink func(data []byte, name string) string
 	// AgentHomeDir is the card's gummi-owned directory for backend state
 	// the agent must never touch — antigravity anchors its per-card HOME
 	// here. Unlike ScratchDir it is never named to the session. Empty

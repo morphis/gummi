@@ -11,7 +11,7 @@
 // Lines starting with `%%` are review notes and prompts; the spec view shows
 // notes on their own, so they are dropped here.
 
-import { h } from './dom.js?v=__ASSET_V__'
+import { h, setVars } from './dom.js?v=__ASSET_V__'
 import { attachmentURL } from './api.js?v=__ASSET_V__'
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+-]*)/
@@ -204,7 +204,7 @@ function oneList (lines, opts) {
 // `[alt](url)` after it as an ordinary link — so markdown from a spec, a
 // note or an agent's own words can never make the browser fetch an
 // arbitrary third-party URL as an image.
-const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\s](?:[^*]*?[^*\s])?)\*|(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)|!\[([^\]\n]*)\]\(\.gummi\/attachments\/([0-9a-f]{64})\.[A-Za-z0-9]+\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|~~(?=\S)([\s\S]*?\S)~~/g
+const INLINE = /(`+)([\s\S]*?[^`]|[^`])\1(?!`)|\*\*([\s\S]+?)\*\*|__([\s\S]+?)__|\*([^*\s](?:[^*]*?[^*\s])?)\*|(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?!\w)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"]*")?\)|!\[([^\]\n]*)\]\(\.gummi\/attachments\/([0-9a-f]{64})\.[A-Za-z0-9]+\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|~~(?=\S)([\s\S]*?\S)~~|!\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g
 
 export function inline (text) {
   const out = []
@@ -228,6 +228,7 @@ export function inline (text) {
     else if (m[11] !== undefined) out.push(attachmentImage(m[11], m[10]))
     else if (m[12] !== undefined) out.push(link(m[12], [m[12]]))
     else if (m[13] !== undefined) out.push(h('del', null, inline(m[13])))
+    else if (m[15] !== undefined) out.push(...otherImage(m[15], m[14]))
     last = re.lastIndex
   }
   if (last < text.length) out.push(...paths(text.slice(last)))
@@ -243,7 +244,7 @@ function paths (s) {
   let m
   while ((m = re.exec(s))) {
     if (m.index > last) out.push(...breaks(s.slice(last, m.index)))
-    out.push(fileLink(m[0], m[0]))
+    out.push(worktreeImage(m[0], '') || fileLink(m[0], m[0]))
     last = re.lastIndex
   }
   if (last < s.length) out.push(...breaks(s.slice(last)))
@@ -258,6 +259,69 @@ function fileLink (p, kids) {
   if (!rel || /\n/.test(rel)) return kids
   const href = files.url + rel.split('/').map(encodeURIComponent).join('/')
   return h('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'file' }, kids)
+}
+
+const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|svg)$/i
+
+// worktreeImage is the image at p drawn inline when p names an image file
+// under the card's worktree (absolute, or relative to it), else null. The
+// served copy is the only source it ever uses, so the page still fetches
+// nothing from outside the card's own files route.
+function worktreeImage (p, alt) {
+  if (!files) return null
+  if (!p.startsWith('/') && !/^[a-z][a-z0-9+.-]*:/i.test(p)) p = files.dir + '/' + p.replace(/^\.\//, '')
+  if (!p.startsWith(files.dir + '/') || !IMAGE_EXT.test(p) || /(^|\/)\.\.(\/|$)/.test(p)) return null
+  const a = fileLink(p, null)
+  const href = a?.getAttribute?.('href')
+  if (!href) return null
+  return figure(href, alt || p.slice(files.dir.length + 1))
+}
+
+// shapes remembers each served image's size, so a thread that redraws puts
+// the image back in a box of its final shape and nothing below it jumps.
+const shapes = new Map()
+
+// figure draws an image with a loading placeholder, a visible failure box
+// and a click that opens it large.
+function figure (href, alt) {
+  const box = h('span', { class: 'md-figure loading', role: 'button', tabindex: '0', title: alt })
+  const shape = shapes.get(href)
+  if (shape) setVars(box, { 'aspect-ratio': shape })
+  const img = h('img', { src: href, alt, loading: 'lazy' })
+  img.addEventListener('load', () => {
+    shapes.set(href, `${img.naturalWidth} / ${img.naturalHeight}`)
+    box.classList.remove('loading')
+    setVars(box, { 'aspect-ratio': null })
+  })
+  img.addEventListener('error', () => {
+    box.classList.remove('loading')
+    box.classList.add('broken')
+    setVars(box, { 'aspect-ratio': null })
+    box.replaceChildren(h('span', { class: 'md-figure-err' }, `Could not load ${alt}`))
+  })
+  const open = () => { if (!box.classList.contains('broken')) lightbox(href, alt) }
+  box.addEventListener('click', open)
+  box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } })
+  box.append(img)
+  return box
+}
+
+// lightbox shows an image over the page until a click or Escape.
+function lightbox (href, alt) {
+  const close = () => { veil.remove(); document.removeEventListener('keydown', onKey) }
+  const onKey = e => { if (e.key === 'Escape') close() }
+  const veil = h('div', { class: 'lightbox', role: 'dialog', 'aria-label': alt, onclick: close },
+    h('img', { src: href, alt }))
+  document.addEventListener('keydown', onKey)
+  document.body.append(veil)
+}
+
+// otherImage reads a `![alt](dest)` that is not an attachment: an image of
+// the worktree, or else the `!` as text and the rest as an ordinary link.
+function otherImage (dest, alt) {
+  let p = dest
+  try { p = decodeURI(dest) } catch { p = dest }
+  return [worktreeImage(p, alt) || ['!', link(dest, inline(alt))]].flat()
 }
 
 function attachmentImage (id, alt) {

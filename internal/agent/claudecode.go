@@ -329,6 +329,7 @@ func (c *ClaudeCode) NewSession(_ context.Context, opts SessionOpts) (Session, e
 		stdin:       stdin,
 		stderr:      stderr,
 		workdir:     opts.WorkDir,
+		imageSink:   opts.ImageSink,
 		raw:         make(chan Event, 64),
 		events:      make(chan Event),
 		stop:        make(chan struct{}),
@@ -388,11 +389,12 @@ func (c *ClaudeCode) Close() error {
 }
 
 type claudeSession struct {
-	cmd     *exec.Cmd
-	cancel  context.CancelFunc
-	workdir string // opts.WorkDir, for repo-relative tool-call details
-	stdin   io.WriteCloser
-	stderr  *capWriter // bounded tail of the child's stderr, for crash diagnostics
+	cmd       *exec.Cmd
+	cancel    context.CancelFunc
+	workdir   string                      // opts.WorkDir, for repo-relative tool-call details
+	imageSink func([]byte, string) string // opts.ImageSink
+	stdin     io.WriteCloser
+	stderr    *capWriter // bounded tail of the child's stderr, for crash diagnostics
 
 	raw      chan Event
 	events   chan Event
@@ -685,11 +687,12 @@ type ccAPIUsage struct {
 type ccAssistantMessage struct {
 	Model   string `json:"model"`
 	Content []struct {
-		Type  string         `json:"type"`
-		Text  string         `json:"text"`
-		ID    string         `json:"id"`    // tool_use: pairs with its tool_result
-		Name  string         `json:"name"`  // tool_use
-		Input map[string]any `json:"input"` // tool_use arguments
+		Type   string         `json:"type"`
+		Text   string         `json:"text"`
+		ID     string         `json:"id"`     // tool_use: pairs with its tool_result
+		Source *ccImageSource `json:"source"` // image: inline base64 payload
+		Name   string         `json:"name"`   // tool_use
+		Input  map[string]any `json:"input"`  // tool_use arguments
 	} `json:"content"`
 }
 
@@ -865,6 +868,10 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage) []Event {
 			if strings.TrimSpace(b.Text) != "" {
 				out = append(out, Event{Kind: EventMessage, Text: b.Text})
 			}
+		case "image":
+			if md := s.imageMarkdown(b.Source); md != "" {
+				out = append(out, Event{Kind: EventMessage, Text: md})
+			}
 		case "tool_use":
 			if b.Name != "" {
 				if b.ID != "" {
@@ -879,6 +886,19 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage) []Event {
 		}
 	}
 	return out
+}
+
+// imageMarkdown stores an inline image block through the session's sink
+// and returns the markdown that shows it, or "" for a block it cannot keep.
+func (s *claudeSession) imageMarkdown(src *ccImageSource) string {
+	if src == nil || s.imageSink == nil || src.Type != "base64" {
+		return ""
+	}
+	data, err := base64.StdEncoding.DecodeString(src.Data)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return s.imageSink(data, "image")
 }
 
 // mapToolResults turns a user line's tool_result blocks into tool-result

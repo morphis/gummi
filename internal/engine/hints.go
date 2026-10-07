@@ -1382,7 +1382,12 @@ Their unresolved comments are what holds this card from landing, so
 resolving them is finishing the work, not bookkeeping.
 
 When the work is done, say so plainly rather than looking for something
-else to improve: they decide when this lands.`
+else to improve: they decide when this lands.
+
+To show the person an image (a screenshot, a chart, a render), write it
+as a file inside your working directory and put ![description](relative/path.png)
+in your reply on its own line. The web page draws it in the thread; a path
+outside the working directory is shown as a plain link.`
 	if f.MainCheckout {
 		return fmt.Sprintf(`You are working on %s, a freeform card: a coding task with no workflow
 around it. There is no design document, no plan to write, no review gate

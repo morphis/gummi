@@ -103,3 +103,40 @@ test('strikethrough, long words and a refused link read right', async ({ pairedP
   expect(got.link).toBe(0);
   expect(got.wide).toBe(true);
 });
+
+test('a worktree image draws inline and nothing else is fetched as one', async ({ pairedPage: page }) => {
+  const got = await page.evaluate(async () => {
+    const { markdown } = await import('/assets/markdown.js');
+    const files = { dir: '/w/FF-1', url: '/files/FF-1/sig/' };
+    const imgs = (src: string) => [...markdown(src, { files }).querySelectorAll('img')].map((i) => i.getAttribute('src'));
+    return {
+      rel: imgs('![shot](out/a%20b.png)'),
+      abs: imgs('![shot](/w/FF-1/out/a.png)'),
+      bare: imgs('wrote /w/FF-1/out/b.jpg today'),
+      outside: imgs('![x](/etc/a.png) ![y](https://example.com/a.png) ![z](../a.png)'),
+      noFiles: [...markdown('![shot](out/a.png)').querySelectorAll('img')].length,
+    };
+  });
+  expect(got.rel).toEqual(['/files/FF-1/sig/out/a%20b.png']);
+  expect(got.abs).toEqual(['/files/FF-1/sig/out/a.png']);
+  expect(got.bare).toEqual(['/files/FF-1/sig/out/b.jpg']);
+  expect(got.outside).toEqual([]);
+  expect(got.noFiles).toBe(0);
+});
+
+test('a worktree image shows a failure box and opens in a lightbox', async ({ pairedPage: page }) => {
+  const got = await page.evaluate(async () => {
+    const { markdown } = await import('/assets/markdown.js');
+    const files = { dir: '/w/FF-1', url: '/files/FF-1/sig/' };
+    const el = markdown('![shot](out/missing.png)', { files });
+    document.body.append(el);
+    const box = el.querySelector('.md-figure') as HTMLElement;
+    await new Promise((r) => setTimeout(r, 500));
+    const err = box.classList.contains('broken') && !!box.querySelector('.md-figure-err');
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const ok = markdown(`![p](${png})`, { files });
+    return { err, dataImage: ok.querySelectorAll('img').length };
+  });
+  expect(got.err).toBe(true);
+  expect(got.dataImage).toBe(0);
+});
