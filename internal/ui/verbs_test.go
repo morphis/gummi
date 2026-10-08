@@ -103,6 +103,18 @@ func TestParseInput(t *testing.T) {
 			want: parsedInput{Kind: verbMenu, Remainder: "foo", Text: "/foo"},
 		},
 		{
+			// a freeform session's own /handoff, so no verb may shadow it;
+			// hand-off is /close
+			name: "handoff is not a verb",
+			in:   "/handoff the error paths",
+			want: parsedInput{Kind: verbMenu, Remainder: "handoff the error paths", Text: "/handoff the error paths"},
+		},
+		{
+			name: "close is the hand-off verb",
+			in:   "/close",
+			want: parsedInput{Kind: verbCommand, Verb: "close", Text: "/close"},
+		},
+		{
 			name: "slash plus a near-miss is the menu, not a fuzzy verb match",
 			in:   "/appro",
 			want: parsedInput{Kind: verbMenu, Remainder: "appro", Text: "/appro"},

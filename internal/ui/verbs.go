@@ -26,7 +26,7 @@ var verbs = map[string]bool{
 	"autopilot": true,
 	"park":      true,
 	"land":      true,
-	"handoff":   true,
+	"close":     true,
 	"rebase":    true,
 	"squash":    true,
 	"clean":     true,

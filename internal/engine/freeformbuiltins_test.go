@@ -59,7 +59,7 @@ func transcriptOf(ff *FreeformSession) string {
 // offered whatever the backend can do.
 func TestEverySessionOffersItsOwnCommands(t *testing.T) {
 	ff, _, _ := recordingSession(t)
-	for _, name := range []string{"compact", "clear", "retry", "context", "cost", "help"} {
+	for _, name := range []string{"compact", "handoff", "clear", "retry", "context", "cost", "help"} {
 		if _, _, ok := FindProjectCommand(ff.Commands(), "/"+name); !ok {
 			t.Errorf("/%s is not offered", name)
 		}
@@ -94,6 +94,37 @@ func TestCompactWithoutBackendCompactionSummarizes(t *testing.T) {
 	if !strings.Contains(last, "gummi: Compacted the conversation") || !strings.Contains(last, "did Summarize") ||
 		strings.Contains(last, "them: split the lexer") {
 		t.Errorf("the respawned backend's replay:\n%s", last)
+	}
+}
+
+// TestHandoffRestartsOnTheHandoff: /handoff asks the agent for a handoff,
+// empties the conversation, and sends the handoff to a fresh backend as
+// its first turn — which is all that backend is replayed.
+func TestHandoffRestartsOnTheHandoff(t *testing.T) {
+	ff, sent, hints := recordingSession(t)
+	say(t, ff, "split the lexer")
+	say(t, ff, "/handoff the error paths")
+	deadline := time.Now().Add(5 * time.Second)
+	for len(sent()) < 3 || ff.Snapshot().Busy {
+		if time.Now().After(deadline) {
+			t.Fatalf("the handoff was never sent on: %q", sent())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	msgs := sent()
+	if ask := msgs[1]; !strings.HasPrefix(ask, "Write a handoff") || !strings.Contains(ask, "focus on: the error paths") {
+		t.Fatalf("the agent was asked %q, want the handoff prompt with the focus", ask)
+	}
+	if first := msgs[2]; !strings.HasPrefix(first, handoffOpening) || !strings.Contains(first, "did Write a handoff") {
+		t.Fatalf("the fresh backend's first turn = %q, want the handoff", first)
+	}
+	tr := transcriptOf(ff)
+	if strings.Contains(tr, "split the lexer") || strings.Contains(tr, "user:/handoff") || !strings.Contains(tr, "user:"+handoffOpening) {
+		t.Fatalf("transcript after /handoff = %s", tr)
+	}
+	h := hints()
+	if last := h[len(h)-1]; strings.Contains(last, "split the lexer") {
+		t.Errorf("the fresh backend was replayed the old conversation:\n%s", last)
 	}
 }
 

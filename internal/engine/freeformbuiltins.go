@@ -22,8 +22,16 @@ import (
 //     way a rewind does, and never the branch;
 //   - /compact: the backend's own compaction where it has one; elsewhere a
 //     turn that asks the agent for a summary, after which the conversation
-//     is replaced by that summary and the backend restarted on it.
+//     is replaced by that summary and the backend restarted on it;
+//   - /handoff: a turn that asks the agent for a handoff on every backend,
+//     after which the conversation is emptied and the handoff sent to a
+//     fresh backend as its first turn.
 var (
+	handoffCommand = ProjectCommand{
+		Name:        "handoff",
+		Description: "hand the work to a fresh start of the agent: it writes a handoff, which becomes the first message of an empty conversation",
+		builtin:     true,
+	}
 	clearCommand = ProjectCommand{
 		Name:        "clear",
 		Description: "start the conversation afresh — the branch and its files stay as they are",
@@ -52,7 +60,7 @@ var (
 )
 
 // sessionCommands is every built-in, in the order a menu offers them.
-var sessionCommands = []ProjectCommand{compactCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
+var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
 
 // builtinFor is the built-in msg names, when cmds resolve it to one rather
 // than to a project file, and the arguments after it.
@@ -72,6 +80,21 @@ const compactPrompt = "Summarize this conversation so far, for a fresh session o
 	"Cover: what the person asked for and any later changes to it, the decisions made " +
 	"and why, what has been done (files and commits), what is in progress, and what is " +
 	"left or open. Be complete but terse. Reply with the summary only, and do not change any files."
+
+// handoffPrompt is what the agent is asked, for /handoff. Where /compact
+// asks for a record of the conversation, this asks for a brief to act on:
+// its reply is sent, as it stands, as the first turn of the next backend.
+const handoffPrompt = "Write a handoff for a fresh session of yourself that will pick this work up " +
+	"with nothing but your handoff and the worktree. It will be sent to that session as its first " +
+	"message, so write it to that session, as what to do next. Cover: the goal and any later changes " +
+	"to it, the decisions made and why, the current state (files touched, commits made, what is left " +
+	"uncommitted), what was tried and did not work, and the next steps in order. Point to files, " +
+	"commits and documents rather than restating them, and leave out secrets. Reply with the handoff " +
+	"only: do not change any files, and do not write it to a file."
+
+// handoffOpening heads the turn a handoff is sent as, so the thread reads
+// it as what it is and the fresh session knows where it came from.
+const handoffOpening = "Handoff from the previous session of this conversation, which was restarted on it:\n\n"
 
 // runBuiltin answers a built-in that is not a turn for the agent. handled
 // is false for one that is (/compact on any backend), which sendTurn
@@ -155,7 +178,7 @@ func helpReport(cmds []ProjectCommand) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("The card's own commands (/land, /handoff, /model…) are in its menu.")
+	b.WriteString("The card's own commands (/land, /close, /model…) are in its menu.")
 	return b.String()
 }
 
@@ -241,6 +264,26 @@ func (ff *FreeformSession) finishCompact(sess *Session) {
 	sess.truncateAll()
 	sess.appendSystem("Compacted the conversation. What it came to, in the agent's own summary:\n\n" + summary)
 	ff.restartBackend(sess)
+}
+
+// finishHandoff empties the conversation once the agent has written its
+// handoff for /handoff, restarts the backend, and sends the handoff to the
+// fresh one as its first turn, on behalf of whoever asked (ctx). A turn
+// that wrote none (stopped, failed) leaves the conversation as it was and
+// says so. sent reports whether the handoff went out as a turn, whose end
+// then drains what was queued behind it.
+func (ff *FreeformSession) finishHandoff(ctx context.Context, sess *Session) (sent bool) {
+	brief, ok := sess.lastReplySince("/" + handoffCommand.Name)
+	if !ok {
+		sess.appendActivity("/handoff wrote no handoff — the conversation was left as it was")
+		ff.engine.persist(sess)
+		ff.engine.send(Event{Feature: ff.id, Kind: EventUpdated})
+		return false
+	}
+	sess.truncateAll()
+	ff.restartBackend(sess)
+	// an error is the session's own and already on it (SendTurn)
+	return ff.SendTurn(ctx, handoffOpening+brief, nil) == nil
 }
 
 // truncateAll drops the whole conversation but the pinned checklist,

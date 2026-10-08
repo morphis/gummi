@@ -833,12 +833,15 @@ var verbActionIDs = map[string]string{
 	// never in the answer set and always degrades to the menu, where the
 	// merge row answers to "land" by name.
 	"land": "merge",
-	// handoff maps to its own id, and unlike land it IS in the answer set
-	// wherever it is legal: hand-off is offered at exactly one stage, the
-	// one where the row is on screen, so "/handoff" fires from the same
-	// place the reader is already looking rather than degrading to a menu
-	// for a row two lines above the composer.
-	"handoff": "handoff",
+	// close is hand-off: close the card and keep its branch. It maps to the
+	// handoff id, and unlike land it IS in the answer set wherever it is
+	// legal: hand-off is offered at exactly one stage, the one where the
+	// row is on screen, so "/close" fires from the same place the reader is
+	// already looking rather than degrading to a menu for a row two lines
+	// above the composer. The word is not "handoff": on a freeform card
+	// that is the session's own command (engine's freeformbuiltins.go),
+	// and a verb is parsed first, so it would shadow it.
+	"close": "handoff",
 	// writespec is the freeform card's third ending, in the answer set
 	// wherever it is legal, so the word fires the same dialog the row and
 	// its key open.
@@ -987,7 +990,7 @@ var verbKeys = map[string]string{
 	"spec":      "s",
 	"verify":    "v",
 	"land":      "m",
-	"handoff":   "h",
+	"close":     "h",
 	"writespec": "w",
 	"rebase":    "r",
 	"clean":     "c",

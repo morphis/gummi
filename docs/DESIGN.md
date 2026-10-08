@@ -229,7 +229,7 @@ Stage semantics:
     lands this way (or any other manual merge) skips straight to Done.
     `link PR…` rises out of the action inventory's fold at a clean
     verify, which is the one moment linking is the move.
-  - **Hand off** (`h`, `/handoff`; `gummi handoff`) — the card closes and
+  - **Hand off** (`h`, `/close`; `gummi handoff`) — the card closes and
     the branch stays exactly where it is: yours to push, PR by hand,
     cherry-pick, or keep. gummi commits a final checkpoint so nothing
     loose is left on the branch (never on a freeform card, whose loose

@@ -88,6 +88,10 @@ type FreeformSession struct {
 	// compaction of its own is in flight: its reply is the summary the
 	// conversation is replaced with when the turn ends (finishCompact).
 	compacting bool
+	// handingOff is set while a /handoff turn is in flight, carrying who
+	// asked for it: its reply is the handoff the conversation restarts on
+	// when the turn ends (finishHandoff).
+	handingOff context.Context
 	// gummi's own watches (freeformwatch.go): running, and ended with an
 	// exit still to report. They outlive any one backend.
 	watches      []*freeformWatch
@@ -640,7 +644,18 @@ func (ff *FreeformSession) sendTurn(ctx context.Context, msg string, images []At
 	compacts := ff.compacts
 	ff.mu.Unlock()
 	var sendErr error
-	if c, ok := a.(agent.Compactor); ok && compacts && len(images) == 0 && isCompactLine(cmds, msg) {
+	if b, args, ok := builtinFor(cmds, msg); ok && len(images) == 0 && b.Name == handoffCommand.Name {
+		// every backend is asked for the handoff as a turn, even one that
+		// compacts itself: what it writes is the next session's first message
+		prompt := handoffPrompt
+		if args != "" {
+			prompt += "\n\nThe next session should focus on: " + args
+		}
+		ff.mu.Lock()
+		ff.handingOff = context.WithoutCancel(ctx)
+		ff.mu.Unlock()
+		sendErr = a.Send(ctx, prompt)
+	} else if c, ok := a.(agent.Compactor); ok && compacts && len(images) == 0 && isCompactLine(cmds, msg) {
 		sendErr = c.Compact(ctx)
 	} else if b, args, ok := builtinFor(cmds, msg); ok && !compacts && len(images) == 0 && b.Name == compactCommand.Name {
 		// a backend with no compaction of its own is asked for a summary,
@@ -1293,12 +1308,24 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		ff.mu.Lock()
 		compacted := ff.compacting
 		ff.compacting = false
+		handoff := ff.handingOff
+		ff.handingOff = nil
 		ff.mu.Unlock()
 		if compacted {
 			// off the pump: the restart stops the backend it is draining
 			go func() {
 				ff.finishCompact(sess)
 				ff.drainQueue(sess)
+			}()
+			break
+		}
+		if handoff != nil {
+			// off the pump, as above; what was queued meanwhile follows the
+			// handoff's own turn
+			go func() {
+				if !ff.finishHandoff(handoff, sess) {
+					ff.drainQueue(sess)
+				}
 			}()
 			break
 		}
