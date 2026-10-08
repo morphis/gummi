@@ -92,7 +92,17 @@ The first run creates a gitignored `.gummi/` with state, a starter
 5. `m` — once verified, squash-merge it into main (or `h` to hand the
    branch off).
 
-`?` shows every key.
+The keys you need first:
+
+| key | does |
+|---|---|
+| `n` | new card |
+| `enter` | open the selected card |
+| `g` | start the next stage / approve the plan |
+| `d` | the card's diff |
+| `b` | bounce the work back with your notes |
+| `m` / `h` | squash-merge into main / hand the branch off |
+| `?` | the full key table |
 
 Headless, with nobody at the keyboard:
 

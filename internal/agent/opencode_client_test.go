@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -701,6 +702,12 @@ func TestOpencodeServerDeathMidTurnFails(t *testing.T) {
 // serve with default env and no session config, killing it after.
 func TestOpencodeServerModelCatalog(t *testing.T) {
 	f, spawns := stubServeOpencode(t)
+	// the probe resolves the binary before it spawns; any executable will do
+	bindir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bindir, "opencode"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bindir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ids, err := OpencodeModelCatalog(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)

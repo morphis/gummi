@@ -86,7 +86,7 @@ func TestRewriteKeepsTheAuthorAndUntouchedCommits(t *testing.T) {
 	if after[0] != c[0] || after[1] != c[1] || after[2] == c[2] {
 		t.Errorf("untouched commits should keep their SHA: %v -> %v", c, after)
 	}
-	if got := mustGit(t, p, "log", "-1", "--format=%an <%ae> %aI"); got != "Ada <ada@example.com> 2020-01-02T03:04:05+00:00" {
+	if got := mustGit(t, p, "log", "-1", "--format=%an <%ae> %at"); got != "Ada <ada@example.com> 1577934245" {
 		t.Errorf("author lost: %q", got)
 	}
 }
