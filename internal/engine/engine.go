@@ -243,7 +243,11 @@ type Config struct {
 // Engine orchestrates all live sessions and the autonomous runs.
 type Engine struct {
 	cfg Config
-	now func() time.Time // injectable clock (spec-capture timestamps)
+	// stageTimeoutMu guards cfg.StageTimeout, the one Config field a
+	// driver sets after construction (SetStageTimeout) while goal cards
+	// start drivers concurrently.
+	stageTimeoutMu sync.Mutex
+	now            func() time.Time // injectable clock (spec-capture timestamps)
 
 	// raw carries events from pump goroutines to the forwarder; events
 	// is the UI-facing stream, owned solely by the forwarder.

@@ -491,7 +491,10 @@ func (e *Engine) goalView(ctx context.Context, goal domain.Feature) (GoalView, e
 	if !newest.IsZero() {
 		in.Quiet = now.Sub(newest)
 	}
-	in.QuietCeiling = goalpolicy.QuietCeilingFor(e.cfg.StageTimeout)
+	e.stageTimeoutMu.Lock()
+	stageTimeout := e.cfg.StageTimeout
+	e.stageTimeoutMu.Unlock()
+	in.QuietCeiling = goalpolicy.QuietCeilingFor(stageTimeout)
 	in.NeedOwner = v.NeedsOwner.Question
 	for _, t := range v.Tranches {
 		if !t.Closed {
@@ -832,7 +835,11 @@ func sizeUnestimatedRows(want []int, typical int) {
 // A setter rather than a Config field because the caller that knows
 // the timeout is the driver, which is handed an engine somebody else
 // built (SetExperimentSpawner is here for the same reason).
-func (e *Engine) SetStageTimeout(d time.Duration) { e.cfg.StageTimeout = d }
+func (e *Engine) SetStageTimeout(d time.Duration) {
+	e.stageTimeoutMu.Lock()
+	defer e.stageTimeoutMu.Unlock()
+	e.cfg.StageTimeout = d
+}
 
 // GoalStart is a card the driving loop must start, with the note to start
 // it with (a send-back's reason), empty for a plain start.

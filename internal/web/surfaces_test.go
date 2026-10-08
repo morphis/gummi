@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,6 +114,12 @@ func newBoardHarness(t *testing.T) *boardHarness {
 	shell.SetEnvelope(500)
 	shell.SetCopilotHint(false)
 	shell.SetMotion(false)
+	var publish atomic.Pointer[func(webapi.Change)]
+	shell.SetChangeHook(func(c webapi.Change) {
+		if p := publish.Load(); p != nil {
+			(*p)(c)
+		}
+	})
 	bridge := ui.NewHeadless(shell)
 	go func() { _ = bridge.Run() }()
 	t.Cleanup(bridge.Stop)
@@ -132,7 +139,8 @@ func newBoardHarness(t *testing.T) *boardHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shell.SetChangeHook(srv.Publish)
+	pub := srv.Publish
+	publish.Store(&pub)
 	h.srv = srv
 	h.http = httptestServer(t, srv)
 	b := &boardHarness{harness: h, root: root, store: store, eng: eng, ag: ag}

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,15 @@ func newHarness(t *testing.T, mutate ...func(*Options)) *harness {
 	shell := ui.NewShell(theme.GummiDark(), "v0-test")
 	shell.SetCopilotHint(false)
 	shell.SetMotion(false)
+	// the hook must be set before the board runs (SetChangeHook); the
+	// server it publishes to does not exist yet, so it is reached through
+	// this once it does
+	var publish atomic.Pointer[func(webapi.Change)]
+	shell.SetChangeHook(func(c webapi.Change) {
+		if p := publish.Load(); p != nil {
+			(*p)(c)
+		}
+	})
 	bridge := ui.NewHeadless(shell)
 	go func() { _ = bridge.Run() }()
 	t.Cleanup(bridge.Stop)
@@ -78,7 +88,8 @@ func newHarness(t *testing.T, mutate ...func(*Options)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shell.SetChangeHook(srv.Publish)
+	pub := srv.Publish
+	publish.Store(&pub)
 	h.srv = srv
 	h.http = httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
@@ -432,6 +443,9 @@ type sseReader struct {
 	t   *testing.T
 	res *http.Response
 	sc  *bufio.Scanner
+
+	drain sync.Once
+	end   chan struct{}
 }
 
 type sseMsg struct{ id, event, data string }
@@ -450,7 +464,7 @@ func (h *harness) events(c *http.Client, lastID string) *sseReader {
 		h.t.Fatalf("GET /api/events = %d %s", res.StatusCode, res.Header.Get("Content-Type"))
 	}
 	h.t.Cleanup(func() { _ = res.Body.Close() })
-	return &sseReader{t: h.t, res: res, sc: bufio.NewScanner(res.Body)}
+	return &sseReader{t: h.t, res: res, sc: bufio.NewScanner(res.Body), end: make(chan struct{})}
 }
 
 // next returns the next event (comments and retry lines skipped).
@@ -610,17 +624,20 @@ func TestANamedCodePairsAsItsPerson(t *testing.T) {
 	}
 }
 
-// ends reports whether the stream closes within d.
+// ends reports whether the stream closes within d. One goroutine drains the
+// stream however often it is asked, so a repeated ask never scans beside
+// the first.
 func (r *sseReader) ends(d time.Duration) bool {
 	r.t.Helper()
-	done := make(chan struct{})
-	go func() {
-		for r.sc.Scan() {
-		}
-		close(done)
-	}()
+	r.drain.Do(func() {
+		go func() {
+			for r.sc.Scan() {
+			}
+			close(r.end)
+		}()
+	})
 	select {
-	case <-done:
+	case <-r.end:
 		return true
 	case <-time.After(d):
 		return false

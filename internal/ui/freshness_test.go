@@ -479,13 +479,11 @@ func TestAPassedVerifyStoppedByHandStillReadsPassed(t *testing.T) {
 			return nil
 		})
 	}
-	c, err := b.Card(ctx, "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Decision == nil || c.Decision.Word != "verify passed" || c.Decision.Tone != "ok" {
-		t.Fatalf("a passed verify stopped by hand reads %+v; want \"verify passed\"", c.Decision)
-	}
+	// the card reads the paused session on its next refresh, a beat
+	// behind the session itself
+	c = waitCard(t, b, "FD-001", "verify passed after the stop", func(c webapi.Card) bool {
+		return c.Decision != nil && c.Decision.Word == "verify passed" && c.Decision.Tone == "ok"
+	})
 	if !strings.HasPrefix(c.Decision.Question, "verification passed") {
 		t.Errorf("its question reads %q", c.Decision.Question)
 	}

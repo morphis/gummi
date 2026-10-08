@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -76,7 +77,11 @@ type Shell struct {
 	// repoSeq issues the sequence numbers of repository reads (nextRepoSeq);
 	// repoInstalled is the newest one installed (installRepos). Both are
 	// what keep an older read from overwriting a newer one.
-	repoSeq       atomic.Uint64
+	repoSeq atomic.Uint64
+	// repoMu guards baseBranches and repoBranches: installRepos writes them
+	// on the loop while loadRows, an off-loop read, resolves each card's
+	// trunk (repoBaseBranch).
+	repoMu        sync.RWMutex
 	repoInstalled uint64
 
 	rows []featureRow
@@ -641,7 +646,9 @@ func (m *Shell) installRepos(snap repoSnapshot) bool {
 	if snap.discovered {
 		m.repoNames = snap.names
 	}
+	m.repoMu.Lock()
 	m.baseBranches, m.repoBranches = snap.base, snap.branches
+	m.repoMu.Unlock()
 	return true
 }
 
@@ -776,6 +783,8 @@ func (m *Shell) baseBranch(f domain.Feature) string {
 // out, with no goal considered. Only the two callers that have already
 // answered the goal question for themselves reach it directly.
 func (m *Shell) repoBaseBranch(f domain.Feature) string {
+	m.repoMu.RLock()
+	defer m.repoMu.RUnlock()
 	if name, ok := m.baseBranches[f.Repo]; ok && name != "" {
 		return name
 	}
