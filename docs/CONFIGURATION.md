@@ -1,8 +1,7 @@
 # Backends and configuration
 
-The README names the knobs a first user meets. This page holds the rest:
-every backend's specifics, every key in the two config files, and the full
-environment table. Design rationale lives in `DESIGN.md` §4.4 and §5.
+This page holds every backend's specifics, every key in the two config
+files, and the full environment table. Design rationale lives in `DESIGN.md` §4.4 and §5.
 
 ## Agent backends
 
@@ -179,10 +178,11 @@ profiles:
     scribe:      { backend: antigravity, model: gemini-3.1-pro-low }
 ```
 
-A fifth role, `lead`, runs a goal's judgment (see the README's goals
-section). It is optional: a profile with no `lead:` runs its goals' leads on
-the architect's backend and model. A lead needs a backend that reaches
-tools — native client tools or MCP — or the goal runs on its rules alone.
+A fifth role, `lead`, runs a goal's judgment (see
+[HEADLESS.md](HEADLESS.md#goals)). It is optional: a profile with no
+`lead:` runs its goals' leads on the architect's backend and model. A
+lead needs a backend that reaches tools — native client tools or MCP — or
+the goal runs on its rules alone.
 Lead turns are many and short — one per card question, plan check and
 event worth a judgment — and each is booked to the goal's budget, so on a
 goal with chatty cards the lead can cost more than any one card. A
@@ -215,8 +215,8 @@ Model ids are forwarded verbatim, so their spelling is the backend's: the
 claude CLI takes `claude-haiku-4-5`, while Copilot's spells the same
 model `claude-haiku-4.5`. `gummi doctor` fails a claude-backed role
 spelled the dotted way without needing `--deep`, and a scribe the backend
-refuses says so on the first card it fails, since discovery, estimates
-and landing drafts all run on it.
+refuses says so on the first card it fails, since discovery and landing
+drafts all run on it.
 
 ## Hooks
 
@@ -307,7 +307,7 @@ re-raised decision that deduped to a no-op raises nothing).
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
 | `GUMMI_ANTIGRAVITY_CREDITS_PER_1K` | token→credit rate for antigravity sessions (agy reports token counts only); 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile |
-| `GUMMI_ENVELOPE` | default credit envelope for new cards, and a floor under the estimated one. Unset, the board prefills 2000 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
+| `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat per-stage credit cap |
 | `GUMMI_TURN_RESERVE` | one turn's credits, the floor under envelope-derived stage budgets |
 | `GUMMI_REVIEW_DIFF_MAX` | bytes of diff the reviewer is handed inline (default 48 KiB); above it the reviewer gets a stat and fetches what it reads, and 0 forces that shape |

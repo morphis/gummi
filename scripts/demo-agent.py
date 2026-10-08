@@ -306,9 +306,28 @@ def git(workdir, *args):
 # stage scripts
 # --------------------------------------------------------------------------
 
-def fd001_brainstorm(ctx, turn):
-    """Interactive: one question per turn, recommendation attached."""
-    if turn == 0:
+def fd001_ask(ctx, ask_id, question, options, anchor):
+    """Put a decision to the user through gummi's ask_user. The turn stays
+    open: gummi answers with a resolve frame and the work carries on there.
+    A design-stage question must say which section its answer changes, or
+    gummi bounces it before it reaches the screen."""
+    ctx["pending_ask"] = True
+    emit({
+        "type": "ask",
+        "id": ask_id,
+        "ask": {"question": question, "options": options, "spec_anchor": anchor,
+                "changes_section": "Chosen approach"},
+    })
+
+
+def fd001_plan(ctx, turn):
+    """The design stage, in one turn: two decisions put to the user with
+    their recommendation attached, then converge and write the plan. The
+    stage ends at the turn's end (a critique runs next), so the questions
+    go through ask_user rather than across turns."""
+    step = ctx.get("plan_step", 0)
+    ctx["plan_step"] = step + 1
+    if step == 0:
         think("reading lxc/list.go to see how the memory pair is built")
         tool("read", "lxc/list.go")
         tool("grep", "columnsShorthandMap")
@@ -320,106 +339,79 @@ def fd001_brainstorm(ctx, turn):
             "carries `m`/`M` for the memory pair but only `D` for disk, and\n"
             "`diskUsageColumnData` already reads `State.Disk[rootDisk].Usage`.\n"
             "So the numerator exists; this feature is a denominator plus a\n"
-            "column entry. I have written that up under Problem.\n\n"
-            "First decision -- **which denominator?**\n\n"
-            "  a. `State.Disk[rootDisk].Total`, the pool-reported total from\n"
-            "     the `instances_state_total` API extension\n"
-            "  b. the root device's configured `size`, mirroring how the\n"
-            "     memory column reads `limits.memory`\n\n"
-            "My recommendation is **(a)**: the column answers a capacity\n"
-            "question, and `size` is unset on most instances -- (b) would\n"
-            "leave the column blank exactly where operators need it."
+            "column entry. I have written that up under Problem."
         )
         usage(38, 9100, 640, ctx["model"])
-    elif turn == 1:
+        fd001_ask(
+            ctx, "ask-plan-1",
+            "Which denominator should DISK USAGE% report against? `size` is "
+            "unset on most instances, so it would leave the column blank "
+            "exactly where operators need it.",
+            [
+                {"label": "State.Disk[rootDisk].Total -- the pool total (recommended)",
+                 "detail": "real capacity, fetched on the request that already carries Usage"},
+                {"label": "The root device's configured size",
+                 "detail": "mirrors how the memory column reads limits.memory"},
+            ],
+            "Problem",
+        )
+    elif step == 1:
         think("recording the decision and laying out both approaches")
         edit_spec(ctx["spec"], lambda d: set_section(d, "Considered approaches", CONSIDERED))
         say(
             "Recorded. Both approaches are written up under Considered\n"
-            "approaches with their tradeoffs -- I have kept (b) on the page\n"
-            "rather than deleting it, so the spec shows why it lost.\n\n"
-            "Next decision -- **the shorthand char**. This is more awkward\n"
-            "than it looks: `d` is Description and `D` is DISK USAGE, so the\n"
-            "disk pair cannot mirror the `m`/`M` casing the memory pair uses.\n\n"
-            "Free and plausible: `U` (usage percent) or `%`.\n\n"
-            "I recommend **`U`**: `%` has to be quoted in most shells, which\n"
-            "makes `lxc list -c %` a support question waiting to happen."
+            "approaches with their tradeoffs -- I have kept the quota on the\n"
+            "page rather than deleting it, so the spec shows why it lost."
         )
         usage(31, 11200, 520, ctx["model"])
-    else:
-        say(
-            "Noted -- `U` it is. I have flagged the remaining open question\n"
-            "(the older-server rendering) as its own `%%` thread against the\n"
-            "approach it belongs to, so it rides the spec into the gate.\n\n"
-            "Problem, scope and both approaches are on the page. Convergence\n"
-            "is the Spec stage's job, so I will stop here."
+        fd001_ask(
+            ctx, "ask-plan-2",
+            "Which shorthand char? `d` is Description and `D` is DISK USAGE, "
+            "so the disk pair cannot mirror the `m`/`M` casing.",
+            [
+                {"label": "U -- usage percent (recommended)",
+                 "detail": "free, and needs no quoting in a shell"},
+                {"label": "%",
+                 "detail": "reads well, but `lxc list -c %` has to be quoted"},
+            ],
+            "Considered approaches",
         )
-        usage(22, 12400, 300, ctx["model"])
-
-
-def fd001_spec(ctx, turn):
-    think("converging on the denominator and writing the verification plan")
-    tool("read", "lxc/list.go")
-    tool("read", "lxc/list_test.go")
-    edit_spec(ctx["spec"], lambda d: set_section(d, "Chosen approach", CHOSEN))
-    edit_spec(ctx["spec"], lambda d: set_section(d, "Verification plan", VERIFICATION))
-    edit_spec(
-        ctx["spec"],
-        lambda d: d.replace(
-            "%% @architect: does an older server without instances_state_total need a",
-            "%% @architect: resolved -- blank is enough; an older server reports\n"
-            "%% Total == 0, which is already the whole-pool case. One rendering,\n"
-            "%% one guard. (was: does an older server need a distinct rendering?)\n"
-            "%% @gummi-unused: ",
-            1,
-        ),
-    )
-    say(
-        "Converged on `State.Disk[rootDisk].Total`, and resolved the open\n"
-        "thread while I was there: an older server without the\n"
-        "`instances_state_total` extension simply reports `Total == 0`, which\n"
-        "is already the whole-pool case. One guard covers both -- no version\n"
-        "sniffing needed.\n\n"
-        "The Verification plan pins the honest-blank rule as an explicit\n"
-        "check, because that is the one behaviour a careless implementation\n"
-        "gets wrong (`0.0%` reads as a measurement).\n\n"
-        "Spec is complete and ready for your gate."
-    )
-    usage(54, 14800, 1120, ctx["model"])
-
-
-def fd001_plan(ctx, turn):
-    think("deriving tracer-bullet steps from the approved spec")
-    tool("read", "lxc/list.go")
-    tool("grep", "func TestColumns")
-    edit_spec(ctx["spec"], lambda d: set_section(d, "Implementation notes", NOTES))
-    say(
-        "Four steps, tracer-bullet ordered: step 1 cuts the thin complete\n"
-        "path (the column function), steps 2-3 wire it into the map and the\n"
-        "help text, step 4 locks the header in a test.\n\n"
-        "Plan claims are written out -- including the golden trace for\n"
-        "`50.0%` and the `Total == 0` invariant, so the critique can check\n"
-        "them without re-deriving anything from the source."
-    )
-    usage(47, 16100, 980, ctx["model"])
+    else:
+        think("converging on the denominator and deriving tracer-bullet steps")
+        tool("read", "lxc/list.go")
+        tool("read", "lxc/list_test.go")
+        tool("grep", "func TestColumns")
+        edit_spec(ctx["spec"], lambda d: set_section(d, "Chosen approach", CHOSEN))
+        edit_spec(ctx["spec"], lambda d: set_section(d, "Implementation notes", NOTES))
+        edit_spec(ctx["spec"], lambda d: set_section(d, "Verification plan", VERIFICATION))
+        edit_spec(
+            ctx["spec"],
+            lambda d: d.replace(
+                "%% @architect: does an older server without instances_state_total need a",
+                "%% @architect: resolved -- blank is enough; an older server reports\n"
+                "%% Total == 0, which is already the whole-pool case. One rendering,\n"
+                "%% one guard. (was: does an older server need a distinct rendering?)\n"
+                "%% @gummi-unused: ",
+                1,
+            ),
+        )
+        say(
+            "`U` it is. Converged on `State.Disk[rootDisk].Total`, and resolved\n"
+            "the open thread while I was there: an older server without\n"
+            "`instances_state_total` reports `Total == 0`, which is already\n"
+            "the whole-pool case. One guard covers both.\n\n"
+            "Four tracer-bullet steps are under Implementation notes, with the\n"
+            "golden trace for `50.0%` written out as a plan claim, and the\n"
+            "Verification plan pins the honest-blank rule as its own check.\n\n"
+            "The plan is ready for your gate."
+        )
+        usage(76, 16100, 1480, ctx["model"])
 
 
 def fd001_critique(ctx, turn):
     think("refuting the plan before the user approves it")
     tool("read", "lxc/list.go")
     tool("read", "lxc/list_test.go")
-    edit_spec(
-        ctx["spec"],
-        lambda d: append_section(
-            d,
-            "Review",
-            "standards / nit: step 2's tuple fields are given positionally.\n"
-            "%% @reviewer: nit -- the `column` struct's four bool fields are\n"
-            "unnamed at the callsite, so \"copy 'D''s\" is the only thing\n"
-            "keeping them right. Not blocking (every other entry in the map\n"
-            "is written the same way), but worth a comment on the line.",
-        ),
-    )
     say(
         "One pass, four lenses. The plan holds up:\n\n"
         "- **completeness** -- all four Verification plan bullets map to a\n"
@@ -429,7 +421,8 @@ def fd001_critique(ctx, turn):
         "- **security** -- no new input surface; the divide is guarded.\n"
         "- **executability** -- `go build ./lxc/...` and `go vet ./lxc/`\n"
         "  both resolve in this worktree, and the checks block parses.\n\n"
-        "One non-blocking nit filed against step 2.\n\n"
+        "One non-blocking nit: step 2's tuple fields are positional, as\n"
+        "every other entry in that map already is. Not worth a thread.\n\n"
         "VERDICT: pass"
     )
     usage(41, 15900, 870, ctx["model"])
@@ -641,8 +634,6 @@ def fd001_verify(ctx, turn):
 
 
 FD001 = {
-    "brainstorm": fd001_brainstorm,
-    "spec": fd001_spec,
     "plan": fd001_plan,
     "critique": fd001_critique,
     "implement": fd001_implement,
@@ -886,8 +877,12 @@ def main():
             # the answer to our ask_user; carry straight on with the work
             log("RESOLVE " + json.dumps(frame.get("result"))[:200])
             ctx["pending_ask"] = False
-            fd001_implement(ctx, 1)
-            idle()
+            if ctx["stage"] == "plan":
+                fd001_plan(ctx, 0)
+            else:
+                fd001_implement(ctx, 1)
+            if not ctx.get("pending_ask"):
+                idle()
         elif kind == "interrupt":
             idle()
         elif kind == "send":

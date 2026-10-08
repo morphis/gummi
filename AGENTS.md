@@ -14,7 +14,7 @@ agent, script, or CI driving a *fresh* gummi from *outside*, via the
 headless CLI driver (`gummi run`/`resume`). An agent working *inside* a
 card reaches gummi's tools only through that card's own session MCP
 endpoint (§16) — there is no board-level agent. See `internal/driver`
-and README's "Running headlessly" for the outside path.
+and `docs/HEADLESS.md` for the outside path.
 
 - **Language:** Go 1.26, single module `github.com/morphis/gummi`.
 - **Binary:** `cmd/gummi` → `bin/gummi`. Run with no args inside a git repo.
@@ -41,7 +41,8 @@ the sections its gate demands — never a graph of its own. Every stage
 ends with a critique pass before its gate; review is a pass, not a
 stage.
 
-Read `README.md` for the user-facing feature tour and key bindings.
+Read `README.md` for the user-facing overview; the full key table is `?`
+in the TUI.
 
 ## Package map (`internal/`)
 
@@ -89,7 +90,7 @@ leaf services.
 (spec decomposition), `bugs` (GitHub issue import / manual add), and the
 headless driver surface — `run`, `resume`, `status` (`--stats` reports where a
 card's money and hours went), `spec`, `diff`, `verify`,
-`merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See README's "Running headlessly"
+`merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See `docs/HEADLESS.md`
 for the driver's command grammar and exit-status table.
 
 **Flags are declared once.** Cobra owns routing, help, completion *and*
@@ -167,7 +168,7 @@ Copilot auth, set `GUMMI_AGENT=headless` with `GUMMI_AGENT_CMD` pointed at
 a BYOK/local endpoint's adapter (`GUMMI_HEADLESS_CREDITS_PER_1K` prices its
 spend into credits). With no usable agent, creation/specs/worktrees/gates
 still work — the board just stays static. Key env vars are tabled in
-`README.md#configuration`.
+`docs/CONFIGURATION.md`.
 
 ## Conventions & guardrails
 

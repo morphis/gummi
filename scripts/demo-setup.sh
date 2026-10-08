@@ -50,7 +50,9 @@ if [ -d "$repo/.gummi" ]; then
         [ -d "$wt" ] && git -C "$repo" worktree remove --force "$wt" 2>/dev/null || true
     done
     git -C "$repo" worktree prune 2>/dev/null || true
-    for b in $(git -C "$repo" branch --list 'gummi/*' --format='%(refname:short)'); do
+    # Every branch but main is one an earlier take's cards cut (feat/,
+    # fix/, ...), and a leftover one makes the hero card's plan stage fail.
+    for b in $(git -C "$repo" branch --format='%(refname:short)' | grep -vx main); do
         git -C "$repo" branch -D "$b" >/dev/null 2>&1 || true
     done
 fi

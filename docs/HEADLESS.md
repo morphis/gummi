@@ -12,15 +12,15 @@ verified branch, and landing is the separate `merge` verb.
 ## Starting a card
 
 ```sh
-gummi run --envelope 500 "Add a --format=json flag to the export command"
-gummi run --envelope 500 --gate-approval autopilot "..."
-gummi research --envelope 300 "Where does the exporter buffer, and why?"
+gummi run --envelope 5 "Add a --format=json flag to the export command"
+gummi run --envelope 5 --gate-approval autopilot "..."
+gummi research --envelope 3 "Where does the exporter buffer, and why?"
 ```
 
 Two things must be true before any work begins, and both fail loud:
 
-- an envelope is named (`--envelope N`, or `GUMMI_ENVELOPE`). The board's
-  creation form prefills 2000 credits you can edit; an unattended run has
+- an envelope is named, in dollars (`--envelope 5`, `$12.50`, or
+  `GUMMI_ENVELOPE`). The board's creation form prefills $20 you can edit; an unattended run has
   no one to read a default, so it must name one.
 - an agent backend is configured. `gummi doctor` tells you which.
 
@@ -303,8 +303,8 @@ budget, agree what "done" means, and gummi runs the cards that get there on
 one shared branch and comes back when the result is ready for you.
 
 ```sh
-gummi goal --envelope 4000 "Export works offline"
-gummi goal --envelope 4000 --plan-file goal.md "Export works offline"
+gummi goal --envelope 40 "Export works offline"
+gummi goal --envelope 40 --plan-file goal.md "Export works offline"
 ```
 
 **Plan.** The goal's plan is a conversation with the architect, and it
@@ -354,7 +354,7 @@ and resumable, not given up on. Nothing is dropped and the card keeps its
 branch and its spend, so raising the envelope continues it:
 
 ```sh
-gummi resume GL-004 --envelope 6000     # more budget, and it carries on
+gummi resume GL-004 --envelope 60     # more budget, and it carries on
 ```
 
 A goal proved by an experiment has a second ceiling — substrate runs and
@@ -462,9 +462,9 @@ A card can be minted **onto** a branch gummi did not cut, and rework it in
 place (DESIGN §10 D22):
 
 ```sh
-gummi run --adopt feat/their-parser --envelope 500 "finish the empty-case handling"
-gummi run --pr 412 --envelope 500 "address the review comments"
-gummi bugs new --title "Parser drops empty input" --adopt fix/parser --envelope 300
+gummi run --adopt feat/their-parser --envelope 5 "finish the empty-case handling"
+gummi run --pr 412 --envelope 5 "address the review comments"
+gummi bugs new --title "Parser drops empty input" --adopt fix/parser --envelope 3
 ```
 
 `--adopt <branch>` takes a local branch as it stands. `--pr <url|number>`

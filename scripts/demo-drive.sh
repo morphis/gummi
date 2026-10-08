@@ -142,7 +142,7 @@ to_board() {
     tm set -g @key "esc"
     t 1.4
     for ((i = 0; i < 4; i++)); do
-        tm capture-pane -p 2>/dev/null | grep -q "BACKLOG" && break
+        tm capture-pane -p 2>/dev/null | grep -q "BOARD " && break
         tm send-keys Escape
         t 0.7
     done
@@ -166,10 +166,10 @@ await() {
 }
 
 # The card page draws a stage rail and pads the active stage with an extra
-# space on each side ("─ spec ─  plan  ─ implement ─"). That is the one
+# space on each side ("─ todo ─  plan  ─ implement ─"). That is the one
 # progress signal that stays on screen, so stage waits anchor to it rather
 # than to thread text, which scrolls away between two polls.
-STAGES=(brainstorm spec plan implement review verify done)
+STAGES=(todo plan implement verify done)
 
 # await_stage <stage> [timeout] -- wait until the card is AT that stage or
 # past it. "Or past it" is the load-bearing half: an autonomous tail can
@@ -217,7 +217,7 @@ cues() {
     fi
 
     # -- 3 ------------------------------------------------------------------
-    chapter "3 · Design is a conversation" "brainstorm"
+    chapter "3 · Design is a conversation" "the plan stage"
     # Selection does not follow a newly created card, and chapter 1 left it
     # further down the list -- so re-anchor on card 1 and step to the new
     # one rather than assuming where the cursor is.
@@ -228,17 +228,17 @@ cues() {
     say "Nothing has run yet, so gummi pins the one decision that is open." 2.8
     press Enter "enter" "Start the design flow." 2.4
     press Enter "enter" "Now start the architect." 1.5
-    await "which denominator" 90
+    await "denominator" 90
     say "It read lxc/list.go first, then wrote the Problem section from what it found." 3.4
-    say "One question per turn, with its recommendation attached — so you can agree in a word." 3.6
-    typeline "(a) — report against the pool total, not the quota" \
-        "Answer it in the composer, like any other chat."
-    press Enter "enter" "Send." 1.2
+    say "One question at a time, with its recommendation attached — so you can agree in one key." 3.6
+    press_when "denominator" Enter "enter" "Take the recommendation: the pool total, not the quota." 15 2.0
     await "shorthand char" 90
     say "Second decision: d and D are both taken, so the disk pair cannot mirror m and M." 3.6
-    typeline "U it is" "Agree, and it moves on."
-    press Enter "enter" "Send." 1.2
-    await "stop here" 90
+    press_when "shorthand char" Enter "enter" "U it is." 15 1.2
+    await "ready for your gate" 90
+    say "It chose an approach, wrote tracer-bullet steps, and resolved its own open thread." 3.6
+    say "Before the plan reaches you, a fresh reviewer tries to refute it." 3.2
+    await "VERDICT: pass" 90
 
     # -- the spec ----------------------------------------------------------
     chapter "3 · Design is a conversation" "the spec is the artifact"
@@ -256,29 +256,21 @@ cues() {
     say "It landed as a %% marker — and notice it now blocks approval." 3.4
     press Down "j" "Your open question is a gate, not a note." 1.2
     press x "x" "x resolves the thread once you are satisfied." 2.6
+    press Enter "enter" "A reason is optional; enter resolves it." 2.0
 
     # -- the gate ----------------------------------------------------------
-    chapter "3 · Design is a conversation" "crossing a gate"
-    press g "g" "g crosses the gate. Brainstorm is done; the spec stage converges." 3.0
-    press Enter "enter" "Run the architect once more." 1.5
-    await "your gate" 90
-    say "It converged, and resolved its own open thread while it was there." 3.2
+    chapter "3 · Design is a conversation" "crossing the one gate"
+    press g "g" "g crosses the gate. There is one design gate, and it is yours." 3.0
     say "Approving is the moment gummi creates the worktree and the branch." 3.2
-    press Enter "enter" "Approve." 2.0
-    await_stage plan 60
+    await_stage implement 60
 
     # -- 4 ------------------------------------------------------------------
     # From here the card is running, so the stages advance themselves and
     # the cues only narrate. Await the stage rail, not thread text: the
     # thread scrolls, and a line can pass by between two polls.
-    chapter "4 · Implementation runs alone" "plan → critique → implement"
-    say "A worktree and a branch now exist. The spec settled into .gummi/specs." 3.4
-    press_when "run the planner" Enter "enter" "Run the planner." 20 1.8
-    say "Tracer-bullet steps, each naming the files it touches and the test that proves it." 3.6
-    say "Before the plan reaches you, a fresh reviewer tries to refute it." 3.4
-    say "It passed with one non-blocking nit, filed as its own thread." 3.0
-    await_stage implement 120
-    say "This card is on gates — the everyday default — so design gates cross themselves." 3.8
+    chapter "4 · Implementation runs alone" "in the card's own worktree"
+    say "A worktree and a branch now exist. The spec rides along on the branch." 3.4
+    press_when "run implement" Enter "enter" "Start the implementer." 15 2.0
     say "Implement runs alone in the worktree, streaming what it does into the card." 3.6
     await "untouched" 150
     say "Mid-turn the implementer needs a decision, so it asks — inline, with options." 3.8
@@ -288,7 +280,7 @@ cues() {
 
     # -- 5 ------------------------------------------------------------------
     chapter "5 · Review has no shared context" "a fresh session, the spec and the diff"
-    await_stage review 150
+    await "implement · reviewer" 150
     say "The reviewer never saw the implementer's session. Only the spec and the diff." 3.8
     say "It found the missing test — blocking — so the work bounces back automatically." 3.8
     say "The implementer fixes it and resolves the thread with how, then review runs again." 4.0
@@ -305,7 +297,7 @@ cues() {
     to_board "Back to the board — esc leaves a card page in one press."
     say "Single-letter verbs work here: the board has the keyboard, not a composer." 3.2
     press 1 "1" "Take the untriaged bug at the top." 1.6
-    press_when "BACKLOG" A "A" "A sets how far a card runs unattended — and starts it where it sits." 10 3.2
+    press_when "BOARD " A "A" "A sets how far a card runs unattended — and starts it where it sits." 10 3.2
     say "off stops at every gate · gates crosses the design gates · full runs to a verified branch." 4.4
     say "On full it answers its own questions and bounces its own failed verify." 3.4
     say "What it never does is widen its own reach. And it never lands on main." 3.6
@@ -317,7 +309,7 @@ cues() {
     # A digit, not four j's: a dialog closing above swallows the first
     # keystroke after it, which silently lands the cursor one card short.
     press 5 "5" "Jump straight to the card we drove." 2.0
-    press_when "BACKLOG" m "m" "m squash-merges it into main." 10 3.4
+    press_when "BOARD " m "m" "m squash-merges it into main." 10 3.4
     say "gummi drafts the landing message from the spec and the branch's own commits…" 3.8
     say "…and then stops. You read it, edit it, approve it. Nothing lands unreviewed." 4.2
     press Escape "esc" "Not today — the branch keeps." 2.2
