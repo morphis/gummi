@@ -58,11 +58,11 @@ func TestRunViewNamesTheRedoAndItsCost(t *testing.T) {
 	if !strings.Contains(out, "cost more than the first") {
 		t.Errorf("the redo cost 12.51 against 12.24 and the surface does not say so:\n%s", out)
 	}
-	if !strings.Contains(out, "12.51 of 28.16 credits was work already done (44%)") {
+	if !strings.Contains(out, "$0.13 of $0.28 was work already done (44%)") {
 		t.Errorf("the rework total is missing or wrong:\n%s", out)
 	}
 	// and the split is on the headline row too, where the money is
-	if !strings.Contains(out, "first pass 15.65") || !strings.Contains(out, "redone 12.51 (44%)") {
+	if !strings.Contains(out, "first pass $0.16") || !strings.Contains(out, "redone $0.13 (44%)") {
 		t.Errorf("the spend split is missing from the money block:\n%s", out)
 	}
 }
@@ -118,10 +118,10 @@ func TestRunViewSaysWhenTheBackendRecordedNoTools(t *testing.T) {
 func TestRunViewMarksReconstructedFigures(t *testing.T) {
 	r := bounced()
 	r.Sessions[2].Reconstructed = true
-	if out := statsRender(r); !strings.Contains(out, "12.51 ~") {
+	if out := statsRender(r); !strings.Contains(out, "$0.13 ~") {
 		t.Errorf("a reconstructed figure is presented as measured:\n%s", out)
 	}
-	if out := statsRender(bounced()); strings.Contains(out, "12.51 ~") {
+	if out := statsRender(bounced()); strings.Contains(out, "$0.13 ~") {
 		t.Errorf("a measured figure was marked as reconstructed:\n%s", out)
 	}
 }
@@ -131,7 +131,7 @@ func TestRunViewMarksReconstructedFigures(t *testing.T) {
 func TestRunViewMarksEstimatedSpend(t *testing.T) {
 	r := bounced()
 	r.Money.Estimated = 4.5
-	if out := statsRender(r); !strings.Contains(out, "~4.50 estimated") {
+	if out := statsRender(r); !strings.Contains(out, "~$0.04 estimated") {
 		t.Errorf("estimated spend was not marked:\n%s", out)
 	}
 	if out := statsRender(bounced()); strings.Contains(out, "estimated") {

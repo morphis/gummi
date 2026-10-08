@@ -71,32 +71,6 @@ func TestCreditEquivalentAt(t *testing.T) {
 	}
 }
 
-func TestBlendEstimate(t *testing.T) {
-	if got := BlendEstimate(100, 200); got != 150 { // avg → 150
-		t.Errorf("blend(100,200) = %v, want 150", got)
-	}
-	if got := BlendEstimate(0, 175); got != 180 { // scribe only, round up to 10
-		t.Errorf("blend(0,175) = %v, want 180", got)
-	}
-	// every non-zero blend is floored at MinEnvelope — an undersized
-	// estimate gates a stage instantly
-	if got := BlendEstimate(0, 40); got != 150 { // scribe only, under the floor
-		t.Errorf("blend(0,40) = %v, want 150 (MinEnvelope floor)", got)
-	}
-	if got := BlendEstimate(130, 0); got != 150 { // historical only, under the floor
-		t.Errorf("blend(130,0) = %v, want 150 (MinEnvelope floor)", got)
-	}
-	if got := BlendEstimate(60, 80); got != 150 { // both signals, under the floor
-		t.Errorf("blend(60,80) = %v, want 150 (MinEnvelope floor)", got)
-	}
-	if got := BlendEstimate(300, 0); got != 300 { // historical only, over the floor
-		t.Errorf("blend(300,0) = %v, want 300", got)
-	}
-	if got := BlendEstimate(0, 0); got != 0 { // unbudgeted stays unbudgeted
-		t.Errorf("blend(0,0) = %v, want 0", got)
-	}
-}
-
 func TestRaisedEnvelope(t *testing.T) {
 	// spend near the envelope: rederive 285 × 1.25 = 356.25 → 360. The
 	// rederive term wins when the spend shows the envelope was undersized.
@@ -154,6 +128,21 @@ func TestFormatDollars(t *testing.T) {
 	for _, c := range cases {
 		if got := FormatDollars(c.credits); got != c.want {
 			t.Errorf("FormatDollars(%v) = %q, want %q", c.credits, got, c.want)
+		}
+	}
+}
+
+func TestParseDollars(t *testing.T) {
+	for in, want := range map[string]int{
+		"5": 500, "$5": 500, " $ 5.50 ": 550, "0": 0, "1,200": 120000, "0.01": 1, "12.3": 1230,
+	} {
+		if got, err := ParseDollars(in); err != nil || got != want {
+			t.Errorf("ParseDollars(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "$", "five", "-1", "0.005", "NaN", "Inf"} {
+		if got, err := ParseDollars(in); err == nil {
+			t.Errorf("ParseDollars(%q) = %d, want an error", in, got)
 		}
 	}
 }

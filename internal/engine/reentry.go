@@ -56,8 +56,7 @@ INTENT: none — a wrong guess routes the card to the wrong stage, and
 saying nothing is always the safer answer.`
 
 // intentRe pulls the answer word out of the reply. Every match is
-// collected and the last wins, matching parseScribeEstimate: a model
-// that corrects itself mid-reply means the correction.
+// collected and the last wins: a model that corrects itself mid-reply means the correction.
 var intentRe = regexp.MustCompile(`(?im)^\s*INTENT:\s*` + "`?" + `([A-Za-z_ -]+)` + "`?" + `\s*$`)
 
 // classifyPrompt renders the full turn for one sentence at one stage.

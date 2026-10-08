@@ -366,7 +366,7 @@ func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudg
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{
-			text:   fmt.Sprintf("%s topped up to %d credits — %s carries on", f.ID, to, need.Card),
+			text:   fmt.Sprintf("%s topped up to %s — %s carries on", f.ID, domain.FormatDollars(float64(to)), need.Card),
 			reload: true, clearInbox: f.ID,
 		}
 	}

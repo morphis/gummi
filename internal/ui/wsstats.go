@@ -537,13 +537,10 @@ func (m *Shell) wsHeadlineLines(rep *fleetrun.Report) []string {
 	s := m.styles
 	var parts []string
 	if rep.Credits > 0 {
-		head := fmt.Sprintf("%.2f credits", rep.Credits)
-		if d := wsDollars(rep.Credits); d != "" {
-			head += " " + d
-		}
+		head := usd(rep.Credits)
 		parts = append(parts, s.CardTitle.Render(head))
 		if rep.RateSpan > 0 {
-			parts = append(parts, fmt.Sprintf("%.1f/h", rep.Credits/rep.RateSpan.Hours()))
+			parts = append(parts, usd(rep.Credits/rep.RateSpan.Hours())+"/h")
 		}
 	}
 	if tok := rep.Tokens.Total(); tok > 0 {
@@ -568,7 +565,7 @@ func (m *Shell) wsHeadlineLines(rep *fleetrun.Report) []string {
 		out = append(out, " "+strings.Join(parts, s.Faint.Render(" · ")))
 	}
 	if rep.Estimated > 0 {
-		out = append(out, " "+s.Warning.Render(fmt.Sprintf("~%.2f estimated", rep.Estimated))+
+		out = append(out, " "+s.Warning.Render("~"+usd(rep.Estimated)+" estimated")+
 			" "+s.Faint.Render("— not yet settled by the provider"))
 	}
 	return out
@@ -941,8 +938,8 @@ func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 	out = append(out, m.wsTotalLines(rep, w)...)
 	foot := "  "
 	if rep.Rework > 0 {
-		foot += fmt.Sprintf("rework %.2f of %.2f (%.0f%%) — %.2f corrected · %.2f re-proved",
-			rep.Rework, rep.Credits, share(rep.Rework, rep.Credits)*100, rep.Corrected, rep.Reproved)
+		foot += fmt.Sprintf("rework %s of %s (%.0f%%) — %s corrected · %s re-proved",
+			usd(rep.Rework), usd(rep.Credits), share(rep.Rework, rep.Credits)*100, usd(rep.Corrected), usd(rep.Reproved))
 		out = append(out, s.Muted.Render(foot))
 	}
 	return out
@@ -963,10 +960,7 @@ func (m *Shell) wsTotalLines(rep *fleetrun.Report, w int) []string {
 	// that did not line up under the rows it totals is one a reader has
 	// to check by eye instead of by adding.
 	row := func(label string, credits float64, tok fleetrun.Tokens) string {
-		line := fmt.Sprintf("  %-10s %s %8.2f credits", label, strings.Repeat(" ", wsBarWidth), credits)
-		if d := wsDollars(credits); d != "" {
-			line += "  " + d
-		}
+		line := fmt.Sprintf("  %-10s %s %9s", label, strings.Repeat(" ", wsBarWidth), usd(credits))
 		if c := wsTokenClause(tok); c != "" {
 			line += s.Faint.Render("  ·  ") + s.Muted.Render(c)
 		}
@@ -1000,18 +994,6 @@ func wsTokenClause(t fleetrun.Tokens) string {
 	return in + " · " + humanTokens(t.Output) + " out"
 }
 
-// wsDollars is a credit figure as money, or empty when it is too small
-// for domain.FormatDollars to render as money at all — that fallback
-// prints credits, and a "(0.05 credits)" beside a credits figure would
-// say the same thing twice.
-func wsDollars(credits float64) string {
-	d := domain.FormatDollars(credits)
-	if !strings.HasPrefix(d, "$") {
-		return ""
-	}
-	return d
-}
-
 // wsBarWidth is how wide a bucket row's magnitude bar is drawn, and
 // wsBucketWidth what the whole row comes to at that bar — the margin,
 // the name, the bar, the figure and the share, in the widths the format
@@ -1021,7 +1003,7 @@ func wsDollars(credits float64) string {
 // other.
 const (
 	wsBarWidth    = 12
-	wsBucketWidth = 2 + 10 + 1 + wsBarWidth + 1 + 8 + 2 + 4
+	wsBucketWidth = 2 + 10 + 1 + wsBarWidth + 1 + 9 + 2 + 4
 )
 
 // wsBucketLines is one column's rows: name, a magnitude bar, the
@@ -1030,8 +1012,8 @@ const (
 func wsBucketLines(s *theme.Styles, bs []cardrun.Bucket, total float64) []string {
 	var out []string
 	for _, b := range bs {
-		out = append(out, fmt.Sprintf("  %-10s %s %8.2f  %3.0f%%",
-			b.Name, wsBar(s, b.Credits, total, wsBarWidth), b.Credits, share(b.Credits, total)*100))
+		out = append(out, fmt.Sprintf("  %-10s %s %9s  %3.0f%%",
+			b.Name, wsBar(s, b.Credits, total, wsBarWidth), usd(b.Credits), share(b.Credits, total)*100))
 	}
 	return out
 }
@@ -1094,7 +1076,7 @@ func (m *Shell) wsTopLines(rep *fleetrun.Report, w int) []string {
 	for _, l := range rep.Top {
 		bar := wsBar(s, l.Credits, maxCredits, 8)
 		line := "  " + s.CardID.Render(string(l.ID)) + "  " + bar +
-			fmt.Sprintf(" %8.2f", l.Credits)
+			fmt.Sprintf(" %9s", usd(l.Credits))
 		if l.Note != "" {
 			line += "  " + s.Muted.Render(l.Note)
 		}

@@ -339,8 +339,8 @@ func TestCardFormEnvelope(t *testing.T) {
 		return form
 	}
 	form := mk()
-	if form.env.Value() != "2400" {
-		t.Fatalf("envelope prefill = %q, want 2400", form.env.Value())
+	if form.env.Value() != "24" {
+		t.Fatalf("envelope prefill = %q, want 24", form.env.Value())
 	}
 	form.HandleKey(keyEnter)
 	if !submitted || got.Envelope == nil || *got.Envelope != 2400 {
@@ -348,7 +348,7 @@ func TestCardFormEnvelope(t *testing.T) {
 	}
 
 	form = mk()
-	form.env.SetValue("7500")
+	form.env.SetValue("75")
 	form.HandleKey(keyEnter)
 	if got.Envelope == nil || *got.Envelope != 7500 {
 		t.Fatalf("Envelope = %v, want explicit 7500", got.Envelope)

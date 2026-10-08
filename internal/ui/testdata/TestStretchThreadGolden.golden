@@ -6,7 +6,7 @@ todo ─ plan ─  implement  ─ verify ─ done
 ⌄ spec · Implementation notes ────────────────────────────────────────────────────────── alt+s
 
 ── autopilot took over ────────────────────────────────────────────────────────────── 23:40 ──
-plan · architect · 1 turn · 180 credits ────────────────────────────────────────────── ✓ 00:04
+plan · architect · 1 turn · $1.80 ──────────────────────────────────────────────────── ✓ 00:04
   ✓ autopilot answered “q?” — stream rows, don't buffer                                 00:00
   ✓ autopilot crossed plan → implement                                                  00:04
 

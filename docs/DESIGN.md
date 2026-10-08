@@ -192,8 +192,7 @@ Stage semantics:
   starts, a verify that still has nothing to run drawn as "no checks"
   rather than "all passed", and a pass on such a card worded as the
   reviewer's own. A failing scribe is said once per card, naming its
-  model, because the same failure also skips the estimate and the
-  landing draft. The approval baseline records the **commit it was
+  model, because the same failure also skips the landing draft. The approval baseline records the **commit it was
   measured on**, and a check it excuses as already failing is excused
   on that commit only: when the card's base moves (a rebase, a
   restack), the excused checks are measured again on the new base
@@ -704,20 +703,30 @@ hits its cap, the orchestrator catches the stop event, records a
 needs-attention queue — never a silent death.
 
 **Layer 2 — model awareness (advisory).** The CLI does not tell the model
-its budget, so gummi does, twice:
+its budget, so gummi does, twice — and in neither does it ask the model to
+judge its own spend. A model cannot see what it has spent; asked to
+"estimate whether the task fits", it guessed, and guessed badly (stopping
+early with most of the budget left, or ploughing on into the cap). The
+metering is gummi's, so the judgment is too:
 
 - *At session start*, in the stage system hints:
-  > You have a budget of ~N credits (≈$X) for this stage. Work
-  > budget-consciously: prefer targeted reads over broad exploration, batch
-  > related edits, avoid speculative refactors. If you estimate the task
-  > cannot be finished within budget, stop early and write a checkpoint
-  > (what's done, what's left, where to resume) into the spec's progress
-  > section instead of running dry mid-edit.
+  > This stage has a budget of $X. gummi meters what you spend and will
+  > tell you here as you pass 50%, 80% and 95% of it. You cannot see your
+  > own spend, so do not estimate it, ration your work against it, or stop
+  > early on a guess about it. Work efficiently: prefer targeted reads over
+  > broad exploration, batch related edits, and avoid speculative
+  > refactors. When gummi tells you to checkpoint, write what's done,
+  > what's left and where to resume into the spec's progress section,
+  > then stop.
 - *Mid-session*, the orchestrator meters actual spend from SDK usage events
-  and injects budget updates at thresholds (50%, 80%, 95%):
-  `[budget] 80% consumed, ~12 credits left — wrap up or checkpoint now.`
-  The 95% message explicitly demands a checkpoint. This converts the hard
-  stop from a cliff into a landing.
+  and injects budget updates at thresholds (50%, 80%, 95%), each naming
+  the metered figure: `[budget] 80% consumed, ~$0.12 left — write what you
+  have into the artifact NOW…`. The 95% message explicitly demands a
+  checkpoint. This converts the hard stop from a cliff into a landing.
+
+Goal cards are the exception: a goal's lead still reasons about budget
+(its `reserve_set`, the envelope it asks for a card), because sizing work
+against a ceiling is the lead's job (§17.3).
 
 **Layer 3 — the budget envelope.** Each work item carries one credit
 envelope, shown on the kanban card. Every stage — interactive or
@@ -749,10 +758,20 @@ Rules that make the envelope real rather than decorative:
   spend × 1.25 (re-deriving the envelope from what the work actually
   costs) and spend + two agent turns, so a resumed stage never re-gates
   on the next turn.
-- **Plan-time estimation**: the envelope is proposed from the historical
-  median spend of completed features blended with a scribe-role
-  estimate, padded and floored (`MinEnvelope`) so estimates skewing low
-  don't gate instantly.
+- **Plan-time proposal**: the envelope is proposed from the historical
+  median spend of completed cards, padded and floored (`MinEnvelope`) so
+  a thin history doesn't gate instantly. There is no agent estimate in
+  it: an earlier scribe pass guessed each card's cost and was blended
+  in, and its guesses were the least reliable input the proposal had.
+
+**Dollars, not credits.** Every figure a person reads or types — the board,
+the web page, the CLI's `--envelope` and `GUMMI_ENVELOPE`, `status` — is in
+US dollars, and so is every figure an agent is told. Storage, the
+`--json` fields and the web contract stay in credits (1 credit = $0.01,
+so a credit is a cent and a dollar figure finer than a cent is refused
+rather than rounded); the conversion happens only at the edges, through
+`domain.FormatDollars` and `domain.ParseDollars` (and their twins in the
+web page's `dom.js`).
 
 **BYOK/local spend.** Credits only meter GitHub-hosted usage; local llama.cpp
 is credit-free but not cost-free (time, watts). The meter therefore records a
@@ -1889,7 +1908,7 @@ Three existing rules shape the design, and they all point the same way:
   the decomposition is delivered through a **structured client tool**
   (`propose_features`, the same plumbing as `ask_user` / `submit_verdict`), not
   free prose gummi regexes out.
-- **One-shot agent passes already exist.** Plan-time `Estimate` (§5.1) is the
+- **One-shot agent passes already exist.** The scribe's landing draft is the
   template: a transient session that is not tracked on the board, sends one
   prompt, collects a structured result, and closes. Ingestion is the same shape
   but **architect-role** — decomposition is design judgment (boundaries,
@@ -1943,7 +1962,7 @@ coverage map is where the agent justifies its cut.
 ```
 
 - **A · extraction primitive** *(engine)* — `Engine.Ingest(source, profile)`,
-  modeled on `Estimate`: copy the source into `.gummi/ingest/`, open a transient
+  modeled on the one-shot scribe passes: copy the source into `.gummi/ingest/`, open a transient
   architect session with the source path + granularity + coverage rules in the
   system hint, register the `propose_features` client tool whose handler
   captures the structured `IngestResult`, and close. Creates nothing on the
@@ -2421,8 +2440,9 @@ caller must decide, then exits.
   `resume --bounce` rewinds review-round work exactly as it does for
   gummi's own reviewer findings.
 - **Envelope required** — a headless run refuses to start without one
-  (`--envelope N` or `GUMMI_ENVELOPE`); exhaustion fails loud (no auto-topup).
-  The board's creation dialogs prefill `ui.DefaultEnvelopeCredits` (2000) when
+  (`--envelope $N` or `GUMMI_ENVELOPE`, in dollars); exhaustion fails loud (no
+  auto-topup). The board's creation dialogs prefill `ui.DefaultEnvelopeCredits`
+  (2000 credits, $20) when
   `GUMMI_ENVELOPE` is unset — a number in a field someone is looking at and can
   edit, which is a different thing from a number an unattended run assumes.
 - **Design questions are delegated** — an interactive stage's `ask_user`

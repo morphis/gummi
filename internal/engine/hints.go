@@ -205,8 +205,8 @@ than silently complying or silently ignoring them.`
 // are architect work like brainstorm/spec; fix is implementer work like
 // implement. Verify is reviewer work: adversarial judgment of the built
 // artifact, and the verdict it produces is the landing gate — the
-// scribe tier is reserved for the cheap one-shot passes (estimation,
-// check discovery). Stages with no agent action return ok=false.
+// scribe tier is reserved for the cheap one-shot passes (check
+// discovery, landing drafts). Stages with no agent action return ok=false.
 func roleForStage(f domain.Feature) (agent.Role, bool) {
 	switch f.Stage {
 	case domain.StagePlan:

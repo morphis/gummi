@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -49,7 +48,7 @@ type envelopeDialog struct {
 
 func newEnvelopeDialog(f domain.Feature, onSubmit func(int) tea.Cmd, onResume func() tea.Cmd) *envelopeDialog {
 	in := textinput.New()
-	in.Placeholder = "credits (0 = uncapped)"
+	in.Placeholder = "dollars (0 = uncapped)"
 	in.CharLimit = 8
 	in.SetWidth(28)
 	in.Focus()
@@ -75,9 +74,9 @@ func (d *envelopeDialog) submit() (bool, tea.Cmd) {
 	if raw == "" {
 		return true, nil
 	}
-	to, err := strconv.Atoi(raw)
-	if err != nil || to < 0 {
-		d.problem = "a whole credit figure, please"
+	to, err := domain.ParseDollars(raw)
+	if err != nil {
+		d.problem = "a dollar amount, like 5 or 12.50"
 		return false, nil
 	}
 	cmd := d.onSubmit(to)
@@ -208,7 +207,7 @@ func (d *envelopeDialog) View(s *theme.Styles, w, h int) string {
 	if d.askResume {
 		var b strings.Builder
 		b.WriteString(s.DialogTitle.Render("budget · "+string(d.feature.ID)) + "\n\n")
-		b.WriteString(fmt.Sprintf("raised to %d — resume %s on autopilot?", d.resumeTo, d.feature.ID) + "\n")
+		b.WriteString(fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.ID) + "\n")
 		b.WriteString("\n" + d.resumeButtons.View(s, true) + "\n")
 		b.WriteString("\n" + s.Faint.Render("y/enter resume · n/esc not now"))
 		return s.DialogFrame.Render(b.String())
@@ -218,9 +217,9 @@ func (d *envelopeDialog) View(s *theme.Styles, w, h int) string {
 	spent := d.feature.Spend.CreditEquivalent()
 	now := "uncapped"
 	if d.feature.Budget.Envelope > 0 {
-		now = fmt.Sprintf("%g credits", float64(d.feature.Budget.Envelope))
+		now = domain.FormatDollars(float64(d.feature.Budget.Envelope))
 	}
-	b.WriteString(s.Faint.Render(fmt.Sprintf("now %s · spent %s%g", now, estMark(d.feature.Spend), roundSpend(spent))) + "\n\n")
+	b.WriteString(s.Faint.Render(fmt.Sprintf("now %s · spent %s%s", now, estMark(d.feature.Spend), domain.FormatDollars(spent))) + "\n\n")
 	b.WriteString(d.input.View() + "\n")
 	if d.problem != "" {
 		b.WriteString(s.Error.Render(d.problem) + "\n")

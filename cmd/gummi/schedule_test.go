@@ -62,7 +62,7 @@ func TestScheduleCLIRoundTrip(t *testing.T) {
 
 	// A mint with a preset cadence: stored off, cron canonical.
 	if err := runCLI("schedule", "add", "--name", "nightly triage", "--every", "1h",
-		"--prompt", "triage new issues", "--envelope", "50"); err != nil {
+		"--prompt", "triage new issues", "--envelope", "0.50"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	sc, err := store.Schedule(ctx, "nightly-triage")

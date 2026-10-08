@@ -39,7 +39,7 @@ function render (pane, entry, ctx) {
   // from the passes and stay absent rather than printed as zeroes on a
   // card whose record holds the money alone.
   if (!ps.length && !m.credits && !m.estimated) {
-    pane.append(h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'Nothing has run yet'), 'Passes and their credits appear here once a stage starts.'))
+    pane.append(h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'Nothing has run yet'), 'Passes and what they cost appear here once a stage starts.'))
     return
   }
   const sect = h('div', { class: 'sect', testid: 'stats' })
@@ -48,9 +48,9 @@ function render (pane, entry, ctx) {
     const env = s.envelope?.credits
     sect.append(
       h('div', { class: 'tiles' },
-        tile(`${cr(m.credits)}`, 'cr', env ? `spent of ${env} envelope` : 'spent', 'stats-spent'),
+        tile(cr(m.credits), '', env ? `spent of ${cr(env)} budget` : 'spent', 'stats-spent'),
         tile(String(ps.filter(p => p.credits > 0 || p.turns > 0).length), '', 'agent passes', 'stats-passes'),
-        tile(cr(m.rework), 'cr', 'rework', 'stats-rework'),
+        tile(cr(m.rework), '', 'rework', 'stats-rework'),
         tile(dur(c.agentMs), '', 'agent time'),
         tile(dur(c.onYouMs), '', 'waiting on you')),
       h('div', { class: 'tablewrap', tabindex: '0', role: 'region', 'aria-label': 'Passes' }, passesTable(ps, max)))
@@ -70,7 +70,7 @@ function render (pane, entry, ctx) {
 
 function passesTable (ps, max) {
   return h('table', { class: 'passes', testid: 'stats-table' },
-    h('thead', null, h('tr', null, h('th', null, 'pass'), h('th', null, 'role'), h('th', null, 'model'), h('th', { class: 'num' }, 'credits'), h('th', { class: 'barc' }, h('span', { class: 'sr-only' }, 'share')), h('th', { class: 'num' }, 'time'), h('th', { class: 'num' }, 'tokens'), h('th', null, 'context'))),
+    h('thead', null, h('tr', null, h('th', null, 'pass'), h('th', null, 'role'), h('th', null, 'model'), h('th', { class: 'num' }, 'cost'), h('th', { class: 'barc' }, h('span', { class: 'sr-only' }, 'share')), h('th', { class: 'num' }, 'time'), h('th', { class: 'num' }, 'tokens'), h('th', null, 'context'))),
     h('tbody', null, ps.map(p => h('tr', { class: p.redo && 'rework', style: { '--sc': stageVar(p.stage) } },
       h('td', null, [p.stage, p.flavor && p.flavor !== 'work' ? p.flavor : null].filter(Boolean).join(' · ')),
       h('td', null, p.role || '—'),
@@ -103,7 +103,7 @@ function tokenText (t) {
   return parts.join(' · ')
 }
 
-// ---- where the credits went ----
+// ---- where the money went ----
 
 // moneyBars is "where it went": by stage (its stage colour), by role and
 // by model (one neutral series), drawn only when the fold holds buckets,
@@ -120,12 +120,12 @@ function moneyBars (m) {
       ? h('p', { class: 'foot-note warn' }, `~${cr(m.estimated)} estimated`, ' — not yet settled by the provider')
       : null,
     m.elsewhere > 0
-      ? h('p', { class: 'foot-note' }, `${cr(m.elsewhere)} cr on turns that are not passes`,
+      ? h('p', { class: 'foot-note' }, `${cr(m.elsewhere)} on turns that are not passes`,
         (m.elsewhereBy || []).length ? ' — ' + m.elsewhereBy.map(b => `${b.name} ${cr(b.credits)}`).join(', ') : '')
       : null
   ].filter(Boolean)
   if (!groups.length && !notes.length) return null
-  return h('section', { class: 'sblock', testid: 'stats-bars', 'aria-label': 'Where the credits went' },
+  return h('section', { class: 'sblock', testid: 'stats-bars', 'aria-label': 'Where the money went' },
     h('h3', { class: 'shead' }, 'Where it went'),
     groups, notes)
 }
@@ -170,7 +170,7 @@ function redoBlock (ps, m) {
         h('span', { class: 'num' }, cr(p.credits) + (p.reconstructed ? ' ~' : '')),
         f && p.credits > f.credits && f.credits > 0 ? h('span', { class: 'dearer' }, '← cost more than the first') : null)
     })),
-    h('p', { class: 'foot-note' }, `${cr(m.rework)} of ${cr(m.credits)} credits was work already done (${Math.round((m.rework || 0) / (m.credits || 1) * 100)}%).`),
+    h('p', { class: 'foot-note' }, `${cr(m.rework)} of ${cr(m.credits)} was work already done (${Math.round((m.rework || 0) / (m.credits || 1) * 100)}%).`),
     m.corrected > 0 && m.reproved > 0
       ? h('p', { class: 'foot-note' }, `${cr(m.corrected)} corrected after a verdict · ${cr(m.reproved)} re-proved over a new base.`)
       : null)
@@ -291,7 +291,7 @@ function envelopeLine (s) {
   if (!e || !(e.credits > 0)) return null
   const spent = Math.max(e.credits - e.left, 0)
   return h('p', { class: 'foot-note', testid: 'stats-envelope' },
-    `granted ${e.credits} · spent ${cr(spent)} · ${Math.round(spent / e.credits * 100)}% used`)
+    `granted ${cr(e.credits)} · spent ${cr(spent)} · ${Math.round(spent / e.credits * 100)}% used`)
 }
 
 // ---- a session's run ----
@@ -314,19 +314,19 @@ function session (pane, s, ctx) {
   ].filter(Boolean)
   pane.append(h('div', { class: 'sect', testid: 'stats' },
     h('div', { class: 'tiles' },
-      tile(`${cr(m.credits)}`, 'cr', env ? `spent of ${env} envelope` : 'spent', 'stats-spent'),
-      env ? tile(cr(Math.max(s.envelope.left, 0)), 'cr', 'left', 'stats-left') : null,
+      tile(cr(m.credits), '', env ? `spent of ${cr(env)} budget` : 'spent', 'stats-spent'),
+      env ? tile(cr(Math.max(s.envelope.left, 0)), '', 'left', 'stats-left') : null,
       tile(String(models.length), '', models.length === 1 ? 'model' : 'models', 'stats-models')),
     models.length
       ? h('div', { class: 'tablewrap', tabindex: '0', role: 'region', 'aria-label': 'Models' }, h('table', { class: 'passes', testid: 'stats-table' },
-        h('thead', null, h('tr', null, h('th', null, 'model'), h('th', { class: 'num' }, 'credits'), h('th', { class: 'barc' }, h('span', { class: 'sr-only' }, 'share')))),
+        h('thead', null, h('tr', null, h('th', null, 'model'), h('th', { class: 'num' }, 'cost'), h('th', { class: 'barc' }, h('span', { class: 'sr-only' }, 'share')))),
         h('tbody', null, models.map(b => h('tr', null,
           h('td', { class: 'mono' }, b.name || '—'),
           h('td', { class: 'num' }, cr(b.credits)),
           h('td', { class: 'barc' }, h('div', { class: 'b', style: { '--w': (b.credits / max * 100) + '%' } })))))))
       : null,
     bars.length
-      ? h('section', { class: 'sblock', testid: 'stats-bars', 'aria-label': 'Where the credits went' }, h('h3', { class: 'shead' }, 'Where it went'), bars)
+      ? h('section', { class: 'sblock', testid: 'stats-bars', 'aria-label': 'Where the money went' }, h('h3', { class: 'shead' }, 'Where it went'), bars)
       : null,
     envelopeLine(s),
     h('p', { class: 'foot-note' }, 'The same numbers as ', h('span', { class: 'mono' }, `gummi status --stats ${ctx.id}`), '.')))

@@ -329,23 +329,23 @@ func renderStats(w io.Writer, view statusView, r *statusStats) {
 
 	fmt.Fprintln(w, "where it went")
 	for _, b := range r.Money.ByStage {
-		fmt.Fprintf(w, "  %-12s %s %8.2f  %3.0f%%\n",
+		fmt.Fprintf(w, "  %-12s %s %9s  %3.0f%%\n",
 			b.Name, bar(b.Credits, r.Money.Credits, 24),
-			b.Credits, pct(b.Credits, r.Money.Credits))
+			domain.FormatDollars(b.Credits), pct(b.Credits, r.Money.Credits))
 	}
-	fmt.Fprintf(w, "  %-12s %s %8.2f  credits\n", "", strings.Repeat(" ", 24), r.Money.Credits)
+	fmt.Fprintf(w, "  %-12s %s %9s\n", "", strings.Repeat(" ", 24), domain.FormatDollars(r.Money.Credits))
 	if r.Money.Estimated > 0 {
-		fmt.Fprintf(w, "  ~%.2f of it estimated — not yet settled by the provider\n", r.Money.Estimated)
+		fmt.Fprintf(w, "  ~%s of it estimated — not yet settled by the provider\n", domain.FormatDollars(r.Money.Estimated))
 	}
 	// Spend that belongs to no pass, named before the pass table is read,
 	// so nobody adds the passes up and wonders where the rest went.
 	if r.Money.Elsewhere > 0 {
 		var by []string
 		for _, b := range r.Money.ElsewhereBy {
-			by = append(by, fmt.Sprintf("%s %.2f", b.Name, b.Credits))
+			by = append(by, fmt.Sprintf("%s %s", b.Name, domain.FormatDollars(b.Credits)))
 		}
-		fmt.Fprintf(w, "  %.2f of it on turns that are not passes (%s) — no row below holds it\n",
-			r.Money.Elsewhere, strings.Join(by, ", "))
+		fmt.Fprintf(w, "  %s of it on turns that are not passes (%s) — no row below holds it\n",
+			domain.FormatDollars(r.Money.Elsewhere), strings.Join(by, ", "))
 	}
 	fmt.Fprintln(w)
 
@@ -356,11 +356,11 @@ func renderStats(w io.Writer, view statusView, r *statusStats) {
 	if redone := redoPasses(r.Passes); len(redone) > 0 {
 		fmt.Fprintln(w, "the redo")
 		for _, p := range redone {
-			fmt.Fprintf(w, "  %s · %s · %s · %d turns · %s · %.2f%s\n",
-				p.Stage, p.Role, p.RedoReason, p.Turns, dur(p.Seconds), p.Credits, recon(p))
+			fmt.Fprintf(w, "  %s · %s · %s · %d turns · %s · %s%s\n",
+				p.Stage, p.Role, p.RedoReason, p.Turns, dur(p.Seconds), domain.FormatDollars(p.Credits), recon(p))
 		}
-		fmt.Fprintf(w, "  %.2f of %.2f credits was work already done (%.0f%%)\n\n",
-			r.Money.Rework, r.Money.Credits, r.Money.ReworkShare*100)
+		fmt.Fprintf(w, "  %s of %s was work already done (%.0f%%)\n\n",
+			domain.FormatDollars(r.Money.Rework), domain.FormatDollars(r.Money.Credits), r.Money.ReworkShare*100)
 	}
 
 	fmt.Fprintln(w, "the clock")
@@ -396,8 +396,8 @@ func renderStats(w io.Writer, view statusView, r *statusStats) {
 		r.Judgment.Asks.Total, r.Judgment.Asks.ByYou, r.Judgment.Asks.ByMachine)
 
 	if r.Money.Envelope > 0 {
-		fmt.Fprintf(w, "the envelope\n  granted %d · spent %.0f · %.0f%% used\n",
-			r.Money.Envelope, r.Money.Credits, r.Money.Utilization*100)
+		fmt.Fprintf(w, "the envelope\n  granted %s · spent %s · %.0f%% used\n",
+			domain.FormatDollars(float64(r.Money.Envelope)), domain.FormatDollars(r.Money.Credits), r.Money.Utilization*100)
 	}
 }
 

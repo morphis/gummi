@@ -405,7 +405,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// the id and the dialog it opens (envelope.go) both keep the old
 			// name internally; the label and why are the only parts a reader
 			// sees, so those are what §5 renames to "budget".
-			"envelope", "u", "budget", "set the card's budget (credits; 0 = uncapped)", false,
+			"envelope", "u", "budget", "set the card's budget (dollars; 0 = uncapped)", false,
 			envelopeRefusal(r) == nil,
 		},
 		// no accelerator, for the same reason duplicate has none: this is a

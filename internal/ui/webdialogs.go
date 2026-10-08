@@ -113,22 +113,24 @@ func (d *confirmDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 // autopilot card, raised) is answered by confirm.
 func (d *envelopeDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if in.number == nil {
-		return webAnswer{needs: webapi.ActionNeedsNumber, question: "set " + string(d.feature.ID) + "'s budget (credits; 0 = uncapped)"}
+		return webAnswer{needs: webapi.ActionNeedsNumber, question: "set " + string(d.feature.ID) + "'s budget (dollars; 0 = uncapped)"}
 	}
 	if *in.number < 0 {
-		return webAnswer{refused: "a budget is 0 (uncapped) or more credits"}
+		return webAnswer{refused: "a budget is $0 (uncapped) or more"}
 	}
-	if why := tooLong(d.input.CharLimit, "that budget", strconv.Itoa(*in.number)); why != "" {
+	// the page sends credits, the unit the contract carries; the
+	// dialog's own field holds dollars
+	if why := tooLong(d.input.CharLimit, "that budget", domain.DollarsInput(*in.number)); why != "" {
 		return webAnswer{refused: why}
 	}
-	d.input.SetValue(strconv.Itoa(*in.number))
+	d.input.SetValue(domain.DollarsInput(*in.number))
 	done, cmd := d.submit()
 	switch {
 	case done:
 		return webAnswer{cmd: cmd}
 	case d.askResume:
 		d.askResume = false
-		q := fmt.Sprintf("raised to %d — resume %s on autopilot?", d.resumeTo, d.feature.ID)
+		q := fmt.Sprintf("raised to %s — resume %s on autopilot?", domain.FormatDollars(float64(d.resumeTo)), d.feature.ID)
 		if in.takeConfirm(webConfirmToken("envelope-resume", d.feature.ID, q)) {
 			cmd = tea.Batch(cmd, d.resumeNotice())
 			return webAnswer{cmd: cmd}

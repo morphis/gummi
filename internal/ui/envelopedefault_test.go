@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 
@@ -42,14 +41,14 @@ func TestPrefillLeavesEstimationModeIntact(t *testing.T) {
 // field the user actually reads, in every creation dialog that budgets.
 func TestCreationDialogsPrefillDefaultEnvelope(t *testing.T) {
 	s := theme.New(theme.GummiDark())
-	want := strconv.Itoa(DefaultEnvelopeCredits)
+	want := domain.DollarsInput(DefaultEnvelopeCredits)
 	views := map[string]string{}
 	for _, ct := range domain.CardTypes {
 		views[ct.Name()] = newCardForm(ct, nil, nil, true, "", nil, DefaultEnvelopeCredits, nil).View(s, 80, 24)
 	}
 	for name, view := range views {
 		if !strings.Contains(view, want) {
-			t.Errorf("%s dialog does not prefill %s credits:\n%s", name, want, view)
+			t.Errorf("%s dialog does not prefill $%s:\n%s", name, want, view)
 		}
 	}
 }

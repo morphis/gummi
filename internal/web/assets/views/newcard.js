@@ -7,7 +7,7 @@
 // refusal comes back as a sentence, shown beside the field it is about.
 // "Create & autopilot" is that form's second button.
 
-import { h, clear } from '../dom.js?v=__ASSET_V__'
+import { h, clear, dollarsInput, parseDollars } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { hush } from '../toast.js?v=__ASSET_V__'
 
@@ -152,8 +152,8 @@ registerView('newcard', {
       const side = []
       el.profile = h('select', { testid: 'newcard-profile' }, f.profiles.map(p => h('option', { value: p, selected: p === (st.profile || f.profiles[0]) }, p)))
       side.push(field('profile', 'Profile', el.profile, 'Which models play each role.'))
-      el.envelope = h('input', { testid: 'newcard-envelope', type: 'number', min: '0', inputmode: 'numeric', value: st.envelope ?? String(f.envelope || '') })
-      side.push(field('envelope', 'Budget', el.envelope, 'Credits this card may spend. 0 is uncapped.'))
+      el.envelope = h('input', { testid: 'newcard-envelope', type: 'text', inputmode: 'decimal', value: st.envelope ?? (f.envelope ? dollarsInput(f.envelope) : '') })
+      side.push(field('envelope', 'Budget', el.envelope, 'Dollars this card may spend. 0 is uncapped.'))
       if (f.repos?.length) {
         el.repo = h('select', { testid: 'newcard-repo', onchange: async () => { keep(); st.repo = el.repo.value; if (await load(st.repo)) draw() } },
           f.repos.map(r => h('option', { value: r, selected: r === st.repo }, r)))
@@ -288,14 +288,16 @@ registerView('newcard', {
       if (st.attachments.some((a) => a.pending)) { showErr('still uploading an image — wait a moment and try again'); return }
       if (st.attachments.some((a) => a.error)) { showErr('remove the failed attachment before creating'); return }
       keep()
-      const env = el.envelope.value.trim()
+      // typed in dollars, sent in credits
+      const env = el.envelope.value.trim() === '' ? null : parseDollars(el.envelope.value)
+      if (env?.err) { showErr(env.err); return }
       const req = {
         kind: st.kind.startsWith('research') ? 'research' : st.kind,
         diagnosis: st.kind === 'research:diagnosis' || undefined,
         title: el.title.value.trim(),
         description: el.desc.value.trim() || undefined,
         profile: el.profile.value || undefined,
-        envelope: env === '' ? undefined : Number(env),
+        envelope: env ? env.credits : undefined,
         repo: st.repo || undefined,
         base: (!el.base.disabled && el.base.value) || undefined,
         adopt: el.adopt?.value || undefined,

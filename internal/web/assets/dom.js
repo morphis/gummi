@@ -161,7 +161,36 @@ export function decisionColor (d, stage) {
 }
 
 // ---- formatting ----
-export function cr (n) { return (Number(n) || 0).toFixed(1) }
+// cr renders a credit figure as dollars (a credit is a cent), the way
+// domain.FormatDollars does: "$4.20", gaining a place below a cent so a
+// real cost never reads as free. The contract carries credits; only this
+// and the budget inputs below know the rate.
+export function cr (n) {
+  const d = (Number(n) || 0) / 100
+  if (d <= 0) return '$0.00'
+  if (d >= 0.01) return '$' + d.toFixed(2)
+  if (d >= 0.001) return '$' + d.toFixed(3)
+  return `${Number((Number(n) || 0).toPrecision(2))} credits`
+}
+
+// dollarsInput is a credit figure the way a budget input holds it, for
+// parseDollars to read back: 500 → "5", 550 → "5.5".
+export function dollarsInput (n) { return String((Number(n) || 0) / 100) }
+
+// parseDollars reads a budget a person typed — "5", "5.50", "$5",
+// "1,200" — as dollars and answers it in credits, refusing a figure finer
+// than a cent or below zero, like domain.ParseDollars. "" is an error;
+// callers that read an empty field as "no change" check that first.
+export function parseDollars (raw) {
+  const t = String(raw ?? '').trim().replace(/^\$/, '').trim().replace(/,/g, '')
+  if (t === '') return { err: 'Enter a dollar amount, like 5 or 12.50.' }
+  if (t.startsWith('-')) return { err: `“${raw}” is negative; a budget is $0 (uncapped) or more.` }
+  if (!/^\d*\.?\d*$/.test(t) || t === '.') return { err: `“${raw}” is not a dollar amount, like 5 or 12.50.` }
+  if (/\.\d{3,}$/.test(t)) return { err: `“${raw}” is finer than a cent.` }
+  const credits = Math.round(Number(t) * 100)
+  if (!Number.isSafeInteger(credits) || credits > 2147483647) return { err: `“${raw}” is too large a budget.` }
+  return { credits }
+}
 
 // ctxMeter renders a session's context-window occupancy: a green/yellow/red
 // bar (the same thresholds as the budget nudges, DESIGN §5.1) with a

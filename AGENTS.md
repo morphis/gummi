@@ -88,7 +88,7 @@ leaf services.
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
 (spec decomposition), `bugs` (GitHub issue import / manual add), and the
 headless driver surface — `run`, `resume`, `status` (`--stats` reports where a
-card's credits and hours went), `spec`, `diff`, `verify`,
+card's money and hours went), `spec`, `diff`, `verify`,
 `merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See README's "Running headlessly"
 for the driver's command grammar and exit-status table.
 
@@ -150,7 +150,7 @@ make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 ```
 
 To try the headless driver instead of the TUI, `make demo` still gives you
-a throwaway repo — run `bin/gummi run --envelope 500 "<description>"` in it.
+a throwaway repo — run `bin/gummi run --envelope 5 "<description>"` in it.
 
 Driving a **goal** costs real money and its budget arithmetic is the part
 hardest to eyeball, so run `scripts/goal-ledger.py ./bin/gummi <workspace>

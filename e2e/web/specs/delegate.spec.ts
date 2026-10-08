@@ -28,9 +28,9 @@ test('a session with a delegation budget hands work to a card that lands back on
   // the head may have folded the button away: the card's menu offers it too
   await page.getByTestId('card-actions').click();
   await page.getByTestId('action-delegate').click();
-  await page.getByTestId('delegate-budget').fill('1000');
+  await page.getByTestId('delegate-budget').fill('10');
   await page.getByTestId('delegate-save').click();
-  await expect(page.getByTestId('delegate')).toContainText('Delegating · 1000 left');
+  await expect(page.getByTestId('delegate')).toContainText('Delegating · $10.00 left');
   expect((await api('GET', `/api/cards/${id}`)).json.delegation).toEqual({ budget: 1000, confirmAll: false, left: 1000 });
 
   // the session asks for a card; the person is asked before it exists
@@ -39,7 +39,7 @@ test('a session with a delegation budget hands work to a card that lands back on
   await page.getByTestId('decision-option-1').click();
   await expect(thread).toContainText(/card_create: created FD-\d+/, { timeout: 30_000 });
   const child = (await thread.textContent())!.match(/card_create: created (FD-\d+)/)![1];
-  await expect(page.getByTestId('delegate')).toContainText('Delegating · 700 left');
+  await expect(page.getByTestId('delegate')).toContainText('Delegating · $7.00 left');
 
   // the card forks from the session's branch and runs to a verified branch
   const card = (await api('GET', `/api/cards/${child}`)).json;

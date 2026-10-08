@@ -400,7 +400,7 @@ func TestTheStatsTabReportsAFreeformCardsBill(t *testing.T) {
 	if strings.Contains(out, "nothing has run on this card yet") {
 		t.Errorf("the stats tab denies a spent card ran:\n%s", out)
 	}
-	for _, want := range []string{"WHERE IT WENT", "9036", "THE ENVELOPE"} {
+	for _, want := range []string{"WHERE IT WENT", "$90.36", "THE ENVELOPE"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the stats tab never reports %q:\n%s", want, out)
 		}

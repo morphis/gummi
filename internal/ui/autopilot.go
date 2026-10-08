@@ -335,7 +335,7 @@ func autopilotBody(f domain.Feature, plan autopilotPlan, mode string, base strin
 	// will only open and hand back.
 	budget := ""
 	if f.Budget.Envelope > 0 {
-		budget = fmt.Sprintf(", inside a %d credit budget", f.Budget.Envelope)
+		budget = fmt.Sprintf(", inside a %s budget", domain.FormatDollars(float64(f.Budget.Envelope)))
 	}
 	// Every remaining stage is one autopilot may run: no stage needs a
 	// person by nature any more, so the list that used to split in two —

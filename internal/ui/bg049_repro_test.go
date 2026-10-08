@@ -15,8 +15,8 @@ func TestBG049ReproMastheadDropsBudgetBeforeTitle(t *testing.T) {
 	f.Spend.Credits = 36
 
 	out := ansi.Strip(m.threadView(62, 40))
-	if !strings.Contains(out, "credits") {
-		t.Fatalf("62-col masthead = %q, want it to still contain the credit budget", strings.Split(out, "\n")[1])
+	if !strings.Contains(out, "$24.00") {
+		t.Fatalf("62-col masthead = %q, want it to still contain the budget", strings.Split(out, "\n")[1])
 	}
 }
 
@@ -26,7 +26,7 @@ func TestBG049ReproMastheadDropsBudgetBeforeTitle(t *testing.T) {
 // comment on head ordering), so whatever the masthead puts on its
 // first row is what survives a short terminal. A card with an open
 // decision on a frame just short enough to leave room for exactly one
-// head row must still show the credit budget on it — a masthead split
+// head row must still show the budget on it — a masthead split
 // across a title row and a separate badge row loses the badge row
 // outright here, even though the badges alone fit the row's width with
 // room to spare.
@@ -34,7 +34,7 @@ func TestBG049ReproMastheadHeightTrimDropsBudget(t *testing.T) {
 	m := reviewGateWorkspace(t)
 	m.rows[m.sel].F.Profile = "" // isolate the case from profile-tag shedding
 	out := ansi.Strip(m.threadView(61, 7))
-	if !strings.Contains(out, "credits") {
-		t.Fatalf("61x7 masthead with an open decision = %q, want it to still contain the credit budget", strings.Split(out, "\n")[0])
+	if !strings.Contains(out, "$20.00") {
+		t.Fatalf("61x7 masthead with an open decision = %q, want it to still contain the budget", strings.Split(out, "\n")[0])
 	}
 }

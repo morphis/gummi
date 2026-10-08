@@ -173,7 +173,7 @@ func runScheduleAdd(fl cliFlags, _ []string) error {
 	repo := strings.TrimSpace(fl.String("repo"))
 	backend := strings.TrimSpace(fl.String("agent"))
 	model := strings.TrimSpace(fl.String("model"))
-	envelope := fl.Int("envelope")
+	envelope := fl.Budget("envelope")
 
 	if name == "" {
 		return fmt.Errorf("schedule add needs --name")
@@ -213,7 +213,7 @@ func runScheduleAdd(fl cliFlags, _ []string) error {
 		sc.Repo = repo
 		sc.Envelope = envelope
 		if envelope <= 0 {
-			return fmt.Errorf("schedule add needs --envelope N (credits) for a mint: a scheduled card always mints with a brake")
+			return fmt.Errorf("schedule add needs --envelope <dollars> for a mint: a scheduled card always mints with a brake")
 		}
 	}
 	env, err := openScheduleEnv()

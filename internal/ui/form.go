@@ -100,8 +100,8 @@ func fieldRow(s *theme.Styles, focused bool, label string) string {
 // the other hint: an RS card carries no default budget, so 0 is refused
 // there rather than meaning uncapped (rsForm.submit).
 const (
-	envelopeHintCapped   = "credits · 0 = uncapped"
-	envelopeHintRequired = "credits · required"
+	envelopeHintCapped   = "dollars · 0 = uncapped"
+	envelopeHintRequired = "dollars · required"
 )
 
 // repoUnset is repoPicker.idx while no repository has been chosen. A

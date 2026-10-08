@@ -653,7 +653,7 @@ func TestEstimateEnvelopeFromHistory(t *testing.T) {
 	// "budget", and "card" agreeing with its count: this line is read at
 	// every spec approval and carried both of round 2's leftovers (round 3
 	// §5.1, §5.5).
-	if want := " · budget estimated at 150 credits from 1 metered card"; notice != want {
+	if want := " · budget estimated at $1.50 from 1 metered card"; notice != want {
 		t.Fatalf("notice = %q, want %q", notice, want)
 	}
 	if got, _ := store.GetFeature(ctx, f.ID); got.Budget.Envelope != 150 {

@@ -10,7 +10,7 @@
 // no cron of its own), the backend and model come from the session
 // picker's catalog, and the timezone is a shortlist plus free text.
 
-import { h, clear, plural } from '../dom.js?v=__ASSET_V__'
+import { h, clear, plural, cr, dollarsInput, parseDollars } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { errorBox, confirmStrip, field, segmented, choose } from './kit.js?v=__ASSET_V__'
 
@@ -227,7 +227,7 @@ function scheduleRow (ctx, sc, v, openForm, reload, draw, act) {
     h('div', { class: 'sch-line' },
       h('code', { class: 'sch-cron' }, sc.cron),
       sc.timezone ? h('span', { class: 'sch-meta' }, sc.timezone) : null,
-      sc.envelope ? h('span', { class: 'sch-meta' }, `${sc.envelope} credits per card`) : null,
+      sc.envelope ? h('span', { class: 'sch-meta' }, `${cr(sc.envelope)} per card`) : null,
       sc.lastCard ? h('span', { class: 'sch-meta' }, `last card ${sc.lastCard}`) : null,
       sc.orphanCard ? h('span', { class: 'sch-meta warn', testid: `schedule-${sc.id}-orphan` }, `retrying ${sc.orphanCard}`) : null),
     sc.lastDetail ? h('p', { class: 'sch-detail' }, sc.lastDetail) : null,
@@ -342,7 +342,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
     type: 'text', testid: 'schedule-form-model', placeholder: "the agent's default", list: 'schedule-model-list',
     autocomplete: 'off', value: row?.model || ''
   })
-  const envelope = h('input', { type: 'number', min: '1', testid: 'schedule-form-envelope', value: String(row?.envelope ?? 100) })
+  const envelope = h('input', { type: 'text', inputmode: 'decimal', testid: 'schedule-form-envelope', value: dollarsInput(row?.envelope ?? 100) })
   const tzList = h('datalist', { id: 'schedule-tz-list' }, timezones.map(z => h('option', { value: z })))
   const modelList = h('datalist', { id: 'schedule-model-list' })
 
@@ -350,7 +350,7 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
   const repoField = field('Repository', repo)
   const backendField = field('Agent', backend, { hint: "optional — the profile's implementer by default" })
   const modelField = field('Model', model, { testid: 'schedule-form-model-field' })
-  const envelopeField = field('Envelope per card (credits)', envelope, { hint: 'the brake — what one minted card may spend' })
+  const envelopeField = field('Budget per card (dollars)', envelope, { hint: 'the brake — what one minted card may spend' })
 
   // drawCatalog fills the pickers from the session picker's catalog:
   // every agent a session can run on, its installed flag on the row, and
@@ -448,7 +448,9 @@ function scheduleForm (ctx, { row, catalog, done, seed }) {
         body.repo = repo.value.trim() || undefined
         body.backend = backendPick.name || undefined
         body.model = model.value.trim() || undefined
-        body.envelope = Number(envelope.value) || undefined
+        const b = envelope.value.trim() === '' ? { credits: 0 } : parseDollars(envelope.value)
+        if (b.err) { err.append(errorBox(b.err, 'schedule-form-error-detail')); return }
+        body.envelope = b.credits || undefined
       }
       try {
         if (editing) {

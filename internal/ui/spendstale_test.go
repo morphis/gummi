@@ -83,11 +83,11 @@ func TestBudgetSummaryPrefersTheLiveTotal(t *testing.T) {
 	f := domain.Feature{ID: "BG-007", Budget: domain.Budget{Envelope: 2000}}
 	f.Spend.Credits = 339.1
 
-	if got := budgetSummary(f, 0); !strings.Contains(got, "339.1 / 2000 credits") {
+	if got := budgetSummary(f, 0); !strings.Contains(got, "$3.39 / $20.00") {
 		t.Errorf("with no live session the row is all there is: %q", got)
 	}
 	got := budgetSummary(f, 622)
-	if !strings.Contains(got, "622 / 2000 credits") {
+	if !strings.Contains(got, "$6.22 / $20.00") {
 		t.Errorf("budgetSummary(live 622) = %q, want the live total", got)
 	}
 	if strings.Contains(got, "339.1") {

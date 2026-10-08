@@ -42,7 +42,7 @@ test.describe('a running goal', () => {
     await expect(view.getByTestId('goal-title')).toHaveText('Greet in two languages');
     await expect(view.getByTestId('goal-state')).toHaveText('running');
     // the ledger is the report's budget tree, laid out as it adds up
-    await expect(view.getByTestId('ledger-envelope')).toHaveText('3,000');
+    await expect(view.getByTestId('ledger-envelope')).toHaveText('$30.00');
     await expect(view.getByTestId('ledger-held')).toContainText(/\d/);
     await expect(view.getByTestId('ledger-reserve')).toContainText('450');
     await expect(view.getByTestId('ledger-seg-held')).toBeVisible();
@@ -57,14 +57,14 @@ test.describe('a running goal', () => {
     await view.getByTestId('goal-action-budget').click();
     const budget = view.getByTestId('goal-panel-budget');
     await expect(budget).toBeVisible();
-    await budget.getByTestId('goal-action-input').fill('2000');
+    await budget.getByTestId('goal-action-input').fill('20');
     await budget.getByTestId('goal-action-confirm').click();
     await expect(budget.getByTestId('goal-action-error')).toContainText('only raised');
-    await budget.getByTestId('goal-action-input').fill('3600');
+    await budget.getByTestId('goal-action-input').fill('36');
     await shot(page, info, 'goal-raise');
     await budget.getByTestId('goal-action-confirm').click();
     await expect(page.getByTestId('toast').last()).toContainText('raised to 3600');
-    await expect(view.getByTestId('ledger-envelope')).toHaveText('3,600');
+    await expect(view.getByTestId('ledger-envelope')).toHaveText('$36.00');
     await expect(view.getByTestId('ledger-reserve')).toContainText('540');
 
     // a note to the lead lands in its log
@@ -210,7 +210,7 @@ test('a goal is created from the form', async ({ pairedPage: page }, info) => {
   await form.getByTestId('goal-form-submit').click();
   await expect(form.getByTestId('goal-form-error')).toContainText('Describe the objective');
   await form.getByTestId('goal-form-desc').fill('Say goodbye in three languages');
-  await form.getByTestId('goal-form-budget').fill('2500');
+  await form.getByTestId('goal-form-budget').fill('25');
   await form.getByTestId('goal-form-refs').fill('README.md');
   await shot(page, info, 'goal-form');
   await form.getByTestId('goal-form-submit').click();
@@ -218,7 +218,7 @@ test('a goal is created from the form', async ({ pairedPage: page }, info) => {
   const view = page.getByTestId('view-goal');
   await expect(view.getByTestId('goal-title')).toHaveText('Say goodbye in three languages');
   await expect(view.getByTestId('goal-state')).toHaveText('todo');
-  await expect(view.getByTestId('ledger-envelope')).toHaveText('2,500');
+  await expect(view.getByTestId('ledger-envelope')).toHaveText('$25.00');
   await expect(view.getByTestId('goal-notebook').getByTestId('goal-reference')).toContainText('README.md');
   await expect(view.getByTestId('goal-done-when')).toContainText('Nothing agreed yet');
   await shot(page, info, 'goal-new');

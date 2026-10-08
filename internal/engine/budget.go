@@ -153,16 +153,26 @@ func CompileDiffComments(anns []domain.DiffAnnotation, resolveTool bool) string 
 	return turn
 }
 
+// budgetMetered is the clause every budget hint shares. A model cannot
+// see what it has spent — usage is metered by the backend and booked by
+// gummi — so asking it to "estimate whether it can finish" asked for a
+// figure it has no way to compute, and it guessed: a stage stopped early
+// with most of its budget left, or kept going on a remaining figure it
+// had worked out wrong. gummi does the arithmetic and says when it
+// matters (nudge); the model's part is only to act on it.
+const budgetMetered = `gummi meters what you spend and will tell you here as you ` +
+	`pass 50%, 80% and 95% of it. You cannot see your own spend, so do not ` +
+	`estimate it, ration your work against it, or stop early on a guess about it`
+
 // budgetHint is the session-start system instruction telling the model
 // its budget (DESIGN §5.1 layer 2, "at session start"). Tailored for
 // stages that edit files (implement, fix).
 func budgetHint(budget float64) string {
-	return fmt.Sprintf(`You have a budget of about %.0f credits (≈$%.2f) for this stage. `+
-		`Work budget-consciously: prefer targeted reads over broad exploration, `+
-		`batch related edits, and avoid speculative refactors. If you estimate the `+
-		`task cannot finish within budget, stop early and write a checkpoint `+
-		`(what's done, what's left, where to resume) into the spec's progress `+
-		`section rather than running dry mid-edit.`, budget, budget*0.01)
+	return `This stage has a budget of ` + domain.FormatDollars(budget) + `. ` + budgetMetered + `. ` +
+		`Work efficiently: prefer targeted reads over broad exploration, ` +
+		`batch related edits, and avoid speculative refactors. When gummi ` +
+		`tells you to checkpoint, write what's done, what's left and where to ` +
+		`resume into the spec's progress section, then stop.`
 }
 
 // budgetHintReadMostly is the variant used by stages that don't edit
@@ -171,10 +181,9 @@ func budgetHint(budget float64) string {
 // walk closure tables and cited rules — a read-restriction hint
 // pulls in the wrong direction.
 func budgetHintReadMostly(budget float64) string {
-	return fmt.Sprintf(`You have a budget of about %.0f credits (≈$%.2f) for this stage. `+
-		`Work budget-consciously. If you estimate you cannot finish within budget, `+
-		`stop early and write a checkpoint (what's done, what's left, where to resume) `+
-		`into the artifact rather than running dry.`, budget, budget*0.01)
+	return `This stage has a budget of ` + domain.FormatDollars(budget) + `. ` + budgetMetered + `. ` +
+		`When gummi tells you to checkpoint, write what's done, what's left and ` +
+		`where to resume into the artifact, then stop.`
 }
 
 // nudge builds the mid-session budget update injected at a threshold.
@@ -194,33 +203,33 @@ func nudge(pct int, spent, budget float64) string {
 	}
 	switch {
 	case pct >= 95:
-		return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — checkpoint now: "+
+		return fmt.Sprintf("[budget] %d%% consumed, ~%s left — checkpoint now: "+
 			"write what's done, what's left, and where to resume into the artifact, "+
-			"then stop.", pct, left)
+			"then stop.", pct, domain.FormatDollars(left))
 	case pct >= 80:
-		return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — write what you "+
+		return fmt.Sprintf("[budget] %d%% consumed, ~%s left — write what you "+
 			"have into the artifact NOW, while there is room to write it. A stage that "+
 			"runs dry having written nothing has produced nothing, whatever it read.",
-			pct, left)
+			pct, domain.FormatDollars(left))
 	}
-	return fmt.Sprintf("[budget] %d%% consumed, ~%.0f credits left — keep the artifact "+
+	return fmt.Sprintf("[budget] %d%% consumed, ~%s left — keep the artifact "+
 		"current as you go, so what you have learned survives if this stage runs out.",
-		pct, left)
+		pct, domain.FormatDollars(left))
 }
 
 // budgetHintFreeform is the budget instruction for a freeform card's
 // session. It is a third variant beside budgetHint and
 // budgetHintReadMostly for one concrete reason: both of those tell the
-// model to write a checkpoint "into the spec's progress section" when it
-// is running dry, and a freeform card has no spec. A model told to record
-// where it got to in a document that does not exist either invents one in
-// the worktree or does nothing; the thread is where that note belongs.
+// model to write a checkpoint "into the spec's progress section", and a
+// freeform card has no spec. It also has no nudges — gummi stops the turn
+// itself when the envelope runs out (exhaustFreeform) and the person tops
+// it up — so the model is told the figure and that it is not its to judge.
 func budgetHintFreeform(budget float64) string {
-	return fmt.Sprintf(`You have about %.0f credits (≈$%.2f) left on this card. Work
-budget-consciously: prefer targeted reads over broad exploration, batch
-related edits, and avoid speculative refactors. If the task cannot finish
-within that, stop and say so in the conversation — what is done, what is
-left, and where you would pick it up. Do not run dry mid-edit: whatever
-the worktree holds at the end of your turn is what gets committed.`,
-		budget, budget*0.01)
+	return fmt.Sprintf(`This card has %s of budget left. gummi meters what you
+spend and stops the turn itself if it runs out; the person then decides
+whether to top it up. You cannot see your own spend, so do not estimate it,
+ration your work against it, or stop early on a guess about it. Work
+efficiently: prefer targeted reads over broad exploration, batch related
+edits, and avoid speculative refactors. Whatever the worktree holds when a
+turn ends is what the next turn starts from.`, domain.FormatDollars(budget))
 }

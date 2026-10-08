@@ -106,10 +106,7 @@ type AdvanceResult struct {
 	// one-shot check-discovery + baseline passes over the fresh branch.
 	EnteredWorktree bool
 	// EstimatedCredits / EstimateSamples record the historical-median
-	// envelope estimate applied at spec approval (0 when none was). The
-	// engine leaves the follow-on scribe estimate — an agent pass — to the
-	// caller's policy: whether to run it (the TUI gates it on its default
-	// envelope) is not a floor concern, so From is enough to key it on.
+	// envelope estimate applied at spec approval (0 when none was).
 	EstimatedCredits int
 	EstimateSamples  int
 }
@@ -536,8 +533,8 @@ func (r AdvanceResult) EstimateNotice() string {
 	if r.EstimateSamples == 1 {
 		plural = ""
 	}
-	return fmt.Sprintf(" · budget estimated at %d credits from %d metered card%s",
-		r.EstimatedCredits, r.EstimateSamples, plural)
+	return fmt.Sprintf(" · budget estimated at %s from %d metered card%s",
+		domain.FormatDollars(float64(r.EstimatedCredits)), r.EstimateSamples, plural)
 }
 
 // artifactFile resolves where an item's design artifact lives right now:

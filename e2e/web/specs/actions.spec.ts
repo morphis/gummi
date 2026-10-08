@@ -29,12 +29,12 @@ test.describe('a backlog', () => {
     await open(page, server, ids[0], phone(info));
     await menu(page, 'envelope');
     const input = page.getByTestId('action-input');
-    await expect(input).toHaveValue('2000');
-    await input.fill('2500');
+    await expect(input).toHaveValue('20');
+    await input.fill('25');
     await shot(page, info, 'action-budget');
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-dialog')).toHaveCount(0);
-    await expect(page.getByTestId('card-spend')).toContainText('/ 2500 cr');
+    await expect(page.getByTestId('card-spend')).toContainText('/ $25.00');
     expect((await api('GET', `/api/cards/${ids[0]}`)).json.envelope).toBe(2500);
   });
 
@@ -56,16 +56,16 @@ test.describe('a backlog', () => {
     await shot(page, info, 'action-refused');
   });
 
-  test('a budget that is not a whole number is said in the dialog, not sent', async ({ pairedPage: page, server }, info) => {
+  test('a budget that is not a dollar amount is said in the dialog, not sent', async ({ pairedPage: page, server }, info) => {
     await open(page, server, ids[0], phone(info));
     const sent: string[] = [];
     page.on('request', (r) => { if (r.method() === 'POST' && /\/actions\/envelope$/.test(r.url())) sent.push(r.postData() || '') });
     await menu(page, 'envelope');
     await expect(page.getByTestId('action-confirm')).toHaveText('Set budget');
-    for (const v of ['1.5', '1e20', '-3']) {
+    for (const v of ['1.505', '1e20', '-3']) {
       await page.getByTestId('action-input').fill(v);
       await page.getByTestId('action-confirm').click();
-      await expect(page.getByTestId('action-error')).toContainText('whole number');
+      await expect(page.getByTestId('action-error')).toContainText(/cent|dollar amount|negative/);
       await expect(page.getByTestId('action-dialog')).toBeVisible();
     }
     expect(sent).toEqual([]);

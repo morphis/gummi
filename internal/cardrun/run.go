@@ -148,7 +148,7 @@ type Money struct {
 	//
 	// Not every turn a card pays for is a pass. A goal's lead turns are
 	// short synchronous sessions that open and close between ticks, and
-	// the one-shot scribe passes — check discovery, the estimate — are
+	// the one-shot scribe passes — check discovery, the landing draft — are
 	// one turn each with no stage_enter to bracket them. None of them
 	// leaves the two events a Session is built from, so a report that
 	// listed only passes silently dropped them: on a one-card goal that

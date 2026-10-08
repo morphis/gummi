@@ -103,7 +103,7 @@ func closeAgents(agents map[string]agent.Agent) {
 // other flag keeps its current meaning. Without --issue this is the batch
 // path, unchanged.
 func runBugIngest(fl cliFlags) error {
-	be, err := openBugEnv(fl.String("profile"), fl.Int("envelope"))
+	be, err := openBugEnv(fl.String("profile"), fl.Budget("envelope"))
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func runBugNew(fl cliFlags) error {
 		return err
 	}
 
-	be, err := openBugEnv(fl.String("profile"), fl.Int("envelope"))
+	be, err := openBugEnv(fl.String("profile"), fl.Budget("envelope"))
 	if err != nil {
 		return err
 	}

@@ -101,7 +101,7 @@ func TestTheStatsTabDrawsTheTimeline(t *testing.T) {
 
 	for _, want := range []string{
 		"THE TIMELINE", "WHERE IT WENT", "THE CLOCK", "TOP CARDS",
-		"FD-001", "FD-002", "42.00", "parked on you since 12:00",
+		"FD-001", "FD-002", "$0.42", "parked on you since 12:00",
 		"█", "✔", "all-time", "2 cards",
 	} {
 		if !strings.Contains(out, want) {
@@ -394,14 +394,6 @@ func TestTheLedgerSaysNothingAboutACacheItWasNeverTold(t *testing.T) {
 	}
 	if got := wsTokenClause(fleetrun.Tokens{}); got != "" {
 		t.Errorf("token clause of nothing = %q, want empty", got)
-	}
-	// A figure too small to be money reads as credits already; printing
-	// the fallback beside the credits would say it twice.
-	if got := wsDollars(0.01); got != "" {
-		t.Errorf("sub-cent dollars = %q, want nothing", got)
-	}
-	if got := wsDollars(120); got != "$1.20" {
-		t.Errorf("dollars = %q, want $1.20", got)
 	}
 }
 

@@ -163,7 +163,7 @@ test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info
   await expect(page.getByTestId('stats-judgment')).toContainText('1 ask —');
   await expect(page.getByTestId('stats-judgment')).toContainText('1 of 3 checks failed');
   // the envelope line carries the utilization
-  await expect(page.getByTestId('stats-envelope')).toContainText('granted 40 · spent 11.0 · 28% used');
+  await expect(page.getByTestId('stats-envelope')).toContainText('granted $0.40 · spent $0.11 · 28% used');
   // the passes table's honesty marks: per-pass tokens with the components
   // beside the total, and the context occupancy where the pass reported one
   await expect(page.getByTestId('stats-table')).toContainText('81k');

@@ -172,7 +172,7 @@ func (e *Engine) fireHeartbeat(ctx context.Context, s domain.Schedule) domain.Sc
 		target.Budget.Remaining(target.Spend.CreditEquivalent()) <= 0 {
 		return domain.ScheduleOutcome{
 			Status:  domain.SchedulePausedExhausted,
-			Detail:  fmt.Sprintf("%s has spent its envelope of %d credits; raise it to carry on", target.ID, target.Budget.Envelope),
+			Detail:  fmt.Sprintf("%s has spent its budget of %s; raise it to carry on", target.ID, domain.FormatDollars(float64(target.Budget.Envelope))),
 			Disable: true,
 		}
 	}

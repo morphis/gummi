@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -575,7 +574,7 @@ func pricingCheck(backend string) (doctorCheck, bool) {
 	if r := agent.AntigravityCreditRate(); r > 0 {
 		return doctorCheck{
 			Name: "pricing:antigravity", Status: statusOK,
-			Detail: fmt.Sprintf("antigravity tokens priced at %g credits per 1k (%s)", r, agent.AntigravityRateEnv),
+			Detail: fmt.Sprintf("antigravity tokens priced at %g cents per 1k (%s)", r, agent.AntigravityRateEnv),
 		}, true
 	}
 	detail := agent.AntigravityRateEnv + " is unset"
@@ -584,9 +583,9 @@ func pricingCheck(backend string) (doctorCheck, bool) {
 	}
 	return doctorCheck{
 		Name: "pricing:antigravity", Status: statusWarn,
-		Detail: fmt.Sprintf("%s — agy reports token counts only, so its spend is priced at gummi's default %g credits per 1k tokens, which may be far from the model's real price",
+		Detail: fmt.Sprintf("%s — agy reports token counts only, so its spend is priced at gummi's default %g cents per 1k tokens, which may be far from the model's real price",
 			detail, domain.ByokCreditsPer1KTokens),
-		Remediation: "export " + agent.AntigravityRateEnv + "=<credits per 1k tokens> for the models your profiles run, so budgets measure real spend",
+		Remediation: "export " + agent.AntigravityRateEnv + "=<cents per 1k tokens> for the models your profiles run, so budgets measure real spend",
 	}, true
 }
 
@@ -653,25 +652,25 @@ func envelopeCheck() doctorCheck {
 	if v == "" {
 		return doctorCheck{
 			Name: "budget", Status: statusWarn,
-			Detail:      fmt.Sprintf("GUMMI_ENVELOPE is unset — no default spend budget (the board prefills %d credits; headless runs have none)", ui.DefaultEnvelopeCredits),
-			Remediation: "pass --envelope N per run, or export GUMMI_ENVELOPE=<credits> (headless runs refuse to start without a budget)",
+			Detail:      fmt.Sprintf("GUMMI_ENVELOPE is unset — no default spend budget (the board prefills %s; headless runs have none)", domain.FormatDollars(ui.DefaultEnvelopeCredits)),
+			Remediation: "pass --envelope <dollars> per run, or export GUMMI_ENVELOPE=<dollars> (headless runs refuse to start without a budget)",
 		}
 	}
-	n, err := strconv.Atoi(v)
+	n, err := domain.ParseDollars(v)
 	if err != nil || n <= 0 {
 		return doctorCheck{
-			Name: "budget", Status: statusWarn, Detail: "GUMMI_ENVELOPE=" + v + " is not a positive integer",
-			Remediation: "set GUMMI_ENVELOPE to a positive credit count",
+			Name: "budget", Status: statusWarn, Detail: "GUMMI_ENVELOPE=" + v + " is not a positive dollar amount",
+			Remediation: "set GUMMI_ENVELOPE to a positive dollar amount, like 5 or 12.50",
 		}
 	}
 	if float64(n) < domain.TurnReserveCredits {
 		return doctorCheck{
 			Name: "budget", Status: statusWarn,
-			Detail:      fmt.Sprintf("GUMMI_ENVELOPE=%d is below one agent turn (~%d credits)", n, int(domain.TurnReserveCredits)),
+			Detail:      fmt.Sprintf("GUMMI_ENVELOPE=%s is below one agent turn (~%s)", domain.FormatDollars(float64(n)), domain.FormatDollars(domain.TurnReserveCredits)),
 			Remediation: "raise it so stage budgets aren't floored at a single turn and overshoot the cap",
 		}
 	}
-	return doctorCheck{Name: "budget", Status: statusOK, Detail: fmt.Sprintf("spend budget: %d credits per run", n)}
+	return doctorCheck{Name: "budget", Status: statusOK, Detail: fmt.Sprintf("spend budget: %s per run", domain.FormatDollars(float64(n)))}
 }
 
 // lockCheck probes the workspace's exclusive lock and releases it

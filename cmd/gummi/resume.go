@@ -39,9 +39,9 @@ func runResume(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	envelope, runs, minutes := fl.Int("envelope"), fl.Int("runs"), fl.Int("minutes")
+	envelope, runs, minutes := fl.Budget("envelope"), fl.Int("runs"), fl.Int("minutes")
 	if envelope < 0 {
-		return fmt.Errorf("--envelope must be a positive credit count, got %d", envelope)
+		return fmt.Errorf("--envelope must be a positive dollar amount, got %s", domain.FormatDollars(float64(envelope)))
 	}
 	if runs < 0 || minutes < 0 {
 		return fmt.Errorf("--runs and --minutes must be positive, got %d and %d", runs, minutes)

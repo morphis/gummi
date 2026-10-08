@@ -63,12 +63,12 @@ func runModel(snap engine.Snapshot) string {
 // backend reports them, otherwise tokens priced at the provider's rate.
 func spendSummary(snap engine.Snapshot) string {
 	if snap.Spend.Credits > 0 {
-		return fmt.Sprintf("%g credits", roundSpend(snap.Spend.Credits))
+		return domain.FormatDollars(snap.Spend.Credits)
 	}
 	if tok := snap.Spend.InputTokens + snap.Spend.OutputTokens; tok > 0 {
 		out := humanTokens(tok) + " tok"
 		if snap.SpentCredits > 0 {
-			out += fmt.Sprintf(" ≈%g credits", roundSpend(snap.SpentCredits))
+			out += " ≈" + domain.FormatDollars(snap.SpentCredits)
 		}
 		return out
 	}
@@ -161,14 +161,14 @@ func budgetSummary(f domain.Feature, live float64) string {
 	if live > 0 {
 		spent = live
 	}
-	out := fmt.Sprintf("%s%g / %g credits", estMark(f.Spend), roundSpend(spent), env)
-	// A budget stop reads "171.1 / 150 credits", which is true and looks
+	out := fmt.Sprintf("%s%s / %s", estMark(f.Spend), domain.FormatDollars(spent), domain.FormatDollars(env))
+	// A budget stop reads "$1.71 / $1.50", which is true and looks
 	// broken. The overshoot is real and expected — a turn already in flight
 	// finishes, and TurnReserveCredits is sized for exactly that — but the
 	// masthead never said so, so the one number a reader checks after a stop
 	// appears to have failed at arithmetic (round 3 §4.2). Two words, only
 	// when it is actually over.
-	if env > 0 && roundSpend(spent) > env {
+	if env > 0 && spent > env {
 		out += " (over)"
 	}
 	return out
@@ -180,8 +180,7 @@ func budgetSummary(f domain.Feature, live float64) string {
 func featureSpend(sp domain.Spend) string {
 	parts := []string{}
 	if sp.Credits > 0 {
-		parts = append(parts, fmt.Sprintf("%s%g credits (%s≈%s)",
-			estMark(sp), roundSpend(sp.Credits), estLabel(sp), money(sp.Credits)))
+		parts = append(parts, fmt.Sprintf("%s%s%s", estMark(sp), estLabel(sp), domain.FormatDollars(sp.Credits)))
 	}
 	if sp.InputTokens+sp.OutputTokens > 0 {
 		parts = append(parts, fmt.Sprintf("%d in / %d out tokens", sp.InputTokens, sp.OutputTokens))
@@ -208,3 +207,6 @@ func estLabel(sp domain.Spend) string {
 // money renders a credit figure as adaptive-precision dollars; see
 // domain.FormatDollars (shared with the engine's stage-exit receipt).
 func money(credits float64) string { return domain.FormatDollars(credits) }
+
+// usd is money under the name the stats views use for it.
+func usd(credits float64) string { return domain.FormatDollars(credits) }

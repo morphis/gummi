@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -112,16 +111,16 @@ func readAcceptance(pathOrDash string) (string, error) {
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
 func driverOptions(fl cliFlags, acceptance string) (driver.Options, error) {
-	envelope := fl.Int("envelope")
+	envelope := fl.Budget("envelope")
 	if envelope == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n, err := domain.ParseDollars(v); err == nil && n > 0 {
 				envelope = n
 			}
 		}
 	}
 	if envelope <= 0 {
-		return driver.Options{}, fmt.Errorf("an envelope is required: pass --envelope N (or set GUMMI_ENVELOPE); runs refuse to start without one")
+		return driver.Options{}, fmt.Errorf("an envelope is required: pass --envelope <dollars> (or set GUMMI_ENVELOPE); runs refuse to start without one")
 	}
 	gate, err := gateApproval(fl.String("gate-approval"))
 	if err != nil {

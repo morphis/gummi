@@ -35,7 +35,7 @@ func TestRequestsAreCheckedBeforeTheBoardSeesThem(t *testing.T) {
 		{"goal, fractional budget", http.MethodPost, "/api/goals", map[string]any{"description": "x", "envelope": 1.5}, "Budget must be a whole, non-negative number of credits"},
 		{"goal action, fractional budget", http.MethodPost, "/api/goals/GL-001/actions/budget", map[string]any{"envelope": 1.5}, "Budget must be a whole, non-negative number of credits"},
 		// refused before the pass runs, not at approve after the review
-		{"ingest, negative envelope", http.MethodPost, "/api/ingest", map[string]any{"markdown": "# x\n\n## one\n", "envelope": -50}, "whole, non-negative number of credits"},
+		{"ingest, negative envelope", http.MethodPost, "/api/ingest", map[string]any{"markdown": "# x\n\n## one\n", "envelope": -50}, "$0 (uncapped) or more"},
 		{"ingest, fractional envelope", http.MethodPost, "/api/ingest", map[string]any{"markdown": "# x\n\n## one\n", "envelope": 1.5}, "Budget must be a whole"},
 	} {
 		var e webapi.Error

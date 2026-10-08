@@ -108,8 +108,8 @@ func TestRenderRunNamesTheRedo(t *testing.T) {
 
 	for _, want := range []string{
 		"BG-004", "landed · 2 sessions", "where it went", "the redo",
-		"implement · implementer · corrected", "12.51 of 24.75 credits was work already done (51%)",
-		"waiting on you", "granted 1350",
+		"implement · implementer · corrected", "$0.13 of $0.25 was work already done (51%)",
+		"waiting on you", "granted $13.50",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render missing %q:\n%s", want, out)

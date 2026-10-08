@@ -60,7 +60,7 @@ func runIngest(fl cliFlags, args []string) error {
 	if prof == "" && len(names) > 0 {
 		prof = names[0]
 	}
-	env := fl.Int("envelope")
+	env := fl.Budget("envelope")
 	if env == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {

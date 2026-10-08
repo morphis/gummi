@@ -27,8 +27,8 @@ func TestAPassWithNoChecksSaysWhatItRestsOn(t *testing.T) {
 }
 
 // Discovery that left a card with no block is said at once, with why and
-// what it costs; the estimate failing on the same broken scribe a moment
-// later does not say it again.
+// what it costs; the same broken scribe failing again a moment later does
+// not say it again.
 func TestDiscoveryThatLeavesNoChecksIsSaidOnce(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "t")
 	id := domain.FeatureID("FD-002")
@@ -52,14 +52,14 @@ func TestDiscoveryThatLeavesNoChecksIsSaidOnce(t *testing.T) {
 	}
 
 	m.notice = noticeMsg{}
-	model, _ = m.Update(scribeEstimateDoneMsg{id: id, err: &engine.ScribeFailure{Pass: "the budget estimate", Model: "claude-haiku-4.5", Err: sf.Err}})
+	model, _ = m.Update(checksDiscoveredMsg{id: id, err: &engine.ScribeFailure{Pass: "check discovery", Model: "claude-haiku-4.5", Err: sf.Err}})
 	m = model.(*Shell)
 	if m.notice.text != "" {
 		t.Errorf("the same scribe failure was said twice on one card: %q", m.notice.text)
 	}
 
 	// a different card's first failure is still said
-	model, _ = m.Update(scribeEstimateDoneMsg{id: "FD-003", err: &engine.ScribeFailure{Pass: "the budget estimate", Model: "claude-haiku-4.5", Err: sf.Err}})
+	model, _ = m.Update(checksDiscoveredMsg{id: "FD-003", err: &engine.ScribeFailure{Pass: "check discovery", Model: "claude-haiku-4.5", Err: sf.Err}})
 	m = model.(*Shell)
 	if !strings.Contains(m.notice.text, "FD-003") || !strings.Contains(m.notice.text, "profiles.yaml") {
 		t.Errorf("another card's scribe failure = %q, want it said with the fix", m.notice.text)

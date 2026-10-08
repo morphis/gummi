@@ -914,12 +914,9 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 	}
 	// StatusAdvanced: show the transition notice, then kick off the
 	// background one-shot passes — check discovery whenever a fresh
-	// worktree was created (both kinds), and the scribe envelope pass on
-	// spec approval in estimation mode only (an explicit GUMMI_ENVELOPE
-	// wins, so the UI default gates it here, not the engine).
+	// worktree was created (both kinds).
 	note := fmt.Sprintf("%s → %s", id, res.To) + res.EstimateNotice()
 	discover := res.EnteredWorktree
-	est := res.From == domain.StagePlan && m.envelope == 0
 	continueTo := domain.Stage("")
 	// A person's crossing on a card they handed to autopilot continues the
 	// same way autopilot's own does: the card now sits at a stage with
@@ -930,14 +927,14 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 	if autonomousStage(res.To) && (actor == state.ActorAutopilot || autopilotAnswers(res.Feature.GateApproval, decisionIdle)) {
 		continueTo = res.To
 	}
-	if discover || est {
+	if discover {
 		// the crossing entered a worktree, so the background one-shot
 		// passes go first — but the continuation rides along rather
 		// than being dropped here. Entering a worktree is exactly what
 		// a spec approval does, which made this the branch autopilot's
 		// own handover took, and it used to end the story: the gate
 		// crossed and nothing behind it ever started.
-		return worktreeEnteredMsg{id: id, note: note, discover: discover, estimate: est, continueTo: continueTo}
+		return worktreeEnteredMsg{id: id, note: note, discover: discover, continueTo: continueTo}
 	}
 	if continueTo != "" {
 		return autopilotContinueMsg{id: id, to: continueTo, note: note}
@@ -952,7 +949,6 @@ type worktreeEnteredMsg struct {
 	id       domain.FeatureID
 	note     string
 	discover bool // run check auto-discovery
-	estimate bool // run the scribe envelope pass
 	// continueTo is the autonomous stage autopilot's own crossing opened
 	// and must now start, or "" for a crossing nobody is continuing. It
 	// rides this message because entering a worktree is what a spec
@@ -981,21 +977,6 @@ type baselineDoneMsg struct {
 	id      domain.FeatureID
 	results []verify.Result
 	err     error // malformed block or run/persist failure
-}
-
-// scribeEstimateDoneMsg follows the envelope-estimate pass, whether or
-// not it changed anything: the shell needs to hear back on every exit
-// path, not just the success one, so the card's in-flight scribe count
-// always settles. blended is the new envelope value on success, 0 on
-// every early-out (store lookup failure, engine error or non-positive
-// estimate, an unchanged blend, or a persist failure) — none of those
-// distinguish from each other, only from a real change.
-type scribeEstimateDoneMsg struct {
-	id      domain.FeatureID
-	blended int
-	// err is the estimate pass's own failure, nil otherwise; a backend
-	// that refused the scribe is said once per card (warnScribeFailure)
-	err error
 }
 
 // discoverChecks runs a one-shot scribe pass that surveys the fresh
@@ -1061,8 +1042,8 @@ func noChecksNotice(id domain.FeatureID, err error) string {
 }
 
 // warnScribeFailure puts a failed scribe pass on screen once per card. A
-// scribe the backend refuses fails every pass it runs — discovery, the
-// estimate, the landing draft — and they used to fail in silence; the
+// scribe the backend refuses fails every pass it runs — discovery and
+// the landing draft — and they used to fail in silence; the
 // card's thread carries the durable note (engine.ScribeFailure), and this
 // is the notice for whoever is looking now. Anything that is not a
 // backend failure (an unusable reply, a cancelled pass) says nothing.
@@ -1075,7 +1056,7 @@ func (m *Shell) warnScribeFailure(id domain.FeatureID, err error) {
 	// not isErr, for the reason the no-checks notice is not: the pass
 	// that failed rides in the wake of a crossing that succeeded
 	m.notice = noticeMsg{id: id, aside: true, text: sanitize(string(id) + ": " + sf.Error() +
-		" — check discovery, the budget estimate and landing drafts are skipped until it works; fix the scribe's model in .gummi/profiles.yaml")}
+		" — check discovery and landing drafts are skipped until it works; fix the scribe's model in .gummi/profiles.yaml")}
 }
 
 // baselineChecks runs the artifact's gummi-checks once on the fresh
@@ -1095,66 +1076,6 @@ func (m *Shell) baselineChecks(id domain.FeatureID) tea.Cmd {
 		}
 		results, err := m.engine.BaselineChecks(ctx, f)
 		return baselineDoneMsg{id: id, results: results, err: err}
-	}
-}
-
-// scribeEstimate runs a scribe-agent pass over the approved spec and, if
-// it returns a usable number, blends it with the historical estimate and
-// updates the envelope (DESIGN §5.1). Best-effort: any failure or an
-// unparseable reply leaves the envelope as the historical estimate.
-func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
-	if m.engine == nil {
-		return nil
-	}
-	m.scribing[id]++
-	return func() tea.Msg {
-		ctx := context.Background()
-		f, err := m.store.GetFeature(ctx, id)
-		if err != nil {
-			return scribeEstimateDoneMsg{id: id}
-		}
-		if f.GoalID != "" {
-			// A goal's card is funded by its goal's ledger, which has
-			// already divided the envelope between the cards and holds
-			// the rest against raises. Re-sizing one card behind the
-			// conductor's back moves credits the goal believes it still
-			// has to give.
-			return scribeEstimateDoneMsg{id: id}
-		}
-		scribe, err := m.engine.Estimate(ctx, f)
-		if err != nil {
-			return scribeEstimateDoneMsg{id: id, err: err}
-		}
-		if scribe <= 0 {
-			return scribeEstimateDoneMsg{id: id}
-		}
-		blended := int(domain.BlendEstimate(float64(f.Budget.Envelope), scribe))
-		// a user-chosen GUMMI_ENVELOPE is a floor: the blend may raise it
-		// for an expensive-looking feature, never silently undercut it
-		if m.envelope > 0 && blended < m.envelope {
-			blended = m.envelope
-		}
-		// and so is the number on the card. The budget field of the
-		// creation dialog is required and prefilled, so every card
-		// arrives here with a figure a person either typed or accepted,
-		// and averaging it with a scribe's guess quietly moved it: a goal
-		// created at 3000 was stored at 2940, which is the ceiling its
-		// reserve, its mint pool and every card envelope are derived
-		// from. The engine's own estimator has always had this rule —
-		// estimateEnvelope fills an UNSET envelope and never replaces a
-		// chosen one — and this surface did not. An estimate may still
-		// raise a budget that looks too small; it may not shave one.
-		if blended < f.Budget.Envelope {
-			return scribeEstimateDoneMsg{id: id}
-		}
-		if blended == f.Budget.Envelope {
-			return scribeEstimateDoneMsg{id: id}
-		}
-		f.Budget.Envelope = blended
-		if err := m.store.UpdateFeature(ctx, &f); err != nil {
-			return scribeEstimateDoneMsg{id: id}
-		}
-		return scribeEstimateDoneMsg{id: id, blended: blended}
 	}
 }
 

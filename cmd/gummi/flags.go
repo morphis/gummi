@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
 )
 
@@ -56,6 +57,44 @@ func (f cliFlags) Int(name string) int {
 		panic(fmt.Sprintf("reading --%s as an int: %v", name, err))
 	}
 	return v
+}
+
+// Budget reads a dollar flag (budgetFlag) as the credits it was parsed to.
+func (f cliFlags) Budget(name string) int {
+	g := f.fs.Lookup(name)
+	if g == nil {
+		panic(fmt.Sprintf("--%s is not a flag of this command", name))
+	}
+	v, ok := g.Value.(*dollarsValue)
+	if !ok {
+		panic(fmt.Sprintf("reading --%s as a budget: it is a %s flag", name, g.Value.Type()))
+	}
+	return int(*v)
+}
+
+// dollarsValue is a budget flag: typed in dollars ("5", "$12.50"), held
+// in credits, the unit every envelope is stored in.
+type dollarsValue int
+
+func (v *dollarsValue) String() string {
+	return domain.DollarsInput(int(*v))
+}
+
+func (v *dollarsValue) Set(s string) error {
+	n, err := domain.ParseDollars(s)
+	if err != nil {
+		return err
+	}
+	*v = dollarsValue(n)
+	return nil
+}
+
+func (*dollarsValue) Type() string { return "dollars" }
+
+// envelopeFlag declares --envelope on fs: a budget typed in dollars and
+// read back in credits, defaulting to 0.
+func envelopeFlag(fs *pflag.FlagSet, usage string) {
+	fs.Var(new(dollarsValue), "envelope", usage)
 }
 
 func (f cliFlags) Bool(name string) bool {
@@ -128,7 +167,7 @@ type driveFlags struct {
 // entries whose meaning genuinely differs for them.
 func stdDriveFlags() driveFlags {
 	return driveFlags{
-		envelope:   "spend budget for the card, in credits (required; falls back to GUMMI_ENVELOPE)",
+		envelope:   "spend budget for the card, in dollars (required; falls back to GUMMI_ENVELOPE)",
 		profile:    "profile mapping roles to models (default: first configured)",
 		gate:       "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)",
 		timeout:    "per-stage inactivity timeout (0 disables)",
@@ -149,7 +188,7 @@ func (d driveFlags) bind(fs *pflag.FlagSet) {
 		}
 	}
 	if d.envelope != "" {
-		fs.Int("envelope", 0, d.envelope)
+		envelopeFlag(fs, d.envelope)
 	}
 	str("profile", d.profile)
 	if d.gate != "" {

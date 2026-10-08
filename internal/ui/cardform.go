@@ -242,7 +242,7 @@ func newCardForm(ct domain.CardType, profiles, repos []string, hasDefault bool, 
 	env := textinput.New()
 	env.SetWidth(12)
 	env.CharLimit = 12
-	env.SetValue(strconv.Itoa(defaultEnvelope))
+	env.SetValue(domain.DollarsInput(defaultEnvelope))
 	filter := textinput.New()
 	filter.Placeholder = "id or title…"
 	filter.CharLimit = 60
@@ -873,9 +873,9 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		return false, nil
 	}
 	if trimmed != "" {
-		n, err := strconv.Atoi(trimmed)
-		if err != nil || n < 0 {
-			d.errText = "budget must be a non-negative number of credits"
+		n, err := domain.ParseDollars(trimmed)
+		if err != nil {
+			d.errText = "budget must be a dollar amount, like 5 or 12.50 (0 = uncapped)"
 			return false, nil
 		}
 		env = &n
@@ -1274,7 +1274,7 @@ func (d *cardForm) runsLine(s *theme.Styles) string {
 	case env == "":
 		env = "default budget"
 	default:
-		env += " credits"
+		env = "$" + strings.TrimPrefix(env, "$")
 	}
 	out := env + " · " + d.profiles[d.profile]
 	if len(d.after) > 0 {
@@ -1573,7 +1573,7 @@ func (d *cardForm) hint() string {
 		// wants to fix it was being shown only the long way (round 3 §6).
 		return "tab/shift+tab rows · " + g + " · alt+o options · alt+enter newline · enter create · esc cancel"
 	case cardStopEnvelope:
-		return "type a number of credits · alt+o collapse · tab next · esc cancel"
+		return "type a dollar amount · alt+o collapse · tab next · esc cancel"
 	case cardStopProfile:
 		return "←/→ choose the profile · alt+o collapse · tab next · esc cancel"
 	case cardStopSeverity:

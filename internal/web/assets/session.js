@@ -14,7 +14,7 @@
 // session that exists, a pick is the card's "model" action. A card in the
 // workflow shows no picker: its stages take their models from its profile.
 
-import { $, h, clear, append, setVars, isMobile } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, append, setVars, isMobile, cr, dollarsInput, parseDollars } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -25,7 +25,7 @@ let form = null // webapi.Form: the draft's choices and the picker's catalog
 let formLoad = null // the /api/form fetch in flight, for a send that cannot wait on nothing
 let pop = null // the open popover: { el, close }
 
-const BUDGETS = [50, 150, 500, 0]
+const BUDGETS = [500, 1500, 5000, 0]
 
 export function initSession (c) {
   ctx = c
@@ -48,21 +48,21 @@ async function loadForm (repo = '') {
   try { return await mine } finally { if (formLoad === mine) formLoad = null }
 }
 
-// budgetOf reads a budget typed by a person: a whole number of credits, 0
-// for uncapped. Anything else — empty, negative, a fraction — is refused
-// with a sentence, never quietly read as 0 (which would be no cap at all).
+// budgetOf reads a budget typed by a person in dollars, 0 for uncapped,
+// and answers it in credits. Anything else — empty, negative, finer than a
+// cent — is refused with a sentence, never quietly read as 0 (which would
+// be no cap at all).
 export function budgetOf (raw) {
-  const v = String(raw ?? '').trim()
-  if (v === '') return { err: 'Say a budget in whole credits — 0 is uncapped.' }
-  if (!/^\d+$/.test(v)) return { err: 'A budget is a whole number of credits, 0 or more.' }
-  return { n: parseInt(v, 10) }
+  if (String(raw ?? '').trim() === '') return { err: 'Say a budget in dollars — 0 is uncapped.' }
+  const b = parseDollars(raw)
+  return b.err ? { err: b.err } : { n: b.credits }
 }
 
 // budgetWord is how a draft says its budget: none picked yet and the
 // board's default still on its way says so, rather than "uncapped".
 function budgetWord (env) {
   if (env == null) return 'the board default'
-  return env ? `${env} cr` : 'uncapped'
+  return env ? cr(env) : 'uncapped'
 }
 
 // newSession opens an empty draft in the conversation column. cameFrom
@@ -313,7 +313,7 @@ function openPop (kind, anchor, el, { alignLeft = false } = {}) {
 
 function openBudget (anchor) {
   const d = state.sessionDraft
-  const input = h('input', { class: 'inp', type: 'number', min: '0', step: '10', value: String(d.envelope ?? form?.envelope ?? 0), testid: 'draft-budget-input', 'aria-label': 'Budget in credits', 'aria-describedby': 'draft-budget-err' })
+  const input = h('input', { class: 'inp', type: 'text', inputmode: 'decimal', value: dollarsInput(d.envelope ?? form?.envelope ?? 0), testid: 'draft-budget-input', 'aria-label': 'Budget in dollars', 'aria-describedby': 'draft-budget-err' })
   const err = h('p', { class: 'ferr', id: 'draft-budget-err', testid: 'draft-budget-error', role: 'alert', hidden: true })
   const apply = (v) => {
     const b = budgetOf(v)
@@ -327,7 +327,7 @@ function openBudget (anchor) {
     h('div', { class: 'fl' }, 'Budget for the new session'),
     h('div', { class: 'presets' }, BUDGETS.map(v => h('button', {
       class: ['btn', v === d.envelope && 'pri'], type: 'button', testid: `draft-budget-${v}`, onclick: () => apply(v)
-    }, v ? `${v} cr` : 'uncapped'))),
+    }, v ? cr(v) : 'uncapped'))),
     h('div', { class: 'row' }, input, h('button', { class: 'btn', type: 'button', testid: 'draft-budget-set', onclick: () => apply(input.value) }, 'Set')),
     err,
     h('p', { class: 'fh' }, 'When it runs out the session stops and asks. Raise it from the session’s head and the same conversation carries on.'))
@@ -488,14 +488,14 @@ export async function openWriteSpec (card, a) {
   const note = h('span', { class: 'fh', testid: 'spec-brief-note' }, 'drafting the handoff brief…')
   const profile = h('select', { testid: 'spec-profile' },
     (a.choices || []).map((c, i) => h('option', { value: c.value, selected: i === 0 }, c.detail ? `${c.label} — ${c.detail}` : c.label)))
-  const budget = h('input', { type: 'number', min: '0', step: '10', value: form ? String(form.envelope || 0) : '', testid: 'spec-budget' })
+  const budget = h('input', { type: 'text', inputmode: 'decimal', value: form ? dollarsInput(form.envelope || 0) : '', testid: 'spec-budget' })
   const err = h('p', { class: 'spec-err', role: 'alert', testid: 'spec-error', hidden: true })
   const body = h('div', { class: 'mbody spec-body' },
     h('p', { class: 'spec-about' }, `${card.id} ends here and keeps its branch. A feature continues its work on a branch cut from it: the profile’s architect plans it from this conversation and what the branch already holds, and it lands only once its critique and checks pass.`),
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Title'), title),
     h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Brief'), brief, note),
     (a.choices || []).length ? h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Profile'), profile, h('span', { class: 'fh' }, 'Every stage takes its agent and model from the profile.')) : null,
-    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Credits for the whole spec, apart from what the session spent. 0 is uncapped.')),
+    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Dollars for the whole spec, apart from what the session spent. 0 is uncapped.')),
     err)
   const startAction = { label: 'Start the spec', primary: true, testid: 'spec-start', disabled: true, onClick: mint }
   // filled: the brief has landed in the field, which is when a mint may
@@ -596,19 +596,19 @@ export async function openWriteSpec (card, a) {
 export function delegateButton (card) {
   if (!card?.session || card.stage === 'done') return null
   const d = card.delegation
-  const label = d ? `Delegating · ${Math.max(0, Math.round(d.left))} left` : 'Delegate'
+  const label = d ? `Delegating · ${cr(Math.max(0, d.left))} left` : 'Delegate'
   return h('button', { class: ['btn', 'hide-s', d && 'on'], type: 'button', testid: 'delegate', title: 'Let this session create workflow cards under a budget', onclick: () => openDelegate(card) }, label)
 }
 
 export function openDelegate (card) {
   const d = card.delegation || { budget: 0, confirmAll: false }
-  const budget = h('input', { type: 'number', min: '0', step: '50', value: String(d.budget || ''), testid: 'delegate-budget' })
+  const budget = h('input', { type: 'text', inputmode: 'decimal', value: d.budget ? dollarsInput(d.budget) : '', testid: 'delegate-budget' })
   const all = h('input', { type: 'checkbox', testid: 'delegate-all' })
   all.checked = !!d.confirmAll
   const err = h('p', { class: 'spec-err', role: 'alert', testid: 'delegate-error', hidden: true })
   const body = h('div', { class: 'mbody spec-body' },
     h('p', { class: 'spec-about' }, 'The session may then create feature and bug cards that fork from this branch, run the whole workflow, and land back here when it asks. Each card is put to you first.'),
-    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Credits across every card it creates. 0 turns delegation off.')),
+    h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Budget'), budget, h('span', { class: 'fh' }, 'Dollars across every card it creates. 0 turns delegation off.')),
     h('label', { class: 'field' }, all, h('span', null, ' Don’t ask me about each card')),
     err)
   openModal({
@@ -621,8 +621,10 @@ export function openDelegate (card) {
       primary: true,
       testid: 'delegate-save',
       onClick: async () => {
+        const b = budget.value.trim() === '' ? { credits: 0 } : parseDollars(budget.value)
+        if (b.err) { err.hidden = false; err.textContent = b.err; return false }
         try {
-          await post(cardPath(card.id, 'delegation'), { budget: Number(budget.value) || 0, confirm_all: all.checked })
+          await post(cardPath(card.id, 'delegation'), { budget: b.credits, confirm_all: all.checked })
           return true
         } catch (e) {
           err.hidden = false

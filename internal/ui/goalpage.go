@@ -377,8 +377,8 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) ([]string, []int) {
 	// cards: what they HOLD (a live card holds its envelope), since that
 	// is what "left to give" is the remainder of — their spend is beside
 	// it rather than in its place, so the row adds up to the envelope.
-	add(fmt.Sprintf("   %d credits · goal %.0f · cards %.0f held (%.0f spent) · reserve %d · left to give %.0f",
-		b.Envelope, b.Own, b.Given, b.CardSpent, b.Reserve, b.Available))
+	add(fmt.Sprintf("   %s · goal %s · cards %s held (%s spent) · reserve %s · left to give %s",
+		usd(float64(b.Envelope)), usd(b.Own), usd(b.Given), usd(b.CardSpent), usd(float64(b.Reserve)), usd(b.Available)))
 
 	if len(r.Decisions) > 0 {
 		section("decisions for review")

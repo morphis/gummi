@@ -103,25 +103,6 @@ func TestEnvironmentCardStageAgnostic(t *testing.T) {
 }
 
 func TestEnvironmentCardNotInOneShot(t *testing.T) {
-	t.Run("Estimate", func(t *testing.T) {
-		ws, store, wt := newRepo(t)
-		writeEnvironmentCard(t, ws.Root, testCard)
-		rec := recordingAgent()
-		e := New(Config{Agents: singleAgent(rec), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
-		t.Cleanup(func() { e.Close() })
-
-		// Use an interactive stage so no worktree is required.
-		f := feature(1, "x", domain.StagePlan)
-		if _, err := e.Estimate(context.Background(), f); err != nil {
-			t.Fatal(err)
-		}
-		for _, h := range rec.opts().SystemHints {
-			if strings.Contains(h, testCard) {
-				t.Errorf("Estimate session received the environment card: %q", h)
-			}
-		}
-	})
-
 	t.Run("CommitMessage", func(t *testing.T) {
 		ws, store, wt := newRepo(t)
 		writeEnvironmentCard(t, ws.Root, testCard)

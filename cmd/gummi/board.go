@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -131,13 +130,14 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	} else {
 		shell.SetEngineUnavailable(why)
 	}
-	// layer-3 budget: new features get this credit envelope, drawn on by
-	// every stage until it runs dry and a human gate offers a top-up.
+	// layer-3 budget: new features get this envelope (dollars, held in
+	// credits), drawn on by every stage until it runs dry and a human gate
+	// offers a top-up.
 	if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := domain.ParseDollars(v); err == nil && n > 0 {
 			if float64(n) < domain.TurnReserveCredits {
-				fmt.Fprintf(os.Stderr, "gummi: GUMMI_ENVELOPE=%d is below one agent turn (~%d credits); "+
-					"stage budgets will be floored at a turn and overshoot the cap\n", n, int(domain.TurnReserveCredits))
+				fmt.Fprintf(os.Stderr, "gummi: GUMMI_ENVELOPE=%s is below one agent turn (~%s); "+
+					"stage budgets will be floored at a turn and overshoot the cap\n", v, domain.FormatDollars(domain.TurnReserveCredits))
 			}
 			shell.SetEnvelope(n)
 		}

@@ -16,14 +16,14 @@
 // which answers that question and nothing else. A refusal stays in the
 // dialog, in the board's own words.
 
-import { h, clear, isMobile } from './dom.js?v=__ASSET_V__'
+import { h, clear, isMobile, dollarsInput, parseDollars } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal, openView } from './views.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { state, set, rows } from './store.js?v=__ASSET_V__'
 import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
 
-const NOUN = { message: 'Message', number: 'Credits', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
+const NOUN = { message: 'Message', number: 'Dollars', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
 
 // GO is the confirm button of an entry whose label is a noun (the menu
 // row names what it sets): the button says what pressing it does.
@@ -244,13 +244,14 @@ function fieldFor (card, a, need) {
     }
   }
   if (need === 'number') {
-    const inp = h('input', { id: 'action-input', testid: 'action-input', type: 'number', min: '0', inputmode: 'numeric', value: def })
+    // a budget is typed in dollars and sent in credits, the unit the
+    // contract carries; what is not a dollar amount is said here, not sent
+    // for the board to refuse as malformed
+    const inp = h('input', { id: 'action-input', testid: 'action-input', type: 'text', inputmode: 'decimal', value: def === '' ? '' : dollarsInput(def) })
     return {
-      el: h('label', { class: 'field' }, label, inp, a.id === 'envelope' ? h('span', { class: 'fh' }, '0 means uncapped.') : null),
-      // credits are whole and never negative: anything else is said here,
-      // not sent for the board to refuse as malformed
-      value: () => /^\d+$/.test(inp.value.trim()) && Number.isSafeInteger(Number(inp.value.trim())) ? { number: Number(inp.value.trim()) } : undefined,
-      problem: () => inp.value.trim() === '' && !inp.validity.badInput ? '' : 'Enter a whole number of credits, 0 or more.',
+      el: h('label', { class: 'field' }, label, inp, a.id === 'envelope' ? h('span', { class: 'fh' }, 'In dollars. 0 means uncapped.') : null),
+      value: () => { const b = parseDollars(inp.value); return b.err ? undefined : { number: b.credits } },
+      problem: () => inp.value.trim() === '' ? '' : parseDollars(inp.value).err,
       focus: () => inp.focus()
     }
   }

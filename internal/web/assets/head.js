@@ -176,11 +176,11 @@ function spend (c) {
   // how a session stops: the card's own envelope action raises it
   const raise = c.session && state.card?.actions?.find(a => a.id === 'envelope')
   if (raise) {
-    return h('button', { class: ['spend', 'link-spend', env && c.spend > env && 'over'], type: 'button', testid: 'card-spend', title: `${cr(c.spend)} of a ${env || '∞'} credit budget — change it`, onclick: () => runAction(state.card, raise) },
+    return h('button', { class: ['spend', 'link-spend', env && c.spend > env && 'over'], type: 'button', testid: 'card-spend', title: `${cr(c.spend)} of ${env ? 'a ' + cr(env) : 'an uncapped'} budget — change it`, onclick: () => runAction(state.card, raise) },
       h('span', { class: 'bar' }, h('i', { style: { '--pct': pct + '%' } })),
-      h('span', { class: 'mono' }, `${cr(c.spend)} / ${env || '∞'} cr`))
+      h('span', { class: 'mono' }, `${cr(c.spend)} / ${env ? cr(env) : '∞'}`))
   }
-  return h('span', { class: ['spend', env && c.spend > env && 'over'], testid: 'card-spend', title: env ? `${cr(c.spend)} of a ${env} credit envelope` : 'No envelope' },
+  return h('span', { class: ['spend', env && c.spend > env && 'over'], testid: 'card-spend', title: env ? `${cr(c.spend)} of a ${cr(env)} budget` : 'No budget' },
     h('span', { class: 'bar' }, h('i', { style: { '--pct': pct + '%' } })),
-    h('span', { class: 'mono' }, `${cr(c.spend)} / ${env || '∞'} cr`))
+    h('span', { class: 'mono' }, `${cr(c.spend)} / ${env ? cr(env) : '∞'}`))
 }

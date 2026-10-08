@@ -38,7 +38,7 @@ const (
 	cardTabThread   cardTab = "thread"
 	cardTabArtifact cardTab = "artifact"
 	cardTabDiff     cardTab = "diff"
-	// cardTabStats is where the card's credits and hours went
+	// cardTabStats is where the card's money and hours went
 	// (statsview.go). A fourth reading surface of exactly the same kind as
 	// the other three: something you look at before deciding, never one of
 	// the decisions.

@@ -266,10 +266,10 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	}
 	d.text.SetValue(text)
 	if req.Envelope != nil {
-		if why := tooLong(d.env.CharLimit, "that budget", strconv.Itoa(*req.Envelope)); why != "" {
+		if why := tooLong(d.env.CharLimit, "that budget", domain.DollarsInput(*req.Envelope)); why != "" {
 			return why
 		}
-		d.env.SetValue(strconv.Itoa(*req.Envelope))
+		d.env.SetValue(domain.DollarsInput(*req.Envelope))
 	}
 	if req.Profile != "" {
 		i := slices.Index(d.profiles, req.Profile)

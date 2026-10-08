@@ -257,7 +257,7 @@ func TestDoctorEnvelopeWarnDoesNotBlock(t *testing.T) {
 		t.Errorf("an unset envelope should not block readiness: %+v", r.Checks)
 	}
 
-	t.Setenv("GUMMI_ENVELOPE", "5") // below one turn
+	t.Setenv("GUMMI_ENVELOPE", "0.05") // below one turn
 	r = buildDoctorReport(gitRepo(t), doctorOpts{})
 	if c := checkByName(r, "budget"); c.Status != statusWarn {
 		t.Errorf("sub-turn envelope = %+v, want warn", c)

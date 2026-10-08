@@ -161,7 +161,7 @@ func TestTheScheduleDialogSavesACompiledCron(t *testing.T) {
 	d.name.SetValue("nightly triage")
 	d.every.SetValue("1h")
 	d.prompt.SetValue("triage new issues")
-	d.env.SetValue("50")
+	d.env.SetValue("0.50")
 	d.refresh()
 	if d.preview.Err != nil || d.preview.Cron != "0 * * * *" {
 		t.Fatalf("the preview read %+v, want the compiled hourly cron", d.preview)
@@ -308,7 +308,7 @@ func TestTheScheduleDialogPrefillsAndEdits(t *testing.T) {
 	if d.zone.Value() != "local" {
 		t.Errorf("the empty stored timezone reads back %q, want local", d.zone.Value())
 	}
-	if d.env.Value() != "50" {
+	if d.env.Value() != "0.5" {
 		t.Errorf("the budget reads back %q", d.env.Value())
 	}
 
@@ -429,7 +429,7 @@ func TestTheScheduleDialogKeepsTheKindOnEdit(t *testing.T) {
 	if view := d.View(m.styles, 120, 34); !strings.Contains(view, "an edit keeps the kind") {
 		t.Error("the edit dialog does not say the kind is kept")
 	}
-	d.env.SetValue("60")
+	d.env.SetValue("0.60")
 	done, cmd := d.submit()
 	if !done {
 		t.Fatalf("the mint edit was refused: %s", d.errText)
@@ -497,17 +497,17 @@ func TestTheScheduleDialogHintsTheEnvelope(t *testing.T) {
 		t.Errorf("the unpriced hint = %q, want the brake words", d.envHint)
 	}
 
-	// a priced backend: what a credit buys on it, under the budget row
+	// a priced backend: what a cent buys on it, under the budget row
 	for i, b := range d.backends {
 		if b.name == "claude" {
 			d.backend = i
 		}
 	}
 	m = pump(t, m, d.probeModels())
-	if !strings.Contains(d.envHint, "1 credit ≈ 500 tokens") {
+	if !strings.Contains(d.envHint, "1¢ ≈ 500 tokens") {
 		t.Errorf("the priced hint = %q, want the rate estimate", d.envHint)
 	}
-	if view := d.View(m.styles, 120, 34); !strings.Contains(view, "1 credit ≈ 500 tokens") {
+	if view := d.View(m.styles, 120, 34); !strings.Contains(view, "1¢ ≈ 500 tokens") {
 		t.Error("the dialog does not render the hint")
 	}
 }

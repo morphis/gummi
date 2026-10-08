@@ -27,8 +27,8 @@ test('a feature that waits on one card and stacks on another', async ({ pairedPa
   await expect(page.getByTestId('newcard-error-title')).toHaveText('A card needs a title');
   await page.getByTestId('newcard-title').fill('Add a farewell helper');
   await page.getByTestId('newcard-desc').fill('Greet has no goodbye. Add Farewell(name) beside it, with a test.');
-  await expect(page.getByTestId('newcard-envelope')).toHaveValue('2000');
-  await page.getByTestId('newcard-envelope').fill('300');
+  await expect(page.getByTestId('newcard-envelope')).toHaveValue('20');
+  await page.getByTestId('newcard-envelope').fill('3');
   await page.getByTestId('newcard-profile').selectOption('e2e-alt');
   await page.getByTestId(`newcard-after-${backlog[0]}`).check();
   await page.getByTestId('newcard-stack').selectOption(gate);
@@ -98,8 +98,8 @@ test('a research card, and a diagnosis', async ({ pairedPage: page, api }, info)
   // a budget the form refuses, in its own words, beside the budget
   await page.getByTestId('newcard-envelope').fill('-5');
   await page.getByTestId('newcard-create').click();
-  await expect(page.getByTestId('newcard-error-envelope')).toContainText('non-negative');
-  await page.getByTestId('newcard-envelope').fill('150');
+  await expect(page.getByTestId('newcard-error-envelope')).toContainText('negative');
+  await page.getByTestId('newcard-envelope').fill('1.5');
   await page.getByTestId('newcard-create').click();
   await expect(page.getByTestId('card-id')).toHaveText(/^RS-/);
   const rs = (await page.getByTestId('card-id').textContent())!;

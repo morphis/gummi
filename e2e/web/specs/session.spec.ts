@@ -29,7 +29,7 @@ test('a session starts from its first message, on the model picked beside Send',
 
   await page.getByTestId('draft-budget').click();
   await page.getByTestId('draft-budget-500').click();
-  await expect(page.getByTestId('draft-budget')).toContainText('500 cr');
+  await expect(page.getByTestId('draft-budget')).toContainText('$5.00');
 
   const input = page.getByTestId('composer-input');
   await input.fill('Tidy the readme.\n\nKeep it to one paragraph.');
@@ -148,9 +148,9 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
   // a negative budget is refused in words, not started uncapped
   await page.getByTestId('spec-budget').fill('-5');
   await page.getByTestId('spec-start').click();
-  await expect(page.getByTestId('spec-error')).toContainText('whole number');
+  await expect(page.getByTestId('spec-error')).toContainText('negative');
   await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
-  await page.getByTestId('spec-budget').fill('600');
+  await page.getByTestId('spec-budget').fill('6');
   await shot(page, info, 'session-write-spec');
   await page.getByTestId('spec-start').click();
 
@@ -182,7 +182,7 @@ test('the session stats tab draws its spend, bars and envelope', async ({ paired
   await expect(page.getByTestId('stats-bars')).toContainText('open');
   await expect(page.getByTestId('stats-bars')).toContainText('session');
   await expect(page.getByTestId('stats-table')).toContainText('e2e-implementer');
-  await expect(page.getByTestId('stats-envelope')).toContainText('granted 500 · spent 3.2 · 1% used');
+  await expect(page.getByTestId('stats-envelope')).toContainText('granted $5.00 · spent $0.03 · 1% used');
   // pass-derived surfaces a session has nothing of: absent, not zero
   await expect(page.getByTestId('stats-hands')).toHaveCount(0);
   await expect(page.getByTestId('stats-judgment')).toHaveCount(0);
@@ -212,19 +212,19 @@ test('a draft keeps its budget honest, and its popovers keep working', async ({ 
   await page.unroute('**/api/form*');
 
   await page.getByTestId('rail-new-session').click();
-  await expect(page.getByTestId('draft-budget')).toContainText('2000 cr');
+  await expect(page.getByTestId('draft-budget')).toContainText('$20.00');
   // the picker opened and closed within one task leaves no listener behind
   await page.evaluate(() => { const b = document.querySelector<HTMLElement>('[data-testid=model-picker-btn]')!; b.click(); b.click(); });
   await page.waitForTimeout(200);
   await page.getByTestId('draft-budget').click();
   await page.getByTestId('draft-budget-input').fill('-30');
   await page.getByTestId('draft-budget-set').click();
-  await expect(page.getByTestId('draft-budget-error')).toContainText('whole number');
+  await expect(page.getByTestId('draft-budget-error')).toContainText('negative');
   await page.getByTestId('draft-budget-input').fill('');
   await page.getByTestId('draft-budget-set').click();
   await expect(page.getByTestId('draft-budget-error')).toContainText('0 is uncapped');
   await page.getByTestId('draft-budget-500').click();
-  await expect(page.getByTestId('draft-budget')).toContainText('500 cr');
+  await expect(page.getByTestId('draft-budget')).toContainText('$5.00');
 
   // enter takes the id typed, not the first suggestion containing it
   await page.getByTestId('model-picker-btn').click();

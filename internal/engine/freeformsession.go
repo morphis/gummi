@@ -524,7 +524,7 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 			return nil, ferr
 		}
 		if ff.engine.stageBudget(f, sess.rate()) <= 0 {
-			return nil, fmt.Errorf("%s has spent its envelope of %d credits; raise it to carry on", ff.id, f.Budget.Envelope)
+			return nil, fmt.Errorf("%s has spent its budget of %s; raise it to carry on", ff.id, domain.FormatDollars(float64(f.Budget.Envelope)))
 		}
 	}
 	var seed []Message

@@ -78,13 +78,13 @@ func TestRunRequiresEnvelope(t *testing.T) {
 
 // GUMMI_ENVELOPE supplies the envelope when --envelope is absent.
 func TestDriverOptionsEnvelopeFallback(t *testing.T) {
-	t.Setenv("GUMMI_ENVELOPE", "250")
+	t.Setenv("GUMMI_ENVELOPE", "2.50")
 	opts, err := driverOptions(parsedFlags(t, "run"), "")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
 	if opts.Envelope != 250 {
-		t.Fatalf("envelope = %d, want 250 from GUMMI_ENVELOPE", opts.Envelope)
+		t.Fatalf("envelope = %d, want 250 credits from GUMMI_ENVELOPE=2.50", opts.Envelope)
 	}
 }
 

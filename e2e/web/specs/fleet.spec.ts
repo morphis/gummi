@@ -35,7 +35,7 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
 
   const rep = (await api('GET', `/api/fleet?from=${encodeURIComponent(new Date(Date.now() - 7 * 864e5).toISOString())}`)).json;
   expect(rep.credits).toBeGreaterThan(0);
-  await expect(page.getByTestId('fleet-spent')).toContainText(rep.credits.toFixed(1));
+  await expect(page.getByTestId('fleet-spent')).toContainText(`$${(rep.credits / 100).toFixed(2)}`);
   await expect(page.getByTestId('fleet-alltime')).toContainText(`${rep.allTimeCards} card`);
   await expect(page.getByTestId('fleet-rework')).toContainText('corrected');
   await expect(page.getByTestId('fleet-clock-agent')).toBeVisible();
@@ -70,7 +70,7 @@ test('the headline, the clock, the breakdowns and the timeline, to scale', async
     // every mark carries its numbers on hover: value first, then the name
     await page.getByTestId('fleet-stage-bars').locator('tr').first().hover();
     await expect(page.getByTestId('fleet-tip')).toBeVisible();
-    await expect(page.getByTestId('fleet-tip')).toContainText(/cr.*plan$/);
+    await expect(page.getByTestId('fleet-tip')).toContainText(/\$.*plan$/);
     await landed.locator('.land').hover();
     await expect(page.getByTestId('fleet-tip')).toContainText('landed');
   } else {

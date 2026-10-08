@@ -334,7 +334,7 @@ func lastRunCost(r featureRow, stage domain.Stage) string {
 	cost := spend[stage]
 	var b strings.Builder
 	if cost > 0 {
-		b.WriteString("The last " + string(stage) + " run on this card cost " + itoa(int(cost+0.5)) + " credits")
+		b.WriteString("The last " + string(stage) + " run on this card cost " + domain.FormatDollars(cost))
 	} else {
 		b.WriteString(string(stage) + " has not run on this card yet")
 	}

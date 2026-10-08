@@ -393,29 +393,21 @@ func severityAbbrev(sev domain.Severity) string {
 // over the stored figure while a session is running, the same precedence
 // budgetSummary (spendformat.go) already gives it for the masthead.
 //
-// The unit is spelled "credits" in full rather than the old "cr"
-// suffix, which was invented for this one line — nowhere else in the
-// product abbreviates it (the masthead's budget line and the dashboard's
-// spend rollup both say "credits"). The column is also the first thing
-// cardLine sheds once a row runs out of room, so the extra characters
-// cost nothing the layout wasn't already prepared to give up.
+// The figure is in dollars, like every other money figure the product
+// shows. The column is the first thing cardLine sheds once a row runs
+// out of room.
 func spendTick(sp domain.Spend, live float64) string {
 	if live > 0 {
-		return fmt.Sprintf("~%g credits", roundSpend(live))
+		return "~" + domain.FormatDollars(live)
 	}
 	if sp.Credits > 0 {
-		return fmt.Sprintf("%s%g credits", estMark(sp), roundSpend(sp.Credits))
+		return estMark(sp) + domain.FormatDollars(sp.Credits)
 	}
 	tk := sp.InputTokens + sp.OutputTokens
 	if tk >= 1000 {
 		return fmt.Sprintf("%.1fktk", float64(tk)/1000)
 	}
 	return fmt.Sprintf("%dtk", tk)
-}
-
-// roundSpend rounds credits to one decimal for display.
-func roundSpend(c float64) float64 {
-	return float64(int(c*10+0.5)) / 10
 }
 
 // shortcutLabel shows 1..9 jump keys; features beyond nine get a dot.

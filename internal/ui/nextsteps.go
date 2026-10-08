@@ -1261,7 +1261,7 @@ func stageAnswers(in nextInput) []nextAction {
 				need := in.goal.NeedsBudget
 				return []nextAction{
 					nextStep("goaltopup", "", "top up and continue",
-						fmt.Sprintf("%s needs about %d credits — raise the goal's envelope and it carries on from where it stopped", need.Card, need.Needs)),
+						fmt.Sprintf("%s needs about %s — raise the goal's envelope and it carries on from where it stopped", need.Card, domain.FormatDollars(float64(need.Needs)))),
 					nextStep("advance", "g", "finish without it",
 						"take what landed to verify — the waiting card's items come back not met"),
 					nextStep("goalpage", "P", "open the goal page",

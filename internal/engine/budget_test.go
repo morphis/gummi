@@ -36,7 +36,7 @@ func TestBudgetHintAndCap(t *testing.T) {
 	}
 	// the model is told its budget
 	joined := strings.Join(opts.SystemHints, "\n")
-	if !strings.Contains(joined, "budget of about 100 credits") {
+	if !strings.Contains(joined, "budget of $1.00") {
 		t.Errorf("budget hint missing from system hints:\n%s", joined)
 	}
 }
@@ -62,7 +62,7 @@ func TestBudgetHintReadMostlyForVerify(t *testing.T) {
 	waitState(t, e, "FD-001", StateDone)
 
 	joined := strings.Join(rec.opts().SystemHints, "\n")
-	if !strings.Contains(joined, "budget of about 100 credits") {
+	if !strings.Contains(joined, "budget of $1.00") {
 		t.Errorf("read-mostly hint missing credit figure:\n%s", joined)
 	}
 	if !strings.Contains(joined, "checkpoint") {

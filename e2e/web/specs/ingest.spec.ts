@@ -139,7 +139,7 @@ test('a negative envelope is refused before anything decomposes', async ({ paire
   await page.getByTestId('ingest-markdown').fill(DOC);
   await page.getByTestId('ingest-envelope').fill('-50');
   await page.getByTestId('ingest-start').click();
-  await expect(page.getByTestId('toast').filter({ hasText: 'whole, non-negative number of credits' })).toHaveCount(1);
+  await expect(page.getByTestId('toast').filter({ hasText: 'is negative' })).toHaveCount(1);
   await expect(page.getByTestId('ingest-form')).toBeVisible();
   const refused = await api('POST', '/api/ingest', { markdown: DOC, envelope: -50 });
   expect(refused.status).toBe(400);

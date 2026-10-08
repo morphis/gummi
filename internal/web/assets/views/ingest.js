@@ -13,7 +13,7 @@
 //             and the approve confirm repeats them as the TUI's does
 //   done      the cards the approval minted, each a link to open it
 
-import { h, clear, plural } from '../dom.js?v=__ASSET_V__'
+import { h, clear, plural, cr, parseDollars } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { field, choose, segmented, errorBox, confirmStrip, cardLinks, refetcher } from './kit.js?v=__ASSET_V__'
 
@@ -98,7 +98,7 @@ registerView('ingest', {
       const repo = c.repos.length > 1
         ? choose([{ value: '', label: 'default' }, ...c.repos], { value: draft.repo, testid: 'ingest-repo', onchange: (e) => { draft.repo = e.target.value } })
         : null
-      const env = h('input', { testid: 'ingest-envelope', type: 'number', min: '0', inputmode: 'numeric', value: draft.envelope, placeholder: c.envelope ? String(c.envelope) : 'default', oninput: (e) => { draft.envelope = e.target.value } })
+      const env = h('input', { testid: 'ingest-envelope', type: 'text', inputmode: 'decimal', value: draft.envelope, placeholder: c.envelope ? cr(c.envelope) : 'default', oninput: (e) => { draft.envelope = e.target.value } })
       const start = h('button', { type: 'button', class: 'btn pri', testid: 'ingest-start', onclick: () => begin(start) }, 'Decompose')
       return h('div', { class: 'vstack', testid: 'ingest-form' },
         h('p', { class: 'vnote' }, 'An architect pass reads the document and proposes cards, with a map of which requirement each covers. Nothing is created until you approve.'),
@@ -127,9 +127,10 @@ registerView('ingest', {
       if (draft.repo) req.repo = draft.repo
       if (String(draft.envelope).trim() !== '') {
         // refused here, not at approve after the review's edits
-        const n = Number(draft.envelope)
-        if (!Number.isSafeInteger(n) || n < 0) return ctx.toast('The envelope per card must be a whole, non-negative number of credits', { err: true })
-        req.envelope = n
+        // typed in dollars, sent in credits
+        const b = parseDollars(draft.envelope)
+        if (b.err) return ctx.toast(`The budget per card: ${b.err}`, { err: true })
+        req.envelope = b.credits
       }
       btn.disabled = true
       try {
@@ -168,7 +169,7 @@ registerView('ingest', {
           h('span', { class: 'src' }, r.source || ''),
           h('span', { class: 'grow' }),
           r.profile ? h('span', null, `profile ${r.profile}`) : null,
-          r.envelope ? h('span', null, `${r.envelope} cr each`) : null),
+          r.envelope ? h('span', null, `${cr(r.envelope)} each`) : null),
         cov ? coverage(cov, unmapped) : null,
         h('ol', { class: 'props', testid: 'ingest-proposals' }, props.map((p, i) => proposal(r, p, i))))
       if (v.confirm === 'approve') {

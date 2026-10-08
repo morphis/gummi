@@ -5,7 +5,7 @@
 // and the goal's own verbs. Everything shown is the server's: the ledger
 // is engine.GoalReport's budget tree as it is, never recomputed here.
 
-import { h, append, clear, cr, clock, plural, GLYPH } from '../dom.js?v=__ASSET_V__'
+import { h, append, clear, cr, clock, plural, GLYPH, dollarsInput, parseDollars } from '../dom.js?v=__ASSET_V__'
 import { registerView, openView } from '../views.js?v=__ASSET_V__'
 import { markdown } from '../markdown.js?v=__ASSET_V__'
 
@@ -45,7 +45,7 @@ function cardGlyph (state) {
   }
 }
 
-const num = (n) => Math.round(Number(n) || 0).toLocaleString('en-US')
+const num = (n) => cr(n)
 
 function section (title, testid, ...kids) {
   return h('section', { class: 'gl-sec', testid }, h('h3', null, title), ...kids)
@@ -126,8 +126,8 @@ function goalRow (g, open) {
         h('span', { testid: 'goal-row-landed' }, h('b', null, `${g.landed || 0}/${g.cards || 0}`), ' cards landed'),
         g.partial ? h('span', { class: 'gl-partial' }, `partial: ${g.partial}`) : null,
         g.status === 'needs' && g.needs?.question ? h('span', { class: 'gl-needs' }, g.needs.question) : null)),
-    h('span', { class: 'gl-row-spend', testid: 'goal-row-spent', title: `${cr(g.spent)} of a ${env} credit budget` },
-      h('span', { class: 'mono' }, `${cr(g.spent)} / ${env ? num(env) : '∞'} cr`),
+    h('span', { class: 'gl-row-spend', testid: 'goal-row-spent', title: env ? `${cr(g.spent)} of a ${cr(env)} budget` : `${cr(g.spent)}, uncapped` },
+      h('span', { class: 'mono' }, `${cr(g.spent)} / ${env ? num(env) : '∞'}`),
       h('span', { class: 'gl-mini' }, h('i', { style: { '--pct': pct + '%' } }))))
 }
 
@@ -135,7 +135,7 @@ function goalRow (g, open) {
 
 function goalForm (ctx, goals, done) {
   const desc = h('textarea', { id: 'goal-desc', testid: 'goal-form-desc', rows: 3, placeholder: 'The outcome, in a sentence or two: what is true when this goal is done.' })
-  const budget = h('input', { id: 'goal-budget', testid: 'goal-form-budget', type: 'number', min: '1', inputmode: 'numeric', placeholder: 'board default' })
+  const budget = h('input', { id: 'goal-budget', testid: 'goal-form-budget', type: 'text', inputmode: 'decimal', placeholder: 'board default' })
   const profile = h('select', { id: 'goal-profile', testid: 'goal-form-profile' }, h('option', { value: '' }, 'the board’s default'))
   const after = h('select', { id: 'goal-after', testid: 'goal-form-after' },
     h('option', { value: '' }, 'nothing — a goal of its own'),
@@ -148,13 +148,13 @@ function goalForm (ctx, goals, done) {
   // the form's choices, when the board serves them
   ctx.api.get('/api/form').then(f => {
     for (const p of f?.profiles || []) profile.append(h('option', { value: p }, p))
-    if (f?.envelope) budget.placeholder = `board default (${f.envelope})`
+    if (f?.envelope) budget.placeholder = `board default (${cr(f.envelope)})`
   }).catch(() => {})
 
   const form = h('form', { class: 'gl-form', testid: 'goal-form' },
     h('label', { class: 'field wide' }, 'Objective', desc),
     h('div', { class: 'gl-form-row' },
-      h('label', { class: 'field' }, 'Budget, credits', budget),
+      h('label', { class: 'field' }, 'Budget, dollars', budget),
       h('label', { class: 'field' }, 'Profile', profile),
       h('label', { class: 'field' }, 'Continues', after)),
     h('label', { class: 'field wide' }, h('span', null, 'References ', h('span', { class: 'gl-hint' }, '— paths in the workspace, one per line; pinned at the plan gate')), refs),
@@ -171,7 +171,11 @@ function goalForm (ctx, goals, done) {
     const description = desc.value.trim()
     if (!description) { err.textContent = 'Describe the objective — a goal is created from it.'; err.hidden = false; desc.focus(); return }
     const body = { description }
-    if (budget.value !== '') body.envelope = Number(budget.value)
+    if (budget.value.trim() !== '') {
+      const b = parseDollars(budget.value)
+      if (b.err || !b.credits) { err.textContent = b.err || 'A goal’s budget is more than $0.'; err.hidden = false; budget.focus(); return }
+      body.envelope = b.credits
+    }
     if (profile.value) body.profile = profile.value
     if (after.value) body.after = after.value
     const paths = refs.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean)
@@ -289,7 +293,7 @@ function attention (g, r, ctx) {
       h('button', { class: 'btn', type: 'button', testid: 'goal-plan-open', onclick: () => { ctx.select(r.id); ctx.close() } }, `Open ${r.id}`)))
   }
   const nb = r.needs_budget || {}
-  if (nb.card) lines.push(h('div', { class: 'gl-callout t-warn', testid: 'goal-needs-budget' }, h('b', null, 'Waiting on budget'), ` — ${nb.card} needs ${nb.needs || '?'} credits. ${nb.reason || ''}`))
+  if (nb.card) lines.push(h('div', { class: 'gl-callout t-warn', testid: 'goal-needs-budget' }, h('b', null, 'Waiting on budget'), ` — ${nb.card} needs ${nb.needs ? cr(nb.needs) : '?'}. ${nb.reason || ''}`))
   const ns = r.needs_substrate || {}
   if (ns.experiment) lines.push(h('div', { class: 'gl-callout t-warn', testid: 'goal-needs-substrate' }, h('b', null, 'Waiting on substrate'), ` — ${ns.experiment}: ${ns.reason || ''}`))
   const no = r.needs_owner || {}
@@ -356,14 +360,15 @@ function openPanel (a, g, ctx, host, hooks, preset = {}, opener = null) {
     }
     case 'number': {
       const cur = Number(a.default) || r.budget?.envelope || 0
-      const inp = h('input', { testid: 'goal-action-input', type: 'number', inputmode: 'numeric', min: String(cur + 1), value: String(cur ? cur + Math.max(100, Math.round(cur * 0.25)) : ''), step: '1' })
-      fields.append(h('label', { class: 'field' }, h('span', null, 'New budget, credits ', h('span', { class: 'gl-hint' }, `— now ${num(cur)}; a goal’s budget is only ever raised`)), inp))
+      const inp = h('input', { testid: 'goal-action-input', type: 'text', inputmode: 'decimal', value: cur ? dollarsInput(cur + Math.max(100, Math.round(cur * 0.25))) : '' })
+      fields.append(h('label', { class: 'field' }, h('span', null, 'New budget, dollars ', h('span', { class: 'gl-hint' }, `— now ${num(cur)}; a goal’s budget is only ever raised`)), inp))
       focus = inp
       collect = () => {
-        const n = Number(inp.value)
-        if (!inp.value || !Number.isFinite(n)) return 'Name the new budget.'
-        if (n <= cur) return `A goal’s budget is only raised — above ${num(cur)}.`
-        return { envelope: Math.round(n) }
+        if (!inp.value.trim()) return 'Name the new budget.'
+        const b = parseDollars(inp.value)
+        if (b.err) return b.err
+        if (b.credits <= cur) return `A goal’s budget is only raised — above ${num(cur)}.`
+        return { envelope: b.credits }
       }
       break
     }
@@ -486,7 +491,7 @@ function ledger (b) {
   const s = b.substrate
   return section('Budget', 'goal-ledger',
     h('div', { class: 'gl-ledger-top' },
-      h('span', null, h('b', { class: 'mono', testid: 'ledger-envelope' }, num(env)), ' credit budget'),
+      h('span', null, h('b', { class: 'mono', testid: 'ledger-envelope' }, num(env)), ' budget'),
       h('span', { class: 'gl-hint' }, h('span', { class: 'mono', testid: 'ledger-total' }, cr(b.total_spend)), ' spent in all')),
     h('div', { class: ['gl-bar-track', left < 0 && 'over'], role: 'img', 'aria-label': `goal spend ${cr(own)}, held by cards ${num(held)}, reserve ${num(reserve)}, left to give ${num(left)}, of ${num(env)}` },
       seg('own', own, `goal spend ${cr(own)}`),
@@ -550,7 +555,7 @@ function cards (g, r, ctx) {
               c.commit ? h('span', { class: 'mono' }, `landed as ${c.commit.slice(0, 7)}`) : null),
             c.subject ? h('span', { class: 'gl-card-sub' }, c.subject) : null,
             c.reason ? h('span', { class: 'gl-card-sub' }, c.reason) : null),
-          h('span', { class: 'gl-card-spend mono' }, `${cr(c.spent)}/${c.envelope || '∞'}`))
+          h('span', { class: 'gl-card-spend mono' }, `${cr(c.spent)}/${c.envelope ? cr(c.envelope) : '∞'}`))
       }))
       : h('p', { class: 'gl-none' }, 'None yet — crossing the plan gate mints them.'))
 }

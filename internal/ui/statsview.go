@@ -182,33 +182,33 @@ func statsMoneyLines(s *theme.Styles, r cardrun.Run, clip func(string) string) [
 	out := statsHeading(s, "where it went")
 	add := func(line string) { out = append(out, line) }
 	for _, b := range r.Money.ByStage {
-		add(clip(fmt.Sprintf("  %-11s %s %8.2f  %3.0f%%",
+		add(clip(fmt.Sprintf("  %-11s %s %9s  %3.0f%%",
 			b.Name, s.Info.Render(statsBar(b.Credits, r.Money.Credits)),
-			b.Credits, share(b.Credits, r.Money.Credits)*100)))
+			usd(b.Credits), share(b.Credits, r.Money.Credits)*100)))
 	}
-	add(clip(fmt.Sprintf("  %-11s %s %8.2f  %s",
-		"", strings.Repeat(" ", statsBarWidth), r.Money.Credits, s.Muted.Render("credits"))))
+	add(clip(fmt.Sprintf("  %-11s %s %9s",
+		"", strings.Repeat(" ", statsBarWidth), usd(r.Money.Credits))))
 	// An unsettled figure is marked where it stands rather than in a
 	// footnote: a number a provider may still correct has to read as one.
 	if r.Money.Estimated > 0 {
-		add("  " + s.Warning.Render(fmt.Sprintf("~%.2f estimated", r.Money.Estimated)) +
+		add("  " + s.Warning.Render("~"+usd(r.Money.Estimated)+" estimated") +
 			" " + s.Faint.Render("— not yet settled by the provider"))
 	}
 	if r.Money.Rework > 0 {
-		add("  " + s.Info.Render("█") + s.Muted.Render(fmt.Sprintf(" first pass %.2f", r.Money.FirstPass)) +
+		add("  " + s.Info.Render("█") + s.Muted.Render(" first pass "+usd(r.Money.FirstPass)) +
 			"   " + s.Warning.Render("█") +
-			s.Muted.Render(fmt.Sprintf(" redone %.2f (%.0f%%)",
-				r.Money.Rework, r.Money.ReworkShare()*100)))
+			s.Muted.Render(fmt.Sprintf(" redone %s (%.0f%%)",
+				usd(r.Money.Rework), r.Money.ReworkShare()*100)))
 	}
 	// Spend no pass holds, named here rather than left for a reader to
 	// find by adding the pass list up and coming out short.
 	if r.Money.Elsewhere > 0 {
 		var by []string
 		for _, b := range r.Money.ElsewhereBy {
-			by = append(by, fmt.Sprintf("%s %.2f", b.Name, b.Credits))
+			by = append(by, b.Name+" "+usd(b.Credits))
 		}
-		add("  " + s.Muted.Render(fmt.Sprintf("%.2f on turns that are not passes — %s",
-			r.Money.Elsewhere, strings.Join(by, ", "))))
+		add("  " + s.Muted.Render(fmt.Sprintf("%s on turns that are not passes — %s",
+			usd(r.Money.Elsewhere), strings.Join(by, ", "))))
 	}
 	return out
 }
@@ -238,9 +238,9 @@ func statsRedoLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []
 		}
 	}
 	for _, p := range redone {
-		line := fmt.Sprintf("  %s · %s · %s · %d turn%s · %s · %.2f%s",
+		line := fmt.Sprintf("  %s · %s · %s · %d turn%s · %s · %s%s",
 			p.Stage, p.Role, p.RedoReason, p.Turns, plural(p.Turns),
-			shortDur(p.Duration()), p.Credits, reconMark(p))
+			shortDur(p.Duration()), usd(p.Credits), reconMark(p))
 		k := string(p.Stage) + "\x00" + p.Role + "\x00" + p.Flavor
 		if f, ok := first[k]; ok && p.Credits > f.Credits && f.Credits > 0 {
 			line += "  ← cost more than the first"
@@ -248,12 +248,12 @@ func statsRedoLines(s *theme.Styles, r cardrun.Run, clip func(string) string) []
 		out = append(out, clip(s.Warning.Render(line)))
 	}
 	out = append(out, clip(s.Muted.Render(fmt.Sprintf(
-		"  %.2f of %.2f credits was work already done (%.0f%%)",
-		r.Money.Rework, r.Money.Credits, r.Money.ReworkShare()*100))))
+		"  %s of %s was work already done (%.0f%%)",
+		usd(r.Money.Rework), usd(r.Money.Credits), r.Money.ReworkShare()*100))))
 	if r.Money.Reproved > 0 && r.Money.Corrected > 0 {
 		out = append(out, clip(s.Faint.Render(fmt.Sprintf(
-			"  %.2f corrected after a verdict · %.2f re-proved over a new base",
-			r.Money.Corrected, r.Money.Reproved))))
+			"  %s corrected after a verdict · %s re-proved over a new base",
+			usd(r.Money.Corrected), usd(r.Money.Reproved)))))
 	}
 	return out
 }
@@ -345,8 +345,8 @@ func statsEnvelopeLines(s *theme.Styles, r cardrun.Run) []string {
 		return nil
 	}
 	out := statsHeading(s, "the envelope")
-	line := fmt.Sprintf("  granted %d · spent %.0f · %.0f%% used",
-		r.Envelope.Granted, r.Envelope.Spent, r.Envelope.Utilization()*100)
+	line := fmt.Sprintf("  granted %s · spent %s · %.0f%% used",
+		usd(float64(r.Envelope.Granted)), usd(r.Envelope.Spent), r.Envelope.Utilization()*100)
 	if r.Envelope.Utilization() < 0.25 {
 		out = append(out, s.Muted.Render(line))
 		return out

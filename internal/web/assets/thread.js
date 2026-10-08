@@ -211,7 +211,7 @@ function groupNode (grp, last) {
   const count = grp.items.length
   const bits = last
     ? [st.role && st.role !== st.stage ? st.role : (st.role ? '' : ROLE[st.stage] || ''), st.model, st.exited && verdict ? verdict : null].filter(Boolean)
-    : [plural(count, 'event'), verdict || receipt?.receipt?.text || receipt?.text, st.credits ? `${cr(st.credits)} cr` : null].filter(Boolean)
+    : [plural(count, 'event'), verdict || receipt?.receipt?.text || receipt?.text, st.credits ? cr(st.credits) : null].filter(Boolean)
   // a freeform card's one conversation is headed as its live block is
   const stageName = st.stage === 'open' ? 'session' : st.stage
   const name = st.flavor && !/^(stage|work)$/.test(st.flavor) ? `${stageName} · ${st.flavor}` : stageName
@@ -530,7 +530,7 @@ function renderLive () {
         parts.push(h('div', { class: 'live', testid: 'live' },
           h('span', { class: 'spinner' }),
           h('span', { class: 'shimmer' }, words + (pausing ? ' · pauses after this turn' : '')),
-          l.spent ? h('span', { class: 'spent' }, `${cr(l.spent)} cr`) : null))
+          l.spent ? h('span', { class: 'spent' }, cr(l.spent)) : null))
       }
       // a failure the pinned decision already states (a failed stage's
       // stop quotes it) is not said a second time under the thread
@@ -556,7 +556,7 @@ function renderLive () {
           const words = [c.verb || 'thinking', c.tool ? String(c.tool.label || c.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
           const ctx = c.context?.limit ? `${Math.round(100 * c.context.tokens / c.context.limit)}% context` : null
           parts.push(h('div', { class: 'live', testid: `live-${k}` }, h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }, words),
-            c.spent || ctx ? h('span', { class: 'spent' }, [c.spent ? `${cr(c.spent)} cr` : null, ctx].filter(Boolean).join(' · ')) : null))
+            c.spent || ctx ? h('span', { class: 'spent' }, [c.spent ? cr(c.spent) : null, ctx].filter(Boolean).join(' · ')) : null))
         }
         if (c.err) parts.push(h('div', { class: 'live badc' }, c.err))
       }

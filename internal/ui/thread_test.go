@@ -138,7 +138,7 @@ func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 	if strings.Contains(line, "\n") {
 		t.Fatalf("folded receipt spans more than one line: %q", line)
 	}
-	for _, want := range []string{"plan", "architect", "2 turns", "6 credits", "12:04"} {
+	for _, want := range []string{"plan", "architect", "2 turns", "$0.06", "12:04"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("folded receipt %q missing %q", line, want)
 		}
@@ -339,10 +339,10 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 
 	// one segment: the payload wins over the rollup even though both exist.
 	line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, metered, 1, 0, 80))
-	if !strings.Contains(line, "6 credits") {
+	if !strings.Contains(line, "$0.06") {
 		t.Errorf("receipt %q did not use the segment's own payload", line)
 	}
-	if strings.Contains(line, "41 credits") {
+	if strings.Contains(line, "$0.41") {
 		t.Errorf("receipt %q used the stage rollup over the segment", line)
 	}
 
@@ -350,7 +350,7 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 	// still better than nothing.
 	bare := threadfold.Segment{Stage: domain.StageImplement, Role: "implementer", Exited: true}
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 1, 0, 80))
-	if !strings.Contains(line, "41 credits") {
+	if !strings.Contains(line, "$0.41") {
 		t.Errorf("receipt %q dropped the rollup fallback", line)
 	}
 
@@ -358,7 +358,7 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 	// be attributed to this session, so nothing is shown rather than a
 	// number that may not even be this segment's.
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 2, 0, 80))
-	if strings.Contains(line, "credits") {
+	if strings.Contains(line, "$") {
 		t.Errorf("receipt %q showed an unattributable rollup across multiple segments", line)
 	}
 }
@@ -376,11 +376,11 @@ func TestFoldedReceiptPerSessionSpendDiffers(t *testing.T) {
 
 	l1 := ansi.Strip(foldedReceiptLine(m0Styles(), first, rollup, 2, 0, 80))
 	l2 := ansi.Strip(foldedReceiptLine(m0Styles(), second, rollup, 2, 0, 80))
-	if !strings.Contains(l1, "12 credits") {
-		t.Errorf("first fix receipt %q did not show its own 12 credits", l1)
+	if !strings.Contains(l1, "$0.12") {
+		t.Errorf("first fix receipt %q did not show its own $0.12", l1)
 	}
-	if !strings.Contains(l2, "34 credits") {
-		t.Errorf("second fix receipt %q did not show its own 34 credits", l2)
+	if !strings.Contains(l2, "$0.34") {
+		t.Errorf("second fix receipt %q did not show its own $0.34", l2)
 	}
 	if strings.Contains(l1, "53.5") || strings.Contains(l2, "53.5") {
 		t.Errorf("a receipt showed the stage rollup instead of its own spend: %q / %q", l1, l2)
@@ -1615,13 +1615,13 @@ func TestReceiptClaimsTheStagesUnaccountedSpend(t *testing.T) {
 
 	line := ansi.Strip(foldedReceiptLine(m0Styles(), bare, rollup, 2,
 		threadfold.Remainder(bare, unclaimed, unknown), 90))
-	if !strings.Contains(line, "35.1 credits") {
+	if !strings.Contains(line, "$0.35") {
 		t.Errorf("the unclaimed remainder is still missing from the receipt: %q", line)
 	}
 	// the segment that knows its own cost is untouched
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), known, rollup, 2,
 		threadfold.Remainder(known, unclaimed, unknown), 90))
-	if !strings.Contains(line, "25 credits") {
+	if !strings.Contains(line, "$0.25") {
 		t.Errorf("a segment with its own figure lost it: %q", line)
 	}
 
@@ -1630,7 +1630,7 @@ func TestReceiptClaimsTheStagesUnaccountedSpend(t *testing.T) {
 	unknown[domain.StagePlan] = 2
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, rollup, 2,
 		threadfold.Remainder(bare, unclaimed, unknown), 90))
-	if strings.Contains(line, "credits") {
+	if strings.Contains(line, "$") {
 		t.Errorf("a remainder was split across two segments that cannot be told apart: %q", line)
 	}
 }
@@ -1661,7 +1661,7 @@ func TestSessionlessSpendGetsItsOwnLine(t *testing.T) {
 	}
 	joined := strings.Join(names, "\n")
 	if !strings.Contains(joined, "checks · discovery and baseline") ||
-		!strings.Contains(joined, "94.9 credits") {
+		!strings.Contains(joined, "$0.95") {
 		t.Errorf("check discovery is still unexplained on the page:\n%s", joined)
 	}
 	if !strings.Contains(joined, "backend's own side model") {

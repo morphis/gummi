@@ -21,7 +21,7 @@ func TestEnvelopeDialogSubmitsFigure(t *testing.T) {
 	got := -1
 	d := newEnvelopeDialog(f, func(to int) tea.Cmd { got = to; return nil }, nil)
 
-	typeInto(d, "450")
+	typeInto(d, "4.50")
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !closed || got != 450 {
 		t.Fatalf("submit: closed=%v got=%d, want true/450", closed, got)
@@ -80,7 +80,7 @@ func TestEnvelopeDialogOffersResumeOnParkedAutopilotRaise(t *testing.T) {
 	got := -1
 	d := newEnvelopeDialog(parkedAutopilotFeature(), func(to int) tea.Cmd { got = to; return nil }, nil)
 
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got != 4000 {
 		t.Fatalf("onSubmit got %d, want 4000 — the raise must fire regardless of the resume answer", got)
@@ -103,7 +103,7 @@ func TestEnvelopeDialogNoResumeOffGateApproval(t *testing.T) {
 	f := parkedAutopilotFeature()
 	f.GateApproval = domain.GateAttended
 	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil }, nil)
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d.askResume {
 		t.Fatal("askResume = true on a GateAttended card, want false")
@@ -118,7 +118,7 @@ func TestEnvelopeDialogNoResumeWhenNotExhausted(t *testing.T) {
 	f := parkedAutopilotFeature()
 	f.Spend.Credits = 100 // nowhere near the 2400 envelope
 	d := newEnvelopeDialog(f, func(int) tea.Cmd { return nil }, nil)
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if d.askResume {
 		t.Fatal("askResume = true on a card that was not exhausted, want false")
@@ -131,7 +131,7 @@ func TestEnvelopeDialogNoResumeWhenNotExhausted(t *testing.T) {
 // than pretending the run resumed.
 func TestEnvelopeDialogResumeAnswerYes(t *testing.T) {
 	d := newEnvelopeDialog(parkedAutopilotFeature(), func(int) tea.Cmd { return nil }, nil)
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !d.askResume {
 		t.Fatal("setup: expected the resume question to be showing")
@@ -154,7 +154,7 @@ func TestEnvelopeDialogResumeAnswerYes(t *testing.T) {
 // the envelope stays raised (already set), nothing else happens.
 func TestEnvelopeDialogResumeAnswerNo(t *testing.T) {
 	d := newEnvelopeDialog(parkedAutopilotFeature(), func(int) tea.Cmd { return nil }, nil)
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	closed, cmd := d.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"})
@@ -173,7 +173,7 @@ func TestEnvelopeDialogResumeAnswerFiresTheResume(t *testing.T) {
 		func(int) tea.Cmd { return nil },
 		func() tea.Cmd { resumed++; return func() tea.Msg { return nil } })
 
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	if closed, _ := d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter}); closed {
 		t.Fatal("raising a parked autopilot card's envelope closed without asking about the resume")
 	}
@@ -199,7 +199,7 @@ func TestEnvelopeDialogDeclinedResumeNeverRestarts(t *testing.T) {
 		func(int) tea.Cmd { return nil },
 		func() tea.Cmd { resumed++; return nil })
 
-	typeInto(d, "4000")
+	typeInto(d, "40")
 	d.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if closed, _ := d.HandleKey(tea.KeyPressMsg{Code: 'n', Text: "n"}); !closed {
 		t.Fatal("answering no did not close the dialog")

@@ -2423,7 +2423,7 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 	}
 	if to != 0 {
 		if floor := int(math.Ceil(domain.EnvelopeFloor(f.Spend.CreditEquivalent()))); to < floor {
-			return fmt.Errorf("%s: %d credits is below the %d-credit floor (spend plus resume headroom)", id, to, floor)
+			return fmt.Errorf("%s: %s is below the %s floor (spend plus resume headroom)", id, domain.FormatDollars(float64(to)), domain.FormatDollars(float64(floor)))
 		}
 	}
 	f.Budget.Envelope = to

@@ -111,7 +111,7 @@ func TestAutopilotBodyNamesConcreteConsequence(t *testing.T) {
 		// reader does not have to already know what "the inbox" is), and
 		// the round count now says what running out of it means instead
 		// of leaving that to guesswork.
-		"2400 credit budget",
+		"$24.00 budget",
 		"stops and leaves the card in the inbox",
 		"never lands on master",
 	} {
@@ -130,8 +130,8 @@ func TestAutopilotBodyNoEnvelopeWhenUncapped(t *testing.T) {
 	f := domain.Feature{ID: "FD-051", Stage: domain.StageTodo}
 	plan := autopilotPlan{bucket: "todo", to: domain.StagePlan, remaining: []domain.Stage{domain.StagePlan}}
 	body := strings.Join(autopilotBody(f, plan, domain.GateAutopilot, "main"), " ")
-	if strings.Contains(body, "credit budget") {
-		t.Errorf("body mentions a credit budget for an uncapped card: %q", body)
+	if strings.Contains(body, " budget,") {
+		t.Errorf("body mentions a budget for an uncapped card: %q", body)
 	}
 }
 

@@ -309,8 +309,8 @@ type Shell struct {
 	// on that.
 	scribing map[domain.FeatureID]int
 	// scribeWarned is the cards whose scribe failure the board already
-	// put on screen: the passes that fail together (discovery, the
-	// estimate, the landing draft) say it once, not three times.
+	// put on screen: the passes that fail together (discovery and the
+	// landing draft) say it once, not twice.
 	scribeWarned map[domain.FeatureID]bool
 	rounds       map[roundKey]int // automatic loop round counters, keyed by (id, round_kind)
 	// cardEvents caches the card-event log (state.CardEvent, card_events
@@ -954,11 +954,8 @@ func (m *Shell) SetEnvelope(credits int) { m.envelope = credits }
 
 // envelopePrefill is the number the creation dialogs open on. It is
 // deliberately not m.envelope itself: m.envelope stays the *operator's*
-// envelope (0 when GUMMI_ENVELOPE is unset), which is the sentinel that
-// puts spec approval into scribe-estimation mode and floors the blend
-// (see estimateEnvelope). Folding the prefill into that field would read
-// as an explicit choice nobody made, and would silently switch off
-// estimation for every workspace that never set the variable.
+// envelope (0 when GUMMI_ENVELOPE is unset). Folding the prefill into
+// that field would read as an explicit choice nobody made.
 func (m *Shell) envelopePrefill() int {
 	if m.envelope > 0 {
 		return m.envelope
@@ -2472,9 +2469,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.discover {
 			cmds = append(cmds, m.discoverChecks(msg.id))
 		}
-		if msg.estimate {
-			cmds = append(cmds, m.scribeEstimate(msg.id))
-		}
 		if msg.continueTo != "" {
 			// autopilot's own crossing: the stage behind the gate is its to
 			// start, alongside the one-shot passes rather than after them —
@@ -2528,17 +2522,6 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case narrationDoneMsg:
 		m.applyNarration(msg)
 		return m, nil
-
-	case scribeEstimateDoneMsg:
-		m.scribeSettled(msg.id)
-		if msg.err != nil {
-			m.warnScribeFailure(msg.id, msg.err)
-		}
-		if msg.blended == 0 {
-			return m, nil
-		}
-		m.notice = noticeMsg{text: fmt.Sprintf("%s: scribe raised the budget to %d credits", msg.id, msg.blended), reload: true}
-		return m, m.loadRows
 
 	case baselineDoneMsg:
 		delete(m.baselining, msg.id)
@@ -4532,8 +4515,8 @@ func (m *Shell) topUpBudget(id domain.FeatureID) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: string(id) + " topped up — resuming", reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s topped up — budget raised to %d credits, resuming",
-			id, f.Budget.Envelope), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s topped up — budget raised to %s, resuming",
+			id, domain.FormatDollars(float64(f.Budget.Envelope))), reload: true}
 	}
 }
 
@@ -4571,7 +4554,7 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 			if err := m.engine.RaiseGoalBudget(engine.WithActor(context.Background(), actor), id, to); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %d credits", id, to), reload: true}
+			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %s", id, domain.FormatDollars(float64(to))), reload: true}
 		}
 		if err := m.engine.RaiseEnvelope(context.Background(), id, to); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
@@ -4579,7 +4562,7 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		if to == 0 {
 			return noticeMsg{text: string(id) + ": budget removed — spend is uncapped", reload: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: budget set to %d credits (applies from the next agent session)", id, to), reload: true}
+		return noticeMsg{text: fmt.Sprintf("%s: budget set to %s (applies from the next agent session)", id, domain.FormatDollars(float64(to))), reload: true}
 	}
 }
 

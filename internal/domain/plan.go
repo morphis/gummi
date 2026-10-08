@@ -1,9 +1,12 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // The layer-3 budget (DESIGN §5.1) is one envelope per work item, spent
@@ -49,6 +52,41 @@ func FormatDollars(credits float64) string {
 	default:
 		return fmt.Sprintf("%.2g credits", credits)
 	}
+}
+
+// ParseDollars reads a budget a person typed — "5", "5.50", "$5",
+// "1,200" — as US dollars and returns it in credits, the unit every
+// envelope is stored in. A credit is a cent, so a figure finer than a cent
+// is refused rather than rounded: whatever was typed is what is stored.
+// Negative figures are refused; "0" is 0, which callers read as uncapped.
+func ParseDollars(s string) (int, error) {
+	t := strings.TrimSpace(s)
+	t = strings.TrimSpace(strings.TrimPrefix(t, "$"))
+	t = strings.ReplaceAll(t, ",", "")
+	if t == "" {
+		return 0, errors.New("a dollar amount, like 5 or 12.50")
+	}
+	v, err := strconv.ParseFloat(t, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, fmt.Errorf("%q is not a dollar amount, like 5 or 12.50", s)
+	}
+	if v < 0 {
+		return 0, fmt.Errorf("%q is negative; a budget is $0 (uncapped) or more", s)
+	}
+	cents := math.Round(v / CreditsToDollars)
+	if math.Abs(cents*CreditsToDollars-v) > 1e-9 {
+		return 0, fmt.Errorf("%q is finer than a cent", s)
+	}
+	if cents > math.MaxInt32 {
+		return 0, fmt.Errorf("%q is too large a budget", s)
+	}
+	return int(cents), nil
+}
+
+// DollarsInput renders a credit figure the way an input field holds it,
+// for ParseDollars to read back: 500 → "5", 550 → "5.5".
+func DollarsInput(credits int) string {
+	return strconv.FormatFloat(float64(credits)*CreditsToDollars, 'f', -1, 64)
 }
 
 // CreditEquivalent returns the spend as a credit figure at the default
@@ -145,24 +183,6 @@ func EstimateEnvelope(history []Spend) (envelope float64, samples int) {
 
 // roundUpTo10 rounds a credit figure up to a tidy multiple of 10.
 func roundUpTo10(v float64) float64 { return math.Ceil(v/10) * 10 }
-
-// BlendEstimate combines the historical-spend envelope with a scribe
-// agent's plan-time estimate (DESIGN §5.1). With both signals it averages
-// them (the history grounds the guess, the scribe reflects this specific
-// plan); with one, it uses that; with neither, 0. Rounded to a tidy 10
-// and floored at MinEnvelope — any non-zero blend is an estimate.
-func BlendEstimate(historical, scribe float64) float64 {
-	switch {
-	case historical > 0 && scribe > 0:
-		return math.Max(roundUpTo10((historical+scribe)/2), MinEnvelope)
-	case scribe > 0:
-		return math.Max(roundUpTo10(scribe), MinEnvelope)
-	case historical > 0:
-		return math.Max(roundUpTo10(historical), MinEnvelope)
-	default:
-		return 0
-	}
-}
 
 // topUpResumeTurns sizes RaisedEnvelope's resume floor: a top-up
 // guarantees the gated stage at least this many agent turns of fresh

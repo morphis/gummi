@@ -14,8 +14,8 @@ import (
 )
 
 // TestAScribeFailureIsSaidOnceOnTheCard is the regression for a scribe
-// whose model the backend refused: check discovery, the estimate and the
-// landing draft all failed on every card, and each swallowed it. The first
+// whose model the backend refused: check discovery and the landing draft
+// both failed on every card, and each swallowed it. The first
 // failure now leaves one note on the card naming the model and the fix;
 // the next failure on the same card and model adds nothing.
 func TestAScribeFailureIsSaidOnceOnTheCard(t *testing.T) {
@@ -34,9 +34,6 @@ func TestAScribeFailureIsSaidOnceOnTheCard(t *testing.T) {
 	var sf *ScribeFailure
 	if len(checks) != 0 || !errors.As(err, &sf) {
 		t.Fatalf("DiscoverChecks = %v, %v; want no checks and a ScribeFailure", checks, err)
-	}
-	if _, err := e.Estimate(ctx, f); !errors.As(err, &sf) {
-		t.Fatalf("Estimate err = %v, want a ScribeFailure", err)
 	}
 
 	notes := cardNotes(t, store, f.ID)

@@ -21,7 +21,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -152,7 +151,7 @@ func newScheduleForm(m *Shell, edit *domain.Schedule) *scheduleForm {
 		buttons: newButtonRow(button{label: "Cancel"}, button{label: "Save"}),
 	}
 	d.name.Focus()
-	d.env.SetValue("100")
+	d.env.SetValue(domain.DollarsInput(100))
 	// the backend cycle: the profile default first, then every backend a
 	// session could be pointed at, with the static frame of the session
 	// picker's catalog — the install flags and the profile ids
@@ -211,7 +210,7 @@ func (d *scheduleForm) prefill(sc *domain.Schedule) {
 			d.models = append([]string{}, b.suggest...)
 		}
 	}
-	d.env.SetValue(strconv.Itoa(sc.Envelope))
+	d.env.SetValue(domain.DollarsInput(sc.Envelope))
 }
 
 // kindIsHeartbeat reports whether the kind row currently names one.
@@ -514,7 +513,7 @@ func (d *scheduleForm) submit() (bool, tea.Cmd) {
 		req.Every = strings.TrimSpace(d.every.Value())
 	}
 	if !d.kindIsHeartbeat() {
-		if v, err := strconv.Atoi(strings.TrimSpace(d.env.Value())); err == nil {
+		if v, err := domain.ParseDollars(d.env.Value()); err == nil {
 			req.Envelope = &v
 		}
 	}

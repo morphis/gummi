@@ -185,7 +185,7 @@ function rowEl (r, spread) {
     r.stack ? h('span', { class: ['badge stack', r.stack.stale && 'stale'], title: r.stack.name }, `stack ${r.stack.pos + 1} of ${r.stack.of}`) : null,
     r.elsewhere ? h('span', { class: 'badge else', title: 'Another gummi is driving this card' }, 'elsewhere') : null,
     // the same figures as the card's head: spent / budget
-    h('span', { class: 'meter' }, `${cr(r.spend)} / ${r.envelope || '∞'}`)))
+    h('span', { class: 'meter' }, `${cr(r.spend)} / ${r.envelope ? cr(r.envelope) : '∞'}`)))
 }
 
 function strip (stage) {

@@ -315,7 +315,7 @@ func (m *Shell) boardBindings() []binding {
 		{key: "h", label: "hand off", help: handOffHelp},
 		bounce,
 		{key: "v", label: "verify", help: "run verify checks"},
-		{key: "u", label: "budget", help: "set the card's budget (credits; 0 = uncapped)"},
+		{key: "u", label: "budget", help: "set the card's budget (dollars; 0 = uncapped)"},
 		{key: "o", label: "repo", help: "change the card's managed repository (before worktree)"},
 		{key: "a", label: "attach", help: "open a terminal agent in this card's worktree"},
 		{key: "A", label: "autopilot", help: "set how far this card runs on its own, and start it"},

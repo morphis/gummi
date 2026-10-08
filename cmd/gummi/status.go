@@ -520,7 +520,7 @@ func renderStatus(w io.Writer, v statusView) {
 		fmt.Fprintf(w, "  Ending:   landed — %s is merged\n", v.Branch)
 	}
 	fmt.Fprintf(w, "  Running:  %s\n", yesNo(v.Running))
-	fmt.Fprintf(w, "  Spend:    %s / %d credits\n", trimCredits(v.Spend.Credits), v.Spend.Envelope)
+	fmt.Fprintf(w, "  Spend:    %s / %s\n", domain.FormatDollars(v.Spend.Credits), domain.FormatDollars(float64(v.Spend.Envelope)))
 	// An envelope bounds what a card may START, not what it may finish:
 	// the check fires between sessions, so the session in flight when the
 	// cap is reached runs to its end. Every stop on the lxd autopilot
@@ -531,13 +531,13 @@ func renderStatus(w io.Writer, v statusView) {
 	if v.Spend.Envelope > 0 && v.Spend.Credits > float64(v.Spend.Envelope) {
 		fmt.Fprintf(w, "            over by %s — the envelope is checked between sessions, "+
 			"so the one in flight finishes\n",
-			trimCredits(v.Spend.Credits-float64(v.Spend.Envelope)))
+			domain.FormatDollars(v.Spend.Credits-float64(v.Spend.Envelope)))
 	}
 	// continuation lines under Spend: the breakdown is the same figure
 	// taken apart, not a second one.
 	for _, sp := range v.StageSpend {
 		fmt.Fprintf(w, "            %-9s %-11s %8s  %s\n",
-			sp.Stage, sp.Role, trimCredits(sp.Credits), sp.Model)
+			sp.Stage, sp.Role, domain.FormatDollars(sp.Credits), sp.Model)
 	}
 	fmt.Fprintf(w, "  Blockers: %d open comment%s · %d open diff comment%s\n",
 		v.Blockers.OpenQuestions, cardPlural(v.Blockers.OpenQuestions), v.Blockers.OpenDiff, cardPlural(v.Blockers.OpenDiff))
@@ -586,9 +586,9 @@ func renderStatus(w io.Writer, v statusView) {
 		// "left to give" is computed from. Printing their spend here beside
 		// it made four numbers that look like a decomposition of the
 		// envelope and do not add up to it.
-		fmt.Fprintf(w, "  Budget:   %d · goal %s · cards %s held (%s spent) · reserve %d · left to give %s\n",
-			g.Budget.Envelope, trimCredits(g.Budget.Own), trimCredits(g.Budget.Given),
-			trimCredits(g.Budget.CardSpent), g.Budget.Reserve, trimCredits(g.Budget.Available))
+		fmt.Fprintf(w, "  Budget:   %s · goal %s · cards %s held (%s spent) · reserve %s · left to give %s\n",
+			domain.FormatDollars(float64(g.Budget.Envelope)), domain.FormatDollars(g.Budget.Own), domain.FormatDollars(g.Budget.Given),
+			domain.FormatDollars(g.Budget.CardSpent), domain.FormatDollars(float64(g.Budget.Reserve)), domain.FormatDollars(g.Budget.Available))
 		for _, d := range g.DoneWhen {
 			fmt.Fprintf(w, "            %s %s — %s\n", d.ID, d.Status, d.Says)
 		}
@@ -608,15 +608,6 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-// trimCredits formats a credit figure without a trailing ".0" for whole
-// numbers, so the common integer case reads cleanly.
-func trimCredits(c float64) string {
-	if c == float64(int64(c)) {
-		return fmt.Sprintf("%d", int64(c))
-	}
-	return fmt.Sprintf("%.2f", c)
 }
 
 // goalOrItsGoal names the goal that dropped a card, falling back to the

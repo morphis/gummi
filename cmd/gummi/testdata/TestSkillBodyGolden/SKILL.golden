@@ -44,7 +44,7 @@ verb only where that verb means something different by one:
 
     --autonomous              auto-take the recommended answer instead of checkpointing questions
     --base string             branch the card's work forks from and lands on (default: whatever the repository has checked out)
-    --envelope int            spend budget for the card, in credits (required; falls back to GUMMI_ENVELOPE)
+    --envelope dollars        spend budget for the card, in dollars (required; falls back to GUMMI_ENVELOPE)
     --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)
     --profile string          profile mapping roles to models (default: first configured)
     --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
@@ -60,14 +60,14 @@ gummi run [flags] "<description>"
 
 gummi research [flags] "<brief>"
 gummi diagnose [flags] "<symptom>"
-    --envelope int  spend budget for the research card, in credits (required; falls back to GUMMI_ENVELOPE)
-    --until string  stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
+    --envelope dollars  spend budget for the research card, in dollars (required; falls back to GUMMI_ENVELOPE)
+    --until string      stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
 
 gummi resume <id|ref> [decision]
     --answer string           answer a delegated ask_user question
     --approve                 approve a design gate handed back by --gate-approval=attended
     --bounce                  rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)
-    --envelope int            raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)
+    --envelope dollars        raise the spend budget before resuming, in dollars (required to clear a card that ran out; never lowers it)
     --gate-approval string    who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)
     --note string             addendum to the reborn stage's kickoff (used with --bounce)
     --ref string              external correlation id, echoed in the stream
@@ -101,7 +101,7 @@ gummi clean <id|ref>
 
 gummi status <id|ref>
     --json   emit machine-readable JSON instead of the text summary
-    --stats  report where the card's credits and hours went instead of where it stands
+    --stats  report where the card's money and hours went instead of where it stands
 
 gummi watch <id|ref>
     --json  emit the raw record stream as NDJSON instead of the rendered transcript
@@ -157,7 +157,7 @@ and exits with a **typed status**. Branch on the exit code:
 | 2 | `question` | a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>` |
 | 3 | `blocked` | open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back |
 | 4 | `escalation` | rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage. A verify-fail (or review cap-hit) carries `next: resume <id> --bounce --note "<why>"`, which rewinds the feature to implement/fix and drives review→verify again |
-| 5 | `exhausted` | credit budget dry — `resume <id> --envelope N` (N larger than the dry budget) raises it and continues |
+| 5 | `exhausted` | budget dry — `resume <id> --envelope <dollars>` (more than the dry budget) raises it and continues |
 | 6 | `timeout` | a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage |
 
 **Capture that exit code directly — never through a pipe.** `gummi run … | tee

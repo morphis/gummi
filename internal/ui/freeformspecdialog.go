@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -143,10 +142,10 @@ func newFreeformSpecDialog(f domain.Feature, profiles []string, envelope int, on
 	brief.SetHeight(9)
 
 	env := textinput.New()
-	env.Placeholder = "credits for the whole spec; 0 is uncapped"
+	env.Placeholder = "dollars for the whole spec; 0 is uncapped"
 	env.CharLimit = 9
 	env.SetWidth(12)
-	env.SetValue(strconv.Itoa(envelope))
+	env.SetValue(domain.DollarsInput(envelope))
 
 	if len(profiles) == 0 {
 		profiles = defaultProfilePresets
@@ -193,9 +192,9 @@ func (d *freeformSpecDialog) submit() (bool, tea.Cmd) {
 	if d.errText != "" {
 		return false, nil
 	}
-	env, err := strconv.Atoi(strings.TrimSpace(d.envelope.Value()))
-	if err != nil || env < 0 {
-		d.errText = "the budget is a number of credits, 0 for uncapped"
+	env, err := domain.ParseDollars(d.envelope.Value())
+	if err != nil {
+		d.errText = "the budget is a dollar amount, 0 for uncapped"
 		return false, nil
 	}
 	return true, d.onSubmit(d.f, strings.TrimSpace(d.title.Value()), d.brief.Value(), d.profiles[d.profile], env)

@@ -438,7 +438,7 @@ func scheduleEnvelopeHint(eng *engine.Engine, backend, model string) string {
 	if tokens >= 1000 {
 		buys = fmt.Sprintf("%.1fk", tokens/1000)
 	}
-	return fmt.Sprintf("1 credit ≈ %s tokens on this model at %g credits per 1k — %s", buys, rate, scheduleBrakeWords)
+	return fmt.Sprintf("1¢ ≈ %s tokens on this model at %g¢ per 1k — %s", buys, rate, scheduleBrakeWords)
 }
 
 // schedulePreview answers a preview request: the cadence inputs read the

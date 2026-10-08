@@ -488,7 +488,7 @@ func bindRunFlags(fs *pflag.FlagSet) {
 // seed, and it never gets a branch, so neither adoption flag applies.
 func bindResearchFlags(fs *pflag.FlagSet) {
 	d := stdDriveFlags()
-	d.envelope = "spend budget for the research card, in credits (required; falls back to GUMMI_ENVELOPE)"
+	d.envelope = "spend budget for the research card, in dollars (required; falls back to GUMMI_ENVELOPE)"
 	d.until = `stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)`
 	d.bind(fs)
 }
@@ -499,7 +499,7 @@ func bindResearchFlags(fs *pflag.FlagSet) {
 // (its cards name their own, DESIGN §17.2).
 func bindGoalFlags(fs *pflag.FlagSet) {
 	d := stdDriveFlags()
-	d.envelope = "the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)"
+	d.envelope = "the goal's whole budget in dollars — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)"
 	d.profile = "profile mapping roles to models, the lead included (default: first configured)"
 	d.gate = "who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)"
 	d.timeout = "per-stage inactivity timeout for the goal and each of its cards (0 disables)"
@@ -518,7 +518,7 @@ func bindGoalFlags(fs *pflag.FlagSet) {
 // goal-only levers.
 func bindResumeFlags(fs *pflag.FlagSet) {
 	d := stdDriveFlags()
-	d.envelope = "raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)"
+	d.envelope = "raise the spend budget before resuming, in dollars (required to clear a card that ran out; never lowers it)"
 	d.gate = "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)"
 	d.ref = "external correlation id, echoed in the stream"
 	// A resumed card already knows its repository, its base branch and the
@@ -585,7 +585,7 @@ func bindRewriteFlags(fs *pflag.FlagSet) {
 // stands stays a cheap question; how it got there is the expensive one.
 func bindStatusFlags(fs *pflag.FlagSet) {
 	jsonFlag(fs, "emit machine-readable JSON instead of the text summary")
-	fs.Bool("stats", false, "report where the card's credits and hours went instead of where it stands")
+	fs.Bool("stats", false, "report where the card's money and hours went instead of where it stands")
 }
 
 func bindWatchFlags(fs *pflag.FlagSet) {
@@ -601,7 +601,7 @@ func bindDoctorFlags(fs *pflag.FlagSet) {
 
 func bindIngestFlags(fs *pflag.FlagSet) {
 	fs.String("profile", "", "profile the new features adopt (default: first configured)")
-	fs.Int("envelope", 0, "spend budget per card, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
+	envelopeFlag(fs, "spend budget per card, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	fs.String("repo", "", "managed repository to create the cards in (a configured repos: name; required when repos: is configured)")
 	fs.Bool("yes", false, "materialize without the confirmation prompt")
 }
@@ -612,7 +612,7 @@ func bindBugsIngestFlags(fs *pflag.FlagSet) {
 	fs.String("label", "bug", `issue label filter ("" imports all issues)`)
 	fs.String("state", "open", "issue state: open|closed|all")
 	fs.String("profile", "", "profile the new bugs adopt (default: first configured)")
-	fs.Int("envelope", 0, "spend budget per bug, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
+	envelopeFlag(fs, "spend budget per bug, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	fs.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)")
 	fs.Bool("comments", false, "fetch issue comments into the report's Discussion section")
 	fs.Bool("yes", false, "materialize without the confirmation prompt")
@@ -628,7 +628,7 @@ func bindBugsNewFlags(fs *pflag.FlagSet) {
 	fs.String("env", "", "environment (versions, OS, config)")
 	fs.String("desc", "", "summary of what's broken")
 	fs.String("profile", "", "profile the bug adopts (default: first configured)")
-	fs.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
+	envelopeFlag(fs, "spend budget, in dollars (0 = uncapped; falls back to GUMMI_ENVELOPE)")
 	fs.String("repo", "", "managed repository to create the bug in (a configured repos: name; required when repos: is configured)")
 	fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
 	adoptionFlags(fs)
@@ -657,7 +657,7 @@ func bindScheduleAddFlags(fs *pflag.FlagSet) {
 	fs.String("repo", "", "mint: managed repository the card is minted in (a configured repos: name; default: the workspace default)")
 	fs.String("agent", "", "mint: the session's backend (default: the profile's implementer)")
 	fs.String("model", "", "mint: the session's model (default: the profile's)")
-	fs.Int("envelope", 0, "mint: the minted card's spend brake, in credits (required; every card mints with one)")
+	envelopeFlag(fs, "mint: the minted card's spend brake, in dollars (required; every card mints with one)")
 	jsonFlag(fs, "emit the stored row as JSON (the shape the board's web page reads)")
 }
 

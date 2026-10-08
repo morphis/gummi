@@ -2,7 +2,6 @@ package ui
 
 import (
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -1231,7 +1230,7 @@ func foldedReceiptLine(s *theme.Styles, seg threadfold.Segment, spend map[domain
 	// which figure a receipt trusts, and why the per-session one wins over
 	// the stage rollup, is threadfold.ReceiptCredits' to say.
 	if credits := threadfold.ReceiptCredits(seg, spend, stageSegs, remainder); credits > 0 {
-		head += fmt.Sprintf(" · %g credits", roundSpend(credits))
+		head += " · " + domain.FormatDollars(credits)
 	}
 	// an open segment keeps the neutral mark; a finished one's is
 	// threadfold's Outcome, keyed on the role that ran it.
@@ -2077,7 +2076,7 @@ func sessionlessReceiptLine(s *theme.Styles, row state.StageSpend, w int) string
 		what = "backend's own side model"
 	}
 	head := string(row.Stage) + " · " + what +
-		fmt.Sprintf(" · %g credits", roundSpend(row.Credits))
+		" · " + domain.FormatDollars(row.Credits)
 	fill := max(w-ansi.StringWidth(head)-2, 1)
 	return s.Faint.Render(head+" ") + s.Separator.Render(strings.Repeat("─", fill))
 }

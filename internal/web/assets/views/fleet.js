@@ -1,4 +1,4 @@
-// views/fleet.js — Fleet stats: where the whole board's credits and hours
+// views/fleet.js — Fleet stats: where the whole board's money and hours
 // went over a window, fleetrun's fold (the TUI's stats tab, the same
 // numbers). The headline money, the clock (card-hours split into agent
 // working, waiting on you and nothing running — the three add up to the
@@ -84,16 +84,16 @@ registerView('fleet', {
       return h('div', { class: 'ftiles', testid: 'fleet-headline' },
         h('div', { class: 'ftile hero', testid: 'fleet-spent' },
           h('div', { class: 'k' }, 'Spent in this window'),
-          h('div', { class: 'v' }, cr(r.credits), h('small', null, ' cr')),
-          r.estimated > 0 ? h('div', { class: 's est', testid: 'fleet-estimated' }, `~${cr(r.estimated)} cr estimated — not yet settled by the provider`) : h('div', { class: 's' }, plural(lanesWithSpend(r), 'card') + ' spent'),
+          h('div', { class: 'v' }, cr(r.credits)),
+          r.estimated > 0 ? h('div', { class: 's est', testid: 'fleet-estimated' }, `~${cr(r.estimated)} estimated — not yet settled by the provider`) : h('div', { class: 's' }, plural(lanesWithSpend(r), 'card') + ' spent'),
           tokenTotal(r.tokens) ? h('div', { class: 's', testid: 'fleet-tokens' }, tokenText(r.tokens)) : null),
         h('div', { class: 'ftile', testid: 'fleet-alltime' },
           h('div', { class: 'k' }, 'All time'),
-          h('div', { class: 'v' }, cr(r.allTimeCredits), h('small', null, ' cr')),
+          h('div', { class: 'v' }, cr(r.allTimeCredits)),
           h('div', { class: 's' }, plural(r.allTimeCards || 0, 'card'))),
         h('div', { class: 'ftile', testid: 'fleet-rework' },
           h('div', { class: 'k' }, 'Rework'),
-          h('div', { class: 'v' }, cr(r.rework), h('small', null, ` cr · ${reworkPct}%`)),
+          h('div', { class: 'v' }, cr(r.rework), h('small', null, ` · ${reworkPct}%`)),
           h('div', { class: 's' }, `${cr(r.corrected)} corrected · ${cr(r.reproved)} re-proved`)),
         h('div', { class: 'ftile', testid: 'fleet-lanes' },
           h('div', { class: 'k' }, 'Lanes'),
@@ -133,7 +133,7 @@ registerView('fleet', {
     function bars (list, total, colorOf, testid) {
       const max = Math.max(...list.map(b => b.credits), 0.0001)
       return h('table', { class: 'fbars', testid },
-        h('tbody', null, list.map(b => h('tr', { data: { tip: `${b.name}\n${cr(b.credits)} cr · ${total ? Math.round(b.credits / total * 100) : 0}%` } },
+        h('tbody', null, list.map(b => h('tr', { data: { tip: `${b.name}\n${cr(b.credits)} · ${total ? Math.round(b.credits / total * 100) : 0}%` } },
           h('th', { scope: 'row', title: b.name }, colorOf ? h('i', { class: 'sw', style: { '--sc': colorOf(b.name) }, 'aria-hidden': 'true' }) : null, b.name),
           h('td', { class: 'bc' }, h('span', { class: 'b', style: { '--w': (b.credits / max * 100).toFixed(2) + '%', '--sc': colorOf ? colorOf(b.name) : null } })),
           h('td', { class: 'n' }, cr(b.credits)),
@@ -232,7 +232,7 @@ registerView('fleet', {
         flags.endings.add(end)
         marks.push(h('span', { class: ['land', end.cls], style: { '--x': x(l.landedAt).toFixed(3) + '%' }, data: { tip: `${end.label}\n${when(l.landedAt)}` } }, end.glyph))
       }
-      const summary = [`${l.id} ${l.title}`, `${cr(l.credits)} credits`, l.redo ? `${cr(l.redo)} rework` : null, l.running ? 'running' : null,
+      const summary = [`${l.id} ${l.title}`, cr(l.credits), l.redo ? `${cr(l.redo)} rework` : null, l.running ? 'running' : null,
         l.openWaitFrom ? `waiting on you since ${when(l.openWaitFrom)}` : null, l.landedAt && end ? `${end.label} ${when(l.landedAt)}` : null,
         tokenTotal(l.tokens) ? tokenText(l.tokens) : null, l.note || null].filter(Boolean).join(', ')
       return h('div', { class: ['lane', l.running && 'running'], testid: `fleet-lane-${l.id}`, tabindex: '0', role: 'group', 'aria-label': summary },

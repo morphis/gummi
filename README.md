@@ -37,7 +37,7 @@ because there is no configuration for it.
 **Frontier models only where they earn it.** Stages are done by roles:
 architect, implementer, reviewer, scribe. A profile maps each role to a
 model, a strong one for design and review, a cheap or local one for
-mechanical steps. Each card carries a credit envelope, and you top it up
+mechanical steps. Each card carries a budget in dollars, and you top it up
 when it runs dry.
 
 ## The workflow
@@ -122,8 +122,7 @@ the board. Then:
 
 1. Press `n` and describe the feature. The first line is the title.
    Anything after it seeds the spec, so the architect starts from your
-   words (`alt+enter` for a newline). The envelope defaults to 2000
-   credits.
+   words (`alt+enter` for a newline). The budget defaults to $20.
 2. Press `enter` to open the card and design it with the architect in
    its thread. `s` shows the spec; `c` comments on a line, `x` resolves a
    thread.
@@ -367,7 +366,7 @@ How they behave:
   of minting another — until you close or delete the card.
 
 `gummi schedule add --name nightly --every 1h --prompt "triage new
-issues" --envelope 50` defines a mint; `--heartbeat FF-001` (with no
+issues" --envelope 0.50` defines a mint; `--heartbeat FF-001` (with no
 envelope — the target's own is the brake) defines a heartbeat. `enable`,
 `disable`, `run-now` (the running board fires it off-cadence), `rm` and
 `list --json` round it out. The board's Schedules view (`L`) defines and
@@ -384,13 +383,14 @@ stdout, and exits with a typed status your script or agent branches on.
 It changes who approves a gate, never whether review and verify run.
 
 ```sh
-gummi run --envelope 500 "Add a --format=json flag to the export command"
-gummi run --envelope 500 --gate-approval autopilot "..."    # cross its own gates
-gummi research --envelope 300 "Where does the exporter buffer, and why?"
-gummi diagnose --envelope 300 "Exports truncate at 64KB, but only over HTTP/2"
+gummi run --envelope 5 "Add a --format=json flag to the export command"
+gummi run --envelope 5 --gate-approval autopilot "..."    # cross its own gates
+gummi research --envelope 3 "Where does the exporter buffer, and why?"
+gummi diagnose --envelope 3 "Exports truncate at 64KB, but only over HTTP/2"
 ```
 
-An envelope is required headlessly. `--until plan` stops before
+An envelope is required headlessly, in dollars (`5`, `$12.50`; a cent is
+the finest it takes). `--until plan` stops before
 implementation for a human design review. `--autonomous` takes the
 agent's recommended answer instead of stopping on a question.
 
@@ -563,7 +563,7 @@ Two files in `.gummi/`, both scaffolded on first run:
   `guarded` mode a tool call a backend holds — opencode's server does —
   becomes the card's open decision with approve/deny options, answered
   from the thread like any question; loops with no decision surface
-  (title scribes, estimates, ingest) run allow-all regardless.
+  (title scribes, ingest) run allow-all regardless.
 - **`profiles.yaml`**: named profiles mapping each role to
   `{backend, model}`, and which one is the default. A running board
   picks up an edit for its next session (a session already running keeps
@@ -577,7 +577,7 @@ The environment variables you meet first:
 | variable | effect |
 |---|---|
 | `GUMMI_AGENT` | default backend |
-| `GUMMI_ENVELOPE` | default credit envelope for new cards |
+| `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`) |
 | `GUMMI_THEME` | `dark`, `light`, `neon` |
 | `GUMMI_NOTIFY` | `bell`, `desktop`, `off` |
 | `GUMMI_ANTIGRAVITY_BIN` | the antigravity backend's binary, when `agy` is not on PATH |
@@ -691,8 +691,8 @@ somebody already started — a colleague's half-finished work, a pull request
 sitting under review — and gummi runs the ordinary workflow on top of it:
 
 ```sh
-gummi run --adopt feat/their-parser --envelope 500 "finish the empty-case handling"
-gummi run --pr 412 --envelope 500 "address the review comments"
+gummi run --adopt feat/their-parser --envelope 5 "finish the empty-case handling"
+gummi run --pr 412 --envelope 5 "address the review comments"
 ```
 
 `--pr` does three things in one go: it finds the branch behind the pull
