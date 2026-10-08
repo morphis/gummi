@@ -830,6 +830,16 @@ func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files [
 	if carried {
 		note += "\nThe worktree carries uncommitted work; it is this card's own. The --autostash in the command carries it across the rebase and puts it back — if applying the autostash conflicts at the end, resolve and keep it as the contract below says; never discard it."
 	}
+	// A freeform card has no stage to borrow: the hand-off is a turn in its
+	// own session, which the person reads in the thread. Nothing judges the
+	// result — the card has no gate that waits on it.
+	if f.IsFreeform() {
+		ff, err := e.OpenFreeform(ctx, f)
+		if err != nil {
+			return err
+		}
+		return ff.Send(ctx, note)
+	}
 	return e.run(f, note, flavorRebase)
 }
 

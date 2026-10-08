@@ -268,9 +268,12 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	}
 	// The worktree, ensured here: this is what "gets its worktree/branch"
 	// means, and it is the same locate() every stage goes through, so the
-	// branch is cut the same way and a rewrite of main under it is refused
-	// the same way. A freeform card comes back with no artifact path.
-	workDir, _, err := e.locate(ctx, f)
+	// branch is cut the same way. A freeform card comes back with no artifact
+	// path. A rewrite of main under it is NOT refused here: the session is
+	// the way out of that state (the rebase hand-off is a turn in it), and
+	// the card has no stage a stale fork would corrupt — landing and the diff
+	// check drift on their own.
+	workDir, _, err := e.locateFor(ctx, f, true)
 	if err != nil {
 		ff.dropLock()
 		return err

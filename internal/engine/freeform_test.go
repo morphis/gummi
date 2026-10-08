@@ -1272,3 +1272,38 @@ func TestAFreeformQuestionSurvivesItsBackendIdlingOut(t *testing.T) {
 		t.Errorf("the answer is not in the thread as the last user line, got %q", turn)
 	}
 }
+
+// TestARewrittenMainDoesNotLockAFreeformCardOut: the rebase hand-off for a
+// freeform card is a turn in its own session, and a card whose base was
+// rewritten is the very card that needs it — neither opening the session
+// nor the turn may be refused for the drift.
+func TestARewrittenMainDoesNotLockAFreeformCardOut(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	f := freeformCard(1, "rebase me")
+	createFeature(t, store, f)
+	withWorktree(t, wt, f)
+	rewindMain(t, ws.Root)
+
+	if err := e.RunRebaseStopped(ctx, f, nil, ""); err != nil {
+		t.Fatalf("the rebase hand-off was refused: %v", err)
+	}
+	ff := e.Freeform(f.ID)
+	if ff == nil {
+		t.Fatal("no freeform session after the hand-off")
+	}
+	waitFreeformIdle(t, ff)
+	if got := transcriptText(ff.Snapshot()); !strings.Contains(got, "Rebase this branch onto") {
+		t.Errorf("the agent was not asked to rebase:\n%s", got)
+	}
+	if err := ff.Send(ctx, "and then?"); err != nil {
+		t.Fatalf("a prompt after the rewrite was refused: %v", err)
+	}
+}

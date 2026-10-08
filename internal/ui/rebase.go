@@ -80,6 +80,15 @@ func (m *Shell) offerAgentRebase(msg rebaseConflictMsg) {
 // stop the card waits at so an unresolved rebase can put it back.
 func (m *Shell) agentRebase(msg rebaseConflictMsg) tea.Cmd {
 	f, files, reason := msg.f, msg.files, msg.reason
+	if f.IsFreeform() {
+		// a turn in the card's own session: no stop to hold, nothing to judge
+		return func() tea.Msg {
+			if err := m.engine.RunRebaseStopped(context.Background(), f, files, reason); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+			return noticeMsg{text: string(f.ID) + ": asked the agent to rebase onto " + m.baseBranch(f)}
+		}
+	}
 	if m.rebaseDirty == nil {
 		m.rebaseDirty = map[domain.FeatureID]bool{}
 	}
