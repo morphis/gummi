@@ -361,6 +361,10 @@ type SendRequest struct {
 	// and freeform-turn routes accept them; every other route refuses a
 	// line that carries any with a 4xx, and nothing is recorded.
 	Attachments []string `json:"attachments,omitempty"`
+	// Confirm is the token a "confirm" refusal of this same line handed
+	// out; the line sent again with it is that question's yes, and
+	// nothing else's (AnswerRequest.Confirm).
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // SendResponse says where the line went and returns the card as it now

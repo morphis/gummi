@@ -372,7 +372,7 @@ function unknownCommand (text, c) {
   return menu || offered ? '' : m[1]
 }
 
-async function submit ({ asLine = false } = {}) {
+async function submit ({ asLine = false, confirm = '' } = {}) {
   const d = openDecision()
   const text = state.draft.trim()
   if (d && !text) { answer(); return }
@@ -409,6 +409,7 @@ async function submit ({ asLine = false } = {}) {
     const body = { text }
     if (d?.against?.token) body.against = d.against.token
     if (attachments.length) body.attachments = attachments.map((a) => a.id)
+    if (confirm) body.confirm = confirm
     const r = await post(cardPath(id, 'send'), body)
     if (r?.route === 'menu') {
       // the line names something in the card's menu: hand it over — the
@@ -444,6 +445,10 @@ async function submit ({ asLine = false } = {}) {
     } else if (err.status === 409 && e.error === 'moved') {
       setNote(`${id} moved since you read it — your line is still here. Read it again, then send it if it still holds.`)
       ctxRef.refresh?.(id)
+    } else if (err.status === 409 && e.error === 'confirm' && e.confirm) {
+      // the board's own question, answered where decisions' are: its yes
+      // sends the same line again with the token
+      set({ decConfirm: { question: sentence(e.text) || `${text}?`, yes: `Yes, ${text.replace(/^\//, '')}`, go: () => submit({ asLine: true, confirm: e.confirm }) } })
     } else if (err.status === 409 && (e.error === 'needs' || e.error === 'confirm')) {
       setNote(sentence(e.text) || err.message, 'info')
     } else if (err.notBuilt && err.status !== 404) {

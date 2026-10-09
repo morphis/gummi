@@ -351,7 +351,7 @@ func (b *Bridge) Send(ctx context.Context, id string, req webapi.SendRequest, pe
 		return webapi.SendResponse{}, err
 	}
 	var route webapi.Route
-	out, werr := b.intent(ctx, webID(id), webInput{actor: state.PersonActor(person)}, webWait,
+	out, werr := b.intent(ctx, webID(id), webInput{actor: state.PersonActor(person), confirm: req.Confirm}, webWait,
 		func(m *Shell, r featureRow) (tea.Cmd, error) {
 			if err := m.checkAgainstOnLoop(r, "", req.Against); err != nil {
 				return nil, err
