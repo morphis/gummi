@@ -2052,23 +2052,6 @@ func (m *Manager) DiffSince(ctx context.Context, f *domain.Feature, rev string) 
 	return runGitEnv(ctx, p, env, "diff", "-U0", rev, "--")
 }
 
-// Upstream is the remote branch the card's branch tracks, as git's own
-// branch config records it: the remote's name and the branch's name
-// there. ok is false for a branch that tracks nothing, which is every
-// branch gummi cut until someone pushed it with -u.
-func (m *Manager) Upstream(ctx context.Context, f *domain.Feature) (remote, branch string, ok bool) {
-	name := f.BranchName()
-	remote, err := runGit(ctx, m.repo, "config", "--get", "branch."+name+".remote")
-	if err != nil || remote == "" || remote == "." {
-		return "", "", false
-	}
-	merge, err := runGit(ctx, m.repo, "config", "--get", "branch."+name+".merge")
-	if err != nil || merge == "" {
-		return "", "", false
-	}
-	return remote, strings.TrimPrefix(merge, "refs/heads/"), true
-}
-
 // UpstreamRewritten reports that the card's branch and the remote branch
 // it tracks have each got commits the other lacks — what a history
 // rewrite of pushed commits leaves behind, and what a plain push is
