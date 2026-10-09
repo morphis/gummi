@@ -190,8 +190,9 @@ still work — the board just stays static. Key env vars are tabled in
   It does not release, merge on GitHub, retarget a PR unasked or resolve
   a thread. Pushing a card's own branch and opening, updating or readying
   its PR are acts a *person* starts (TUI, web or `gummi push`/`gummi pr`),
-  through `gh` and the credentials already on the machine; gummi stores
-  no token. No stage, autopilot, goal, schedule, MCP tool or
+  through `gh` and the credentials already on the machine; it is
+  optional, detected rather than configured (no token, key or setting of
+  gummi's own), and absent where `gh`/push access is not set up. No stage, autopilot, goal, schedule, MCP tool or
   `run`/`resume` may reach the publish code (decision 25, DESIGN §22).
   Stacks (§18) still replay branches locally and print the `git push
   --force-with-lease` they need; publishing a stacked card is refused

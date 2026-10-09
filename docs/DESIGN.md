@@ -1876,9 +1876,15 @@ Decided in the design interview (2026-07-03):
       goal, schedule, MCP tool or `run`/`resume` reaches the publish
       code, and a test fails if one imports it. An agent may draft the
       words; it never sends them.
+    - **It is optional, and gummi finds out rather than being told.**
+      Publishing exists only where the person has set up `gh` and a
+      push credential for the remote themselves. gummi detects that and
+      acts on it: with it, the acts are offered; without it, they are
+      simply absent, and nothing else about a card changes. There is no
+      switch to turn on and no key to register.
     - **The credential is yours, and gummi holds none.** `gh` and git
-      authenticate as they already do. gummi reads no token, stores no
-      key, and refuses to publish when they are not signed in.
+      authenticate as they already do. gummi reads no token and stores
+      no key.
     - **The quality floor still stands at the one step it protects.**
       Marking a PR ready needs `MayLandAt(head)`; a push and a draft PR
       do not, because neither can merge anything.
@@ -4671,20 +4677,36 @@ the web page and the CLI:
 
 It is not merge, not review, not retarget, and not CI.
 
-### 22.2 Credentials: yours, ambient, never held
+### 22.2 Optional: detected, never configured
 
-`gh` and git authenticate as they do for you. gummi does not read
-`GH_TOKEN`, does not open `~/.ssh` and stores no secret. What it does is
-check, before it offers the act at all: `gh` on the path, `gh auth
-status` signed in for the remote's host, and the remote naming the repo
-the card's PR would be against. `gummi doctor` reports the same three,
-so a card never discovers at the push that it could not have pushed.
+Publishing is a capability of the person's machine, not a setting of
+gummi's. A person who wants it installs and signs in `gh` and arranges a
+push credential for the remote (an SSH key, an agent, a credential
+helper — whatever git already uses there). gummi has no configuration
+for any of it, no `publish` block and no key path of its own: it looks,
+and acts on what it finds.
 
-An optional `publish.ssh_key` in the person's **user-level** config
-(never the repository's `.gummi/config.yaml`, which a branch could change)
-becomes `GIT_SSH_COMMAND="ssh -F /dev/null -i <key> -o IdentitiesOnly=yes"`
-for gummi's own push. A passphrase-protected key is used only through an
-agent that already holds it; gummi never prompts for or stores one.
+Detection is a read, run when a card's PR surface is drawn and by
+`gummi doctor`, and cached for the session:
+
+1. `gh` is on the path (`GUMMI_GH_CMD` honoured) and `gh auth status`
+   is signed in for the remote's host.
+2. The remote names a GitHub repository, and `gh repo view --json
+   viewerPermission` says the signed-in user may write to it.
+3. git can actually push there: `git push --dry-run` of the branch,
+   which exercises the real transport and credential (an SSH key, agent
+   or helper) without moving a ref.
+
+All three pass: the acts of §22.1 are offered. Any fails: they are not
+drawn, and where a person asks for one by name (`gummi push`) the
+refusal says which of the three failed and what would fix it. A missing
+capability is never an error on the board, never a warning on a card,
+and never a reason a card cannot land the way it always could (§7).
+
+gummi holds nothing of its own in this: it does not read `GH_TOKEN`,
+does not open `~/.ssh` and stores no secret. A passphrase-protected key
+works only through an agent that already holds it; gummi never prompts
+for or stores a passphrase.
 
 ### 22.3 Who may publish
 
