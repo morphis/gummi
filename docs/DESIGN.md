@@ -4060,6 +4060,100 @@ a landed one only its spend (`domain.DelegateHeld`, §17.3).
   ledgers would hold the same credits), and only feature and bug cards
   are delegated: research has no branch to land.
 
+### 19.11 Objectives: a session that keeps going until it is done
+
+A heartbeat (§19.9) brings a session back on a clock. An **objective**
+brings it back when its turn ends: a person sets one on a session, and
+after each turn an auditor decides whether the work is done. If not,
+gummi sends the next turn itself, and it keeps doing so until the work is
+met, stuck or out of money. The person reads the result once, at the end,
+instead of typing "keep going" after every turn.
+
+**The name.** A goal (§17) already means a card whose work is other
+cards. An objective is the single-session counterpart: what a goal doc's
+Objective section would be with no goal around it, no lanes and no cards.
+It belongs to one freeform card and stays on that card's branch.
+
+**Freeform only.** A workflow card already loops: autopilot drives it to
+its next gate, and each stage's critique is its auditor. Setting an
+objective on one is refused (`Feature.Validate`), as a session model is
+(§19.8).
+
+**The loop.** When a freeform turn ends and its objective is active:
+
+1. **The person goes first.** Lines queued while the turn ran are sent
+   (`drainQueue`), and the loop waits for the turn they start. An open
+   `ask_user` question holds the loop until it is answered, which makes
+   asking the agent's way of saying it is blocked. The loop never answers
+   for the person.
+2. **The audit.** A fresh, tool-less session of the profile's `auditor`
+   role is given the objective, the agent's last reply, and what gummi can
+   see for itself: commits since the objective was set, the diffstat, and
+   whether the tree is dirty. It is not given the transcript. It answers
+   in the `verdict` package's grammar with `CONTINUE`, `MET` or `STUCK`
+   and a one-line note. The audit's cost is charged to the card, and an
+   answer that does not parse counts as `STUCK`.
+3. **The next turn.** On `CONTINUE`, gummi sends a turn under an actor of
+   its own (`WithActor`), the way a heartbeat does: the objective
+   restated with the auditor's note. The thread draws that turn as
+   gummi's, never as the person's.
+4. **The end.** The objective settles once, in one of these states, with
+   one notification. The per-turn attention pings are muted while it runs.
+
+   | state | when |
+   |---|---|
+   | `met` | the auditor says `MET` and the check, if any, passes |
+   | `stuck` | three `STUCK` verdicts in a row |
+   | `exhausted` | the card's envelope ran out |
+   | `capped` | it reached its continuation limit (default 20) |
+   | `failed` | the backend errored, or the session was closed |
+
+   `paused` is the one other state. It is the person's own, from pause or
+   stop, and resume leaves it.
+
+**`met` can mean a command passed.** An objective may carry a `check:`
+command, the shape of a `gummi-done-when` item (§17.1). `MET` then counts
+only once that command exits 0 in the worktree, and a failing check is a
+`CONTINUE` whose note is the check's tail. The auditor is a cheap model
+reading one reply. Where the work has a test that proves it, the test is
+the judge and the auditor is not.
+
+**The envelope is the brake.** An objective has no token budget of its
+own to keep in step with the card's. It spends the card's envelope, and it
+stops at `exhausted` the way a heartbeat pauses (§19.9). Raising the
+envelope does not resume it by itself, because spending more is a choice
+the person makes. The continuation cap catches a loop that is cheap and
+going nowhere, which the envelope would let run for a long time.
+
+**Only a person sets one.** There is no MCP tool for an objective, so an
+agent cannot set one for itself. It is the same operator surface as
+schedules: `/objective [--check <cmd>] <text>` in the composer, and
+pause, resume and stop in the session's menu and on the web page's strip.
+Stop interrupts the turn in flight and leaves the objective `paused`.
+Setting a new objective replaces the old one, and a session has at most
+one.
+
+**`met` lands nothing.** The freeform floor (§19.1) does not change. The
+card shows as needing the person, with the auditor's last note, and the
+person reads the diff and lands it, hands it off or writes a spec.
+
+**It survives a restart.** The objective is a store row next to the
+conversation's (§19.3a): its text, check, state, continuation count, stuck
+streak and last note. A board that comes back finds an `active` objective
+on an idle session and audits once before it sends anything, since the
+turn that ended before the restart was never audited.
+
+**What each face shows.** A strip above the composer gives the state, the
+last note, the number of turns and what the objective has spent, with
+pause and resume. "Auditing…" replaces the working indicator between
+turns. The board row carries a mark coloured by state. Both faces read
+one view of the row, as they do for every other thread (`threadfold`).
+
+Deferred: "run as objective" on a schedule (§19.9), so that a minted
+card starts with an objective instead of a single prompt; and an auditor
+that sees more than the last reply, if the last reply turns out to be too
+little to judge from.
+
 ## 20. The web face — the board in a browser
 
 `gummi web` serves the board to a browser as a page of its own: cards on
