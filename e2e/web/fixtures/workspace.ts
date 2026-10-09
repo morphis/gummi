@@ -46,7 +46,7 @@ export class Workspace {
       XDG_CONFIG_HOME: path.join(root, 'config'),
       GUMMI_AGENT: 'headless',
       GUMMI_AGENT_CMD: agentScript,
-      GUMMI_ENVELOPE: '2000',
+      GUMMI_ENVELOPE: '20',
       GUMMI_NOTIFY: 'off',
       GUMMI_GH_CMD: fakeGh,
       FAKE_GH_DATA: path.join(root, 'gh'),

@@ -44,7 +44,7 @@ test.describe('a running goal', () => {
     // the ledger is the report's budget tree, laid out as it adds up
     await expect(view.getByTestId('ledger-envelope')).toHaveText('$30.00');
     await expect(view.getByTestId('ledger-held')).toContainText(/\d/);
-    await expect(view.getByTestId('ledger-reserve')).toContainText('450');
+    await expect(view.getByTestId('ledger-reserve')).toContainText('$4.50');
     await expect(view.getByTestId('ledger-seg-held')).toBeVisible();
     await expect(view.getByTestId('done-when-DW-1')).toContainText('the module builds');
     await expect(view.getByTestId('done-when-DW-2')).toHaveAttribute('data-status', 'not checked');
@@ -63,9 +63,9 @@ test.describe('a running goal', () => {
     await budget.getByTestId('goal-action-input').fill('36');
     await shot(page, info, 'goal-raise');
     await budget.getByTestId('goal-action-confirm').click();
-    await expect(page.getByTestId('toast').last()).toContainText('raised to 3600');
+    await expect(page.getByTestId('toast').last()).toContainText('raised to $36.00');
     await expect(view.getByTestId('ledger-envelope')).toHaveText('$36.00');
-    await expect(view.getByTestId('ledger-reserve')).toContainText('540');
+    await expect(view.getByTestId('ledger-reserve')).toContainText('$5.40');
 
     // a note to the lead lands in its log
     await view.getByTestId('goal-action-note').click();
