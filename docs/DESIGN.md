@@ -1398,20 +1398,21 @@ board where it raises a card to the inbox (`Shell.logDecision`).
   branch may fork from another card's branch, and gummi replays the cards
   above one that changed. Those replays are local `rebase --onto` on
   branches gummi cut, and the stack still reaches main one accepted
-  landing at a time, bottom first. PRs, pushing,
-  and releasing stay in your hands. A card may name and read the PR it
-  lands through — linking it and pulling its review threads in as diff
-  annotations — but gummi still never writes to GitHub: no PR creation,
-  no push, no merge, no base retarget, no thread resolution, no CI
-  gating. Pushing a replayed branch is a `git push --force-with-lease`
-  gummi prints and never runs. **Adoption** (decision 22) widens which
-  branches gummi may work on without widening what it may do to GitHub: a
-  card can be minted onto a branch gummi did not cut, and for a pull
-  request gummi will fetch that PR's head into a local branch — a read of
-  a remote ref and a write to your own repository, nothing more. It still
-  never pushes, never opens or retargets a PR, never resolves a thread,
-  and — new with adoption — never deletes or rewrites a branch it took
-  custody of. A fork's PR can be adopted and reworked; the result is a
+  landing at a time, bottom first. Releasing stays in your hands. A card
+  may name and read the PR it lands through — linking it and pulling its
+  review threads in as diff annotations — and, on a person's explicit
+  act (decision 25, §22), **publish**: push its own branch and open,
+  update or ready its PR through `gh` and the credentials you already
+  have. That is the whole of what gummi writes to GitHub: no merge, no
+  base retarget it was not asked for, no thread resolution, no CI
+  gating, no release, and nothing an agent or a run can start by itself.
+  **Adoption** (decision 22) widens which branches gummi may work on
+  without widening what it may do to GitHub: a card can be minted onto a
+  branch gummi did not cut, and for a pull request gummi will fetch that
+  PR's head into a local branch — a read of a remote ref and a write to
+  your own repository, nothing more. It never resolves a thread, and —
+  new with adoption — never deletes or rewrites a branch it took custody
+  of; publishing an adopted card adds commits and nothing else. A fork's PR can be adopted and reworked; the result is a
   local branch you own, and gummi says so rather than implying the work
   can travel back to a fork it cannot write to.
 - Not a process editor — one workflow, compiled in. If the workflow needs
@@ -1532,8 +1533,10 @@ Decided in the design interview (2026-07-03):
    while what it lands **onto** is unchanged, and a stacked card refuses
    to land until every card below it has. When you accept a
    verified feature, gummi lands its branch on local main as one squash
-   commit with a message you approve — no PR or push automation; sharing
-   the result is yours. gummi detects when a branch landed outside this
+   commit with a message you approve — no PR or push *automation*: nothing
+   publishes a branch unless a person asks (*amended, decision 25, §22:*
+   push and PR are acts a person can take from gummi, never steps it
+   takes). gummi detects when a branch landed outside this
    flow and offers worktree cleanup either way.
    *Amended for merge landings:* a landing may instead be a `--no-ff`
    merge commit carrying the approved message, which keeps the branch's
@@ -1862,6 +1865,30 @@ Decided in the design interview (2026-07-03):
     holds the card, on an adopted branch (D22) and on a landed one, and
     on pushed commits until the person acknowledges the force push gummi
     prints and never runs.
+25. **A person may publish a card from inside gummi**, decided
+    2026-10-09 (§22). Until now every write to GitHub was a command gummi
+    printed and a person ran, which kept the board honest about what it
+    does and left the last step of every card outside it. A card's own
+    branch can now be pushed, and its pull request opened, updated and
+    marked ready, from either face or `gummi push` / `gummi pr`. Five
+    rules bound it:
+    - **A person starts it, every time.** No stage, autopilot step,
+      goal, schedule, MCP tool or `run`/`resume` reaches the publish
+      code, and a test fails if one imports it. An agent may draft the
+      words; it never sends them.
+    - **The credential is yours, and gummi holds none.** `gh` and git
+      authenticate as they already do. gummi reads no token, stores no
+      key, and refuses to publish when they are not signed in.
+    - **The quality floor still stands at the one step it protects.**
+      Marking a PR ready needs `MayLandAt(head)`; a push and a draft PR
+      do not, because neither can merge anything.
+    - **Only the card's own branch, only forward.** Never a fork's, never
+      a branch gummi does not hold, never a force push without a lease
+      pinned to the tip the person was shown.
+    - **Never a path around landing.** A card with a PR lands through it
+      or locally, never both; creating one is the act that picks.
+    This reverses the "never pushes, never opens a PR" of decisions 6
+    and 22, §7, §18.5, §20.5 and §21.2, each amended in place.
 
 Still open:
 
@@ -3422,10 +3449,13 @@ on one surface is the defect this keymap's own comments keep recording.
 
 ### 18.5 Deferred
 
-- **Pushing and retargeting.** gummi prints the `git push
-  --force-with-lease` a replayed branch needs and never runs it, and never
-  changes a PR's base. Reversing that needs a write-scoped token story
-  where gummi reads no token at all today (`pr.Available` is a `LookPath`).
+- **Pushing and retargeting a stack.** A single card can now publish
+  (§22); a stacked card cannot yet. Doing it right needs the parent's PR
+  open or merged, pushes ordered bottom first, and a base retarget on
+  every replay, because a parent's squash landing leaves the child's PR
+  pointing at a branch that is gone. Until then gummi still prints the
+  `git push --force-with-lease` a replayed branch needs and refuses to
+  publish a stacked card (§22.8).
 - **Stacks inside a goal.** A goal's cards already share one branch; the
   two arrangements answer different questions and are kept apart.
 - **Renaming existing branches.** A card minted under the original
@@ -4430,8 +4460,10 @@ loopback host remains an alternative for a machine that already runs
 
 The web face is bound by §7 rather than excused from it. It is not a
 cloud service: one binary, your machine, state in your repo, listening on
-loopback unless told otherwise. It never writes to GitHub: the PR tab
-reads, and shows the push command for a person to run. It never runs a
+loopback unless told otherwise. It writes to GitHub only on a
+person's explicit act and only what §22 allows; the PR tab reads, and
+its publish actions are held back until the web's own confirm story
+(§22.9) is decided. It never runs a
 workflow the TUI would not run, and it offers no agent a surface the
 workflow (§16) withholds.
 
@@ -4582,8 +4614,11 @@ carries one is flagged in the log.
 Commits the branch's upstream already has are marked **pushed**. A plan
 that replaces one is refused until the person acknowledges it, and a
 rewrite that did ends with the `git push --force-with-lease` it needs
-(`engine.PushCommandFor`, the line a replayed stack card prints) —
-printed, never run (§18.5, §20.5).
+(`engine.PushCommandFor`, the line a replayed stack card prints). The
+rewrite itself never pushes; publishing it is the separate act §22.5
+describes, with a lease pinned to the tip that was shown. A card with an
+open PR is refused a rewrite until the person acknowledges that the PR
+will need the force push.
 
 Rewriting is refused while an agent holds the card, for the reason
 `squash` is: what a card's history says is the person's to decide. An outside
@@ -4611,3 +4646,165 @@ it, per §20.1: neither face decides who may rewrite.
 - **Adopted branches.** Recording the tip at adoption would let the
   commits gummi added be rewritten while the inherited ones stay
   locked.
+
+## 22. Publishing — pushing a card's branch and opening its PR
+
+gummi's job used to end at a verified branch, and the last step — push
+it, open the PR, keep the PR current — was a command it printed. That
+step is where a person's attention most often leaves the board, and it
+is also where the card's state (is this the PR it lands through? is it
+ready? did the branch move?) is easiest to lose. This section brings it
+inside, under decision 25, without bringing a credential, an agent or a
+new route around the landing floors with it.
+
+### 22.1 What it is
+
+Four acts on one card, each a human's, each the same code from the TUI,
+the web page and the CLI:
+
+| act | what it does | verb |
+|---|---|---|
+| push | publishes the card's branch to its remote | `gummi push <id>` |
+| open | pushes if needed, then `gh pr create`, then links the PR | `gummi pr create <id>` |
+| update | `gh pr edit` of title/body, and a push for new commits | `gummi pr update <id>` |
+| ready | `gh pr ready` of a draft | `gummi pr ready <id>` |
+
+It is not merge, not review, not retarget, and not CI.
+
+### 22.2 Credentials: yours, ambient, never held
+
+`gh` and git authenticate as they do for you. gummi does not read
+`GH_TOKEN`, does not open `~/.ssh` and stores no secret. What it does is
+check, before it offers the act at all: `gh` on the path, `gh auth
+status` signed in for the remote's host, and the remote naming the repo
+the card's PR would be against. `gummi doctor` reports the same three,
+so a card never discovers at the push that it could not have pushed.
+
+An optional `publish.ssh_key` in the person's **user-level** config
+(never the repository's `.gummi/config.yaml`, which a branch could change)
+becomes `GIT_SSH_COMMAND="ssh -F /dev/null -i <key> -o IdentitiesOnly=yes"`
+for gummi's own push. A passphrase-protected key is used only through an
+agent that already holds it; gummi never prompts for or stores one.
+
+### 22.3 Who may publish
+
+One predicate, `publish.Refusal`, called by every face — deliberately not
+`branchlog.Refusal`, which answers whether history may be *rewritten* and
+refuses adopted branches that may still be pushed:
+
+| the card | publish |
+|---|---|
+| research, todo, goal, a main-checkout card | refused: no branch of its own to publish |
+| a card in a stack | refused for now (§22.8) |
+| landed | refused: the commits are already on the base |
+| an agent holds it, or the tree is dirty, or a rebase is in flight | refused until it is not |
+| a freeform card that was continued as another | refused: the work would go out twice |
+| adopted (D22) | push and open allowed; adds commits, never rewrites; refused when the branch came from a fork, which gummi re-asks `gh` about at the moment of publishing rather than trusting a flag saved at adoption |
+| otherwise | publishable |
+
+### 22.4 One seam, typed failures
+
+Publishing is `worktree.Manager` plus a `publish` package in the shape
+`branchlog` already has: a pure read model and refusal, and an `Env`
+that runs the git and `gh` reads and writes. The faces call it; none
+decides. It runs under the card's lock, under `childproc` supervision,
+with a timeout, with prompts disabled (`GIT_TERMINAL_PROMPT=0`,
+`GH_PROMPT_DISABLED=1`, stdin closed), and with the resolved `gh` path
+shown to the person, because `GUMMI_GH_CMD` can replace the binary that
+carries the credential.
+
+Failures are typed, not a stderr string: not signed in, non-fast-forward,
+protected branch, a hook refusing, a PR already open for the head, the
+branch moved. The web's error vocabulary has none of these today and
+gains them with this section.
+
+### 22.5 What a push does
+
+- It pushes with `-u`, so the branch's upstream is recorded. The log's
+  **pushed** mark (§21) reads that configuration; a plain push would
+  leave it blind and let a later rewrite diverge a PR's branch.
+- A fast-forward is a plain push. A branch whose upstream was rewritten
+  is pushed with `--force-with-lease=<ref>:<sha>` where the sha is the
+  remote tip the person was shown, so a fetch in between cannot make the
+  lease vacuous.
+- The branch is pushed as the observed local tip, by SHA, under the same
+  staleness guard the rewrite plan uses: if the branch moved between the
+  dialog and the push, the act refuses and shows the new state. The
+  pushed SHA is recorded.
+- Arguments are never positional where they could be an option: titles
+  as `--title=<v>`, bodies on stdin, a fully qualified refspec, the
+  branch name checked with `git check-ref-format`, and `--repo` and
+  `--head` always explicit.
+- Opening is atomic with linking. The PR created is recorded through the
+  existing `SetPullRequest` before the act reports done; if the link
+  fails, the PR is found again by its head branch rather than orphaned.
+  After every push the link's head SHA is refreshed.
+
+### 22.6 The words
+
+The PR's title and body come from the card — its title, the spec's
+summary, the commit subjects — as a template, shown and editable. An
+agent draft is a button that runs the same bounded, recorded scribe pass
+the landing message uses; it is never the default and never sent without
+the person's read. Imported text (issue and review-comment bodies) is not
+placed in the body unreviewed, and `@mentions` and closing keywords
+(`closes #N`) in it are escaped.
+
+### 22.7 What this does not claim
+
+It does not claim an agent cannot push. A card's backend inherits the
+person's environment and its shell is unconfined (§4.4), so an agent that
+runs `git push` or `gh pr create` itself can: that was true before this
+section and is not made better or worse by it. The claim is narrower and
+checkable: *gummi's own code* never publishes except through the acts in
+§22.1, and the publish package is imported only by the human-facing
+handlers. Scrubbing `SSH_AUTH_SOCK` and `GH_TOKEN` from an agent's
+environment is a separate, opt-in confinement decision and is not made
+here.
+
+### 22.8 Floors, stacks, and rewrite
+
+- **Ready is floored; push and draft are not.** `MayLandAt(head)` gates
+  `ready`, so a verification gone stale after a later commit cannot be
+  published as ready. A freeform card's floor is the person's read, as
+  in §19.1.
+- **A card is published or landed locally, never both.** Linking a PR is
+  what already refuses local landing; opening one is the act that picks.
+  Unlinking is how a person changes their mind, and a PR that GitHub
+  reports merged or closed offers exactly that.
+- **Stacks are refused for now.** Their PRs need the parent's PR open or
+  merged, bottom-first order and a retarget on every replay (§18.5).
+- **Rewrite guards the other way.** Once a PR is open, `Refusal` needs an
+  acknowledgement before a rewrite and the result must be force-pushed
+  with the pinned lease.
+
+### 22.9 Faces and phasing
+
+One engine seam, three faces, built in this order, each behind the one
+before:
+
+1. `internal/publish` (read model, refusal, `Env`), `doctor` checks,
+   `gummi push` and `gummi pr create|update|ready`. The CLI is the first
+   face because `runCLI` tests drive it through the real tree.
+2. The TUI: a status line in the log tab (branch, ahead of origin,
+   behind base, upstream rewritten) and publish actions in the PR dialogs
+   (`prlink.go` and its neighbours), showing the exact command first.
+3. The web page: the PR tab gains the same actions. The web is reachable
+   by any paired device, and §20.3 says an agent running as the operator
+   can pair silently, so a paired browser would otherwise *be* a push
+   credential. The web waits for publishing to be limited to the
+   loopback admin token or an equally strong confirm that echoes the
+   command and the remote.
+
+### 22.10 Deferred
+
+- **Stacked cards** (§18.5).
+- **GitHub Enterprise**, which `PullRequestRef.Validate`'s `github.com`
+  requirement excludes.
+- **Merging, retargeting on request, resolving threads** — still not
+  gummi's.
+- **Staging, committing by hand, stash, branch switching.** The agent
+  commits on the person's behalf (§19), and a hand-staged area would
+  fight its checkpoints.
+- **Fetching and conflict surfacing** beyond what `ForkDriftError` and
+  the rebase dialog already do, until publishing shows the need.

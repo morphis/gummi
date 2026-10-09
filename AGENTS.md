@@ -186,11 +186,16 @@ still work — the board just stays static. Key env vars are tabled in
   `run`/`resume`.
 - **The spec is the context carrier**, not chat transcripts. Keep token
   windows small: pass specs between stages, not conversation history.
-- **gummi's job ends at a verified branch.** It does not open PRs or
-  release. Don't add that scope without checking `docs/DESIGN.md §7`
-  (scope guards) and §10 (Decisions — binding). Stacks (§18) replay
-  branches locally and print the `git push --force-with-lease` they need;
-  they still never push, create a PR, or retarget one.
+- **gummi's job ends at a verified branch — and a person may publish it.**
+  It does not release, merge on GitHub, retarget a PR unasked or resolve
+  a thread. Pushing a card's own branch and opening, updating or readying
+  its PR are acts a *person* starts (TUI, web or `gummi push`/`gummi pr`),
+  through `gh` and the credentials already on the machine; gummi stores
+  no token. No stage, autopilot, goal, schedule, MCP tool or
+  `run`/`resume` may reach the publish code (decision 25, DESIGN §22).
+  Stacks (§18) still replay branches locally and print the `git push
+  --force-with-lease` they need; publishing a stacked card is refused
+  until §18.5's deferral is done.
 - **An adopted branch is held, never owned.** A card can be minted onto a
   branch gummi did not cut (`--adopt`, `--pr`; DESIGN §10 D22). gummi may
   add commits to it and nothing else: it never deletes one (`clean` keeps
