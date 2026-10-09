@@ -234,3 +234,15 @@ func TestResumeBadID(t *testing.T) {
 		t.Fatal("malformed id accepted")
 	}
 }
+
+// GUMMI_ENVELOPE is dollars wherever it is read — run, ingest and bugs
+// alike — so the same export never gives one command's cards a hundredth
+// of another's budget.
+func TestEnvEnvelopeIsDollars(t *testing.T) {
+	for v, want := range map[string]int{"20": 2000, "$12.50": 1250, "1,200": 120000, "": 0, "0": 0, "-5": 0, "lots": 0} {
+		t.Setenv("GUMMI_ENVELOPE", v)
+		if got := envEnvelope(); got != want {
+			t.Errorf("GUMMI_ENVELOPE=%q = %d credits, want %d", v, got, want)
+		}
+	}
+}

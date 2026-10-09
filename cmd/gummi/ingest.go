@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -62,11 +61,7 @@ func runIngest(fl cliFlags, args []string) error {
 	}
 	env := fl.Budget("envelope")
 	if env == 0 {
-		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				env = n
-			}
-		}
+		env = envEnvelope()
 	}
 
 	ctx := context.Background()

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -62,11 +61,7 @@ func openBugEnv(profile string, envelope int) (*bugEnv, error) {
 	}
 	env := envelope
 	if env == 0 {
-		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				env = n
-			}
-		}
+		env = envEnvelope()
 	}
 	return &bugEnv{
 		eng: eng, profile: prof, env: env,
