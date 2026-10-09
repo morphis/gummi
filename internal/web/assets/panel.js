@@ -59,6 +59,9 @@ export function initPanel (c) {
     if (state.card && byName[state.tab]?.hidden?.(state.card)) { set({ tab: 'diff' }); writeHash(state.sel, 'diff') }
     prefetch()
     renderTabs()
+    // the tab may have been drawn before the head arrived (its read can
+    // answer first): one drawn open for a card that has closed is redrawn
+    if (drawnClosed !== null && drawnClosed !== isClosed()) renderPane(true)
   })
   on(['rightHidden'], applyHidden)
   // on a phone the row holds the card's Thread too, and says which is shown
@@ -196,6 +199,14 @@ function tabKeys (e) {
   $(`#tab-${names[(to + names.length) % names.length]}`)?.focus()
 }
 
+// a landed (or otherwise finished) card takes no more review input: its
+// notes and comments have no one left to go to
+function isClosed () { return state.card?.stage === 'done' || !!state.card?.landed }
+
+// drawnClosed is isClosed() as the pane last drew a tab, null when it drew
+// none
+let drawnClosed = null
+
 function renderPane (keepScroll) {
   const pane = $('#pane')
   const top = pane.scrollTop
@@ -204,6 +215,7 @@ function renderPane (keepScroll) {
   const a = document.activeElement
   const typing = pane.contains(a) && a.closest?.('[data-draft]') ? { key: a.closest('[data-draft]').dataset.draft, from: a.selectionStart, to: a.selectionEnd } : null
   clear(pane)
+  drawnClosed = null
   pane.dataset.tab = state.tab
   const tab = byName[state.tab]
   const e = entry(state.tab)
@@ -223,12 +235,11 @@ function renderPane (keepScroll) {
   } else if (!e.data && e.loading) {
     pane.append(h('div', { class: 'empty', testid: 'panel-loading' }, h('span', { class: 'spinner' })))
   } else {
+    drawnClosed = isClosed()
     const tctx = {
       id: state.sel,
       card: state.card,
-      // a landed (or otherwise finished) card takes no more review input:
-      // its notes and comments have no one left to go to
-      closed: state.card?.stage === 'done' || !!state.card?.landed,
+      closed: drawnClosed,
       person: state.session?.person,
       setTab,
       select: ctx.select,
