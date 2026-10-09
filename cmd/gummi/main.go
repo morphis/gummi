@@ -70,6 +70,9 @@ func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code
 // with no arguments launches the board, creating the .gummi workspace lazily
 // on first run.
 func run(args []string) error {
+	// everything this process starts — an agent backend and its shell
+	// above all — inherits the marker the publish verbs refuse under
+	_ = os.Setenv(spawnedMarker, "1")
 	resetFlags(rootCmd)
 	rootCmd.SetArgs(args)
 	return rootCmd.Execute()

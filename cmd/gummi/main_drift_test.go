@@ -73,6 +73,7 @@ var envCellRe = regexp.MustCompile("`(GUMMI_[A-Z0-9_]+)`")
 var nonOperatorVars = map[string]string{
 	"GUMMI_GH_CMD":                 "test seam for swapping the gh binary (pr/gh.go)",
 	"GUMMI_WEB_PUSH_ALLOW_PRIVATE": "test seam: lets gummi web accept and dial push endpoints on loopback/private addresses, for the e2e suite's stand-in push service",
+	"GUMMI_SPAWNED":                "internal marker: gummi sets it on everything it starts so the publish verbs can refuse inside a session; nobody sets it from outside",
 	"GUMMI_MCP_SOCK":               "internal handoff: gummi sets it on a child it spawns so the child can dial back; nobody sets it from outside",
 	"GUMMI_TREE_":                  "a prefix gummi SETS for an experiment's commands (GUMMI_TREE_<REPO>), never reads; documented with the experiments key",
 	"GUMMI_HEAD_":                  "a prefix gummi SETS for an experiment's commands (GUMMI_HEAD_<REPO>), never reads; documented with the experiments key",

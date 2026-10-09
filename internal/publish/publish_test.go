@@ -208,8 +208,8 @@ func newWorld(t *testing.T) *world {
 	w.git("checkout", "-q", "-b", "feat/rate-limit")
 	w.git("commit", "-q", "--allow-empty", "-m", "feat: limit")
 	w.git("checkout", "-q", "main")
-	rewriteOK = func(string) bool { return true }
-	t.Cleanup(func() { rewriteOK = func(string) bool { return false } })
+	RewriteAllowed = func(string) bool { return true }
+	t.Cleanup(func() { RewriteAllowed = func(string) bool { return false } })
 	w.f = verified(w.git("rev-parse", "feat/rate-limit"))
 	w.env = Env{GH: gh}
 	w.repo = fakeRepo{dir: w.dir, target: worktree.PushTarget{Remote: "origin", Branch: "feat/rate-limit", How: "origin"}}

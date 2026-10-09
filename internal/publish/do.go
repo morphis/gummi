@@ -329,3 +329,16 @@ func DefaultText(f *domain.Feature, subjects []string) (title, body string) {
 	}
 	return title, b.String()
 }
+
+// Text is the title and body a new PR starts from for fx (DefaultText over
+// the branch's own commit subjects).
+func Text(ctx context.Context, env Env, repo Repo, f *domain.Feature, fx Facts) (title, body string) {
+	var subjects []string
+	if tree, err := repo.Path(f); err == nil {
+		env.Dir = tree
+		if out, err := env.git(ctx, "log", "--reverse", "--format=%s", fx.Base+".."+fx.Tip); err == nil && out != "" {
+			subjects = strings.Split(out, "\n")
+		}
+	}
+	return DefaultText(f, subjects)
+}

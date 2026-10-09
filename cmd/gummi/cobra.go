@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/morphis/gummi/internal/publish"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -371,6 +372,51 @@ var prCommentsCmd = &cobra.Command{
 	},
 }
 
+// The publish verbs (DESIGN §22): a person pushes a card's branch and opens,
+// updates or readies its PR through gh. Each prints the resolved facts and
+// the exact commands and runs them once confirmed — at the terminal, or with
+// --yes=<fingerprint> of the facts read. They are left out of the agent
+// skill bundle and refuse inside a gummi session.
+var pushCmd = &cobra.Command{
+	Use:   "push <card> [--remote <name>] [--draft] [--yes <facts>]",
+	Short: "Push a card's branch to its remote (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActPush, args)
+	},
+}
+
+var prCreateCmd = &cobra.Command{
+	Use:   "create <card> [--title <t>] [--body-file <f|->] [--draft] [--yes <facts>]",
+	Short: "Push a card's branch and open its pull request (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActCreate, args)
+	},
+}
+
+var prUpdateCmd = &cobra.Command{
+	Use:   "update <card> [--title <t>] [--body-file <f|->] [--draft] [--yes <facts>]",
+	Short: "Push new commits to a card's PR and edit its title or body (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActUpdate, args)
+	},
+}
+
+var prReadyCmd = &cobra.Command{
+	Use:   "ready <card> [--yes <facts>]",
+	Short: "Mark a card's draft PR ready for review, at a verified tip (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActReady, args)
+	},
+}
+
+var prDraftCmd = &cobra.Command{
+	Use:   "draft <card> [--yes <facts>]",
+	Short: "Turn a card's PR back into a draft (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActDraft, args)
+	},
+}
+
 // skillCmd groups the skill file operations.
 var skillCmd = &cobra.Command{
 	Use:   "skill",
@@ -460,6 +506,9 @@ func init() {
 	bindPRLinkFlags(prLinkCmd.Flags())
 	bindPRStatusFlags(prStatusCmd.Flags())
 	bindPRCommentsFlags(prCommentsCmd.Flags())
+	for _, c := range []*cobra.Command{pushCmd, prCreateCmd, prUpdateCmd, prReadyCmd, prDraftCmd} {
+		bindPublishFlags(c, c.Flags())
+	}
 	bindSkillInstallFlags(skillInstallCmd.Flags())
 	bindWebFlags(webCmd.Flags())
 	bindWebPairFlags(webPairCmd.Flags())
@@ -470,7 +519,7 @@ func init() {
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	scheduleCmd.AddCommand(scheduleListCmd, scheduleAddCmd, scheduleEnableCmd, scheduleDisableCmd, scheduleRunNowCmd, scheduleRmCmd)
-	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd)
+	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd, prCreateCmd, prUpdateCmd, prReadyCmd, prDraftCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 	webCmd.AddCommand(webPairCmd, webDevicesCmd, webUnpairCmd)
 }
@@ -688,6 +737,20 @@ func bindPRStatusFlags(fs *pflag.FlagSet) {
 func bindPRCommentsFlags(fs *pflag.FlagSet) {
 	fs.Bool("ingest", false, "write an annotation per unresolved review thread onto the card's diff")
 	jsonFlag(fs, "emit machine-readable JSON instead of the text summary")
+}
+
+func bindPublishFlags(cmd *cobra.Command, fs *pflag.FlagSet) {
+	fs.String("yes", "", "run without the terminal confirm: the fingerprint of the facts you read (printed as `facts`)")
+	jsonFlag(fs, "emit the facts, the plan and the result as JSON; without --yes nothing is run")
+	switch cmd {
+	case pushCmd:
+		fs.String("remote", "", "push to this remote, remembered as the branch's pushRemote")
+		fs.Bool("draft", false, "when the linked PR is ready and the tip is not verified, turn it back into a draft first")
+	case prCreateCmd, prUpdateCmd:
+		fs.String("title", "", "the PR's title (create: default from the card and its commits)")
+		fs.String("body-file", "", "read the PR's body from this file, or - for stdin")
+		fs.Bool("draft", false, "create: open as a draft; update: turn a ready PR back into a draft before pushing an unverified tip")
+	}
 }
 
 func bindSkillInstallFlags(fs *pflag.FlagSet) {

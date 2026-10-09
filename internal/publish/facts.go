@@ -199,7 +199,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	if fx.HeadRepo = RepoOfURL(configured); fx.HeadRepo == "" {
 		return Facts{}, fail(CodeUnsupportedHost, "the push remote "+fx.Remote+" ("+configured+") is not a github.com repository", "publishing is github.com only for now; push it yourself")
 	}
-	if RepoOfURL(fx.PushURL) != fx.HeadRepo && !rewriteOK(fx.PushURL) {
+	if RepoOfURL(fx.PushURL) != fx.HeadRepo && !RewriteAllowed(fx.PushURL) {
 		// an insteadOf/pushInsteadOf rule sends the push somewhere other
 		// than the repository the remote names: never published unseen
 		return Facts{}, fail(CodeUnsupportedHost, "git rewrites the push to "+fx.Remote+" ("+configured+") to "+fx.PushURL, "remove the url.*.insteadOf rule, or push it yourself")
@@ -353,9 +353,10 @@ func ViewPR(ctx context.Context, env Env, repo string, number int) (*PR, error) 
 		HeadSHA: v.HeadRefOid, HeadOwner: v.Owner.Login, HeadBranch: v.HeadRef}, nil
 }
 
-// rewriteOK lets a test push to a local bare repository standing in for
-// GitHub through an insteadOf rule; production never sets it.
-var rewriteOK = func(string) bool { return false }
+// RewriteAllowed lets a test push to a local bare repository standing in
+// for GitHub through an insteadOf rule. Production never sets it; it is a
+// variable, not an environment switch, so nothing outside the process can.
+var RewriteAllowed = func(string) bool { return false }
 
 var ghURL = regexp.MustCompile(`^(?:https://(?:[^@/]+@)?github\.com/|ssh://git@github\.com(?::22)?/|git@github\.com:)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
 
