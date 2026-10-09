@@ -44,7 +44,8 @@ func TestBoardShape(t *testing.T) {
 			},
 			{ID: "FD-001", Kind: "feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
 		},
-		Resume: &ResumeOffer{Cards: []CardRef{{ID: "FD-012", Title: "Dark mode", Stage: "plan"}}, Since: "3m ago", At: at},
+		Resume:  &ResumeOffer{Cards: []CardRef{{ID: "FD-012", Title: "Dark mode", Stage: "plan"}}, Since: "3m ago", At: at},
+		EventID: "1760000000000042",
 	}))
 }
 

@@ -101,6 +101,7 @@ type Server struct {
 	redeems *limiter
 	mints   *limiter
 	assets  map[string]asset
+	assetV  string // the version stamped into every asset link
 	hub     *hub
 	// filesSecret keys the URLs a card's files are served at
 	// (routes_files.go); drawn per start, so they lapse with the server.
@@ -124,7 +125,7 @@ func New(o Options) (*Server, error) {
 	if o.Log == nil {
 		o.Log = func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) }
 	}
-	assets, err := loadAssets()
+	assets, assetV, err := loadAssets()
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +136,7 @@ func New(o Options) (*Server, error) {
 		redeems: newLimiter(redeemLimit, o.Now),
 		mints:   newLimiter(mintLimit, o.Now),
 		assets:  assets,
+		assetV:  assetV,
 		hub:     newHub(o.Now, o.Coalesce),
 		hosts:   map[string]struct{}{},
 	}

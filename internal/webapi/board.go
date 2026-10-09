@@ -24,6 +24,10 @@ type Board struct {
 	// quit stopped: pick them back up, or not now. Nil when there is
 	// nothing to offer. Answer it with POST /api/board/resume.
 	Resume *ResumeOffer `json:"resume,omitempty"`
+	// EventID is the event stream's last id as this read began: a page
+	// opens GET /api/events?since=<it> and is told only what changed after
+	// the read, rather than refetching everything it just read.
+	EventID string `json:"eventId,omitempty"`
 }
 
 // ResumeOffer is the quit-resume question: the cards the last quit
