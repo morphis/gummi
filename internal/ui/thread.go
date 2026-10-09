@@ -1052,7 +1052,11 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 	// out, and the closest thing a freeform card has to "how far along".
 	if f.IsFreeform() {
 		pill := s.StagePill(f.Stage).Render("freeform")
-		if branch := f.BranchName(); branch != "" {
+		branch := f.BranchName()
+		if f.MainCheckout {
+			branch = "main checkout"
+		}
+		if branch != "" {
 			if full := pill + s.Faint.Render(" · "+branch); width <= 0 || ansi.StringWidth(full) <= width {
 				return full
 			}
@@ -1766,6 +1770,16 @@ func (m *Shell) freeformAbsentLines(s *theme.Styles, r featureRow, w int) []stri
 		said = []string{
 			"its work is on " + r.F.BranchName() + " — alt+d to read the diff",
 			"no conversation on record here; say what you want next and it picks the branch up",
+		}
+	}
+	if r.F.MainCheckout {
+		// no branch of its own: it works in the repository checkout itself
+		said = []string{"type below to start — it works in the main checkout, in place"}
+		if r.HasWorktree {
+			said = []string{
+				"its work is in the main checkout — alt+d to read the diff",
+				"no conversation on record here; say what you want next and it picks the work up",
+			}
 		}
 	}
 	out := make([]string, 0, len(said))

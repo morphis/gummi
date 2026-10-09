@@ -324,6 +324,11 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 		// head asserting a checkout that does not exist
 		st.card.Branch, st.card.Base, st.card.Scratch = "", "", true
 	}
+	if r.F.MainCheckout {
+		// a main-checkout session works in the repository's own checkout:
+		// no branch of its own, and nothing it would land onto
+		st.card.Branch, st.card.Base = "", ""
+	}
 	if od := m.webOpenDecision(r); od != nil {
 		dec := od.api
 		st.card.Decision, st.rev = &dec, od.rev
@@ -568,6 +573,9 @@ func (m *Shell) webRevision(ctx context.Context, f domain.Feature, rev string) (
 		}
 		if len(head) > 7 {
 			head = head[:7]
+		}
+		if f.MainCheckout {
+			return head, "main checkout at " + head
 		}
 		return head, f.BranchName() + " at " + head
 	}

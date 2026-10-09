@@ -328,7 +328,7 @@ func (m *Shell) loadRows() tea.Msg {
 		if name := goalLandingBranch(f); name != "" {
 			goalBranches[f.ID] = name
 		}
-		if f.IsFreeform() && f.Stage != domain.StageDone {
+		if f.IsFreeform() && !f.MainCheckout && f.Stage != domain.StageDone {
 			openSessions[f.ID] = f.BranchName()
 		}
 	}
