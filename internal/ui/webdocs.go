@@ -537,12 +537,16 @@ func filesDir(ctx context.Context, pool *worktree.Pool, f domain.Feature) (strin
 // diffLines is the card's diff as the diff surface reads it, split in
 // the coordinates annotations use. why is set when there is none.
 func (d *WebDocs) diffLines(ctx context.Context) (lines []string, why string, err error) {
-	ok, err := d.pool.Exists(ctx, &d.f)
-	if err != nil {
-		return nil, "", err
-	}
-	if !ok {
-		return nil, noWorktreeYet(d.f), nil
+	// a main-checkout session has no worktree: its diff is the loose work
+	// in the checkout itself
+	if !d.f.MainCheckout {
+		ok, err := d.pool.Exists(ctx, &d.f)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ok {
+			return nil, noWorktreeYet(d.f), nil
+		}
 	}
 	raw, err := d.pool.Diff(ctx, &d.f)
 	if err != nil {

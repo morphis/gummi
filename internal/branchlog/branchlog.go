@@ -91,6 +91,8 @@ func Refusal(f domain.Feature, s State) string {
 		return string(f.ID) + " is a research card: it works in a scratch tree and never gets a branch"
 	case f.Stage == domain.StageTodo:
 		return string(f.ID) + " has no branch yet"
+	case f.MainCheckout:
+		return string(f.ID) + " runs in the main checkout: it holds no branch, so it has no commits of its own"
 	case f.Kind == domain.KindGoal:
 		return string(f.ID) + " is a goal: its branch is built from its cards' landings, not from commits to rewrite"
 	case f.Adopted():

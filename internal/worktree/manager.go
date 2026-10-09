@@ -2030,9 +2030,12 @@ var revRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 // commit, in the same coordinates Diff's new side uses (both end at the
 // worktree). rev must be a commit id the repository has.
 func (m *Manager) DiffSince(ctx context.Context, f *domain.Feature, rev string) (string, error) {
-	p, err := m.requireWorktree(f)
-	if err != nil {
-		return "", err
+	p := m.repo
+	if !f.MainCheckout {
+		var err error
+		if p, err = m.requireWorktree(f); err != nil {
+			return "", err
+		}
 	}
 	if !revRe.MatchString(rev) {
 		return "", fmt.Errorf("%q is not a commit id", rev)
