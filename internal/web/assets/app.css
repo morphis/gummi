@@ -458,7 +458,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .composer .mslot{margin-left:auto;display:flex;min-width:0}
 .composer .mslot:empty{display:none}
 .composer .mslot + .send{margin-left:0}
-.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);min-width:0;max-width:280px}
+.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);flex-shrink:0;min-width:0;max-width:280px}
 .mbtn:hover,.mbtn[aria-expanded="true"]{background:var(--sunk)}
 .mbtn .m{color:var(--fg);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mbtn .a{font-size:11px;color:var(--fg3)}
