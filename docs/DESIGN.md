@@ -4131,7 +4131,9 @@ schedules: `/objective [--check <cmd>] <text>` in the composer, and
 pause, resume and stop in the session's menu and on the web page's strip.
 Stop interrupts the turn in flight and leaves the objective `paused`.
 Setting a new objective replaces the old one, and a session has at most
-one.
+one. An objective is optional: a session without one is a freeform card
+as before, and **clear** removes a paused or settled objective, which
+puts the session back to moving only when its person types.
 
 **`met` lands nothing.** The freeform floor (§19.1) does not change. The
 card shows as needing the person, with the auditor's last note, and the
