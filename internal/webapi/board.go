@@ -108,6 +108,10 @@ type Row struct {
 	// Stack and Goal place the card in a stack or under a goal.
 	Stack *RowStack `json:"stack,omitempty"`
 	Goal  *RowGoal  `json:"goal,omitempty"`
+	// Objective is a freeform card's objective state (active, paused, met,
+	// stuck, exhausted, capped, failed), empty when it has none: the row's
+	// mark, coloured by it.
+	Objective string `json:"objective,omitempty"`
 	// Waits names the cards this one's dependencies are waiting on.
 	Waits []string `json:"waits,omitempty"`
 	// Landed marks a card whose branch was squash-merged; PR is the linked

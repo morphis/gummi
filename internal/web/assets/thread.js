@@ -549,6 +549,7 @@ function renderLive () {
         if (c.sending) parts.push(you({ text: c.sending, via: 'sending' }))
         if (c.tasks?.length) parts.push(tasks(c.tasks, k))
         if (k === 'freeform' && c.watches?.length) parts.push(watches(c.watches))
+        if (k === 'freeform' && c.objective) parts.push(objectiveStrip(state.sel, c.objective))
         if (k === 'freeform' && c.queued?.length) parts.push(queued(state.sel, c.queued))
         if (c.busy) {
           // the same line a stage run shows: what it is doing, the call in
@@ -602,6 +603,26 @@ function queued (id, lines) {
       h('span', { class: 'via' }, 'queued'), h('span', { class: 'text' }, text),
       h('button', { type: 'button', title: 'Edit', testid: 'queued-edit', onclick: () => take(i, true) }, 'edit'),
       h('button', { type: 'button', title: 'Cancel', testid: 'queued-cancel', onclick: () => take(i, false) }, '×'))))
+}
+
+// objectiveStrip is the session's objective (DESIGN §19.11): where it
+// stands, what it is, the auditor's last note, and the verbs that act on
+// it — each the session's own /objective command, sent as its menu row.
+function objectiveStrip (id, o) {
+  const act = async verb => {
+    try {
+      await post(cardPath(id, 'actions/objective'), { message: verb })
+    } catch (e) { toast(e.message) }
+  }
+  const verbs = o.state === 'active' ? ['pause', 'stop', 'clear'] : o.state === 'paused' ? ['resume', 'clear'] : ['clear']
+  const head = [o.state, `${o.turns}/${o.cap} turns`, o.auditing ? 'auditing…' : null].filter(Boolean).join(' · ')
+  return h('div', { class: ['objective', `obj-${o.state}`], testid: 'objective' },
+    h('div', { class: 'objective-head' },
+      h('span', { class: 'via' }, 'objective'), h('span', { class: 'obj-state', testid: 'objective-state' }, head),
+      ...verbs.map(v => h('button', { type: 'button', testid: `objective-${v}`, onclick: () => act(v) }, v))),
+    h('div', { class: 'obj-text' }, o.text),
+    o.check ? h('div', { class: 'obj-note' }, `check: ${o.check}`) : null,
+    o.note ? h('div', { class: 'obj-note', testid: 'objective-note' }, o.note) : null)
 }
 
 // watches are the gummi watches the session has running; each reports

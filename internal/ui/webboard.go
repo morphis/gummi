@@ -87,6 +87,9 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		// counts from 0, so the page can index with it.
 		row.Stack = &webapi.RowStack{ID: string(st.ID), Name: st.Name, Pos: st.Pos - 1, Of: st.Of, Stale: st.Stale}
 	}
+	if o := m.freeformObjective(r); o != nil {
+		row.Objective = string(o.State)
+	}
 	sess := m.sessionFor(f.ID)
 	it, needs := m.inbox.get(f.ID)
 	switch {

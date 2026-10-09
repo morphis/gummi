@@ -737,6 +737,16 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 				a.Choices = append(a.Choices, webapi.Choice{Value: p.Name, Label: p.Name, Detail: backend + " · " + model})
 			}
 		}
+	case "objective":
+		// the text, or one of the verbs the page's strip sends as it
+		a.Needs = webapi.ActionNeedsText
+		a.Detail = "what done looks like — the session keeps going until an auditor finds it met. " +
+			"Start with --check 'cmd' to make a command the judge; pause, resume, stop or clear act on the one it has"
+		if ff := m.engine.Freeform(r.F.ID); ff != nil {
+			if o := ff.Snapshot().Objective; o != nil && !o.State.Settled() {
+				a.Default = o.Text
+			}
+		}
 	case "heartbeat":
 		// the page opens its own schedule form for this card; the
 		// definition is written through /api/schedules, not this action

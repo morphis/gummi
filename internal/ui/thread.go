@@ -1733,6 +1733,8 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 	// names it rather than the bare "working" (engine.BriefDrafting).
 	if snap.Briefing {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+engine.BriefDrafting+"…"))
+	} else if snap.Auditing && !snap.Busy {
+		lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+engine.ObjectiveAuditing+"…"))
 	} else if snap.Busy {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" working…"))
 	}

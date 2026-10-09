@@ -4076,8 +4076,8 @@ It belongs to one freeform card and stays on that card's branch.
 
 **Freeform only.** A workflow card already loops: autopilot drives it to
 its next gate, and each stage's critique is its auditor. Setting an
-objective on one is refused (`Feature.Validate`), as a session model is
-(§19.8).
+objective on one is refused, by the engine and again by the store's
+write (`Store.SetObjective` writes only a freeform card's row).
 
 **The loop.** When a freeform turn ends and its objective is active:
 
@@ -4087,11 +4087,12 @@ objective on one is refused (`Feature.Validate`), as a session model is
    asking the agent's way of saying it is blocked. The loop never answers
    for the person.
 2. **The audit.** A fresh, tool-less session of the profile's `auditor`
-   role is given the objective, the agent's last reply, and what gummi can
-   see for itself: commits since the objective was set, the diffstat, and
-   whether the tree is dirty. It is not given the transcript. It answers
-   in the `verdict` package's grammar with `CONTINUE`, `MET` or `STUCK`
-   and a one-line note. The audit's cost is charged to the card, and an
+   role (undeclared, it is the scribe's, and failing that the session's
+   own model) is given the objective, the agent's last reply, and what
+   gummi can see for itself: commits since the objective was set, the
+   diffstat, and whether the tree is dirty. It is not given the
+   transcript. It answers with a `VERDICT:` line — `CONTINUE`, `MET` or
+   `STUCK` and a one-line note (`domain.ParseAudit`). The audit's cost is charged to the card, and an
    answer that does not parse counts as `STUCK`.
 3. **The next turn.** On `CONTINUE`, gummi sends a turn under an actor of
    its own (`WithActor`), the way a heartbeat does: the objective
@@ -4127,8 +4128,12 @@ going nowhere, which the envelope would let run for a long time.
 
 **Only a person sets one.** There is no MCP tool for an objective, so an
 agent cannot set one for itself. It is the same operator surface as
-schedules: `/objective [--check <cmd>] <text>` in the composer, and
-pause, resume and stop in the session's menu and on the web page's strip.
+schedules: `/objective [--check '<cmd>'] <text>` in the composer — a
+session command of its own, so both faces' composers take it and offer
+it — and `/objective pause|resume|stop|clear`. The card's menu has an
+**objective…** row on both faces: the TUI puts `/objective ` in the
+composer, and the web page asks for the text in a dialog. The web page's
+strip sends pause, resume, stop and clear as that row's text.
 Stop interrupts the turn in flight and leaves the objective `paused`.
 Setting a new objective replaces the old one, and a session has at most
 one. An objective is optional: a session without one is a freeform card

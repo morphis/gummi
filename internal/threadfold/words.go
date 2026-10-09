@@ -329,3 +329,13 @@ func ActorWord(actor string) string {
 	}
 	return actor
 }
+
+// TurnBy names who sent a user turn in a thread: a person by name, "" for
+// the terminal's own (drawn as "you"), and "gummi" for a turn gummi sent
+// for a session's objective (DESIGN §19.11) — never drawn as the person's.
+func TurnBy(by string) string {
+	if by == state.ActorObjective {
+		return "gummi"
+	}
+	return state.PersonName(by)
+}

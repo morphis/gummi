@@ -26,6 +26,7 @@ func TestLiveShape(t *testing.T) {
 			Spent: 0.5, Model: "claude-opus", Context: &AgentContext{Tokens: 41000, Limit: 200000},
 			Tasks:  []Task{{Text: "read the adapter", Status: "completed"}, {Text: "Fixing the leak", Status: "in_progress"}},
 			Queued: []string{"also fix the docs"}, Watches: []string{"w1 · go test ./... | grep FAIL"},
+			Objective: &Objective{Text: "the parser is under 10ms", Check: "go test ./parser", State: "active", Turns: 3, Cap: 20, Note: "the lexer is still slow", Auditing: true},
 		},
 		Elsewhere: &Elsewhere{PID: 4411, Stage: "verify", Role: "gummi", Since: at, Busy: true, Watching: true, Note: "read-only: another gummi process owns this run"},
 	}))

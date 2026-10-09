@@ -111,6 +111,13 @@ type FreeformSession struct {
 	// so it never interleaves with the brief turn.
 	queue []queuedTurn
 
+	// objective is the card's objective (objective.go), read from the
+	// store once (objLoaded) and kept here so a render does not query it;
+	// auditing is set while its audit runs. Both guarded by mu.
+	objective *domain.Objective
+	objLoaded bool
+	auditing  bool
+
 	// writeMu serializes one card's memory writes (freeformmemory.go):
 	// an MCP backend may issue two memory_write calls in parallel —
 	// mcpsock dispatches each in its own goroutine — and a rename-based
@@ -814,6 +821,9 @@ func joinQueue(q []queuedTurn) (queuedBatch, bool) {
 func (ff *FreeformSession) drainQueue(sess *Session) {
 	b, ok := ff.takeQueue(sess)
 	if !ok {
+		// nothing the person said is waiting: the objective, if one is
+		// running, decides whether gummi sends the next turn
+		ff.advanceObjective(sess)
 		return
 	}
 	go func() {
@@ -948,6 +958,9 @@ func (e *Engine) InterruptFreeform(ctx context.Context, id domain.FeatureID) err
 	if sess == nil {
 		return fmt.Errorf("%s has no live turn", id)
 	}
+	// stop is the person taking the wheel: a running objective pauses
+	// first, so the idle the interrupt brings is not audited into a turn
+	ff.pauseObjective()
 	if a := sess.agent(); a != nil {
 		if err := a.Interrupt(ctx); err != nil {
 			return err
@@ -1050,11 +1063,13 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 	sess := ff.sess
 	briefing := ff.briefing
 	ff.mu.Unlock()
+	obj, auditing := ff.objectiveView()
 	if sess == nil {
-		return Snapshot{Briefing: briefing}
+		return Snapshot{Briefing: briefing, Objective: obj, Auditing: auditing}
 	}
 	snap := sess.Snapshot()
 	snap.Briefing = briefing
+	snap.Objective, snap.Auditing = obj, auditing
 	snap.Queued = ff.Queued()
 	for _, w := range ff.Watches() {
 		snap.Watches = append(snap.Watches, w.ID+" · "+w.Command)
@@ -1075,6 +1090,7 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 // left in the worktree stays there, uncommitted, for somebody to commit on
 // purpose.
 func (ff *FreeformSession) Close() error {
+	ff.settleObjective(domain.ObjectiveFailed, "the session was closed")
 	ff.stopWatches()
 	ff.settle()
 	ff.stopBackend()
@@ -1233,6 +1249,7 @@ func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
 			if !ok {
 				if !sess.finalizedState() {
 					sess.setError(errSessionDied)
+					ff.settleObjective(domain.ObjectiveFailed, "the backend died: "+errSessionDied.Error())
 					e.send(Event{Feature: ff.id, Kind: EventError, Err: errSessionDied})
 					sess.stop()
 				}
@@ -1335,6 +1352,9 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		ff.drainQueue(sess)
 	case agent.EventError:
 		sess.setError(ev.Err)
+		if ev.Err != nil {
+			ff.settleObjective(domain.ObjectiveFailed, "the backend errored: "+ev.Err.Error())
+		}
 	case agent.EventBudgetExhausted:
 		// The BACKEND's own cap, not gummi's envelope (handleBoard's
 		// identical case has the full reasoning). Nothing gummi can raise
@@ -1361,6 +1381,7 @@ func (e *Engine) exhaustFreeform(ff *FreeformSession, sess *Session) {
 	sess.appendSystem("this card has spent its envelope — its work is left as it is in its worktree; " +
 		"raise the envelope to carry on")
 	sess.setBusy(false)
+	ff.settleObjective(domain.ObjectiveExhausted, "the card's envelope ran out")
 	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventExhausted})
 }
 
@@ -1403,8 +1424,18 @@ func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnaps
 	rc, backend := e.sessionRole(f)
 	sess := restoredFreeformSession(f, snap)
 	e.stampSpawnInfo(sess)
-	e.freeform[f.ID] = &FreeformSession{
+	ff := &FreeformSession{
 		engine: e, id: f.ID, rc: rc, backend: backend, sess: sess,
+	}
+	e.freeform[f.ID] = ff
+	// the turn that ended before the restart was never audited
+	// (goBrief's join, taken inline: the caller already holds e.mu)
+	if !e.closed {
+		e.briefs.Add(1)
+		go func() {
+			defer e.briefs.Done()
+			ff.restoreObjective(sess)
+		}()
 	}
 }
 

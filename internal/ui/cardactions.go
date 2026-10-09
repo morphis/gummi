@@ -505,6 +505,14 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
 		},
 		{
+			// keyless, like heartbeat: the session keeps going on its own
+			// until an auditor finds the objective met (DESIGN §19.11). The
+			// TUI hands it to the composer as /objective; the web page asks
+			// for the text, or a verb its strip sends
+			"objective", "", "objective…", "keep the session going until something is done — an auditor judges each turn, and gummi sends the next", false,
+			freeform && in.stage == domain.StageOpen && in.agentWired && !r.watchOnly(),
+		},
+		{
 			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,
 			needsWT && r.Landed,
 		},

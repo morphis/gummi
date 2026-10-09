@@ -168,6 +168,10 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .badge.run{color:var(--fg2)}
 .badge.paused{color:var(--warn)}
 .badge.watch{color:var(--fg2)}
+.badge.obj{color:var(--accent)}
+.badge.obj.obj-met{color:var(--ok)}
+.badge.obj.obj-paused{color:var(--fg3)}
+.badge.obj.obj-stuck,.badge.obj.obj-exhausted,.badge.obj.obj-capped,.badge.obj.obj-failed{color:var(--warn)}
 .badge.stack{color:var(--fg3);border:1px solid var(--line2)}
 .row .badge.stack,.row .badge.else{line-height:15px}
 .badge.stack.stale{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,var(--line2))}
@@ -307,6 +311,17 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .queued-line .via{color:var(--fg3);font-size:11px}
 .queued-line button{padding:0 6px;border-radius:6px;color:var(--fg3)}
 .queued-line button:hover{background:var(--line);color:var(--fg)}
+.objective{margin:4px 0 4px 40px;padding:6px 10px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;font-size:12.5px;color:var(--fg2)}
+.objective.obj-met{border-left-color:var(--ok)}
+.objective.obj-paused{border-left-color:var(--fg3)}
+.objective.obj-stuck,.objective.obj-exhausted,.objective.obj-capped,.objective.obj-failed{border-left-color:var(--warn)}
+.objective-head{display:flex;align-items:center;gap:8px}
+.objective-head .via{color:var(--fg3);font-size:11px}
+.objective-head .obj-state{flex:1;color:var(--fg3);font-size:11px}
+.objective-head button{padding:0 6px;border-radius:6px;color:var(--fg3)}
+.objective-head button:hover{background:var(--line);color:var(--fg)}
+.objective .obj-text{color:var(--fg);margin-top:2px}
+.objective .obj-note{color:var(--fg3);margin-top:2px}
 .msg .who .rewind{margin-left:auto;padding:0 6px;border-radius:6px;font-size:11px;color:var(--fg3);opacity:0}
 .msg:hover .who .rewind,.msg .who .rewind:focus-visible{opacity:1}
 @media (hover:none){.msg .who .rewind{opacity:1}}

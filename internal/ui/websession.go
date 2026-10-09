@@ -199,6 +199,30 @@ func (m *Shell) commitSession(id domain.FeatureID, message string) tea.Cmd {
 	}
 }
 
+// objectiveSession runs a session's /objective command from the web
+// page's menu and strip: the same command the composer takes.
+func (m *Shell) objectiveSession(id domain.FeatureID, args string) tea.Cmd {
+	eng := m.engine
+	return func() tea.Msg {
+		if err := eng.ObjectiveCommand(context.Background(), id, args); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		return noticeMsg{text: string(id) + ": objective " + objectiveVerbDone(args), id: id}
+	}
+}
+
+func objectiveVerbDone(args string) string {
+	switch strings.ToLower(strings.TrimSpace(args)) {
+	case "pause", "stop":
+		return "paused"
+	case "resume":
+		return "resumed"
+	case "clear":
+		return "cleared"
+	}
+	return "set"
+}
+
 // sessionSwitchedMsg settles a model switch: the rows reload, since the
 // card row is what carries the pair, and the notice says what runs now.
 type sessionSwitchedMsg struct {

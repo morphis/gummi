@@ -1691,6 +1691,15 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		}
 		m.alert(ev.Feature, "handoff brief finished — write a spec to review it")
 		return nil
+	case engine.EventObjective:
+		// a session's objective settled: the one notification it gives
+		// (DESIGN §19.11), with the auditor's last word on it
+		if ff := m.engine.Freeform(ev.Feature); ff != nil {
+			if o := ff.Snapshot().Objective; o != nil {
+				m.alert(ev.Feature, "objective "+string(o.State)+" — "+sanitize(o.Note))
+			}
+		}
+		return m.loadRows
 	case engine.EventDelegateCreated:
 		// a freeform session created a card under its delegation: it was
 		// minted on autopilot, and the board starts it the way a goal's

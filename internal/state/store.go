@@ -331,6 +331,22 @@ CREATE TABLE IF NOT EXISTS card_last_seen (
 	feature_id TEXT    PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
 	seq        INTEGER NOT NULL DEFAULT 0
 );
+
+-- A freeform card's objective (domain.Objective, DESIGN §19.11): at most
+-- one per card, and no row is none. It sits beside the conversation's
+-- row rather than on features because only a freeform card has one.
+CREATE TABLE IF NOT EXISTS objectives (
+	feature_id   TEXT    PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+	text         TEXT    NOT NULL,
+	check_cmd    TEXT    NOT NULL DEFAULT '',
+	state        TEXT    NOT NULL,
+	turns        INTEGER NOT NULL DEFAULT 0,
+	stuck_streak INTEGER NOT NULL DEFAULT 0,
+	note         TEXT    NOT NULL DEFAULT '',
+	base_rev     TEXT    NOT NULL DEFAULT '',
+	set_at       TEXT    NOT NULL,
+	set_by       TEXT    NOT NULL DEFAULT ''
+);
 `
 
 // OpenStore opens (creating if needed) the SQLite store at dbPath.

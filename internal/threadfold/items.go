@@ -312,7 +312,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 				Author: AuthorLabel(p.Author, seg.Role), Text: Sanitize(p.Content),
 			}
 			if p.Author == string(engine.AuthorUser) {
-				it.T, it.Via, it.By = ItemYou, ViaSteered, state.PersonName(p.By)
+				it.T, it.Via, it.By = ItemYou, ViaSteered, TurnBy(p.By)
 				it.Attachments = attachmentRefs(p.Images)
 				if echoes[k][p.Content] {
 					it.Via = ViaAnswer

@@ -38,3 +38,8 @@ func PersonName(actor string) string {
 	}
 	return name
 }
+
+// ActorObjective is the actor of the turns gummi sends for a freeform
+// card's objective (DESIGN §19.11): not a person, so a thread draws them
+// as gummi's and never as the person's.
+const ActorObjective = "objective"

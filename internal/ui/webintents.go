@@ -681,6 +681,11 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: engine.ErrSessionBusy.Error()}
 		}
 		return m.switchSessionModel(r.F.ID, req.Backend, strings.TrimSpace(req.Model)), nil
+	case "objective":
+		if msg == "" {
+			return nil, refuse(WebBadRequest, "say what done looks like, or pause, resume, stop or clear")
+		}
+		return m.objectiveSession(r.F.ID, msg), nil
 	case "commit":
 		if msg == "" {
 			// the menu entry already asks for the message (webActionNeeds),

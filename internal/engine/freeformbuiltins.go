@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // A freeform session's own commands: the ones a person expects of any
@@ -52,6 +54,12 @@ var (
 		Description: "what this session and the card have spent — sends nothing",
 		builtin:     true,
 	}
+	objectiveCommand = ProjectCommand{
+		Name: "objective",
+		Description: "keep the agent going until something is done: /objective [--check 'cmd'] <what done looks like>; " +
+			"/objective pause|resume|stop|clear; alone, where it stands",
+		builtin: true,
+	}
 	helpCommand = ProjectCommand{
 		Name:        "help",
 		Description: "list the commands this session takes — sends nothing",
@@ -60,7 +68,7 @@ var (
 )
 
 // sessionCommands is every built-in, in the order a menu offers them.
-var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
+var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, objectiveCommand, clearCommand, retryCommand, contextCommand, costCommand, helpCommand}
 
 // builtinFor is the built-in msg names, when cmds resolve it to one rather
 // than to a project file, and the arguments after it.
@@ -99,8 +107,10 @@ const handoffOpening = "Handoff from the previous session of this conversation, 
 // runBuiltin answers a built-in that is not a turn for the agent. handled
 // is false for one that is (/compact on any backend), which sendTurn
 // sends on its way.
-func (ff *FreeformSession) runBuiltin(ctx context.Context, c ProjectCommand, _ string, cmds []ProjectCommand) (handled bool, err error) {
+func (ff *FreeformSession) runBuiltin(ctx context.Context, c ProjectCommand, args string, cmds []ProjectCommand) (handled bool, err error) {
 	switch c.Name {
+	case objectiveCommand.Name:
+		return true, ff.runObjectiveCommand(ctx, args)
 	case clearCommand.Name:
 		return true, ff.Clear()
 	case retryCommand.Name:
@@ -336,4 +346,87 @@ func (s *Session) lastReplySince(prefix string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// runObjectiveCommand answers /objective: a verb (pause, resume, stop,
+// clear), nothing (where the objective stands), or a new objective with
+// an optional --check command ahead of its text.
+func (ff *FreeformSession) runObjectiveCommand(ctx context.Context, args string) error {
+	e := ff.engine
+	args = strings.TrimSpace(args)
+	switch strings.ToLower(args) {
+	case "pause":
+		return e.PauseObjective(ctx, ff.id)
+	case "resume":
+		return e.ResumeObjective(ctx, ff.id)
+	case "stop":
+		return e.StopObjective(ctx, ff.id)
+	case "clear":
+		return e.ClearObjective(ctx, ff.id)
+	case "":
+		sess, err := ff.ensureSession(ctx)
+		if err != nil {
+			return err
+		}
+		o, auditing := ff.objectiveView()
+		sess.appendToolDone("gummi /"+objectiveCommand.Name, true, objectiveReport(o, auditing))
+		e.persist(sess)
+		e.send(Event{Feature: ff.id, Kind: EventUpdated})
+		return nil
+	}
+	check, text, err := ParseObjectiveArgs(args)
+	if err != nil {
+		return err
+	}
+	return ff.setObjective(ctx, text, check)
+}
+
+// ParseObjectiveArgs splits /objective's arguments into the check command
+// and the objective's text: "--check 'go test ./...' make it pass". The
+// command may be quoted with ', " or `, or be a single word.
+func ParseObjectiveArgs(args string) (check, text string, err error) {
+	args = strings.TrimSpace(args)
+	rest, ok := strings.CutPrefix(args, "--check")
+	if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '=') {
+		return "", args, nil
+	}
+	rest = strings.TrimLeft(rest, " =")
+	if rest == "" {
+		return "", "", errors.New("--check needs a command: /objective --check 'go test ./...' <what done looks like>")
+	}
+	if q := rest[0]; q == '\'' || q == '"' || q == '`' {
+		end := strings.IndexByte(rest[1:], q)
+		if end < 0 {
+			return "", "", errors.New("the --check command's quote is not closed")
+		}
+		check, text = rest[1:1+end], rest[2+end:]
+	} else {
+		check, text, _ = strings.Cut(rest, " ")
+	}
+	check, text = strings.TrimSpace(check), strings.TrimSpace(text)
+	if check == "" {
+		return "", "", errors.New("--check needs a command")
+	}
+	if text == "" {
+		return "", "", errors.New("an objective needs some text after its check")
+	}
+	return check, text, nil
+}
+
+func objectiveReport(o *domain.Objective, auditing bool) string {
+	if o == nil {
+		return "This session has no objective. /objective <what done looks like> sets one, and the agent keeps " +
+			"going after each turn until an auditor finds it met."
+	}
+	s := fmt.Sprintf("Objective (%s, %d of %d turns): %s", o.State, o.Turns, domain.ObjectiveTurnCap, o.Text)
+	if o.Check != "" {
+		s += "\nCheck: " + o.Check
+	}
+	if o.Note != "" {
+		s += "\nLast note: " + o.Note
+	}
+	if auditing {
+		s += "\nAuditing the last turn now."
+	}
+	return s
 }

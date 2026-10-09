@@ -75,7 +75,16 @@
     ],
     "watches": [
       "w1 · go test ./... | grep FAIL"
-    ]
+    ],
+    "objective": {
+      "text": "the parser is under 10ms",
+      "check": "go test ./parser",
+      "state": "active",
+      "turns": 3,
+      "cap": 20,
+      "note": "the lexer is still slow",
+      "auditing": true
+    }
   },
   "elsewhere": {
     "pid": 4411,
