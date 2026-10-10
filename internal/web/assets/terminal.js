@@ -20,6 +20,7 @@
 
 import { h, isMobile } from './dom.js?v=__ASSET_V__'
 import { on, state } from './store.js?v=__ASSET_V__'
+import { get, cardPath } from './api.js?v=__ASSET_V__'
 import { isDark } from './theme.js?v=__ASSET_V__'
 
 export const terminalTab = {
@@ -91,6 +92,7 @@ function drop () {
   if (!t) return
   t.gone = true
   clearTimeout(t.timer)
+  clearTimeout(t.unsure)
   t.sizes?.disconnect()
   t.ws?.close()
   t.term?.dispose()
@@ -129,7 +131,31 @@ function start (id) {
   const screen = h('div', { class: 'term-screen', testid: 'terminal-screen' })
   const note = h('div', { class: 'term-note', testid: 'terminal-note', role: 'status', hidden: true })
   const t = { id, screen, note, tries: 0, ctrl: false, alt: false }
-  t.root = h('div', { class: 'term', testid: 'terminal' }, h('div', { class: 'term-main' }, screen, note), touch() ? keyBar(t) : null)
+  // the way out of a shell that no longer answers its keys; asked twice,
+  // since whatever it was running goes with it
+  const end = h('button', {
+    class: 'term-end',
+    type: 'button',
+    testid: 'terminal-end',
+    title: 'End this shell and whatever is running in it',
+    onclick: () => {
+      if (t.ws?.readyState !== WebSocket.OPEN) return
+      if (!end.dataset.sure) {
+        end.dataset.sure = '1'
+        end.textContent = 'End it?'
+        t.unsure = setTimeout(() => { delete end.dataset.sure; end.textContent = 'End shell' }, 4000)
+        return
+      }
+      clearTimeout(t.unsure)
+      delete end.dataset.sure
+      end.textContent = 'End shell'
+      t.ended = true
+      t.ws.send(JSON.stringify({ end: true }))
+    }
+  }, 'End shell')
+  end.addEventListener('pointerdown', (e) => e.preventDefault())
+  end.addEventListener('mousedown', (e) => e.preventDefault())
+  t.root = h('div', { class: 'term', testid: 'terminal' }, h('div', { class: 'term-main' }, screen, end, note), touch() ? keyBar(t) : null)
   say(t, h('span', { class: 'spinner' }), 'Opening the terminal…')
   loadLibs().then(([{ Terminal }, { FitAddon }]) => {
     if (t.gone) return
@@ -260,6 +286,7 @@ function connect (t) {
   const ws = t.ws = new WebSocket(u)
   ws.binaryType = 'arraybuffer'
   t.exited = null
+  t.ended = false
   t.opened = false
   ws.onopen = () => {
     t.opened = true
@@ -277,13 +304,23 @@ function connect (t) {
   ws.onclose = () => {
     if (t.gone || t.ws !== ws) return
     t.root.dataset.state = 'closed'
-    const again = (label) => h('button', { class: 'btn', type: 'button', testid: 'terminal-again', onclick: () => { t.tries = 0; say(t, h('span', { class: 'spinner' }), 'Opening the terminal…'); connect(t) } }, label)
+    const again = (label) => h('button', { class: 'btn', type: 'button', testid: 'terminal-again', onclick: () => { t.tries = 0; say(t, h('span', { class: 'spinner' }), 'Opening the terminal…'); connect(t); t.focus = true; t.term.focus() } }, label)
     if (t.exited !== null) {
-      say(t, h('b', null, t.exited ? `The shell exited (${t.exited})` : 'The shell exited'), again('New shell'))
-    } else if (!t.opened && t.tries >= 3) {
-      // a refused handshake says nothing a page may read
-      say(t, h('b', null, 'The terminal did not open'), 'The board may be out of reach, or already running as many shells as it allows.', again('Try again'))
-    } else {
+      say(t, h('b', null, t.ended ? 'The shell was ended' : t.exited ? `The shell exited (${t.exited})` : 'The shell exited'), again('New shell'))
+    } else if (!t.opened) {
+      // a refused handshake says nothing a page may read, so the server
+      // is asked in words: its refusal is final, its silence is not
+      get(cardPath(t.id, 'term')).then(() => null, (err) => err).then((err) => {
+        if (t.gone || t.ws !== ws) return
+        if (err?.status && err.status < 500) say(t, h('b', null, 'The terminal did not open'), err.message, again('Try again'))
+        else retry()
+      })
+    } else retry()
+    function retry () {
+      if (t.tries >= 6) {
+        say(t, h('b', null, 'The terminal did not open'), 'The board is out of reach.', again('Try again'))
+        return
+      }
       say(t, h('span', { class: 'spinner' }), 'Reconnecting…')
       t.timer = setTimeout(() => connect(t), Math.min(500 * 2 ** t.tries++, 8000))
     }

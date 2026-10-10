@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -20,8 +21,12 @@ import (
 // person running the server can do.
 //
 // The page talks to it over a WebSocket. Binary frames are the terminal's
-// bytes, both ways. A text frame from the page is a termResize; one from
-// the server is a termExit, sent once, before it closes the socket.
+// bytes, both ways. A text frame from the page is a termMsg; one from the
+// server is a termExit, sent once, before it closes the socket.
+//
+// A browser tells a page nothing about a handshake that was refused, so
+// the same GET without the upgrade answers what the upgrade would have
+// been refused with, and starts nothing.
 //
 // The shell is the card's, not the socket's: it keeps running when the
 // page goes away, and the next socket is replayed the tail of its output
@@ -39,10 +44,12 @@ const (
 // to be paired still. A variable so a test can shorten it.
 var termRecheck = 30 * time.Second
 
-// termResize is the page telling the shell its window's size.
-type termResize struct {
-	Cols int `json:"cols"`
-	Rows int `json:"rows"`
+// termMsg is the page telling the shell its window's size, or to end: a
+// shell that no longer answers its keys has no other way out.
+type termMsg struct {
+	Cols int  `json:"cols,omitempty"`
+	Rows int  `json:"rows,omitempty"`
+	End  bool `json:"end,omitempty"`
 }
 
 // termExit is the server saying the shell has ended, and how.
@@ -60,16 +67,24 @@ func (s *Server) termRoutes() {
 // handleTerm is GET /api/cards/{id}/term, upgraded to a WebSocket: the
 // card's shell, started if it has none.
 func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	dir, ok := s.worktreeDir(w, r, id)
+	if !ok {
+		return
+	}
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if err := s.terms.Check(id); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, struct{}{})
+		return
+	}
 	// An upgrade is a GET, which Handler's same-origin check lets through
 	// as a read. This one is the most a request here can ask for, so it is
 	// held to what a write is: the cookie alone opens nothing.
 	if !isSameOrigin(r) {
 		writeError(w, http.StatusForbidden, "cross-origin terminal refused")
-		return
-	}
-	id := r.PathValue("id")
-	dir, ok := s.worktreeDir(w, r, id)
-	if !ok {
 		return
 	}
 	q := r.URL.Query()
@@ -126,8 +141,17 @@ func (s *Server) handleTerm(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			var m termResize
-			if json.Unmarshal(data, &m) == nil && m.Cols > 0 && m.Rows > 0 {
+			var m termMsg
+			if json.Unmarshal(data, &m) != nil {
+				continue
+			}
+			if m.End {
+				who, _ := WhoFrom(r.Context())
+				s.opt.Log("web: %s on %s ended the terminal in %s", who.Person, who.Device, id)
+				go sess.Close()
+				continue
+			}
+			if m.Cols > 0 && m.Rows > 0 {
 				sess.Resize(m.Cols, m.Rows)
 			}
 		}

@@ -11,8 +11,10 @@ import type { Page } from '@playwright/test';
 
 const desktopOnly = () => test.skip(test.info().project.name !== 'desktop', 'the shell and its socket are the same on every viewport');
 
-async function sessionCard(api: BoundApi): Promise<{ id: string; dir: string }> {
-  const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke around' })).json?.id);
+async function sessionCard(api: BoundApi, title = 'Poke around'): Promise<{ id: string; dir: string }> {
+  const made = await api('POST', '/api/cards', { kind: 'freeform', title });
+  expect(made.json?.id, JSON.stringify(made.json)).toBeTruthy();
+  const id = String(made.json.id);
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.files?.dir, { timeout: 30_000 }).toBeTruthy();
   return { id, dir: (await api('GET', `/api/cards/${id}`)).json.files.dir };
 }
@@ -71,8 +73,52 @@ test.describe('a board served with --terminal', () => {
     await page.getByTestId('terminal-again').click();
     await expect(term).toHaveAttribute('data-state', 'open');
 
+    // a reload comes back to the tab, and to the same shell
+    await page.keyboard.type('echo before-$((3*3))\n');
+    await expect(rows(page)).toContainText('before-9');
+    await page.reload();
+    await expect(term).toHaveAttribute('data-state', 'open');
+    await expect(rows(page)).toContainText('before-9');
+
+    // a shell that no longer answers its keys is ended from the page, asked twice
+    await page.getByTestId('terminal-screen').click();
+    await page.keyboard.type("trap '' INT HUP; echo deaf-$((1+1)); sleep 300\n");
+    await expect(rows(page)).toContainText('deaf-2');
+    await page.keyboard.press('Control+c');
+    const end = page.getByTestId('terminal-end');
+    await end.click();
+    await expect(end).toHaveText('End it?');
+    await expect(term).toHaveAttribute('data-state', 'open');
+    await end.click();
+    await expect(page.getByTestId('terminal-note')).toContainText('The shell was ended');
+    await expect(end).toBeHidden();
+
     expect(refused).toEqual([]);
     expect(server.log).toContain(`opened a terminal in ${id}`);
+    expect(server.log).toContain(`ended the terminal in ${id}`);
+  });
+
+  test('a shell past the board’s limit is refused in words', async ({ pairedPage: page, server, api }) => {
+    desktopOnly();
+    test.setTimeout(120_000);
+    const cards: string[] = [];
+    for (let i = 0; i < 5; i++) cards.push((await sessionCard(api, `Poke around ${i}`)).id);
+    for (const id of cards.slice(0, 4)) {
+      await page.goto(`${server.url}/#${id}/terminal`);
+      await expect(page.getByTestId('card-id')).toHaveText(id);
+      await expect(page.getByTestId('terminal')).toHaveAttribute('data-state', 'open');
+    }
+    await page.goto(`${server.url}/#${cards[4]}/terminal`);
+    await expect(page.getByTestId('card-id')).toHaveText(cards[4]);
+    await expect(page.getByTestId('terminal-note')).toContainText('too many terminals are open');
+
+    // exiting one makes room
+    await page.goto(`${server.url}/#${cards[0]}/terminal`);
+    await expect(page.getByTestId('terminal')).toHaveAttribute('data-state', 'open');
+    await page.keyboard.type('exit\n');
+    await expect(page.getByTestId('terminal-note')).toContainText('The shell exited');
+    await page.goto(`${server.url}/#${cards[4]}/terminal`);
+    await expect(page.getByTestId('terminal')).toHaveAttribute('data-state', 'open');
   });
 });
 
@@ -142,6 +188,24 @@ test.describe('a phone at a board served with --terminal', () => {
     await page.keyboard.type('b');
     await page.keyboard.type('x\n');
     await expect(rows(page)).toContainText('alt-xyz');
+
+    // the rest, read back as the bytes they send: esc, home, end, page up
+    // and down, and an arrow under ctrl
+    await page.keyboard.type('cat -v\n');
+    await key('esc').tap();
+    await page.keyboard.type('E');
+    for (const k of ['home', 'end', 'pgup', 'pgdn']) {
+      await key(k).scrollIntoViewIfNeeded();
+      await key(k).tap();
+    }
+    await key('ctrl').scrollIntoViewIfNeeded();
+    await key('ctrl').tap();
+    await key('left').tap();
+    await expect(key('ctrl')).toHaveAttribute('aria-pressed', 'false');
+    await page.keyboard.press('Enter');
+    await expect(rows(page)).toContainText('^[E^[[H^[[F^[[5~^[[6~^[[1;5D^[E^[[H^[[F^[[5~^[[6~^[[1;5D');
+    await key('ctrl').tap();
+    await page.keyboard.type('c');
 
     // the far keys are reached by sliding the row
     await key('tilde').scrollIntoViewIfNeeded();

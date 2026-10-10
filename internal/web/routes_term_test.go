@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/term"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -187,5 +189,62 @@ func TestAnUnpairedDeviceLosesItsTerminal(t *testing.T) {
 			}
 			return
 		}
+	}
+}
+
+// A shell that no longer answers its keys is ended from the page.
+func TestThePageCanEndAShell(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	b := newDocsBoard(t, agent.NewFake("ok"), withTerminal)
+	ctx := context.Background()
+	conn, _, err := b.dialTerm(b.c, "FD-001", b.http.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	_ = conn.Write(ctx, websocket.MessageBinary, []byte("trap '' INT HUP; echo deaf-$((1+1)); sleep 300\n"))
+	termUntil(t, conn, "deaf-2")
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"end":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for {
+		typ, _, err := conn.Read(rctx)
+		if err != nil {
+			t.Fatalf("the socket ended without an exit message: %v", err)
+		}
+		if typ == websocket.MessageText {
+			break
+		}
+	}
+	if !b.logged("ended the terminal in FD-001") {
+		t.Error("ending a terminal was not logged")
+	}
+}
+
+// A refused handshake tells a page nothing, so the plain GET says why,
+// and starts no shell doing it.
+func TestThePlainGetSaysWhyATerminalWouldBeRefused(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	b := newDocsBoard(t, agent.NewFake("ok"), withTerminal)
+	if st := b.get("/api/cards/FD-001/term", nil); st != http.StatusOK {
+		t.Errorf("a card that may have a shell = %d, want 200", st)
+	}
+	if st := b.get("/api/cards/FD-002/term", nil); st != http.StatusNotFound {
+		t.Errorf("a card with no worktree = %d, want 404", st)
+	}
+	if b.logged("opened a terminal") {
+		t.Error("asking started a shell")
+	}
+	// the board's shells all taken by other cards
+	for i := range term.DefaultMax {
+		if _, _, err := b.srv.terms.Open(fmt.Sprintf("other-%d", i), t.TempDir(), 80, 24); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, body := b.do(b.c, http.MethodGet, "/api/cards/FD-001/term", "")
+	if res.StatusCode != http.StatusConflict || !strings.Contains(fmt.Sprint(body["error"]), "too many terminals") {
+		t.Errorf("past the cap = %d %v, want 409 saying so", res.StatusCode, body)
 	}
 }

@@ -383,7 +383,8 @@ has a worktree: your own shell (`$SHELL`), started in that worktree. It is
 off by default and refused with `--no-pairing`, because it is more than
 the board: a paired device can then run any command as you, outside any
 agent sandbox. The shell stays running when the page closes and is
-replayed when it comes back; it ends on `exit`, when the card's worktree
+replayed when it comes back; it ends on `exit`, with the tab's **End
+shell** button (for one that no longer answers), when the card's worktree
 is removed, after an hour with no page attached, or when the server
 stops. A board runs at most four at once. Opening one is logged by the
 server and announced on every other open page. On a touch screen a bar

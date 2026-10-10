@@ -5,7 +5,7 @@
 
 import { stepping } from './back.js?v=__ASSET_V__'
 
-export const TABS = ['memory', 'spec', 'diff', 'log', 'pr', 'stats']
+export const TABS = ['memory', 'spec', 'diff', 'log', 'pr', 'stats', 'terminal']
 
 export function parse (hash = location.hash) {
   const raw = decodeURIComponent(String(hash || '').replace(/^#/, ''))

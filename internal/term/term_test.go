@@ -156,11 +156,16 @@ func TestCloseEndsEveryShell(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// a shell that ignores the hangup is killed
+	// a shell that ignores the hangup is killed, and so is what it runs,
+	// which holds the pty and is in a process group of its own
 	_, sub := s.Attach()
-	_ = s.Write([]byte("trap '' HUP; echo trap-$((1+1))\n"))
+	_ = s.Write([]byte("trap '' HUP INT; echo trap-$((1+1)); sleep 300\n"))
 	readUntil(t, sub, nil, "trap-2")
+	began := time.Now()
 	r.Close()
+	if took := time.Since(began); took > 5*time.Second {
+		t.Errorf("Close took %s", took)
+	}
 	select {
 	case <-s.Done():
 	default:

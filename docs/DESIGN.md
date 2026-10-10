@@ -4554,8 +4554,10 @@ sandbox, `--terminal` is a door out of it for whatever reaches the page.
 The shell belongs to the card, not to the socket. It keeps running when
 the page goes away and the next socket is replayed the tail of its output
 (256 KB), so a phone that slept comes back to the same shell. It ends
-when the person exits it, when its worktree is removed, after an hour
-with no page attached, and with the server; a board runs four at most. It
+when the person exits it or ends it from the tab (which kills everything
+in its session, for a shell that no longer answers), when its worktree is
+removed, after an hour with no page attached, and with the server; a
+board runs four at most. It
 does not take the card's lock: typing in a worktree an agent is working
 in is what a person with SSH could always do, and verify still judges
 what ends up on the branch.

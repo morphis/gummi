@@ -38,6 +38,9 @@ const (
 	// hangupGrace is how long a shell told to hang up gets before its
 	// process group is killed.
 	hangupGrace = 500 * time.Millisecond
+	// drainGrace is how long an ended shell's last output is waited for
+	// when something it started still holds the pty.
+	drainGrace = 250 * time.Millisecond
 	// sweepEvery is how often a Registry looks for sessions to end.
 	sweepEvery = 30 * time.Second
 
@@ -106,33 +109,39 @@ func start(shell, dir string, cols, rows int, now time.Time) (*Session, error) {
 	return s, nil
 }
 
-// run pumps the shell's output until it ends, then calls onExit. The shell
-// ending is what ends the session, whatever it left running on the pty:
-// the wait closes the master, which is what stops the read.
+// run pumps the shell's output until the shell ends, then calls onExit.
+// The shell ending is what ends the session, whatever it left running on
+// the pty: a job that still holds the terminal keeps the read (and a close
+// of the master) blocked for as long as it lives, so neither is waited on.
 func (s *Session) run(onExit func()) {
-	waited := make(chan int, 1)
+	pumped := make(chan struct{})
 	go func() {
-		err := s.cmd.Wait()
-		code := 0
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			code = ee.ExitCode()
+		defer close(pumped)
+		buf := make([]byte, 32<<10)
+		for {
+			n, err := s.ptmx.Read(buf)
+			if n > 0 {
+				s.fanOut(bytes.Clone(buf[:n]))
+			}
+			if err != nil {
+				// a pty that cannot be read is a shell nobody can use
+				s.cancel()
+				return
+			}
 		}
-		_ = s.ptmx.Close()
-		waited <- code
 	}()
-	buf := make([]byte, 32<<10)
-	for {
-		n, err := s.ptmx.Read(buf)
-		if n > 0 {
-			s.fanOut(bytes.Clone(buf[:n]))
-		}
-		if err != nil {
-			break
-		}
+	err := s.cmd.Wait()
+	code := 0
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		code = ee.ExitCode()
+	}
+	// the shell's last words are still on their way through the pty
+	select {
+	case <-pumped:
+	case <-time.After(drainGrace):
 	}
 	s.cancel()
-	code := <-waited
 	s.mu.Lock()
 	s.code = code
 	// done closes first: a page whose subscription closes can then tell
@@ -143,12 +152,16 @@ func (s *Session) run(onExit func()) {
 	}
 	s.subs = nil
 	s.mu.Unlock()
+	go func() { _ = s.ptmx.Close() }()
 	onExit()
 }
 
 func (s *Session) fanOut(chunk []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.subs == nil { // the shell has ended
+		return
+	}
 	s.ring = append(s.ring, chunk...)
 	if len(s.ring) > 2*scrollback {
 		s.ring = append([]byte(nil), s.ring[len(s.ring)-scrollback:]...)
@@ -219,8 +232,9 @@ func (s *Session) ExitCode() int {
 }
 
 // Close ends the shell: a hangup, as a closed terminal window sends, then
-// a kill of its process group if it has not gone. It returns once the
-// shell is gone.
+// a kill of it and of everything still running in its session if it has
+// not gone (its jobs are in process groups of their own, which a kill of
+// the shell's would miss). It returns once the shell is gone.
 func (s *Session) Close() {
 	select {
 	case <-s.done:
@@ -231,6 +245,7 @@ func (s *Session) Close() {
 	select {
 	case <-s.done:
 	case <-time.After(hangupGrace):
+		killSession(s.cmd.Process.Pid)
 		s.cancel()
 		<-s.done
 	}
@@ -321,6 +336,17 @@ func (r *Registry) Open(key, dir string, cols, rows int) (_ *Session, created bo
 		r.mu.Unlock()
 	})
 	return s, true, nil
+}
+
+// Check says whether Open would answer key a session: nil when it has one
+// or there is room to start one.
+func (r *Registry) Check(key string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.sessions[key]; !ok && len(r.sessions) >= r.max {
+		return ErrTooMany
+	}
+	return nil
 }
 
 // End closes key's session, if it has one.
