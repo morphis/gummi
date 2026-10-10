@@ -406,6 +406,9 @@ func TestCloseDrainIsBounded(t *testing.T) {
 		hookTimeout: 5 * time.Second,
 		drainBudget: 300 * time.Millisecond,
 	}
+	// New sets this; without it a script the worker had already started
+	// when Close came is never killed and runs its whole hookTimeout.
+	d.exiting, d.stopExit = context.WithCancel(context.Background())
 	d.SetWarn(io.Discard)
 	d.wg.Add(1)
 	go d.run()

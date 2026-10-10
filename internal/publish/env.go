@@ -197,7 +197,7 @@ func pushError(said string, err error, hooked bool) *Error {
 		strings.Contains(s, "host key verification") || strings.Contains(s, "sign_and_send_pubkey") ||
 		strings.Contains(s, "could not read username") || strings.Contains(s, "could not read password"):
 		return fail(CodeNeedsInteraction, "the credential wanted a person to answer: "+line, "add your key to ssh-agent (ssh-add), set up a credential helper or store a key in the web page's settings, then try again")
-	case strings.Contains(s, "permission denied") || strings.Contains(s, "authentication failed") || strings.Contains(s, "403"):
+	case strings.Contains(s, "permission denied") || strings.Contains(s, "authentication failed") || strings.Contains(s, "error: 403"):
 		return fail(CodeAuthFailed, "the remote refused the credential: "+line, "")
 	}
 	return fail(CodeFailed, "git push: "+line, "")

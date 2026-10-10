@@ -26,6 +26,7 @@ func TestPushErrorNamesWhatGitSaid(t *testing.T) {
 		"git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.":                  CodeAuthFailed,
 		"remote: Permission to acme/w.git denied to me.\nfatal: unable to access: The requested URL returned error: 403": CodeAuthFailed,
 		"fatal: unable to access 'https://github.com/': Could not resolve host":                                          CodeFailed,
+		"fatal: '/tmp/Test403/gh/absent.git' does not appear to be a git repository":                                     CodeFailed,
 		"": CodeFailed,
 	} {
 		if got := pushError(said, exit, false); got.Code != want {
