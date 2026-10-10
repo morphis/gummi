@@ -1,0 +1,8 @@
+@import url("kit.css?v=__ASSET_V__");
+/* views/settings.css — Settings: the name, and the stored GitHub credentials. */
+.vsettings > *{flex-shrink:0}
+.vcreds{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.vcreds .vform{display:flex;flex-direction:column;gap:8px}
+.vcreds textarea{min-height:76px;font-size:12px}
+.vcreds code{font-family:var(--mono);font-size:12px;color:var(--fg2);overflow-wrap:anywhere}
+.vcreds .pub{margin:6px 0 0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:11.5px;color:var(--fg2);white-space:pre-wrap;overflow-wrap:anywhere;user-select:all}

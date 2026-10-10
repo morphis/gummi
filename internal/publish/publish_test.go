@@ -2,6 +2,9 @@ package publish
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"go/build"
 	"os"
 	"os/exec"
@@ -10,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -471,5 +477,64 @@ func TestOpenSpecThreadsHoldReady(t *testing.T) {
 	}
 	if p, _ := PlanFor(fx, Request{Act: ActCreate, Title: "t"}); !p.Draft {
 		t.Fatal("a card with an open spec thread opened a ready PR")
+	}
+}
+
+// A stored token reaches gh and nothing else; a stored key reaches only
+// the git commands that talk to the remote.
+func TestStoredCredentialsReachOnlyTheCommandThatNeedsThem(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := credentials.Store{Dir: t.TempDir()}
+	if err := store.SetToken("ghp_stored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSSHKey(string(pem.EncodeToMemory(block))); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_AUTH_SOCK", "/the/machines/agent")
+	t.Setenv("GH_TOKEN", "the-machines-token")
+	before := configSum(context.Background(), Env{Dir: t.TempDir()}, "b")
+	credentials.Use(store)
+	t.Cleanup(func() { credentials.Use(credentials.Store{}) })
+	if configSum(context.Background(), Env{Dir: t.TempDir()}, "b") == before {
+		t.Fatal("storing a credential did not change the facts' fingerprint")
+	}
+
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		token     string
+		ownSocket bool
+	}{
+		{"gh", []string{"pr", "create"}, "ghp_stored", false},
+		{"git", []string{"push", "origin"}, "the-machines-token", true},
+		{"git", []string{"ls-remote", "origin"}, "the-machines-token", true},
+		{"git", []string{"rev-parse", "HEAD"}, "the-machines-token", false},
+		{"git", []string{"config", "--list"}, "the-machines-token", false},
+	} {
+		env, stop := credentialed(tc.name, tc.args)
+		var token, sock string
+		for _, kv := range env {
+			if v, ok := strings.CutPrefix(kv, "GH_TOKEN="); ok {
+				token = v
+			}
+			if v, ok := strings.CutPrefix(kv, "SSH_AUTH_SOCK="); ok {
+				sock = v
+			}
+		}
+		stop()
+		if token != tc.token {
+			t.Errorf("%s %v: GH_TOKEN = %q, want %q", tc.name, tc.args, token, tc.token)
+		}
+		if own := sock != "/the/machines/agent"; own != tc.ownSocket {
+			t.Errorf("%s %v: SSH_AUTH_SOCK = %q, gummi's own agent = %v, want %v", tc.name, tc.args, sock, own, tc.ownSocket)
+		}
 	}
 }

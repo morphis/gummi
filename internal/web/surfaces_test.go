@@ -2,7 +2,10 @@ package web
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -608,6 +614,56 @@ func TestSettingsNameThroughTheBoard(t *testing.T) {
 	}
 	if code := b.call(http.MethodPut, "/api/settings", webapi.SettingsRequest{Name: strings.Repeat("x", 99)}, nil); code != http.StatusBadRequest {
 		t.Fatalf("a too long name = %d, want 400", code)
+	}
+}
+
+// A credential stored from the page is kept on the host and described back,
+// never returned; a field left out is left alone, an empty one forgets.
+func TestCredentialsThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	t.Cleanup(func() { credentials.Use(credentials.Store{}) })
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, token := string(pem.EncodeToMemory(block)), "ghp_abcdefghijklmnop1234"
+
+	var raw json.RawMessage
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GitHubToken: &token, SSHKey: &key}, &raw)
+	if strings.Contains(string(raw), token) || strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Fatalf("the answer carries a secret back: %s", raw)
+	}
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &raw)
+	if strings.Contains(string(raw), token) || strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Fatalf("the settings carry a secret back: %s", raw)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if c := got.Credentials; !c.TokenSet || c.TokenHint != "1234" || !c.KeySet || c.KeyType != "ssh-ed25519" || c.KeyFingerprint == "" {
+		t.Fatalf("credentials = %+v", c)
+	}
+	if credentials.Current().Token() != token {
+		t.Fatal("the board's own gh calls do not read the stored token")
+	}
+
+	empty := ""
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GitHubToken: &empty}, &got)
+	if c := got.Credentials; c.TokenSet || !c.KeySet {
+		t.Fatalf("after forgetting the token alone = %+v", c)
+	}
+	bad := "-----BEGIN OPENSSH PRIVATE KEY-----\nnope\n-----END OPENSSH PRIVATE KEY-----"
+	if code := b.call(http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{SSHKey: &bad}, nil); code != http.StatusBadRequest {
+		t.Fatalf("a key that does not parse = %d, want 400", code)
+	}
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &got)
+	if !got.Credentials.KeySet {
+		t.Fatal("a refused key replaced the stored one")
 	}
 }
 

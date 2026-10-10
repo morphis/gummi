@@ -1899,14 +1899,20 @@ Decided in the design interview (2026-07-03):
       code, and a test fails if one imports it. An agent may draft the
       words; it never sends them.
     - **It is optional, and gummi finds out rather than being told.**
-      Publishing exists only where the person has set up `gh` and a
-      push credential for the remote themselves. gummi detects that and
-      acts on it: with it, the acts are offered; without it, they are
-      simply absent, and nothing else about a card changes. There is no
-      switch to turn on and no key to register.
-    - **The credential is yours, and gummi holds none.** `gh` and git
-      authenticate as they already do. gummi reads no token and stores
-      no key.
+      Publishing exists only where `gh` is signed in and git has a push
+      credential for the remote. gummi detects that and acts on it:
+      with it, the acts are offered; without it, they are simply
+      absent, and nothing else about a card changes. There is no switch
+      to turn on.
+    - **The credential is yours, and gummi holds one only if you hand
+      it over.** `gh` and git authenticate as they already do. A person
+      may instead store a GitHub token and an SSH key in the web page's
+      settings, for a host where setting those up means a shell they do
+      not have open. gummi then lends each to the one command that
+      needs it — the token as `GH_TOKEN` on its own `gh` calls, the key
+      through an ssh-agent it answers as while a push runs — and puts
+      neither in an agent's environment (§22.2). *(Amended: this rule
+      first read "gummi reads no token and stores no key".)*
     - **The quality floor still stands at the one step it protects.**
       Marking a PR ready needs `MayLandAt(head)`; a push and a draft PR
       do not, because neither can merge anything.
@@ -4715,14 +4721,15 @@ what runs is what was read: a branch that moved, a remote or `insteadOf`
 rule edited, a hook dropped into `.git/hooks`, or a PR that changed
 state in between each refuse rather than publish unseen.
 
-### 22.2 Optional: detected, never configured
+### 22.2 Optional: detected, and the credential may be lent
 
-Publishing is a capability of the person's machine, not a setting of
-gummi's. A person who wants it installs and signs in `gh` and arranges a
-push credential for the remote (an SSH key, an agent, a credential
-helper — whatever git already uses there). gummi has no configuration
-for any of it, no `publish` block and no key path of its own: it looks,
-and acts on what it finds.
+Publishing is a capability of the person's machine, not a switch of
+gummi's. A person who wants it installs `gh` and either sets the
+credentials up on the machine — `gh auth login`, and a push credential
+for the remote (an SSH key, an agent, a credential helper — whatever git
+already uses there) — or stores them in the web page's settings (below).
+There is no `publish` block and nothing to turn on: gummi looks, and acts
+on what it finds.
 
 Detection is two reads:
 
@@ -4743,10 +4750,45 @@ land the way it always could (§7); where a person asks for an act by
 name (`gummi push`) the refusal says what is missing and what would fix
 it.
 
-gummi holds nothing of its own in this: it does not read `GH_TOKEN`,
-does not open `~/.ssh` and stores no secret. A passphrase-protected key
-works only through an agent that already holds it; gummi never prompts
-for or stores a passphrase.
+gummi does not read `GH_TOKEN` itself and does not open `~/.ssh`. A
+passphrase-protected key works only through an agent that already holds
+it; gummi never prompts for or stores a passphrase.
+
+**Stored credentials.** A board served to a browser is often on a host
+its person has no shell open on, so the web page's settings take two
+secrets (`PUT /api/settings/credentials`, `internal/credentials`): a
+GitHub token and an SSH private key. Both are optional and independent,
+and a workspace with neither behaves exactly as above.
+
+- They are kept under the workspace's state directory
+  (`.gummi/state/credentials/`, 0600 in a 0700 directory), beside the
+  paired-device tokens and for the same reason. They are write-only from
+  the page: an answer names a token by its last four characters and a
+  key by its type, fingerprint and public half, never more. A key with a
+  passphrase is refused at the door.
+- **The token** is set as `GH_TOKEN` on the `gh` commands gummi itself
+  runs — publishing, PR linking and review threads, issue import — in
+  place of any token the environment carried. Detection runs again when
+  it changes, since it is what makes `gh` signed in.
+- **The key** is never handed to a command as a file or a variable.
+  For a git command that reaches the remote (`push`, `ls-remote`) and
+  only for as long as it runs, gummi answers as an ssh-agent on a
+  socket in a private temporary directory and points `SSH_AUTH_SOCK` at
+  it. That agent lists and signs with the one key and refuses to be
+  added to, emptied or locked.
+- Neither is put in an agent backend's environment, and nothing an
+  agent is given names where they are. That is not confinement: they
+  are files of the account gummi runs as, so an unconfined agent can
+  read them exactly as it can read `~/.ssh` (§22.7).
+- What is stored is part of the facts' fingerprint (§22.1): a credential
+  swapped between the confirm and the act refuses the act.
+- The token does not authenticate a push. A remote pushed to over HTTPS
+  still needs a credential helper on the machine; the stored key serves
+  an SSH remote, whose host key must already be known there.
+- A paired browser may store or replace them, which makes pairing
+  (§20.3) the strength of this too. Off loopback without TLS the key
+  crosses the network in the clear; serve the page over HTTPS
+  (`--tls-cert`, `--ts-tls`) before pasting one there.
 
 ### 22.3 Who may publish
 
@@ -4774,7 +4816,8 @@ an `Env` that runs the git and `gh` reads and writes (`Resolve`, `Do`).
 The faces call it; none decides. It runs under the card's lock, with a
 timeout, with prompts disabled (`GIT_TERMINAL_PROMPT=0`,
 `GH_PROMPT_DISABLED=1`, stdin closed), with `GH_REPO`, `GH_HOST`,
-`GIT_ASKPASS` and `SSH_ASKPASS` dropped from its environment, and with
+`GIT_ASKPASS` and `SSH_ASKPASS` dropped from its environment, with what
+the person stored lent to the command that needs it (§22.2), and with
 the resolved `gh` path shown to the person, because `GUMMI_GH_CMD` can replace the binary
 that carries the credential.
 

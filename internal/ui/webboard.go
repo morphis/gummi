@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
@@ -270,7 +271,23 @@ func (m *Shell) webResumeOffer() *webapi.ResumeOffer {
 
 // WebSettings is GET /api/settings: what the settings dialog holds.
 func (m *Shell) WebSettings() webapi.Settings {
-	return webapi.Settings{Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen}
+	st := m.credentialStore().Status()
+	return webapi.Settings{
+		Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen,
+		Credentials: webapi.Credentials{
+			TokenSet: st.TokenSet, TokenHint: st.TokenHint,
+			KeySet: st.KeySet, KeyType: st.KeyType, KeyFingerprint: st.KeyFingerprint, KeyPublic: st.KeyPublic,
+		},
+	}
+}
+
+// credentialStore is where this board's GitHub token and SSH key are kept
+// (DESIGN §22.2); the zero store for a board with no workspace attached.
+func (m *Shell) credentialStore() credentials.Store {
+	if m.ws.Root == "" {
+		return credentials.Store{}
+	}
+	return credentials.Store{Dir: m.ws.CredentialsDir()}
 }
 
 // Settings is GET /api/settings.
@@ -293,6 +310,39 @@ func (b *Bridge) SetSettings(ctx context.Context, req webapi.SettingsRequest) (w
 			return nil
 		}
 		out = m.WebSettings()
+		return nil
+	}); err != nil {
+		return webapi.Settings{}, err
+	}
+	return out, refused
+}
+
+// SetCredentials is PUT /api/settings/credentials: store, replace or
+// forget the GitHub token and the SSH key. The store is the one this
+// process's gh and git calls read from then on, and publishing is detected
+// again, since a token is what makes gh signed in.
+func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsRequest) (webapi.Settings, error) {
+	var out webapi.Settings
+	var refused error
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		store := m.credentialStore()
+		if req.GitHubToken != nil {
+			if err := store.SetToken(*req.GitHubToken); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		if req.SSHKey != nil {
+			if err := store.SetSSHKey(*req.SSHKey); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		credentials.Use(store)
+		out = m.WebSettings()
+		if m.publishEnabled {
+			return m.detectPublish
+		}
 		return nil
 	}); err != nil {
 		return webapi.Settings{}, err

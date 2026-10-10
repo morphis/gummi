@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
 )
@@ -309,6 +310,7 @@ func severityFromLabels(labels []struct {
 func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, cmp.Or(pr.GHBinary(), "gh"), args...) //nolint:gosec // the binary is operator config (GUMMI_GH_CMD), args are gummi-built
 	cmd.Dir = dir
+	cmd.Env = credentials.WithToken(nil)
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError

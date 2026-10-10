@@ -14,8 +14,10 @@
 // names the packages that must not — and the CLI verbs refuse inside an
 // agent's session.
 //
-// Publishing is detected, never configured: it needs gh signed in and a push
-// credential git can already use, and holds none of its own.
+// Publishing is detected, never switched on: it needs gh signed in and a
+// push credential git can use. Those are the machine's own, or the token
+// and key a person stored in the web page's settings (internal/credentials),
+// which Env lends to the one command that needs each.
 package publish
 
 import (

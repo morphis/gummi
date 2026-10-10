@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/morphis/gummi/internal/credentials"
 )
 
 // Timeout bounds every git and gh call an act makes: a push that hangs on
@@ -67,6 +69,25 @@ func scrubbed() []string {
 	)
 }
 
+// remoteGit are the git commands that reach the remote, and so the only
+// ones a stored SSH key is offered to.
+var remoteGit = map[string]bool{"push": true, "ls-remote": true, "fetch": true}
+
+// credentialed is scrubbed plus what the person stored in settings, for
+// the one command that needs it (DESIGN §22.2): GH_TOKEN for gh, and for a
+// git command that reaches the remote an ssh-agent holding the stored key,
+// alive until stop is called.
+func credentialed(name string, args []string) (env []string, stop func()) {
+	env = scrubbed()
+	if name != "git" {
+		return credentials.WithToken(env), func() {}
+	}
+	if len(args) > 0 && remoteGit[args[0]] {
+		return credentials.WithAgent(env)
+	}
+	return env, func() {}
+}
+
 // run runs name with args in dir: stdin from in (nil is empty), no
 // controlling terminal, and the whole process group killed on timeout, so
 // an ssh asking for a passphrase fails instead of waiting on /dev/tty.
@@ -75,7 +96,9 @@ func run(ctx context.Context, dir string, in []byte, name string, args ...string
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Env = scrubbed()
+	env, stop := credentialed(name, args)
+	defer stop()
+	cmd.Env = env
 	cmd.Stdin = bytes.NewReader(in)
 	detach(cmd)
 	var out, errb bytes.Buffer
@@ -171,7 +194,7 @@ func pushError(said string, err error, hooked bool) *Error {
 	case strings.Contains(s, "terminal prompts disabled") || strings.Contains(s, "passphrase") ||
 		strings.Contains(s, "host key verification") || strings.Contains(s, "sign_and_send_pubkey") ||
 		strings.Contains(s, "could not read username") || strings.Contains(s, "could not read password"):
-		return fail(CodeNeedsInteraction, "the credential wanted a person to answer: "+line, "add your key to ssh-agent (ssh-add) or set up a credential helper, then try again")
+		return fail(CodeNeedsInteraction, "the credential wanted a person to answer: "+line, "add your key to ssh-agent (ssh-add), set up a credential helper or store a key in the web page's settings, then try again")
 	case strings.Contains(s, "permission denied") || strings.Contains(s, "authentication failed") || strings.Contains(s, "403"):
 		return fail(CodeAuthFailed, "the remote refused the credential: "+line, "")
 	}

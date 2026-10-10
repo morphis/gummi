@@ -69,6 +69,7 @@ leaf services.
 | `repoview` | Pure read model of one repository's local branches: who holds each (the base, a card, an adopted card, a goal, nobody) and the one rule for which may be deleted from the repositories view — only a branch no card holds, nothing has checked out and no card forks from. The git reads and the three writes (fetch, fast-forward the base, delete a branch) are `worktree/repoview.go`, and a repository's remotes and a branch's upstream — git-config writes only — are `worktree/remotes.go`; the web face reads all of it through `ui/webrepos.go`. |
 | `fleetrun` | Pure fold at the workspace scale: every card's run → the stats tab's report (window and all-time money, the clock, peak concurrency, and the timeline lanes). Charges a pass to the window it started in; reuses `cardrun` per card, so the tab cannot disagree with the cards it is made of. |
 | `publish` | A **person** publishing a card (DESIGN §22): pure rules (`Refusal`, `Floor`, `PlanFor`) and the `Env` that reads the facts a person confirms (`Resolve`, `Fingerprint`) and runs the push and the `gh` calls (`Do`). Imported only by the person-facing faces (`cmd/gummi/publish.go`, `ui/publish.go`); `TestOnlyPersonFacingCodeImportsPublish` fails if the engine, driver, MCP shim or a loop does. Where a branch pushes is `worktree.Manager.PushTarget` (`pushtarget.go`), read by the pushed mark and the printed push line too. |
+| `credentials` | The GitHub token and SSH key a person may store from the web page's settings (DESIGN §22.2), 0600 under `.gummi/state/credentials/`. `WithToken` sets `GH_TOKEN` on a `gh` command gummi runs; `WithAgent` answers as a sign-only ssh-agent for the life of one git command. Never export either to an agent backend. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
 | `config` | Loads `.gummi/config.yaml` (permission mode only, since M5). |
 | `notify` | Terminal bell / desktop notification on needs-attention. |
@@ -192,9 +193,11 @@ still work — the board just stays static. Key env vars are tabled in
   It does not release, merge on GitHub, retarget a PR unasked or resolve
   a thread. Pushing a card's own branch and opening, updating or readying
   its PR are acts a *person* starts (TUI, web or `gummi push`/`gummi pr`),
-  through `gh` and the credentials already on the machine; it is
-  optional, detected rather than configured (no token, key or setting of
-  gummi's own), and absent where `gh`/push access is not set up. No
+  through `gh` and the credentials already on the machine, or the GitHub
+  token and SSH key a person stored in the web page's settings
+  (`internal/credentials`: lent to gummi's own `gh` and push commands,
+  never put in an agent's environment). It is optional, detected rather
+  than switched on, and absent where `gh`/push access is not set up. No
   stage, autopilot, goal, schedule, MCP tool or `run`/`resume` may
   reach the publish code (decision 25, DESIGN §22).
   Stacks (§18) still replay branches locally and print the `git push

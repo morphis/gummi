@@ -183,10 +183,34 @@ type Settings struct {
 	Repo string `json:"repo"`
 	// MaxName is the longest name the workspace accepts, in characters.
 	MaxName int `json:"maxName"`
+	// Credentials is what the workspace holds for GitHub, described and
+	// never disclosed.
+	Credentials Credentials `json:"credentials"`
+}
+
+// Credentials describes the GitHub token and SSH key stored for this
+// workspace. Neither secret is ever in an answer: a token is named by its
+// last characters, a key by its type, fingerprint and public half.
+type Credentials struct {
+	TokenSet  bool   `json:"tokenSet"`
+	TokenHint string `json:"tokenHint,omitempty"`
+	KeySet    bool   `json:"keySet"`
+	KeyType   string `json:"keyType,omitempty"`
+	// KeyFingerprint is the key's SHA256 fingerprint, as GitHub lists it.
+	KeyFingerprint string `json:"keyFingerprint,omitempty"`
+	// KeyPublic is the key's authorized_keys line, for adding to GitHub.
+	KeyPublic string `json:"keyPublic,omitempty"`
 }
 
 // SettingsRequest is PUT /api/settings' body. An empty Name clears the
 // name.
 type SettingsRequest struct {
 	Name string `json:"name"`
+}
+
+// CredentialsRequest is PUT /api/settings/credentials' body. A field left
+// out is left as it is; an empty one forgets what was stored.
+type CredentialsRequest struct {
+	GitHubToken *string `json:"githubToken,omitempty"`
+	SSHKey      *string `json:"sshKey,omitempty"`
 }

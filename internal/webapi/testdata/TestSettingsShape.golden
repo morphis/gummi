@@ -1,5 +1,13 @@
 {
   "name": "east",
   "repo": "gummi",
-  "maxName": 40
+  "maxName": 40,
+  "credentials": {
+    "tokenSet": true,
+    "tokenHint": "9f2c",
+    "keySet": true,
+    "keyType": "ssh-ed25519",
+    "keyFingerprint": "SHA256:u1Yx0kq3",
+    "keyPublic": "ssh-ed25519 AAAAC3Nz gummi"
+  }
 }

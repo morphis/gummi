@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -483,6 +484,9 @@ func configSum(ctx context.Context, env Env, branch string) string {
 	for _, v := range []string{"GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_COUNT", "GUMMI_GH_CMD", "GH_CONFIG_DIR"} {
 		keep = append(keep, v+"="+os.Getenv(v))
 	}
+	// what the person stored in settings authenticates the act as much as
+	// any of the above does
+	keep = append(keep, "gummi.credentials="+credentials.Current().Identity())
 	sort.Strings(keep)
 	s := sha256.Sum256([]byte(strings.Join(keep, "\n")))
 	return hex.EncodeToString(s[:8])

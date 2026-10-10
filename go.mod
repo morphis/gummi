@@ -17,6 +17,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
+	golang.org/x/crypto v0.54.0
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0
@@ -88,7 +89,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect

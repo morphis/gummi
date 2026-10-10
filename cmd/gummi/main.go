@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/hooks"
 	"github.com/morphis/gummi/internal/notify"
@@ -543,6 +544,9 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 			}
 		}
 	}
+	// what a person stored in the web page's settings is read by every
+	// command's own gh calls and by publishing (DESIGN §22.2)
+	credentials.Use(credentials.Store{Dir: w.CredentialsDir()})
 	return w, nil
 }
 
