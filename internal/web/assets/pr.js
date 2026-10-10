@@ -4,7 +4,7 @@
 // themselves. Where the board publishes (DESIGN §22) a strip offers the act
 // that fits the card now; each one opens the publish dialog (publish.js).
 
-import { h, clock, plural } from './dom.js?v=__ASSET_V__'
+import { h, append, clock, plural } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -54,7 +54,7 @@ function render (pane, entry, ctx) {
         p.headSha ? h('span', { class: 'mono' }, `head ${p.headSha.slice(0, 7)}`) : null,
         h('button', { class: 'btn', type: 'button', testid: 'pr-refresh', onclick: () => refresh(ctx) }, 'Refresh'),
         h('button', { class: 'btn', type: 'button', testid: 'pr-pull', title: 'Bring the open review threads into the diff as comments', onclick: () => pull(ctx) }, 'Pull threads into the diff'))))
-  sect.append(checksBox(p, ctx))
+  append(sect, checksBox(p, ctx))
   if (threads.length) {
     sect.append(h('p', { class: 'label' }, 'Review threads, read from GitHub'))
     threads.forEach((t, i) => sect.append(h('div', { class: 'rthread', testid: `pr-thread-${i}` },
@@ -68,7 +68,7 @@ function render (pane, entry, ctx) {
     sect.append(h('p', { class: 'label' }, 'Comments'))
     sect.append(h('div', { class: 'rthread' }, p.comments.map(n => note(n))))
   }
-  sect.append(pushBox(p.pushCommand, ctx, p.publish))
+  append(sect, pushBox(p.pushCommand, ctx, p.publish))
   pane.append(sect)
 }
 
