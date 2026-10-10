@@ -43,6 +43,8 @@ func (s *Server) docsRoutes() {
 	s.api("POST /api/cards/{id}/diff/changes", s.handleDiffChanges)
 	s.api("GET /api/cards/{id}/pr", func(w http.ResponseWriter, r *http.Request) { s.handlePR(w, r, prs) })
 	s.api("POST /api/cards/{id}/pr/pull", func(w http.ResponseWriter, r *http.Request) { s.handlePRPull(w, r, prs) })
+	s.api("GET /api/cards/{id}/publish", s.handlePublishFacts)
+	s.api("POST /api/cards/{id}/publish", func(w http.ResponseWriter, r *http.Request) { s.handlePublish(w, r, prs) })
 	s.api("GET /api/cards/{id}/stats", s.handleStats)
 	s.api("GET /api/cards/{id}/log", s.handleLog)
 	s.api("GET /api/cards/{id}/log/{sha}", s.handleLogCommit)
@@ -356,6 +358,9 @@ func (s *Server) handlePR(w http.ResponseWriter, r *http.Request, cache *prCache
 	if r.URL.Query().Get("refresh") != "" {
 		cache.drop(id)
 	} else if p, ok := cache.get(id); ok && link != "" && p.Ref == link {
+		// the strip follows the card's own tree, so it is never the
+		// cached one
+		p.Publish = d.PublishOffer(r.Context())
 		writeJSON(w, http.StatusOK, p)
 		return
 	}
@@ -368,6 +373,7 @@ func (s *Server) handlePR(w http.ResponseWriter, r *http.Request, cache *prCache
 	} else {
 		cache.drop(id)
 	}
+	p.Publish = d.PublishOffer(r.Context())
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -570,4 +576,40 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+// handlePublishFacts is GET /api/cards/{id}/publish?act=[&draft=1]: the
+// facts the publish dialog shows (DESIGN §22). A refusal is the answer's
+// Error, not a failed request: the dialog shows it in place.
+func (s *Server) handlePublishFacts(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	writeJSON(w, http.StatusOK, d.PublishFacts(r.Context(), q.Get("act"), q.Get("draft") == "1"))
+}
+
+// handlePublish is POST /api/cards/{id}/publish: the act a person confirmed,
+// with the fingerprint of the facts they were shown. A refusal or failure
+// is the answer's Error, as it is for the facts: the dialog shows it in place.
+func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, cache *prCache) {
+	var req webapi.PublishRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	// a confirmed act is not the request's to cancel: a page that reloads
+	// or a phone that locks must not kill a push mid-flight or leave a PR
+	// opened and unlinked. The act carries its own timeouts.
+	res := d.Publish(context.WithoutCancel(r.Context()), req, person(r))
+	cache.drop(id)
+	_ = s.opt.Board.Do(context.Background(), func(m *ui.Shell) tea.Cmd { return m.WebPublished(id) })
+	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+	writeJSON(w, http.StatusOK, res)
 }

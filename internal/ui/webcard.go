@@ -766,6 +766,11 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		}
 	case "gate":
 		a.Default = autopilotSwitchTo(r.F.GateApproval)
+	case "prcreate", "push", "prready", "prdraft":
+		// the page's publish dialog reads the facts itself and confirms
+		// through POST /api/cards/{id}/publish, never through this action
+		a.Needs = webapi.ActionNeedsPublish
+		a.Default = string(publishActs[a.ID])
 	case "delete", "clean", "duplicate", "handoff", "adopt", "prunlink", "goalstop":
 		a.Needs = webapi.ActionNeedsConfirm
 	}

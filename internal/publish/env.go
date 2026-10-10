@@ -73,7 +73,7 @@ func scrubbed() []string {
 func run(ctx context.Context, dir string, in []byte, name string, args ...string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // name is git or the resolved gh; args are built here
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = scrubbed()
 	cmd.Stdin = bytes.NewReader(in)
@@ -129,29 +129,41 @@ func ghError(args []string, stderr string, err error) *Error {
 	s := strings.ToLower(stderr)
 	what := "gh " + strings.Join(args[:min(2, len(args))], " ")
 	switch {
-	case strings.Contains(s, "saml") || strings.Contains(s, "sso"):
+	case strings.Contains(s, "saml") || strings.Contains(s, "single sign-on"):
 		return fail(CodeAuthFailed, what+": the organization requires SSO for this token", "run `gh auth refresh`")
-	case strings.Contains(s, "gh auth login") || strings.Contains(s, "not logged") || strings.Contains(s, "authentication"):
+	case strings.Contains(s, "gh auth login") || strings.Contains(s, "not logged in") || strings.Contains(s, "authentication required") || strings.Contains(s, "bad credentials"):
 		return fail(CodeGHNotSignedIn, what+": gh is not signed in", "run `gh auth login`")
 	}
 	return fail(CodeFailed, what+": "+firstLine(stderr, err), "")
 }
 
-// pushError types git push's refusal from its stderr.
-func pushError(stderr string, err error) *Error {
+// pushError types git push's refusal from what it printed: with --porcelain
+// the per-ref reason is on stdout and the rest on stderr, so said is both.
+func pushError(said string, err error) *Error {
 	if pe := AsError(err); pe.Code == CodeTimeout {
 		return pe
 	}
-	s := strings.ToLower(stderr)
-	line := firstLine(stderr, err)
+	s := strings.ToLower(said)
+	line := firstLine(said, err)
+	for l := range strings.SplitSeq(said, "\n") {
+		// the line that names the refusal, where there is one
+		if ll := strings.ToLower(l); strings.Contains(ll, "rejected") || strings.Contains(ll, "error:") || strings.Contains(ll, "fatal:") {
+			line = strings.TrimSpace(l)
+			break
+		}
+	}
 	switch {
 	case strings.Contains(s, "stale info"):
 		return fail(CodeLeaseStale, "the remote branch moved since its tip was shown; nothing was overwritten", "review again")
 	case strings.Contains(s, "gh006") || strings.Contains(s, "protected branch"):
 		return fail(CodeProtected, "GitHub refused the push: the branch is protected", "")
-	case strings.Contains(s, "pre-push hook") || strings.Contains(s, "hook declined"):
-		return fail(CodeHookRejected, "the pre-push hook refused the push: "+line, "")
-	case strings.Contains(s, "non-fast-forward") || strings.Contains(s, "fetch first") || strings.Contains(s, "rejected"):
+	case strings.Contains(s, "pre-push hook") || strings.Contains(s, "failed to push some refs") && strings.Contains(s, "hook") && !strings.Contains(s, "remote rejected"):
+		return fail(CodeHookRejected, "a local hook refused the push: "+line, "")
+	case strings.Contains(s, "remote rejected"):
+		// the server said no (a push rule, a pre-receive hook): not the
+		// remote being ahead, and nothing a fetch would fix
+		return fail(CodeFailed, "the remote rejected the push: "+line, "")
+	case strings.Contains(s, "non-fast-forward") || strings.Contains(s, "fetch first"):
 		return fail(CodeRemoteAhead, "the remote branch has commits this card does not; nothing was overwritten", "fetch them into the card first")
 	case strings.Contains(s, "terminal prompts disabled") || strings.Contains(s, "passphrase") ||
 		strings.Contains(s, "host key verification") || strings.Contains(s, "sign_and_send_pubkey") ||

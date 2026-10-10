@@ -7,6 +7,7 @@ import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
 import { draftHead, writeSpecButton, delegateButton, openDelegate } from './session.js?v=__ASSET_V__'
+import { openPublish } from './publish.js?v=__ASSET_V__'
 
 let ctx = {}
 
@@ -68,6 +69,7 @@ function render () {
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
         foldAt(1, commitButton(c, actions)),
+        foldAt(2, publishButton(c, actions)),
         foldAt(3, landButton(c, actions)),
         foldAt(0, writeSpecButton(state.card)),
         foldAt(0, delegateButton(state.card)),
@@ -78,6 +80,7 @@ function render () {
       stages(c),
       c.branch ? h('span', { class: 'mono', testid: 'card-branch' }, c.branch) : null,
       c.adopted ? h('span', null, 'adopted branch') : null,
+      c.pr ? h('span', { class: 'mono', testid: 'card-pr' }, c.pr) : null,
       c.base && c.branch ? h('span', null, 'onto ', h('span', { class: 'mono' }, c.base)) : null,
       c.scratch ? h('span', { testid: 'card-scratch' }, 'scratch tree · no branch') : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,
@@ -105,6 +108,14 @@ function landButton (c, actions) {
   const merge = actions.find(a => a.id === 'merge')
   if (!merge) return null
   return h('button', { class: 'btn pri hide-s', type: 'button', testid: 'session-land', title: merge.detail || 'Land this session’s branch', onclick: () => runAction(state.card, merge) }, 'Land…')
+}
+
+// publishButton opens the card's pull request (DESIGN §22): shown where
+// the board offers the act, which is only where a person could confirm it.
+function publishButton (c, actions) {
+  const create = actions.find(a => a.id === 'prcreate')
+  if (!create) return null
+  return h('button', { class: 'btn hide-s', type: 'button', testid: 'card-publish', title: create.detail || 'Open a pull request', onclick: () => openPublish(state.card, 'create', { returnTo: '[data-testid="card-publish"]' }) }, 'Open PR…')
 }
 
 // commitButton commits an open session's worktree with the person's own

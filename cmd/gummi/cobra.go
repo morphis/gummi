@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/morphis/gummi/internal/publish"
 
 	"github.com/spf13/cobra"

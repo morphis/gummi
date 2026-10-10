@@ -63,11 +63,15 @@ func publishFixture(t *testing.T) (bare, fake string) {
 		t.Fatal(err)
 	}
 	gh := filepath.Join(fake, "gh")
-	if err := os.WriteFile(gh, []byte(publishGHShim), 0o700); err != nil { //nolint:gosec // test shim
+	if err := os.WriteFile(gh, []byte(publishGHShim), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	setFakeGHEnv(t, gh)
 	t.Setenv("GH_FAKE", fake)
+	// no person answers a prompt in a test, whatever stdin the run has
+	wasTTY := stdinIsTerminal
+	stdinIsTerminal = func() bool { return false }
+	t.Cleanup(func() { stdinIsTerminal = wasTTY })
 	publish.RewriteAllowed = func(string) bool { return true }
 	t.Cleanup(func() { publish.RewriteAllowed = func(string) bool { return false } })
 	return bare, fake
@@ -103,7 +107,7 @@ func TestPRCreateRunsOnlyOnTheConfirmedFacts(t *testing.T) {
 	if !strings.Contains(out, "opened https://github.com/me/widget/pull/7 (ready)") {
 		t.Fatalf("output:\n%s", out)
 	}
-	if o, err := exec.Command("git", "--git-dir", bare, "rev-parse", "gummi/FD-002-add-a-thing").CombinedOutput(); err != nil { //nolint:gosec // test
+	if o, err := exec.Command("git", "--git-dir", bare, "rev-parse", "gummi/FD-002-add-a-thing").CombinedOutput(); err != nil {
 		t.Fatalf("the branch was not pushed: %s", o)
 	}
 	f, _ := publishStore.GetFeature(context.Background(), "FD-002")
@@ -121,6 +125,18 @@ func TestPublishVerbsRefuseInsideASession(t *testing.T) {
 	for _, argv := range [][]string{{"push", "FD-002"}, {"pr", "create", "FD-002"}, {"pr", "ready", "FD-002"}} {
 		if err := runCLI(argv...); err == nil || !strings.Contains(err.Error(), "agent-session") {
 			t.Errorf("%v: %v, want agent-session", argv, err)
+		}
+	}
+}
+
+// The publish verbs are a person's: the bundle an agent is handed to drive
+// gummi with must not teach them.
+func TestTheSkillBundleDoesNotTeachPublishing(t *testing.T) {
+	for _, f := range skillBundle() {
+		for _, verb := range []string{"gummi push", "pr create", "pr update", "pr ready", "pr draft"} {
+			if strings.Contains(f.body, verb) {
+				t.Errorf("%s names %q", f.path, verb)
+			}
 		}
 	}
 }

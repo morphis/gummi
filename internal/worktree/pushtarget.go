@@ -102,6 +102,27 @@ func (m *Manager) SetPushRemote(ctx context.Context, f *domain.Feature, remote s
 	return err
 }
 
+// PushRemote is the branch's own branch.<b>.pushRemote setting, "" when
+// none is set; RestorePushRemote puts a value read from it back.
+func (m *Manager) PushRemote(ctx context.Context, f *domain.Feature) string {
+	v, err := runGit(ctx, m.repo, "config", "--get", "branch."+f.BranchName()+".pushRemote")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(v)
+}
+
+// RestorePushRemote undoes a SetPushRemote the person did not go on to
+// confirm: was is what PushRemote answered before it.
+func (m *Manager) RestorePushRemote(ctx context.Context, f *domain.Feature, was string) {
+	key := "branch." + f.BranchName() + ".pushRemote"
+	if was == "" {
+		_, _ = runGit(ctx, m.repo, "config", "--unset", key)
+		return
+	}
+	_, _ = runGit(ctx, m.repo, "config", key, was)
+}
+
 // Upstream is the card's push target, as the remote and branch the printed
 // push line and the pushed mark read; ok is false when there is none to
 // name (no remote, or an ambiguous choice no setting resolves).

@@ -32,9 +32,10 @@ type Plan struct {
 	// Draft is the state a created PR opens in; ToDraft turns a ready PR
 	// back into a draft before an unverified push.
 	Draft, ToDraft bool
-	// Edit is a create's or update's title/body.
-	Edit     bool
-	Commands []string
+	// Edit is a create's or update's title/body; EditTitle and EditBody
+	// say which an update carries.
+	Edit, EditTitle, EditBody bool
+	Commands                  []string
 	// Summary is the one sentence a confirm leads with.
 	Summary string
 }
@@ -75,10 +76,18 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 			if e := guardReady(); e != nil {
 				return p, e
 			}
+		} else if fx.OpenPR > 0 {
+			// an open PR this card does not link would gain the commits
+			// with no floor asked of it
+			e := fail(CodePRExists, fmt.Sprintf("PR #%d is open for %s and not linked to this card; a push would add to it unchecked", fx.OpenPR, fx.HeadRef()), "link it first")
+			e.PR = fx.OpenPR
+			return p, e
 		}
 		p.Summary = fmt.Sprintf("Push %s (%s) to %s.", fx.Branch, plural(fx.Ahead, "commit"), fx.HeadRepo)
 	case ActCreate:
 		switch {
+		case fx.PR != nil && !fx.PR.Open():
+			return p, needPR()
 		case fx.PR != nil:
 			return p, fail(CodePRExists, fmt.Sprintf("this card is already linked to PR #%d", fx.PR.Number), "")
 		case fx.OpenPR > 0:
@@ -99,7 +108,8 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 		if e := needPR(); e != nil {
 			return p, e
 		}
-		p.Edit = strings.TrimSpace(req.Title) != "" || strings.TrimSpace(req.Body) != ""
+		p.EditTitle, p.EditBody = strings.TrimSpace(req.Title) != "", strings.TrimSpace(req.Body) != ""
+		p.Edit = p.EditTitle || p.EditBody
 		if !p.Push && !p.Edit {
 			return p, fail(CodeNothingToPublish, fmt.Sprintf("PR #%d already has %s and there is no new title or body", fx.PR.Number, domain.ShortRev(fx.Tip)), "")
 		}
@@ -132,6 +142,9 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 		p.Summary = fmt.Sprintf("Turn PR #%d back into a draft.", fx.PR.Number)
 	default:
 		return p, fail(CodeFailed, "unknown act "+strconv.Quote(string(req.Act)), "")
+	}
+	if p.ToDraft {
+		p.Summary += fmt.Sprintf(" PR #%d returns to draft first: %s.", fx.PR.Number, fx.ReadyWhy)
 	}
 	p.Commands = commands(fx, p)
 	return p, nil
@@ -166,14 +179,21 @@ func commands(fx Facts, p Plan) []string {
 	}
 	switch p.Act {
 	case ActCreate:
-		c := "gh pr create --repo " + fx.BaseRepo + " --head " + fx.HeadRef() + " --base " + fx.Base + " --title=… --body-file -"
+		c := "gh pr create --repo " + fx.BaseRepo + " --head " + fx.HeadRef() + " --base " + fx.Base + " --title=<title> --body-file -"
 		if p.Draft {
 			c += " --draft"
 		}
 		out = append(out, c)
 	case ActUpdate:
 		if p.Edit {
-			out = append(out, "gh pr edit "+num+" --repo "+fx.PR.Repo+" --title=… --body-file -")
+			c := "gh pr edit " + num + " --repo " + fx.PR.Repo
+			if p.EditTitle {
+				c += " --title=<title>"
+			}
+			if p.EditBody {
+				c += " --body-file -"
+			}
+			out = append(out, c)
 		}
 	case ActReady:
 		out = append(out, "gh pr ready "+num+" --repo "+fx.PR.Repo)
@@ -187,8 +207,12 @@ func commands(fx Facts, p Plan) []string {
 type Result struct {
 	Act    Act
 	Pushed string // the SHA pushed, "" when nothing was
-	PR     domain.PullRequestRef
-	Draft  bool
+	// Repo is the repository Pushed went to.
+	Repo string
+	PR   domain.PullRequestRef
+	// Draft is a PR opened as a draft; ToDraft a ready PR returned to
+	// draft ahead of an unverified push.
+	Draft, ToDraft bool
 	// LinkErr is a PR opened that could not be linked: the PR exists, and
 	// the face says so rather than reporting the act failed.
 	LinkErr string
@@ -225,6 +249,7 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo, "--undo"); err != nil {
 			return res, AsError(err)
 		}
+		res.ToDraft = true
 	}
 	if p.Push {
 		// the branch must still be the tip that was shown: the push names
@@ -232,11 +257,19 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		if now, _ := env.git(ctx, "rev-parse", "refs/heads/"+fx.Branch); now != fx.Tip {
 			return res, fail(CodeBranchMoved, "the branch moved from "+domain.ShortRev(fx.Tip)+" to "+domain.ShortRev(now)+" since you confirmed", "review again")
 		}
-		if _, stderr, err := run(ctx, tree, nil, "git", fx.pushArgs()...); err != nil {
-			return res, pushError(stderr, err)
+		if stdout, stderr, err := run(ctx, tree, nil, "git", fx.pushArgs()...); err != nil {
+			return res, after(res, fx, pushError(stderr+"\n"+stdout, err))
 		}
-		res.Pushed = fx.Tip
+		res.Pushed, res.Repo = fx.Tip, fx.HeadRepo
 		trackIfUntracked(ctx, env, fx)
+		if fx.PR != nil {
+			// the link's head follows what was pushed (§22.5), whatever
+			// becomes of the rest of the act
+			res.PR = domain.PullRequestRef{Repo: fx.PR.Repo, Number: fx.PR.Number, URL: fx.PR.URL, HeadSHA: fx.Tip}
+			if lerr := link(ctx, res.PR); lerr != nil {
+				res.LinkErr = "the push succeeded but the link's head could not be updated: " + lerr.Error()
+			}
+		}
 	}
 	switch req.Act {
 	case ActCreate:
@@ -246,11 +279,11 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		}
 		out, err := env.gh(ctx, []byte(req.Body), args...)
 		if err != nil {
-			return res, AsError(err)
+			return res, after(res, fx, AsError(err))
 		}
 		ref, rerr := refFromCreate(out, fx)
 		if rerr != nil {
-			return res, rerr
+			return res, after(res, fx, rerr)
 		}
 		res.PR = ref
 		if lerr := link(ctx, ref); lerr != nil {
@@ -267,30 +300,47 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 				args, body = append(args, "--body-file", "-"), []byte(req.Body)
 			}
 			if _, err := env.gh(ctx, body, args...); err != nil {
-				return res, AsError(err)
+				return res, after(res, fx, AsError(err))
 			}
 		}
 	case ActReady:
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo); err != nil {
-			return res, AsError(err)
+			return res, after(res, fx, AsError(err))
 		}
 	case ActDraft:
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo, "--undo"); err != nil {
-			return res, AsError(err)
+			return res, after(res, fx, AsError(err))
 		}
 	}
-	if fx.PR != nil {
+	if fx.PR != nil && res.Pushed == "" {
 		res.PR = domain.PullRequestRef{Repo: fx.PR.Repo, Number: fx.PR.Number, URL: fx.PR.URL, HeadSHA: fx.PR.HeadSHA}
-		if res.Pushed != "" {
-			// the link's head follows what was pushed (§22.5)
-			res.PR.HeadSHA = res.Pushed
-			if lerr := link(ctx, res.PR); lerr != nil {
-				res.LinkErr = "the push succeeded but the link's head could not be updated: " + lerr.Error()
-			}
-		}
 	}
 	return res, nil
 }
+
+// after words a failure that came after part of the act had already
+// happened: the person is told what did, since GitHub already has it. The
+// Result returned beside the error says the same to the face, which
+// records it.
+func after(res Result, fx Facts, e *Error) *Error {
+	var done []string
+	if res.ToDraft {
+		done = append(done, fmt.Sprintf("PR #%d was returned to draft", fx.PR.Number))
+	}
+	if res.Pushed != "" {
+		done = append(done, domain.ShortRev(res.Pushed)+" was pushed to "+fx.HeadRepo)
+	}
+	if len(done) == 0 {
+		return e
+	}
+	out := *e
+	out.Text = e.Text + " (before that, " + strings.Join(done, " and ") + ")"
+	return &out
+}
+
+// Partial reports a Result that came back beside an error and still
+// changed something on GitHub: the face records it.
+func (r Result) Partial() bool { return r.Pushed != "" || r.ToDraft }
 
 // trackIfUntracked records the push target as the branch's upstream when
 // it tracks nothing yet, so git's own tools see where it lives. An existing

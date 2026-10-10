@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -532,6 +533,25 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"prunlink", "", "unlink PR", "clear the linked PR — the card becomes locally landable again", false,
 			!r.F.PullRequest.Empty(),
 		},
+		// publishing (DESIGN §22): keyless like prlink, offered only where
+		// gh is signed in and the card is one publish.Refusal lets through
+		// on what the row already knows; the confirm reads the rest
+		{
+			"prcreate", "", "open pull request…", "push the branch and open its pull request on GitHub — you confirm where it goes first", false,
+			publishable(in, r) && r.F.PullRequest.Empty(),
+		},
+		{
+			"push", "", "push to GitHub…", "push the branch's new commits to its remote", false,
+			publishable(in, r),
+		},
+		{
+			"prready", "", "mark PR ready…", "mark the linked draft PR ready for review — only at a verified tip", false,
+			publishable(in, r) && !r.F.PullRequest.Empty(),
+		},
+		{
+			"prdraft", "", "PR back to draft…", "turn the linked PR back into a draft", false,
+			publishable(in, r) && !r.F.PullRequest.Empty(),
+		},
 		// prpull is the point of the card: it rises out of the fold via
 		// nextActions' ranking (see nextsteps.go) in the states where
 		// pulling the review is the move, without spending a letter that
@@ -1017,4 +1037,13 @@ func landWhy(choice bool, squash, either string) string {
 		return squash
 	}
 	return either + " — one squash commit, or a merge commit keeping its commits (chosen with the message)"
+}
+
+// publishable is the row-level half of publish.Refusal: the board offers
+// the publish rows only where the card could be published at all.
+func publishable(in nextInput, r featureRow) bool {
+	if !in.publish || !r.HasWorktree || r.Landed || r.watchOnly() {
+		return false
+	}
+	return publish.Refusal(publish.Card{F: &r.F, Busy: in.busy || in.freeformBusy}) == nil
 }

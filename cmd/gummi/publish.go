@@ -8,11 +8,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/ui"
 	"golang.org/x/term"
 )
 
@@ -27,7 +29,7 @@ const spawnedMarker = "GUMMI_SPAWNED"
 var underGummi = os.Getenv(spawnedMarker) != ""
 
 // stdinIsTerminal reports a person at the keyboard to answer the confirm.
-var stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) } //nolint:gosec // a file descriptor fits an int
+var stdinIsTerminal = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // publishError is a publish refusal in the CLI's words: the code first, so
 // a script can match it.
@@ -39,14 +41,18 @@ func (p publishError) Error() string { return "refused (" + string(p.e.Code) + "
 // facts and the exact commands, then runs them once the person confirms —
 // at the terminal, or by passing --yes=<fingerprint> of the facts they read.
 func runPublish(fl cliFlags, act publish.Act, args []string) error {
+	// published turns true once anything reached GitHub
+	published := false
 	verb := "push"
 	if act != publish.ActPush {
 		verb = "pr " + string(act)
 	}
 	if underGummi {
-		return publishError{&publish.Error{Code: publish.CodeAgentSession,
+		return publishError{&publish.Error{
+			Code: publish.CodeAgentSession,
 			Text: "publishing is a person's act and this runs inside a gummi session",
-			Fix:  "run it from your own terminal, the board or the web page"}}
+			Fix:  "run it from your own terminal, the board or the web page",
+		}}
 	}
 	idArg, err := oneID(verb, args)
 	if err != nil {
@@ -106,15 +112,23 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 		return err
 	}
 	if r := str("remote"); r != "" {
+		// the choice steers the facts, so it is written before they are
+		// read; it is kept only once the act it was made for has run
+		was := mgr.PushRemote(ctx, &f)
 		if err := mgr.SetPushRemote(ctx, &f, r); err != nil {
 			return err
 		}
+		defer func() {
+			if !published {
+				mgr.RestorePushRemote(ctx, &f, was)
+			}
+		}()
 	}
 	anns, err := store.ListDiffAnnotations(ctx, f.ID)
 	if err != nil {
 		return err
 	}
-	in := publish.InputFor(ctx, mgr, &f, false, anns)
+	in := publish.InputFor(ctx, mgr, &f, false, anns, ui.OpenSpecThreads(pool.Root(), ws.DraftsDir(), f))
 	env := publish.Env{GH: pr.GHBinary()}
 	fx, perr := publish.Resolve(ctx, env, mgr, in)
 	if perr != nil {
@@ -150,13 +164,26 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 		if jsonOut {
 			return json.NewEncoder(os.Stdout).Encode(publishJSON{Facts: fx, Plan: plan, Fingerprint: fx.Fingerprint()})
 		}
-		return publishError{&publish.Error{Code: publish.CodeConfirmationNeeded,
+		return publishError{&publish.Error{
+			Code: publish.CodeConfirmationNeeded,
 			Text: "there is no terminal to confirm at",
-			Fix:  "read the facts above and run again with --yes=" + fx.Fingerprint()}}
+			Fix:  "read the facts above and run again with --yes=" + fx.Fingerprint(),
+		}}
 	}
 	res, perr := publish.Do(ctx, env, mgr, in, req, func(ctx context.Context, ref domain.PullRequestRef) error {
 		return store.SetPullRequest(ctx, f.ID, ref)
 	})
+	if perr == nil || res.Partial() {
+		published = true
+		// the card's thread says what was published — also the part of a
+		// failed act that went through; best-effort, as GitHub already
+		// has it
+		pay := state.PublishPayload{Act: string(res.Act), Pushed: res.Pushed, Repo: res.Repo, Number: res.PR.Number, URL: res.PR.URL, Draft: res.Draft, ToDraft: res.ToDraft}
+		if perr != nil {
+			pay.Act, pay.Draft = string(publish.ActPush), false
+		}
+		_ = store.AppendPublish(ctx, f.ID, f.Stage, pay, time.Now())
+	}
 	if perr != nil {
 		return publishError{perr}
 	}
@@ -181,7 +208,7 @@ func readBody(path string) ([]byte, error) {
 	if path == "-" {
 		return io.ReadAll(os.Stdin)
 	}
-	return os.ReadFile(path) //nolint:gosec // a path the person named
+	return os.ReadFile(path)
 }
 
 func confirmQuestion(act publish.Act) string {
@@ -224,12 +251,20 @@ func printFacts(w io.Writer, f *domain.Feature, fx publish.Facts, p publish.Plan
 			row("state", "ready for review")
 		}
 		row("title", clean(req.Title))
+		// the description is sent as it reads here
+		for i, l := range strings.Split(strings.TrimRight(req.Body, "\n"), "\n") {
+			k := ""
+			if i == 0 {
+				k = "body"
+			}
+			row(k, clean(l))
+		}
 	}
 	row("gh", fx.GH)
 	if fx.Hook != "" {
-		row("pre-push", fx.Hook+"  — runs with your credential; read it first")
+		row("hooks", fx.Hook+"  — run with your credential; read them first")
 	} else {
-		row("pre-push", "none")
+		row("hooks", "none")
 	}
 	row("facts", fx.Fingerprint())
 	fmt.Fprintln(w)
@@ -248,7 +283,11 @@ func printResult(w io.Writer, fx publish.Facts, res publish.Result) {
 		if res.Draft {
 			state = "draft"
 		}
-		fmt.Fprintf(w, "✓ opened %s (%s), linked to %s\n", res.PR.URL, state, fx.Card)
+		linked := ", linked to " + string(fx.Card)
+		if res.LinkErr != "" {
+			linked = ""
+		}
+		fmt.Fprintf(w, "✓ opened %s (%s)%s\n", res.PR.URL, state, linked)
 	case publish.ActUpdate:
 		fmt.Fprintf(w, "✓ updated %s\n", res.PR.URL)
 	case publish.ActReady:

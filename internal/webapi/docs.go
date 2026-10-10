@@ -203,8 +203,9 @@ type AnnotationResolveRequest struct {
 	Resolved *bool `json:"resolved,omitempty"`
 }
 
-// PR is GET /api/cards/{id}/pr: the linked pull request, read-only. gummi
-// never writes to GitHub (§20.5); PushCommand is the command a person runs.
+// PR is GET /api/cards/{id}/pr: the linked pull request as GitHub has it.
+// The read never writes to GitHub; PushCommand is the command a person can
+// run themselves, and Publish the acts a person may start instead (§22).
 // POST /api/cards/{id}/pr/pull reads the PR's review threads onto the diff
 // as comments; it runs on the board and reports back as a toast and a card
 // change.
@@ -223,6 +224,9 @@ type PR struct {
 	// short cache in between.
 	Fetched time.Time `json:"fetched,omitzero"`
 	Error   string    `json:"error,omitempty"`
+	// Publish is the publish strip; nil where the card has no branch to
+	// publish at all.
+	Publish *PublishOffer `json:"publish,omitempty"`
 }
 
 // PRThread is one unresolved review thread (GitHub's resolved ones are

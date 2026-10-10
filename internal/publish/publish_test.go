@@ -15,8 +15,10 @@ import (
 )
 
 func verified(tip string) *domain.Feature {
-	return &domain.Feature{ID: "FD-208", Title: "Rate-limit pairing", Slug: "rate-limit", BranchScheme: domain.BranchSchemeKind,
-		Stage: domain.StageVerify, VerifiedAt: time.Unix(1, 0), VerifiedRev: tip}
+	return &domain.Feature{
+		ID: "FD-208", Title: "Rate-limit pairing", Slug: "rate-limit", BranchScheme: domain.BranchSchemeKind,
+		Stage: domain.StageVerify, VerifiedAt: time.Unix(1, 0), VerifiedRev: tip,
+	}
 }
 
 func TestRefusalNamesEveryCardThatIsNotPublishable(t *testing.T) {
@@ -80,9 +82,11 @@ func TestTheFloorIsTheLandingFloor(t *testing.T) {
 }
 
 func TestPlanKeepsUnverifiedWorkOffAReadyPR(t *testing.T) {
-	fx := Facts{Branch: "feat/x", Tip: "t2", Base: "main", Remote: "origin", RemoteBranch: "feat/x", HeadRepo: "me/w", BaseRepo: "acme/w",
+	fx := Facts{
+		Branch: "feat/x", Tip: "t2", Base: "main", Remote: "origin", RemoteBranch: "feat/x", HeadRepo: "me/w", BaseRepo: "acme/w",
 		Push: PushFastForward, Ahead: 2, ReadyWhy: "not verified",
-		PR: &PR{Repo: "acme/w", Number: 5, State: "OPEN", HeadSHA: "t1", HeadOwner: "me", HeadBranch: "feat/x"}}
+		PR: &PR{Repo: "acme/w", Number: 5, State: "OPEN", HeadSHA: "t1", HeadOwner: "me", HeadBranch: "feat/x"},
+	}
 	if _, e := PlanFor(fx, Request{Act: ActPush}); e == nil || e.Code != CodeNotVerified {
 		t.Fatalf("push of an unverified tip to a ready PR = %v, want not-verified", e)
 	}
@@ -157,7 +161,7 @@ type fakeRepo struct {
 	target worktree.PushTarget
 }
 
-func (r fakeRepo) RepoRoot() string                        { return r.dir }
+func (r fakeRepo) RepoRoot() string                     { return r.dir }
 func (r fakeRepo) Path(*domain.Feature) (string, error) { return r.dir, nil }
 func (r fakeRepo) PushTarget(context.Context, *domain.Feature) (worktree.PushTarget, error) {
 	return r.target, nil
@@ -170,18 +174,18 @@ case "$1 $2" in
 "repo view") cat "$GH_FAKE/repo.json" ;;
 "pr list") cat "$GH_FAKE/list.json" 2>/dev/null || echo '[]' ;;
 "pr view") cat "$GH_FAKE/view.json" ;;
-"pr create") cat > "$GH_FAKE/body"; echo "https://github.com/acme/widget/pull/512" ;;
+"pr create") test -f "$GH_FAKE/fail-create" && { echo "boom" >&2; exit 1; }; cat > "$GH_FAKE/body"; echo "https://github.com/acme/widget/pull/512" ;;
 *) exit 0 ;;
 esac
 `
 
 type world struct {
-	t                  *testing.T
-	dir, bare, fake    string
-	env                Env
-	f                  *domain.Feature
-	repo               fakeRepo
-	linked             []domain.PullRequestRef
+	t               *testing.T
+	dir, bare, fake string
+	env             Env
+	f               *domain.Feature
+	repo            fakeRepo
+	linked          []domain.PullRequestRef
 }
 
 func newWorld(t *testing.T) *world {
@@ -192,10 +196,14 @@ func newWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	gh := filepath.Join(w.fake, "gh")
-	if err := os.WriteFile(gh, []byte(ghShim), 0o700); err != nil { //nolint:gosec // test shim
+	if err := os.WriteFile(gh, []byte(ghShim), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_FAKE", w.fake)
+	// the developer's own git configuration (signing, hooks, rewrites)
+	// stays out of it
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	w.write("repo.json", `{"nameWithOwner":"me/widget","viewerPermission":"WRITE","isFork":true,"parent":{"name":"widget","owner":{"login":"acme"}}}`)
 	w.run(tmp, "git", "init", "-q", "--bare", w.bare)
 	w.run(tmp, "git", "init", "-q", "-b", "main", w.dir)
@@ -281,7 +289,7 @@ func TestAnActRefusesWhenTheFactsChangedAfterTheConfirm(t *testing.T) {
 	}
 	// an agent writes a pre-push hook between the confirm and the act
 	hook := filepath.Join(w.dir, ".git", "hooks", "pre-push")
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil { //nolint:gosec // test hook
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	_, e = Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link)
@@ -330,5 +338,125 @@ func TestAnOccupiedRemoteNameIsNeverOverwritten(t *testing.T) {
 	w.run(w.dir, "git", "push", "-q", w.bare, unrelated+":refs/heads/feat/rate-limit")
 	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeNameTaken {
 		t.Fatalf("an unrelated branch of the same name: %v, want name-taken", e)
+	}
+}
+
+func TestAFetchedForeignBranchIsNeverForcedOver(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	// someone else's branch of the same name, and this repository has
+	// fetched it: seeing a tip is not having pushed it
+	unrelated := w.run(w.dir, "git", "commit-tree", "-m", "someone else's", w.git("rev-parse", "main^{tree}"))
+	w.run(w.dir, "git", "push", "-q", w.bare, unrelated+":refs/heads/feat/rate-limit")
+	w.git("fetch", "-q", w.bare, "+refs/heads/*:refs/remotes/origin/*")
+	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeNameTaken {
+		t.Fatalf("a fetched foreign branch: %v, want name-taken", e)
+	}
+}
+
+func TestARewrittenPushGoesNowhereUnseen(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	// production: an insteadOf rule that sends the push elsewhere refuses
+	RewriteAllowed = func(string) bool { return false }
+	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeUnsupportedHost {
+		t.Fatalf("an insteadOf rewrite: %v, want unsupported-host", e)
+	}
+	RewriteAllowed = func(string) bool { return true }
+	// several push URLs: git pushes to every one, the person saw one
+	w.git("remote", "set-url", "--add", "--push", "origin", "git@github.com:me/widget.git")
+	w.git("remote", "set-url", "--add", "--push", "origin", "https://example.com/elsewhere.git")
+	if _, e := Resolve(ctx, w.env, w.repo, w.in()); e == nil || e.Code != CodeRemoteAmbiguous {
+		t.Fatalf("two push URLs: %v, want remote-ambiguous", e)
+	}
+}
+
+func TestEveryHookAPushRunsIsShown(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	before, e := Resolve(ctx, w.env, w.repo, w.in())
+	if e != nil {
+		t.Fatal(e)
+	}
+	hook := filepath.Join(w.dir, ".git", "hooks", "reference-transaction")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	after, e := Resolve(ctx, w.env, w.repo, w.in())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(after.Hook, "reference-transaction") || after.Fingerprint() == before.Fingerprint() {
+		t.Fatalf("hook = %q, fingerprint changed = %v", after.Hook, after.Fingerprint() != before.Fingerprint())
+	}
+}
+
+func TestAnUnverifiedPushReturnsAReadyPRToDraftFirst(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	fx, _ := Resolve(ctx, w.env, w.repo, w.in())
+	if _, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link); e != nil {
+		t.Fatal(e)
+	}
+	// the PR is ready at the verified tip; then the branch gains a commit
+	// no verify ran on
+	w.f.PullRequest = domain.PullRequestRef{Repo: "acme/widget", Number: 7, URL: "https://github.com/acme/widget/pull/7", HeadSHA: fx.Tip}
+	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"OPEN","isDraft":false,"headRefOid":"`+fx.Tip+`","headRefName":"feat/rate-limit","headRepositoryOwner":{"login":"me"}}`)
+	w.git("checkout", "-q", "feat/rate-limit")
+	w.git("commit", "-q", "--allow-empty", "-m", "more")
+	w.git("checkout", "-q", "main")
+	fx, e := Resolve(ctx, w.env, w.repo, w.in())
+	if e != nil || fx.ReadyWhy == "" {
+		t.Fatalf("facts = %+v %v", fx, e)
+	}
+	if _, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: fx.Fingerprint()}, w.link); e == nil || e.Code != CodeNotVerified {
+		t.Fatalf("a plain push onto a ready PR: %v, want not-verified", e)
+	}
+	res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActPush, Draft: true, Fingerprint: fx.Fingerprint()}, w.link)
+	if e != nil || !res.ToDraft || res.Pushed != fx.Tip {
+		t.Fatalf("push and return to draft = %+v %v", res, e)
+	}
+	log, _ := os.ReadFile(filepath.Join(w.fake, "log"))
+	if !strings.Contains(string(log), "pr ready 7 --repo acme/widget --undo") {
+		t.Fatalf("the PR was not returned to draft:\n%s", log)
+	}
+	if n := len(w.linked); n == 0 || w.linked[n-1].HeadSHA != fx.Tip {
+		t.Fatalf("the link's head did not follow the push: %+v", w.linked)
+	}
+
+	// a PR merged on GitHub refuses every act with what to do about it
+	w.write("view.json", `{"number":7,"url":"https://github.com/acme/widget/pull/7","state":"MERGED","isDraft":false,"headRefOid":"`+fx.Tip+`","headRefName":"feat/rate-limit","headRepositoryOwner":{"login":"me"}}`)
+	fx, e = Resolve(ctx, w.env, w.repo, w.in())
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, act := range []Act{ActPush, ActCreate, ActUpdate, ActReady, ActDraft} {
+		if _, pe := PlanFor(fx, Request{Act: act, Title: "t", Draft: true}); pe == nil || (pe.Code != CodePRMerged && pe.Code != CodeNothingToPublish) {
+			t.Errorf("%s on a merged PR = %v", act, pe)
+		}
+	}
+}
+
+func TestAnActThatFailsPartWaySaysWhatAlreadyHappened(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	fx, _ := Resolve(ctx, w.env, w.repo, w.in())
+	w.write("fail-create", "")
+	res, e := Do(ctx, w.env, w.repo, w.in(), Request{Act: ActCreate, Title: "t", Fingerprint: fx.Fingerprint()}, w.link)
+	if e == nil || !res.Partial() || res.Pushed != fx.Tip || !strings.Contains(e.Text, "was pushed to me/widget") {
+		t.Fatalf("a create whose gh call failed after the push = %+v %v", res, e)
+	}
+}
+
+func TestOpenSpecThreadsHoldReady(t *testing.T) {
+	w := newWorld(t)
+	in := w.in()
+	in.OpenSpec = 1
+	fx, e := Resolve(context.Background(), w.env, w.repo, in)
+	if e != nil || fx.ReadyWhy == "" {
+		t.Fatalf("with an open spec thread: ReadyWhy %q %v, want the floor to hold ready", fx.ReadyWhy, e)
+	}
+	if p, _ := PlanFor(fx, Request{Act: ActCreate, Title: "t"}); !p.Draft {
+		t.Fatal("a card with an open spec thread opened a ready PR")
 	}
 }

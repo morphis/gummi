@@ -250,7 +250,7 @@ async function apply (d, dr, ctx, groups, p) {
 
 function pushBox (cmd, ctx) {
   return h('div', { class: 'push', testid: 'log-push' },
-    h('span', null, 'gummi does not push. The remote still has the old commits; to replace them, run:'),
+    h('span', null, 'The remote still has the old commits. To replace them, run this, or push from the PR tab where publishing is set up:'),
     h('div', { class: 'cmd' }, h('span', { testid: 'log-push-cmd' }, cmd),
       copyButton(cmd, 'log-push-copy'),
       h('button', { type: 'button', onclick: () => { pushes.delete(ctx.id); ctx.rerender() } }, 'Dismiss')))

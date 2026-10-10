@@ -418,6 +418,10 @@ func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
 			by = "the agent"
 		}
 		return receiptItem(ev, Receipt{Kind: "rebase", OK: true, Text: RebaseLine(p), By: Sanitize(by)}), true
+	case state.EventPublish:
+		var p state.PublishPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return receiptItem(ev, Receipt{Kind: "publish", OK: true, Text: PublishLine(p), By: Sanitize(PersonWord(p.By))}), true
 	case state.EventAutopilot:
 		var p state.AutopilotPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)

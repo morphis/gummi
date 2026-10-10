@@ -22,6 +22,7 @@ import { openModal, openView } from './views.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { state, set, rows } from './store.js?v=__ASSET_V__'
 import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
+import { openPublish } from './publish.js?v=__ASSET_V__'
 
 const NOUN = { message: 'Message', number: 'Dollars', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
 
@@ -49,6 +50,8 @@ export async function runAction (card, a) {
   if (a.needs === 'spec') { openWriteSpec(card, a); return }
   // a heartbeat is a schedule: the Schedules view's form, aimed at this card
   if (a.needs === 'schedule') { openView('schedules', { heartbeat: card.id }); return }
+  // publishing confirms resolved facts, not a yes: its own dialog (publish.js)
+  if (a.needs === 'publish') { openPublish(card, a.default); return }
   if (!a.needs || a.needs === 'confirm') {
     try {
       await send(card.id, a, {})

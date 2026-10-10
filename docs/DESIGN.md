@@ -1870,7 +1870,7 @@ Decided in the design interview (2026-07-03):
     printed and a person ran, which kept the board honest about what it
     does and left the last step of every card outside it. A card's own
     branch can now be pushed, and its pull request opened, updated and
-    marked ready, from either face or `gummi push` / `gummi pr`. Five
+    marked ready, from either face or `gummi push` / `gummi pr`. Six
     rules bound it:
     - **A person starts it, every time.** No stage, autopilot step,
       goal, schedule, MCP tool or `run`/`resume` reaches the publish
@@ -1888,9 +1888,10 @@ Decided in the design interview (2026-07-03):
     - **The quality floor still stands at the one step it protects.**
       Marking a PR ready needs `MayLandAt(head)`; a push and a draft PR
       do not, because neither can merge anything.
-    - **Only the card's own branch, only forward.** Never a fork's, never
-      a branch gummi does not hold, never a force push without a lease
-      pinned to the tip the person was shown.
+    - **Only the card's own branch, only forward.** Never a repository
+      the person cannot write to, never a branch gummi does not hold,
+      never over commits the branch itself never had, and never a force
+      push without a lease pinned to the tip the person was shown.
     - **Never a path around landing.** A card with a PR lands through it
       or locally, never both; creating one is the act that picks.
     This reverses the "never pushes, never opens a PR" of decisions 6
@@ -4467,9 +4468,9 @@ loopback host remains an alternative for a machine that already runs
 The web face is bound by §7 rather than excused from it. It is not a
 cloud service: one binary, your machine, state in your repo, listening on
 loopback unless told otherwise. It writes to GitHub only on a
-person's explicit act and only what §22 allows; the PR tab reads, and
-its publish actions are held back until the web's own confirm story
-(§22.9) is decided. It never runs a
+person's explicit act and only what §22 allows: the PR tab reads, and
+its publish acts run only on a confirm that carries the fingerprint of
+the facts the page showed (§22.9). It never runs a
 workflow the TUI would not run, and it offers no agent a surface the
 workflow (§16) withholds.
 
@@ -4665,8 +4666,10 @@ new route around the landing floors with it.
 
 ### 22.1 What it is
 
-Four acts on one card, each a human's, each the same code from the TUI,
-the web page and the CLI:
+Five acts on one card, each a human's, each the same code on every
+face that offers it (the CLI offers all five; the TUI and the web page
+leave out `update`, whose push is their "push" and whose edit of the
+words is GitHub's own page):
 
 | act | what it does | verb |
 |---|---|---|
@@ -4674,8 +4677,21 @@ the web page and the CLI:
 | open | pushes if needed, then `gh pr create`, then links the PR | `gummi pr create <id>` |
 | update | `gh pr edit` of title/body, and a push for new commits | `gummi pr update <id>` |
 | ready | `gh pr ready` of a draft | `gummi pr ready <id>` |
+| draft | `gh pr ready --undo` | `gummi pr draft <id>` |
 
 It is not merge, not review, not retarget, and not CI.
+
+Every act is two steps, on every face. First the **facts** are resolved
+and shown: the branch and its tip, the remote and the URL git will
+really push to, how the push will go (new, fast-forward, a pinned
+lease), the head and base repositories, the `gh` binary, a pre-push hook
+if one would run, the linked PR as GitHub has it, and the exact commands.
+Then the person confirms, and the confirm carries the facts'
+**fingerprint**. The act resolves the facts again under the card's lock
+and runs only if they digest the same (`facts-changed` otherwise), so
+what runs is what was read: a branch that moved, a remote or `insteadOf`
+rule edited, a hook dropped into `.git/hooks`, or a PR that changed
+state in between each refuse rather than publish unseen.
 
 ### 22.2 Optional: detected, never configured
 
@@ -4686,22 +4702,24 @@ helper — whatever git already uses there). gummi has no configuration
 for any of it, no `publish` block and no key path of its own: it looks,
 and acts on what it finds.
 
-Detection is a read, run when a card's PR surface is drawn and by
-`gummi doctor`, and cached for the session:
+Detection is two reads:
 
-1. `gh` is on the path (`GUMMI_GH_CMD` honoured) and `gh auth status`
-   is signed in for the remote's host.
-2. The remote names a GitHub repository, and `gh repo view --json
-   viewerPermission` says the signed-in user may write to it.
-3. git can actually push there: `git push --dry-run` of the branch,
-   which exercises the real transport and credential (an SSH key, agent
-   or helper) without moving a ref.
+1. Once, when a board starts (`publish.Detect`): `gh` is on the path
+   (`GUMMI_GH_CMD` honoured) and `gh auth status` is signed in to
+   github.com. Until that passes the publish acts are not drawn at all.
+2. Each time a person asks for an act (`publish.Resolve`): the push
+   remote names a github.com repository, `gh repo view --json
+   viewerPermission` says the signed-in user may write to it, and the
+   URL git would really push to is that repository's (an `insteadOf`
+   rule that sends it elsewhere is refused, not shown).
 
-All three pass: the acts of §22.1 are offered. Any fails: they are not
-drawn, and where a person asks for one by name (`gummi push`) the
-refusal says which of the three failed and what would fix it. A missing
-capability is never an error on the board, never a warning on a card,
-and never a reason a card cannot land the way it always could (§7).
+Whether the push credential itself works is found out by the push: a
+failure there is typed (`auth-failed`, `credential-needs-interaction`)
+and nothing after it runs. A missing capability is never an error on
+the board, never a warning on a card, and never a reason a card cannot
+land the way it always could (§7); where a person asks for an act by
+name (`gummi push`) the refusal says what is missing and what would fix
+it.
 
 gummi holds nothing of its own in this: it does not read `GH_TOKEN`,
 does not open `~/.ssh` and stores no secret. A passphrase-protected key
@@ -4717,6 +4735,8 @@ refuses adopted branches that may still be pushed:
 | the card | publish |
 |---|---|
 | research, todo, goal, a main-checkout card | refused: no branch of its own to publish |
+| a card inside a goal | refused: it lands on the goal's branch, and publishing it would go around the goal |
+| nothing ahead of its base, or a branch set to push onto its base or under another name than its own | refused: nothing to publish, or not this card's branch |
 | a card in a stack | refused for now (§22.8) |
 | landed | refused: the commits are already on the base |
 | an agent holds it, or the tree is dirty, or a rebase is in flight | refused until it is not |
@@ -4727,50 +4747,70 @@ refuses adopted branches that may still be pushed:
 ### 22.4 One seam, typed failures
 
 Publishing is `worktree.Manager` plus a `publish` package in the shape
-`branchlog` already has: a pure read model and refusal, and an `Env`
-that runs the git and `gh` reads and writes. The faces call it; none
-decides. It runs under the card's lock, under `childproc` supervision,
-with a timeout, with prompts disabled (`GIT_TERMINAL_PROMPT=0`,
-`GH_PROMPT_DISABLED=1`, stdin closed), and with the resolved `gh` path
-shown to the person, because `GUMMI_GH_CMD` can replace the binary that
-carries the credential.
+`branchlog` already has: pure rules (`Refusal`, `Floor`, `PlanFor`) and
+an `Env` that runs the git and `gh` reads and writes (`Resolve`, `Do`).
+The faces call it; none decides. It runs under the card's lock, with a
+timeout, with prompts disabled (`GIT_TERMINAL_PROMPT=0`,
+`GH_PROMPT_DISABLED=1`, stdin closed), with `GH_REPO`, `GH_HOST`,
+`GIT_ASKPASS` and `SSH_ASKPASS` dropped from its environment, and with
+the resolved `gh` path shown to the person, because `GUMMI_GH_CMD` can replace the binary
+that carries the credential.
 
-Failures are typed, not a stderr string: not signed in, non-fast-forward,
-protected branch, a hook refusing, a PR already open for the head, the
-branch moved. The web's error vocabulary has none of these today and
-gains them with this section.
+Where a push goes is one function, `worktree.Manager.PushTarget`
+(`branch.<n>.pushRemote`, `remote.pushDefault`, the tracked upstream,
+else `origin` under the branch's own name). The log's **pushed** mark,
+the printed push command and publishing all read it, so they cannot
+disagree about where a branch lives.
+
+Failures are typed (`publish.Code`), the same word on every face and in
+the CLI's output: not signed in, no write access, non-fast-forward, a
+stale lease, a protected branch, a hook refusing, a PR already open for
+the head, the branch moved, the facts changed.
 
 ### 22.5 What a push does
 
-- It pushes with `-u`, so the branch's upstream is recorded. The log's
-  **pushed** mark (§21) reads that configuration; a plain push would
-  leave it blind and let a later rewrite diverge a PR's branch.
-- A fast-forward is a plain push. A branch whose upstream was rewritten
-  is pushed with `--force-with-lease=<ref>:<sha>` where the sha is the
-  remote tip the person was shown, so a fetch in between cannot make the
-  lease vacuous.
-- The branch is pushed as the observed local tip, by SHA, under the same
-  staleness guard the rewrite plan uses: if the branch moved between the
-  dialog and the push, the act refuses and shows the new state. The
-  pushed SHA is recorded.
+- The branch is pushed as the tip the person was shown, by SHA, to a
+  fully qualified ref (`<sha>:refs/heads/<branch>`). If the branch moved
+  between the confirm and the push the act refuses (`branch-moved`); a
+  commit made since is never published unseen.
+- A branch that tracks nothing yet gets the push target recorded as its
+  upstream afterwards, so the log's **pushed** mark (§21) and git's own
+  tools see where it lives. An existing upstream (a triangular
+  workflow's `upstream/main`) is never overwritten.
+- A fast-forward is a plain push. A branch rewritten after it was
+  pushed goes out with `--force-with-lease=<ref>:<sha>`, the sha being
+  the remote tip the person was shown — and only when that tip is one
+  this very branch once had (its reflog holds it). Having fetched a tip
+  earns nothing: a remote branch holding commits this branch never had
+  is never overwritten (`name-taken`), and an adopted branch is never
+  forced.
+- A remote with several push URLs, or one that fetches from one
+  repository and pushes to another, is refused: git would push
+  somewhere the person was not shown.
+- The hooks a push runs (`pre-push`, `reference-transaction`) run with
+  the person's credential, so the confirm names them and their content
+  is part of the fingerprint. The TUI and the web page also ask for
+  them to be acknowledged; the CLI prints them above its prompt.
 - Arguments are never positional where they could be an option: titles
-  as `--title=<v>`, bodies on stdin, a fully qualified refspec, the
-  branch name checked with `git check-ref-format`, and `--repo` and
-  `--head` always explicit.
-- Opening is atomic with linking. The PR created is recorded through the
-  existing `SetPullRequest` before the act reports done; if the link
-  fails, the PR is found again by its head branch rather than orphaned.
-  After every push the link's head SHA is refreshed.
+  as `--title=<v>`, bodies on stdin, the branch name checked with
+  `git check-ref-format`, and `--repo` and `--head` always explicit.
+- Opening links. The PR created is recorded through `SetPullRequest`
+  before the act reports done; if the link fails the act says the PR
+  exists and how to link it, rather than reporting a failure. After
+  every push the link's head SHA follows what was pushed.
+- The act is recorded in the card's thread (`state.EventPublish`): who
+  pushed what where, and what happened to the PR. An act that fails
+  part way (pushed, then `gh` refused) says what already happened and
+  records that part.
 
 ### 22.6 The words
 
-The PR's title and body come from the card — its title, the spec's
-summary, the commit subjects — as a template, shown and editable. An
-agent draft is a button that runs the same bounded, recorded scribe pass
-the landing message uses; it is never the default and never sent without
-the person's read. Imported text (issue and review-comment bodies) is not
-placed in the body unreviewed, and `@mentions` and closing keywords
-(`closes #N`) in it are escaped.
+The PR's title and body start from the card — its title and the
+branch's commit subjects — as a template, shown on every face before
+the confirm and never sent unread (the web page edits both; the TUI
+edits the title; the CLI takes `--title` and `--body-file`). Nothing
+imported (issue and review-comment bodies) is placed in
+it. An agent-drafted description is deferred (§22.10).
 
 ### 22.7 What this does not claim
 
@@ -4779,48 +4819,74 @@ person's environment and its shell is unconfined (§4.4), so an agent that
 runs `git push` or `gh pr create` itself can: that was true before this
 section and is not made better or worse by it. The claim is narrower and
 checkable: *gummi's own code* never publishes except through the acts in
-§22.1, and the publish package is imported only by the human-facing
-handlers. Scrubbing `SSH_AUTH_SOCK` and `GH_TOKEN` from an agent's
-environment is a separate, opt-in confinement decision and is not made
-here.
+§22.1, and never without a person's confirm of the resolved facts.
+
+- The `publish` package is imported only by the person-facing faces;
+  `TestOnlyPersonFacingCodeImportsPublish` names the engine, the driver,
+  the MCP shim, goals, schedules and the rest that must not.
+- The CLI verbs refuse inside a session gummi spawned (`agent-session`:
+  every backend gummi starts carries a marker in its environment), ask
+  at the terminal otherwise, and without a terminal run only with
+  `--yes=<fingerprint>` of facts already printed. They are left out of
+  the `gummi skill` bundle an agent is handed.
+- There is no `/push` in the composer, no publish option in an agent's
+  question, no publish step in autopilot, goals or schedules, and no
+  action on a push notification.
+
+Scrubbing `SSH_AUTH_SOCK` and `GH_TOKEN` from an agent's environment is
+a separate, opt-in confinement decision and is not made here.
 
 ### 22.8 Floors, stacks, and rewrite
 
-- **Ready is floored; push and draft are not.** `MayLandAt(head)` gates
-  `ready`, so a verification gone stale after a later commit cannot be
-  published as ready. A freeform card's floor is the person's read, as
-  in §19.1.
+- **Ready is floored; push and draft are not** (`publish.Floor`). A PR
+  may be offered as ready only where the branch could land here: a
+  workflow card verified at exactly this tip with no open spec thread
+  or diff comment holding its gate, a freeform card with no unresolved
+  comment on its diff (its floor is the person's read, §19.1).
+  Below the floor a new PR opens as a draft and the choice is not the
+  person's to untick; `ready` is refused, and also refused when GitHub's
+  head is not the verified tip.
+- **A ready PR never quietly gains unverified commits.** A push of an
+  unverified tip to a ready PR is offered only as "push and return to
+  draft": the PR goes back to draft first, then the commits arrive. A
+  push that would add to an open PR the card does not link is refused
+  until it is linked, since no floor could be asked of it.
 - **A card is published or landed locally, never both.** Linking a PR is
   what already refuses local landing; opening one is the act that picks.
   Unlinking is how a person changes their mind, and a PR that GitHub
-  reports merged or closed offers exactly that.
+  reports merged or closed refuses every act with exactly that advice.
 - **Stacks are refused for now.** Their PRs need the parent's PR open or
   merged, bottom-first order and a retarget on every replay (§18.5).
-- **Rewrite guards the other way.** Once a PR is open, `Refusal` needs an
-  acknowledgement before a rewrite and the result must be force-pushed
-  with the pinned lease.
 
-### 22.9 Faces and phasing
+### 22.9 Faces
 
-One engine seam, three faces, built in this order, each behind the one
-before:
+One seam, three faces:
 
-1. `internal/publish` (read model, refusal, `Env`), `doctor` checks,
-   `gummi push` and `gummi pr create|update|ready`. The CLI is the first
-   face because `runCLI` tests drive it through the real tree.
-2. The TUI: a status line in the log tab (branch, ahead of origin,
-   behind base, upstream rewritten) and publish actions in the PR dialogs
-   (`prlink.go` and its neighbours), showing the exact command first.
-3. The web page: the PR tab gains the same actions. The web is reachable
-   by any paired device, and §20.3 says an agent running as the operator
-   can pair silently, so a paired browser would otherwise *be* a push
-   credential. The web waits for publishing to be limited to the
-   loopback admin token or an equally strong confirm that echoes the
-   command and the remote.
+1. **CLI**: `gummi push` and `gummi pr create|update|ready|draft` print
+   the facts and the commands, then ask (§22.7).
+2. **TUI**: "open pull request…", "push to GitHub…", "mark PR ready…"
+   and "PR back to draft…" in the card's actions menu, shown only where
+   detection passed and `Refusal` lets the card through. The confirm
+   overlay leads with one sentence of what will happen; `tab` unfolds
+   the facts and commands.
+3. **Web**: the same entries in the card's menu, an **Open PR…** button
+   in the head, and a strip in the PR tab offering the act that fits the
+   card now. The page decides nothing: it shows the facts
+   `GET /api/cards/{id}/publish?act=` resolved and posts the confirm with
+   their fingerprint. A paired browser is therefore not a push
+   credential by itself — a request that names no facts, or stale ones,
+   runs nothing — but it is as strong as pairing is (§20.3), no
+   stronger.
 
 ### 22.10 Deferred
 
 - **Stacked cards** (§18.5).
+- **An agent-drafted PR description**, through the same bounded scribe
+  pass the landing message uses.
+- **Publish state on the board itself** — commits not yet on GitHub
+  beside a row's PR badge, and a publish choice in the done gate. Both
+  need a per-card remote read the board does not make today.
+- **`gummi doctor` checks** for `gh` and push access.
 - **GitHub Enterprise**, which `PullRequestRef.Validate`'s `github.com`
   requirement excludes.
 - **Merging, retargeting on request, resolving threads** — still not

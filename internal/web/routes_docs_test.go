@@ -77,6 +77,10 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+// docsShellSetup, when a test sets it, configures the docs board's Shell
+// before its loop starts.
+var docsShellSetup func(*ui.Shell)
+
 func newDocsBoard(t *testing.T, ag agent.Agent) *docsBoard {
 	t.Helper()
 	ctx := context.Background()
@@ -156,6 +160,9 @@ func newDocsBoard(t *testing.T, ag agent.Agent) *docsBoard {
 			(*p)(c)
 		}
 	})
+	if docsShellSetup != nil {
+		docsShellSetup(shell)
+	}
 	bridge := ui.NewHeadless(shell)
 	go func() { _ = bridge.Run() }()
 	t.Cleanup(bridge.Stop)

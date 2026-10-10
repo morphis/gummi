@@ -177,6 +177,10 @@ const (
 	// schedule form aimed at the card and writes through /api/schedules;
 	// the action itself takes no request.
 	ActionNeedsSchedule ActionNeeds = "schedule"
+	// ActionNeedsPublish opens the publish dialog: the page reads the
+	// facts from GET /api/cards/{id}/publish?act= and sends the person's
+	// confirm to POST /api/cards/{id}/publish (DESIGN §22).
+	ActionNeedsPublish ActionNeeds = "publish"
 )
 
 // Action is one entry in a card's menu.

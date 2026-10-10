@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,8 +67,8 @@ type Facts struct {
 	RemoteTip string   `json:"remoteTip"`
 	Push      PushMode `json:"push"`
 	GH        string   `json:"gh"`
-	// Hook is the pre-push hook git will run with the person's credential
-	// loaded, "" for none.
+	// Hook names the hooks git will run during the push with the person's
+	// credential loaded (pushHookNames), "" for none.
 	Hook    string `json:"hook,omitempty"`
 	HookSum string `json:"-"`
 	// ConfigSum digests the git configuration and environment that steer
@@ -119,8 +120,10 @@ type Input struct {
 	Card Card
 	// Base is the branch the card lands on (and its PR targets).
 	Base string
-	// OpenComments counts unresolved review comments on its diff.
-	OpenComments int
+	// OpenComments counts unresolved review comments on its diff, and
+	// OpenSpec the open threads on its spec that hold its gate: the two
+	// counts a landing refuses on.
+	OpenComments, OpenSpec int
 }
 
 // Detect is the cheap check a face makes before it draws the acts: gh is
@@ -186,6 +189,12 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	if fx.RemoteBranch == fx.Base {
 		return Facts{}, fail(CodeOntoBase, "the push would go onto "+fx.Base+", the branch this card lands on", "")
 	}
+	if fx.RemoteBranch != fx.Branch && !f.Adopted() {
+		// only a branch gummi did not cut lives under another name. For
+		// one it cut, an upstream of another name is configuration written
+		// since, and following it would push the card onto that branch
+		return Facts{}, fail(CodeOntoBase, "this branch tracks "+fx.Remote+"/"+fx.RemoteBranch+", another name than its own; gummi publishes a card's branch under its own name", "push it yourself, or unset branch."+fx.Branch+".merge")
+	}
 	if !validRef(ctx, env, fx.RemoteBranch) {
 		return Facts{}, fail(CodeFailed, "the remote branch name "+strconv.Quote(fx.RemoteBranch)+" is not valid", "")
 	}
@@ -193,8 +202,20 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	if configured == "" {
 		configured, _ = env.git(ctx, "config", "--get", "remote."+fx.Remote+".url")
 	}
-	if fx.PushURL, err = env.git(ctx, "remote", "get-url", "--push", fx.Remote); err != nil || configured == "" {
+	// every URL git would push to: a remote may carry several pushurls
+	// and git pushes to all of them, so more than one is never published
+	all, err := env.git(ctx, "remote", "get-url", "--push", "--all", fx.Remote)
+	if err != nil || configured == "" || all == "" {
 		return Facts{}, fail(CodeNoRemote, "the push remote "+fx.Remote+" has no URL", "")
+	}
+	if strings.Contains(all, "\n") {
+		return Facts{}, fail(CodeRemoteAmbiguous, "the push remote "+fx.Remote+" has several push URLs and git would push to every one", "leave it one pushurl, or push it yourself")
+	}
+	fx.PushURL = all
+	if fetch, _ := env.git(ctx, "config", "--get", "remote."+fx.Remote+".url"); RepoOfURL(fetch) != "" && !strings.EqualFold(RepoOfURL(fetch), RepoOfURL(configured)) {
+		// the remote branch is read from the fetch URL and written to the
+		// push URL: two repositories would make the plan about the wrong one
+		return Facts{}, fail(CodeRemoteAmbiguous, "the remote "+fx.Remote+" fetches from "+RepoOfURL(fetch)+" and pushes to "+RepoOfURL(configured), "give the fork a remote of its own and set it as the branch's push remote")
 	}
 	if fx.HeadRepo = RepoOfURL(configured); fx.HeadRepo == "" {
 		return Facts{}, fail(CodeUnsupportedHost, "the push remote "+fx.Remote+" ("+configured+") is not a github.com repository", "publishing is github.com only for now; push it yourself")
@@ -204,7 +225,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 		// than the repository the remote names: never published unseen
 		return Facts{}, fail(CodeUnsupportedHost, "git rewrites the push to "+fx.Remote+" ("+configured+") to "+fx.PushURL, "remove the url.*.insteadOf rule, or push it yourself")
 	}
-	fx.Hook, fx.HookSum = prePushHook(ctx, env)
+	fx.Hook, fx.HookSum = pushHooks(ctx, env)
 	fx.ConfigSum = configSum(ctx, env, fx.Branch)
 	if r := resolveRemote(ctx, env, &fx, f); r != nil {
 		return Facts{}, r
@@ -212,7 +233,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	if r := resolvePR(ctx, env, &fx, f); r != nil {
 		return Facts{}, r
 	}
-	if fl := Floor(f, fx.Tip, in.OpenComments); fl != nil {
+	if fl := Floor(f, fx.Tip, in.OpenComments+in.OpenSpec); fl != nil {
 		fx.ReadyWhy = fl.Text
 	}
 	return fx, nil
@@ -253,7 +274,7 @@ func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *
 	fx.BaseRepo = fx.HeadRepo
 	if view.IsFork && view.Parent != nil {
 		parent := view.Parent.Owner.Login + "/" + view.Parent.Name
-		if remoteRepos(ctx, env)[parent] {
+		if remoteRepos(ctx, env)[strings.ToLower(parent)] {
 			fx.BaseRepo = parent
 		}
 	}
@@ -274,19 +295,20 @@ func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *
 	case env.gitOK(ctx, "cat-file", "-e", fx.RemoteTip+"^{commit}") && env.gitOK(ctx, "merge-base", "--is-ancestor", fx.RemoteTip, fx.Tip):
 		fx.Push = PushFastForward
 	default:
-		seen, _ := env.git(ctx, "rev-parse", "--verify", "--quiet", "refs/remotes/"+fx.Remote+"/"+fx.RemoteBranch)
 		known := env.gitOK(ctx, "cat-file", "-e", fx.RemoteTip+"^{commit}")
 		switch {
 		case !known || env.gitOK(ctx, "merge-base", "--is-ancestor", fx.Tip, fx.RemoteTip):
 			return fail(CodeRemoteAhead, fx.Remote+"/"+fx.RemoteBranch+" has commits this card does not; nothing was overwritten", "fetch them into the card first")
-		case seen == fx.RemoteTip && !f.Adopted():
-			// the remote is exactly what this repository last saw there and
-			// the branch was rewritten since: a force, pinned to that tip
+		case !f.Adopted() && wasBranchTip(ctx, env, fx.Branch, fx.RemoteTip):
+			// the remote holds a tip this very branch once had and was
+			// rewritten away from: a force, pinned to that tip. A fetch
+			// alone never earns it: commits someone else put there were
+			// never this branch's tip
 			fx.Push = PushLease
 		case f.Adopted():
 			return fail(CodeRemoteAhead, "the remote branch and this adopted branch have diverged; gummi never rewrites an adopted branch", "")
 		default:
-			return fail(CodeNameTaken, fx.Remote+" already has a branch "+fx.RemoteBranch+" with other history; gummi never overwrites it", "rename the card's branch or remove the remote one yourself")
+			return fail(CodeNameTaken, fx.Remote+" already has a branch "+fx.RemoteBranch+" with commits this card's branch never had; gummi never overwrites it", "fetch them into the card, rename the card's branch, or remove the remote one yourself")
 		}
 	}
 	return nil
@@ -349,8 +371,10 @@ func ViewPR(ctx context.Context, env Env, repo string, number int) (*PR, error) 
 	if jerr := json.Unmarshal([]byte(out), &v); jerr != nil {
 		return nil, fail(CodeFailed, "gh pr view: "+jerr.Error(), "")
 	}
-	return &PR{Repo: repo, Number: v.Number, URL: v.URL, State: strings.ToUpper(v.State), Draft: v.IsDraft,
-		HeadSHA: v.HeadRefOid, HeadOwner: v.Owner.Login, HeadBranch: v.HeadRef}, nil
+	return &PR{
+		Repo: repo, Number: v.Number, URL: v.URL, State: strings.ToUpper(v.State), Draft: v.IsDraft,
+		HeadSHA: v.HeadRefOid, HeadOwner: v.Owner.Login, HeadBranch: v.HeadRef,
+	}, nil
 }
 
 // RewriteAllowed lets a test push to a local bare repository standing in
@@ -378,7 +402,7 @@ func remoteRepos(ctx context.Context, env Env) map[string]bool {
 	for _, r := range strings.Fields(out) {
 		if u, err := env.git(ctx, "remote", "get-url", r); err == nil {
 			if repo := RepoOfURL(u); repo != "" {
-				set[repo] = true
+				set[strings.ToLower(repo)] = true
 			}
 		}
 	}
@@ -389,28 +413,52 @@ func validRef(ctx context.Context, env Env, name string) bool {
 	return !strings.HasPrefix(name, "-") && env.gitOK(ctx, "check-ref-format", "refs/heads/"+name)
 }
 
-// prePushHook is the pre-push hook git would run, and a digest of it: an
-// agent can write one into the repository, and it runs with the person's
-// credential loaded, so the person is shown it and a change after the
-// confirm refuses the act.
-func prePushHook(ctx context.Context, env Env) (path, sum string) {
-	p, err := env.git(ctx, "rev-parse", "--git-path", "hooks/pre-push")
+// wasBranchTip reports whether the local branch once pointed at sha: its
+// reflog has it. That is what tells a branch rewritten after it was pushed
+// from one whose remote name holds somebody else's commits.
+func wasBranchTip(ctx context.Context, env Env, branch, sha string) bool {
+	out, err := env.git(ctx, "log", "-g", "--format=%H", "refs/heads/"+branch, "--")
 	if err != nil {
+		return false
+	}
+	return slices.Contains(strings.Fields(out), sha)
+}
+
+// pushHookNames are the client-side hooks a `git push` runs: pre-push, and
+// reference-transaction when it moves the remote-tracking ref.
+var pushHookNames = []string{"pre-push", "reference-transaction"}
+
+// pushHooks are the hooks git would run during the push, and a digest of
+// them: an agent can write one into the repository, and it runs with the
+// person's credential loaded, so the person is shown it and a change after
+// the confirm refuses the act.
+func pushHooks(ctx context.Context, env Env) (paths, sum string) {
+	var found []string
+	h := sha256.New()
+	for _, name := range pushHookNames {
+		p, err := env.git(ctx, "rev-parse", "--git-path", "hooks/"+name)
+		if err != nil {
+			continue
+		}
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(env.Dir, p)
+		}
+		st, err := os.Stat(p)
+		if err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
+			continue
+		}
+		found = append(found, p)
+		b, err := os.ReadFile(p)
+		if err != nil {
+			b = []byte("unreadable")
+		}
+		h.Write([]byte(p + "\x00"))
+		h.Write(b)
+	}
+	if len(found) == 0 {
 		return "", ""
 	}
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(env.Dir, p)
-	}
-	st, err := os.Stat(p)
-	if err != nil || st.IsDir() || st.Mode()&0o111 == 0 {
-		return "", ""
-	}
-	b, err := os.ReadFile(p) //nolint:gosec // the path git itself names for the hook
-	if err != nil {
-		return p, "unreadable"
-	}
-	s := sha256.Sum256(b)
-	return p, hex.EncodeToString(s[:8])
+	return strings.Join(found, ", "), hex.EncodeToString(h.Sum(nil)[:8])
 }
 
 // steering is the configuration that decides where a push goes and how it

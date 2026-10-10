@@ -287,6 +287,16 @@ type blockersMsg struct {
 // board.
 func (m *Shell) RefreshBlockers(id string) tea.Cmd { return m.refreshBlockers(webID(id)) }
 
+// WebPublished reloads the board after the page published a card: the act
+// ran off the loop and wrote the card's PR link and its thread, which the
+// rows and the open card's history are read from.
+func (m *Shell) WebPublished(id string) tea.Cmd {
+	if !m.attached() {
+		return nil
+	}
+	return tea.Batch(m.loadRows, m.reloadOpenCardEvents(m.selectedID()), m.refreshBlockers(webID(id)))
+}
+
 func (m *Shell) refreshBlockers(id domain.FeatureID) tea.Cmd {
 	if !m.attached() {
 		return nil

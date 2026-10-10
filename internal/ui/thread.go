@@ -1991,6 +1991,10 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		var p state.RebasePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(threadfold.RebaseLine(p), max(w-2, 8), "…"))
+	case state.EventPublish:
+		var p state.PublishPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return s.Success.Render("⇡ ") + s.Subtle.Render(ansi.Truncate(threadfold.PublishLine(p), max(w-2, 8), "…"))
 	case state.EventDecisionOpen:
 		var p state.DecisionPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)

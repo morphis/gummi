@@ -1,0 +1,68 @@
+{
+  "facts": {
+    "act": "create",
+    "summary": "Push fd-012-dark-mode (2 commits) to me/demo and open a draft PR into octo/demo main.",
+    "fingerprint": "9f2c",
+    "branch": "fd-012-dark-mode",
+    "tip": "0123abc",
+    "tipSubject": "feat: dark mode",
+    "ahead": 2,
+    "base": "main",
+    "remote": "origin",
+    "pushUrl": "git@github.com:me/demo.git",
+    "push": "new",
+    "head": "me:fd-012-dark-mode",
+    "baseRepo": "octo/demo",
+    "gh": "/usr/bin/gh",
+    "hook": ".git/hooks/pre-push",
+    "draft": true,
+    "draftLocked": true,
+    "draftWhy": "the tip 0123abc is not verified",
+    "title": "feat: dark mode",
+    "body": "why",
+    "commands": [
+      "git push origin 0123abc:refs/heads/fd-012-dark-mode"
+    ]
+  },
+  "refused": {
+    "act": "push",
+    "error": {
+      "code": "pr-exists",
+      "text": "PR #12 is already open",
+      "fix": "link it instead",
+      "pr": 12
+    },
+    "pr": {
+      "number": 12,
+      "url": "https://github.com/octo/demo/pull/12",
+      "state": "OPEN",
+      "headSha": "0123abc"
+    },
+    "toDraft": true
+  },
+  "request": {
+    "act": "create",
+    "fingerprint": "9f2c",
+    "title": "feat: dark mode",
+    "body": "why",
+    "draft": true
+  },
+  "result": {
+    "act": "create",
+    "pushed": "0123abc",
+    "url": "https://github.com/octo/demo/pull/12",
+    "number": 12,
+    "draft": true,
+    "toDraft": true,
+    "linkError": "could not link"
+  },
+  "offer": {
+    "available": true,
+    "acts": [
+      "push",
+      "ready"
+    ],
+    "unpushed": 2,
+    "draft": true
+  }
+}

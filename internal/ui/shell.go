@@ -21,6 +21,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/pr"
+	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -509,6 +510,13 @@ type Shell struct {
 	// prepareMerge's own provenance warn: nil or a failing lookup just
 	// skips the caution, never blocks the link.
 	prSquashMergeAllowed func(ctx context.Context, repo string) (bool, error)
+	// publishEnabled, publishGH: EnablePublishing's switch and gh binary;
+	// publishChecked and publishWhy are detection's answer (publish.go),
+	// nil Why meaning gh is there and signed in.
+	publishEnabled bool
+	publishGH      string
+	publishChecked bool
+	publishWhy     *publish.Error
 
 	// shared activity spinner (spinner.go): frame is the current cycle
 	// position; spinning guards the single live tick loop; motionEnabled
@@ -1564,6 +1572,9 @@ func (m *Shell) Init() tea.Cmd {
 		// inference behind it is the part that needs an engine, and it
 		// no-ops without one.
 		cmds = append(cmds, m.fetchOpenDecisions)
+		if m.publishEnabled {
+			cmds = append(cmds, m.detectPublish)
+		}
 		// How far through each card the reader already got. Loaded once,
 		// in bulk, for the same reason the decision records are: the board
 		// renders every card and a per-card query here would be one round
@@ -2286,6 +2297,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prLinkProbeMsg:
 		m.handlePRLinkProbe(msg)
+		return m, nil
+
+	case publishDetectedMsg:
+		m.publishChecked, m.publishWhy = true, msg.err
+		return m, nil
+
+	case publishFactsMsg:
+		m.handlePublishFacts(msg)
 		return m, nil
 
 	case sessionModelsMsg:
