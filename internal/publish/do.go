@@ -36,8 +36,127 @@ type Plan struct {
 	// say which an update carries.
 	Edit, EditTitle, EditBody bool
 	Commands                  []string
+	// Steps are what the act does, in order and in a person's words: the
+	// faces draw them while Do runs and Env.Progress names them as it goes.
+	Steps []Step
 	// Summary is the one sentence a confirm leads with.
 	Summary string
+}
+
+// Step is one stretch of an act a person waits on: the re-read of the
+// facts, the push, each gh call.
+type Step struct {
+	ID   StepID `json:"id"`
+	Text string `json:"text"`
+}
+
+// StepID names a step, so a face can match a report to the list it drew.
+type StepID string
+
+const (
+	StepCheck   StepID = "check"
+	StepToDraft StepID = "todraft"
+	StepPush    StepID = "push"
+	StepCreate  StepID = "create"
+	StepEdit    StepID = "edit"
+	StepReady   StepID = "ready"
+	StepDraft   StepID = "draft"
+)
+
+// StepState is where a reported step stands.
+type StepState string
+
+const (
+	StepRunning StepState = "run"
+	StepDone    StepState = "done"
+	StepFailed  StepState = "fail"
+)
+
+// checkStep leads every act: Do reads the facts again before it runs
+// anything, and that read is GitHub's to answer.
+var checkStep = Step{ID: StepCheck, Text: "Check nothing changed since you confirmed"}
+
+// step is the plan's step named id.
+func (p Plan) step(id StepID) Step {
+	for _, s := range p.Steps {
+		if s.ID == id {
+			return s
+		}
+	}
+	return Step{ID: id, Text: string(id)}
+}
+
+// steps are the plan's commands as a person reads them, behind the check
+// every act starts with.
+func steps(fx Facts, p Plan) []Step {
+	out := []Step{checkStep}
+	num := ""
+	if fx.PR != nil {
+		num = "PR #" + strconv.Itoa(fx.PR.Number)
+	}
+	if p.ToDraft {
+		out = append(out, Step{StepToDraft, "Return " + num + " to draft"})
+	}
+	if p.Push {
+		text := "Push " + domain.ShortRev(fx.Tip) + " to " + fx.HeadRepo
+		if strings.Contains(fx.Hook, "pre-push") {
+			text += ", running the pre-push hook"
+		}
+		out = append(out, Step{StepPush, text})
+	}
+	switch p.Act {
+	case ActCreate:
+		what := "the pull request"
+		if p.Draft {
+			what = "the draft pull request"
+		}
+		out = append(out, Step{StepCreate, "Open " + what + " in " + fx.BaseRepo})
+	case ActUpdate:
+		if p.Edit {
+			what := "title and description"
+			switch {
+			case !p.EditBody:
+				what = "title"
+			case !p.EditTitle:
+				what = "description"
+			}
+			out = append(out, Step{StepEdit, "Update " + num + "'s " + what})
+		}
+	case ActReady:
+		out = append(out, Step{StepReady, "Mark " + num + " ready for review"})
+	case ActDraft:
+		out = append(out, Step{StepDraft, "Turn " + num + " back into a draft"})
+	}
+	return out
+}
+
+// progress follows an act through its steps for Env.Progress: starting one
+// finishes the one before it, and the act's end settles the last.
+type progress struct {
+	report func(Step, StepState)
+	cur    *Step
+}
+
+func (t *progress) begin(s Step) {
+	if t.report == nil {
+		return
+	}
+	if t.cur != nil {
+		t.report(*t.cur, StepDone)
+	}
+	t.cur = &s
+	t.report(s, StepRunning)
+}
+
+func (t *progress) end(ok bool) {
+	if t.report == nil || t.cur == nil {
+		return
+	}
+	if ok {
+		t.report(*t.cur, StepDone)
+	} else {
+		t.report(*t.cur, StepFailed)
+	}
 }
 
 // PlanFor checks req against fx.
@@ -149,7 +268,7 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 	if p.ToDraft {
 		p.Summary += fmt.Sprintf(" PR #%d returns to draft first: %s.", fx.PR.Number, fx.ReadyWhy)
 	}
-	p.Commands = commands(fx, p)
+	p.Commands, p.Steps = commands(fx, p), steps(fx, p)
 	return p, nil
 }
 
@@ -227,7 +346,16 @@ type Link func(ctx context.Context, ref domain.PullRequestRef) error
 // Do runs req: it resolves the facts again under the caller's card lock,
 // refuses when they no longer digest as req.Fingerprint, and runs exactly
 // the plan's commands. A face calls it only for an act a person confirmed.
+// Each step is reported to env.Progress as it starts and as it ends.
 func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Link) (Result, *Error) {
+	t := &progress{report: env.Progress}
+	res, err := do(ctx, env, repo, in, req, link, t)
+	t.end(err == nil)
+	return res, err
+}
+
+func do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Link, t *progress) (Result, *Error) {
+	t.begin(checkStep)
 	fx, ferr := Resolve(ctx, env, repo, in)
 	if ferr != nil {
 		return Result{}, ferr
@@ -249,12 +377,14 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 	env.Dir, env.GH = tree, fx.GH
 	res := Result{Act: req.Act, Draft: p.Draft}
 	if p.ToDraft {
+		t.begin(p.step(StepToDraft))
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo, "--undo"); err != nil {
 			return res, AsError(err)
 		}
 		res.ToDraft = true
 	}
 	if p.Push {
+		t.begin(p.step(StepPush))
 		// the branch must still be the tip that was shown: the push names
 		// the SHA, so a commit made since is never published unseen
 		if now, _ := env.git(ctx, "rev-parse", "refs/heads/"+fx.Branch); now != fx.Tip {
@@ -276,6 +406,7 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 	}
 	switch req.Act {
 	case ActCreate:
+		t.begin(p.step(StepCreate))
 		args := []string{"pr", "create", "--repo", fx.BaseRepo, "--head", fx.HeadRef(), "--base", fx.Base, "--title=" + strings.TrimSpace(req.Title), "--body-file", "-"}
 		if p.Draft {
 			args = append(args, "--draft")
@@ -295,6 +426,7 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		}
 	case ActUpdate:
 		if p.Edit {
+			t.begin(p.step(StepEdit))
 			args := []string{"pr", "edit", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo}
 			if t := strings.TrimSpace(req.Title); t != "" {
 				args = append(args, "--title="+t)
@@ -308,10 +440,12 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 			}
 		}
 	case ActReady:
+		t.begin(p.step(StepReady))
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo); err != nil {
 			return res, after(res, fx, AsError(err))
 		}
 	case ActDraft:
+		t.begin(p.step(StepDraft))
 		if _, err := env.gh(ctx, nil, "pr", "ready", strconv.Itoa(fx.PR.Number), "--repo", fx.PR.Repo, "--undo"); err != nil {
 			return res, after(res, fx, AsError(err))
 		}

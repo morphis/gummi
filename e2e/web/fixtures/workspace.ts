@@ -211,6 +211,16 @@ export class Workspace {
     await fs.promises.writeFile(path.join(this.ghData, file), JSON.stringify(data, null, 2));
   }
 
+  /**
+   * Make fake-gh slow to answer `gh <cmd> <sub>`: the call waits until the
+   * returned function is called (see fake-gh).
+   */
+  async holdGh(cmd: string, sub: string): Promise<() => Promise<void>> {
+    const file = path.join(this.ghData, `hold-${cmd}-${sub}`);
+    await fs.promises.writeFile(file, '');
+    return () => fs.promises.rm(file, { force: true });
+  }
+
   // ------------------------------------------------------------------
   // seeding — each returns the card id and leaves the card parked
   // ------------------------------------------------------------------

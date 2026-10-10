@@ -283,6 +283,8 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		if msg.text != "" {
 			m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.id), Text: msg.webText(), Err: msg.isErr})
 		}
+	case ghDoneMsg:
+		m.emitChanges(msg.inner)
 	case prPullDoneMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.f.ID), Text: msg.notice.text, Err: msg.notice.isErr})
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: string(msg.f.ID)})

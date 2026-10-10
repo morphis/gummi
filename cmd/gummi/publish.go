@@ -131,6 +131,11 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 	in := publish.InputFor(ctx, mgr, &f, false, anns, ui.OpenSpecThreads(pool.Root(), ws.DraftsDir(), f))
 	in.BaseRepo = str("repo")
 	env := publish.Env{GH: pr.GHBinary()}
+	// what is being waited on goes to stderr as it starts, so a slow
+	// remote or a pre-push hook does not read as a hang and stdout stays
+	// the facts and the result
+	waiting := func(what string) { fmt.Fprintln(os.Stderr, "… "+what) }
+	waiting("Reading where the branch goes")
 	fx, perr := publish.Resolve(ctx, env, mgr, in)
 	if perr != nil {
 		return publishError{perr}
@@ -170,6 +175,11 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 			Text: "there is no terminal to confirm at",
 			Fix:  "read the facts above and run again with --yes=" + fx.Fingerprint(),
 		}}
+	}
+	env.Progress = func(s publish.Step, st publish.StepState) {
+		if st == publish.StepRunning {
+			waiting(s.Text)
+		}
 	}
 	res, perr := publish.Do(ctx, env, mgr, in, req, func(ctx context.Context, ref domain.PullRequestRef) error {
 		return store.SetPullRequest(ctx, f.ID, ref)

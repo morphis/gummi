@@ -45,6 +45,14 @@ function place (box) {
   box.style.setProperty('--toast-bottom', Math.max(16, Math.round(vh - top + 8)) + 'px')
 }
 
+// toastBox is where the notices stand, placed for one about to be added:
+// a notice another module draws itself (work.js) stands with the rest.
+export function toastBox () {
+  const box = document.getElementById('toasts')
+  if (box) { place(box); follow(box) }
+  return box
+}
+
 // A decision redrawn taller (or a docked bar opened) under a notice
 // already up would leave it standing over the answers: follow what is
 // docked while any notice is showing.
@@ -143,7 +151,8 @@ function show (text, opts, ack) {
   // an overflow evicts the oldest notice that will go on its own first;
   // one waiting for its command to be copied goes only when all are
   while (box.children.length > MAX) {
-    const drop = [...box.children].find(c => !c.classList.contains('sticky')) || box.firstChild
+    // a wait still out (work.js) is not a notice that has been read
+    const drop = [...box.children].find(c => !c.classList.contains('sticky') && !c.classList.contains('work')) || box.firstChild
     drop.remove()
   }
   if (!sticky) { setTimeout(() => el.remove(), opts.ms || (opts.err ? 5000 : multi ? 8000 : 2600)); return }

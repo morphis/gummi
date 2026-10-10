@@ -5045,6 +5045,21 @@ One seam, three faces:
    runs nothing — but it is as strong as pairing is (§20.3), no
    stronger.
 
+**No face waits in silence.** Reading the facts and running the act are
+both GitHub's to answer, and each call may take up to `publish.Timeout`.
+The plan carries its steps in a person's words (`Plan.Steps`: the
+re-read of the facts, the push, each `gh` call) and `Do` reports each
+one to `Env.Progress` as it starts and as it ends, so the faces draw the
+same progress from the same list: the CLI prints each step to stderr as
+it starts; the TUI's status bar spins on the card with the step and its
+place in the plan; the web dialog is up before its facts are, and once
+confirmed turns the steps into a checklist with the buttons held off,
+the failed step marked where it stopped. The board says what it is
+waiting on as `work` changes (`webapi.ChangeWork`), which also carry the
+PR reads of §22.11 and the thread pull, so a page shows a wait whichever
+face started it. They are a display: nothing is stored and nothing is
+decided from them.
+
 ### 22.10 Deferred
 
 - **Stacked cards** (§18.5).

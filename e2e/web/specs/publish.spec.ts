@@ -153,6 +153,49 @@ test.describe('a verified card on a repository with a github.com remote', () => 
   });
 });
 
+test.describe('a publish GitHub is slow to answer', () => {
+  let id: string;
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedVerified('Add a wave helper'); } } });
+
+  test('says what it is waiting on, step by step', async ({ pairedPage: page, server, workspace }, info) => {
+    test.setTimeout(120_000);
+    await openPR(page, server, id, phone(info));
+    await expect(page.getByTestId('pr-publish-create')).toBeVisible({ timeout: 20_000 });
+
+    // the dialog is up before its facts are, saying what it reads
+    let answer = await workspace.holdGh('repo', 'view');
+    await page.getByTestId('pr-publish-create').click();
+    const dialog = page.getByTestId('publish-dialog');
+    await expect(page.getByTestId('publish-reading')).toBeVisible();
+    await expect(page.getByTestId('publish-confirm')).toHaveCount(0);
+    await shot(page, info, 'publish-wait-1-reading');
+    await answer();
+    await expect(page.getByTestId('publish-summary')).not.toBeEmpty({ timeout: 20_000 });
+    await expect(page.getByTestId('publish-steps')).toBeHidden();
+
+    // confirmed: the plan's steps are a checklist the board marks as it
+    // goes, and nothing in the dialog can start the act a second time
+    answer = await workspace.holdGh('pr', 'create');
+    await page.getByTestId('publish-confirm').click();
+    await expect(page.getByTestId('publish-steps')).toBeVisible();
+    await expect(page.getByTestId('publish-step-create')).toHaveAttribute('data-state', 'run', { timeout: 30_000 });
+    await expect(page.getByTestId('publish-step-check')).toHaveAttribute('data-state', 'done');
+    await expect(page.getByTestId('publish-step-push')).toHaveAttribute('data-state', 'done');
+    await expect(page.getByTestId('publish-confirm')).toBeDisabled();
+    await expect(page.getByTestId('publish-confirm')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.getByTestId('publish-cancel')).toBeDisabled();
+    await expect(page.getByTestId('publish-title')).toBeDisabled();
+    // the checklist is the act's wait: no second notice stands over it
+    await expect(page.getByTestId('work-toast')).toHaveCount(0);
+    // a step that has run a while says for how long
+    await expect(page.getByTestId('publish-step-create')).toContainText(/· \d+s/, { timeout: 10_000 });
+    await shot(page, info, 'publish-wait-2-steps');
+    await answer();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('pr-state')).toBeVisible({ timeout: 15_000 });
+  });
+});
+
 test.describe('a repository whose push runs a hook', () => {
   let id: string;
   test.use({

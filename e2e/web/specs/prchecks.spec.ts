@@ -54,8 +54,19 @@ test('the PR tab sends a failing check and its log to the session', async ({ pai
   await expect(page.getByTestId('pr-checks-send')).toBeVisible({ timeout: 15_000 });
   await shot(page, info, 'pr-checks');
 
+  // the failed jobs' logs are the slow read: while GitHub answers, a
+  // notice says what the board is waiting on and the send cannot be
+  // started a second time
+  const answer = await ws.holdGh('run', 'view');
   await page.getByTestId('pr-checks-send').click();
+  await expect(page.getByTestId('work-toast')).toContainText(`${id}: reading the PR's failing checks and their logs`, { timeout: 15_000 });
+  await expect(page.getByTestId('pr-checks-send')).toBeDisabled();
+  await expect(page.getByTestId('pr-pull')).toBeDisabled();
+  await shot(page, info, 'pr-checks-reading');
+  await answer();
   await expect(page.getByTestId('toasts')).toContainText('sent 1 failing check to its session', { timeout: 30_000 });
+  await expect(page.getByTestId('work-toast')).toHaveCount(0);
+  await expect(page.getByTestId('pr-checks-send')).toBeEnabled();
   // gummi read the failed job's log itself, with the person's gh
   expect(ws.ghCalls().some((c) => c[0] === 'run' && c.includes('--log-failed') && c.includes('4242'))).toBe(true);
   // and the session got it as a turn: the check, its link and where it stopped

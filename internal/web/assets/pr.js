@@ -4,13 +4,14 @@
 // themselves. Where the board publishes (DESIGN §22) a strip offers the act
 // that fits the card now; each one opens the publish dialog (publish.js).
 
-import { h, append, clock, plural } from './dom.js?v=__ASSET_V__'
+import { h, $, append, busy, clock, plural } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
 import { reveal } from './diff.js?v=__ASSET_V__'
 import { openPublish, publishLabel } from './publish.js?v=__ASSET_V__'
+import { workLock } from './work.js?v=__ASSET_V__'
 
 export const prTab = {
   name: 'pr',
@@ -53,7 +54,7 @@ function render (pane, entry, ctx) {
         p.fetched ? h('span', { testid: 'pr-fetched' }, `read from GitHub ${clock(p.fetched)}`) : null,
         p.headSha ? h('span', { class: 'mono' }, `head ${p.headSha.slice(0, 7)}`) : null,
         h('button', { class: 'btn', type: 'button', testid: 'pr-refresh', onclick: () => refresh(ctx) }, 'Refresh'),
-        h('button', { class: 'btn', type: 'button', testid: 'pr-pull', title: 'Bring the open review threads into the diff as comments', onclick: () => pull(ctx) }, 'Pull threads into the diff'))))
+        h('button', { class: 'btn', type: 'button', testid: 'pr-pull', ...workLock(ctx.id), title: 'Bring the open review threads into the diff as comments', onclick: () => pull(ctx) }, 'Pull threads into the diff'))))
   append(sect, checksBox(p, ctx))
   if (threads.length) {
     sect.append(h('p', { class: 'label' }, 'Review threads, read from GitHub'))
@@ -90,7 +91,7 @@ function checksBox (p, ctx) {
         h('span', { class: failing ? 'badc' : 'okc', testid: 'pr-checks-summary' }, failing ? `${failing} failing` : 'none failing'),
         `of ${checks.length}`,
         failing && send
-          ? h('button', { class: 'link go', type: 'button', testid: 'pr-checks-send', title: 'Read the failed jobs’ logs and hand them to this card’s session to fix', onclick: () => runAction(ctx.card, send) }, 'send failing checks to the session')
+          ? h('button', { class: 'link go', type: 'button', testid: 'pr-checks-send', ...workLock(ctx.id), title: 'Read the failed jobs’ logs and hand them to this card’s session to fix', onclick: () => runAction(ctx.card, send) }, 'send failing checks to the session')
           : null),
       sorted.map((c, i) => h('div', { class: 'c1 check', testid: `pr-check-${i}` },
         h('span', { class: checkClass[c.bucket] || 'nonec' }, checkWords[c.bucket] || c.bucket),
@@ -166,20 +167,29 @@ function safeUrl (u) {
   try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : '#' } catch { return '#' }
 }
 
+// refresh reads the PR from GitHub again — its state, threads and checks —
+// and says so where the last read's time stands until the answer redraws
+// the tab.
 async function refresh (ctx) {
+  const done = busy($('[data-testid="pr-refresh"]'))
+  const at = $('[data-testid="pr-fetched"]')
+  const was = at?.textContent
+  if (at) at.textContent = 'reading from GitHub…'
   try {
     ctx.swap(await get(cardPath(ctx.id, 'pr') + '?refresh=1'))
   } catch (err) {
+    done()
+    if (at) at.textContent = was
     toast(err.message, { err: true })
   }
 }
 
-// pull runs on the server and finishes later: a toast and a card change say
-// when the threads have landed in the diff.
+// pull runs on the server and finishes later: the board's own notice
+// stands while it reads the threads (work.js), and a toast and a card
+// change say when they have landed in the diff.
 async function pull (ctx) {
   try {
     await post(cardPath(ctx.id, 'pr/pull'), {})
-    toast('Pulling the review threads; the diff shows them when they land')
   } catch (err) {
     toast(err.notBuilt ? 'Pulling threads from the web is not available yet' : err.message, { err: !err.notBuilt })
   }

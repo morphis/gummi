@@ -29,6 +29,12 @@ type prPullDoneMsg struct {
 // repeated pull idempotent, which is what makes the action safe to run
 // twice: pr.Ingest adds no new de-duplication of its own.
 func (m *Shell) pullPRReview(f domain.Feature) tea.Cmd {
+	m.markGHWork(f.ID, "reading the PR's review threads", "")
+	read := m.readPRReview(f)
+	return func() tea.Msg { return ghDoneMsg{id: f.ID, inner: read()} }
+}
+
+func (m *Shell) readPRReview(f domain.Feature) tea.Cmd {
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		// stale-row safety: the board snapshot may predate an unlink that

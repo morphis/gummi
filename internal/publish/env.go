@@ -20,9 +20,12 @@ const Timeout = 2 * time.Minute
 // Env runs the git and gh commands publishing needs. Dir is the card's
 // worktree, where the git calls run (so a worktree's own config and hooks
 // are the ones read); GH is the gh binary, "" for "gh" on the path.
+// Progress, when set, hears each step of an act Do runs as it starts and
+// as it ends, on Do's goroutine: a face draws it and must not block.
 type Env struct {
-	Dir string
-	GH  string
+	Dir      string
+	GH       string
+	Progress func(Step, StepState)
 }
 
 func (e Env) ghBin() string {

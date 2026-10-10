@@ -259,10 +259,15 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 		t.Fatal("no row")
 	}
 	cmd := m.openPublish(r, publish.ActCreate, "")
-	if !strings.Contains(m.notice.text, "reading where the branch goes") {
-		t.Fatalf("notice while the facts are read: %q", m.notice.text)
+	// the read is GitHub's to answer: the status bar spins on it until
+	// the confirm opens
+	if pill := m.ghWorkPill(); !strings.Contains(pill, "FD-001: reading where the branch goes") || !m.spinnerActive() {
+		t.Fatalf("while the facts are read the bar says %q (spinning %v)", pill, m.spinnerActive())
 	}
 	m = update(m, cmd())
+	if len(m.ghWork) != 0 {
+		t.Fatalf("the wait outlived the read: %v", m.ghWork)
+	}
 	d := publishDialogOn(t, m)
 	if d.ID() != "publish" {
 		t.Fatalf("dialog id = %q", d.ID())
@@ -301,6 +306,9 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	}
 	if m.notice.isErr || !strings.Contains(m.notice.text, "opened PR #512 (draft) https://github.com/me/widget/pull/512") || !strings.Contains(m.notice.text, "FD-001: pushed ") {
 		t.Fatalf("notice = %+v", m.notice)
+	}
+	if len(m.ghWork) != 0 {
+		t.Fatalf("the wait outlived the act: %v", m.ghWork)
 	}
 	log, _ := os.ReadFile(filepath.Join(fake, "log"))
 	if !strings.Contains(string(log), "--title=feat: dark mode --body-file - --draft") {
@@ -405,5 +413,31 @@ func TestPublishNoticesReadTheSameForEveryAct(t *testing.T) {
 	}
 	if _, ok := webPublishAct("merge"); ok {
 		t.Error("an act nobody defined was read off the wire")
+	}
+}
+
+// The bar names the step an act is on and how far through its plan that
+// is; a step read after the act's last word is not drawn over the outcome.
+func TestTheBarNamesThePublishStepInFlight(t *testing.T) {
+	m, _, _ := publishWorkspace(t)
+	said := make(chan publishStepMsg, 1)
+	step := publishStepMsg{id: "FD-001", step: "push", text: "Push 0123abc to me/widget", n: 2, of: 3, next: said}
+
+	m.markGHWork("FD-001", "publishing", "")
+	if cmd := m.handlePublishStep(step); cmd == nil {
+		t.Fatal("the next step is not waited for")
+	}
+	if pill := m.ghWorkPill(); !strings.Contains(pill, "FD-001: Push 0123abc to me/widget (2/3)") {
+		t.Fatalf("the bar says %q", pill)
+	}
+
+	model, _ := m.Update(ghDoneMsg{id: "FD-001", inner: noticeMsg{text: "FD-001: pushed 0123abc"}})
+	m = model.(*Shell)
+	if len(m.ghWork) != 0 || m.notice.text != "FD-001: pushed 0123abc" {
+		t.Fatalf("after the act: work %v, notice %q", m.ghWork, m.notice.text)
+	}
+	m.handlePublishStep(step)
+	if len(m.ghWork) != 0 {
+		t.Fatalf("a late step reopened the wait: %v", m.ghWork)
 	}
 }

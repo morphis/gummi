@@ -556,3 +556,48 @@ func TestDefaultTextStartsFromTheCommits(t *testing.T) {
 		t.Fatal("an error's words")
 	}
 }
+
+// An act says each step as it starts and how it ended, in the order the
+// plan listed them, so a face can draw the plan as the act's progress.
+func TestAnActReportsThePlansStepsAsItRunsThem(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	fx, e := Resolve(ctx, w.env, w.repo, w.in())
+	if e != nil {
+		t.Fatal(e)
+	}
+	req := Request{Act: ActCreate, Title: "t", Draft: true, Fingerprint: fx.Fingerprint()}
+	plan, e := PlanFor(fx, req)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var want, got []string
+	for _, s := range plan.Steps {
+		want = append(want, string(s.ID)+" run", string(s.ID)+" done")
+	}
+	if len(plan.Steps) != 3 || plan.Steps[0].ID != StepCheck || plan.Steps[1].ID != StepPush || plan.Steps[2].ID != StepCreate {
+		t.Fatalf("a create's steps = %+v", plan.Steps)
+	}
+	env := w.env
+	env.Progress = func(s Step, st StepState) {
+		if s.Text == "" || s.Text == string(s.ID) {
+			t.Errorf("step %s is reported without the plan's words", s.ID)
+		}
+		got = append(got, string(s.ID)+" "+string(st))
+	}
+	if _, e := Do(ctx, env, w.repo, w.in(), req, w.link); e != nil {
+		t.Fatal(e)
+	}
+	if strings.Join(got, ", ") != strings.Join(want, ", ") {
+		t.Fatalf("reported %v, want %v", got, want)
+	}
+
+	// the step that failed is the one named, and nothing after it starts
+	got = nil
+	if _, e := Do(ctx, env, w.repo, w.in(), Request{Act: ActPush, Fingerprint: "stale"}, w.link); e == nil {
+		t.Fatal("an act on stale facts ran")
+	}
+	if strings.Join(got, ", ") != "check run, check fail" {
+		t.Fatalf("a refused act reported %v", got)
+	}
+}

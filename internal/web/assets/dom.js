@@ -39,6 +39,18 @@ export function setVars (el, vars) {
   }
 }
 
+// busy marks a button as waiting on what it just started: off, with a
+// spinner, until the returned function is called. A button a redraw has
+// replaced by then is simply gone.
+export function busy (btn) {
+  if (!btn || btn.disabled) return () => {}
+  const spin = h('span', { class: 'spinner sm' })
+  btn.disabled = true
+  btn.setAttribute('aria-busy', 'true')
+  btn.prepend(spin)
+  return () => { spin.remove(); btn.removeAttribute('aria-busy'); btn.disabled = false }
+}
+
 export function clear (el) {
   while (el.firstChild) el.firstChild.remove()
   return el

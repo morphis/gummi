@@ -39,12 +39,17 @@ A missing file answers the way gh does when the thing is not there: a
 message on stderr and exit 1. Every invocation is appended, one JSON array
 of argv per line, to $FAKE_GH_LOG when it is set, so a test can assert what
 gummi asked for.
+
+A call waits while $FAKE_GH_DATA/hold-<cmd>-<sub> exists (hold-pr-create),
+for at most a minute: a test's GitHub that is slow to answer, for as long
+as the test says.
 """
 
 import json
 import os
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 DATA = os.environ.get("FAKE_GH_DATA") or os.path.join(HERE, "gh")
@@ -264,6 +269,10 @@ def main(argv):
         print("gh version 2.99.0 (fake-gh for gummi's e2e suite)")
         return
     cmd, rest = argv[0], argv[1:]
+    if rest:
+        hold, until = os.path.join(DATA, "hold-%s-%s" % (cmd, rest[0])), time.time() + 60
+        while os.path.exists(hold) and time.time() < until:
+            time.sleep(0.05)
     if cmd == "pr" and rest:
         pr(rest)
     elif cmd == "api" and rest:

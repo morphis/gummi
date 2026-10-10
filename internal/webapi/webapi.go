@@ -54,6 +54,12 @@ const (
 	// names refetches GET /api/session. It is the one event a device still
 	// waiting is sent, and only about itself.
 	ChangePairing ChangeKind = "pairing"
+	// ChangeWork: the board is doing something on GitHub for a card right
+	// now — reading a publish's facts, a step of the act, a PR's checks or
+	// its review threads. Text says what, Step names the publish step it
+	// is, and Done ends it (with Err, on the step that failed). Nothing is
+	// refetched: a page draws it as the wait it is.
+	ChangeWork ChangeKind = "work"
 )
 
 // EventResync is the event a reconnecting page gets instead of the events
@@ -78,6 +84,10 @@ type Change struct {
 	// Text and Err are a toast's message and whether it reports a failure.
 	Text string `json:"text,omitempty"`
 	Err  bool   `json:"err,omitempty"`
+	// Step and Done are a work change's: the publish step now running (or,
+	// with Err, the one that failed), and whether the work has ended.
+	Step string `json:"step,omitempty"`
+	Done bool   `json:"done,omitempty"`
 	// Viewers is the whole presence list, on a viewers change.
 	Viewers []Viewer `json:"viewers,omitempty"`
 	// Except is a device the change is not sent to: the one a toast is
@@ -91,7 +101,7 @@ type Change struct {
 // Toasts never coalesce with each other, since each says something.
 func (c Change) Key() string {
 	switch c.Kind {
-	case ChangeCard, ChangeLive, ChangeIngest, ChangePairing:
+	case ChangeCard, ChangeLive, ChangeIngest, ChangePairing, ChangeWork:
 		return string(c.Kind) + ":" + c.ID
 	case ChangeToast:
 		return ""

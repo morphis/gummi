@@ -27,6 +27,13 @@ type prChecksReadyMsg struct {
 // since a check's answer belongs to a commit and is stale the moment the
 // branch is pushed again. Only a person starts it.
 func (m *Shell) sendPRChecks(f domain.Feature) tea.Cmd {
+	// the failed jobs' logs are the slow read of the PR's lot
+	m.markGHWork(f.ID, "reading the PR's failing checks and their logs", "")
+	read := m.readPRChecks(f)
+	return func() tea.Msg { return ghDoneMsg{id: f.ID, inner: read()} }
+}
+
+func (m *Shell) readPRChecks(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		// stale-row safety, as pullPRReview: the row may predate an unlink
