@@ -5056,7 +5056,8 @@ place in the plan; the web dialog is up before its facts are, and once
 confirmed turns the steps into a checklist with the buttons held off,
 the failed step marked where it stopped. The board says what it is
 waiting on as `work` changes (`webapi.ChangeWork`), which also carry the
-PR reads of §22.11 and the thread pull, so a page shows a wait whichever
+PR reads of §22.11, the thread pull and a link's lookup, so a page shows
+a wait whichever
 face started it. They are a display: nothing is stored and nothing is
 decided from them.
 

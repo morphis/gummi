@@ -71,8 +71,15 @@ test.describe('a verified card', () => {
     await expect(page.getByTestId('action-question')).toContainText('URL or number');
     await page.getByTestId('action-input').fill('7');
     await shot(page, info, 'pr-link');
+    // the lookup is GitHub's to answer: while it is out a notice says what
+    // the board is waiting on
+    const answer = await workspace.holdGh('pr', 'view');
     await page.getByTestId('action-confirm').click();
+    await expect(page.getByTestId('work-toast')).toContainText(`${id}: reading pull request 7 from GitHub`, { timeout: 15_000 });
+    await shot(page, info, 'pr-link-reading');
+    await answer();
     await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('work-toast')).toHaveCount(0, { timeout: 15_000 });
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.pr).toBeTruthy();
     expect(workspace.ghCalls().some((a) => a.includes('pr') && a.includes('7'))).toBe(true);
     await expect(page.getByTestId('pr-state')).toBeVisible({ timeout: 15_000 });
