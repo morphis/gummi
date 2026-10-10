@@ -13,8 +13,12 @@
 // the vendored copy writes its generated rules into an <xterm-style>
 // element instead of a <style>: defined here, it keeps them in a
 // constructed stylesheet, which the policy does not restrict.
+//
+// A phone's keyboard has no esc, tab, ctrl or arrows, so on a touch screen
+// a bar of them sits under the shell (keyBar). ctrl and alt are sticky:
+// pressed, they hold for the next key, from the bar or the keyboard.
 
-import { h } from './dom.js?v=__ASSET_V__'
+import { h, isMobile } from './dom.js?v=__ASSET_V__'
 import { on, state } from './store.js?v=__ASSET_V__'
 import { isDark } from './theme.js?v=__ASSET_V__'
 
@@ -124,7 +128,8 @@ function render (pane, entry, ctx) {
 function start (id) {
   const screen = h('div', { class: 'term-screen', testid: 'terminal-screen' })
   const note = h('div', { class: 'term-note', testid: 'terminal-note', role: 'status', hidden: true })
-  const t = { id, screen, note, root: h('div', { class: 'term', testid: 'terminal' }, screen, note), tries: 0 }
+  const t = { id, screen, note, tries: 0, ctrl: false, alt: false }
+  t.root = h('div', { class: 'term', testid: 'terminal' }, h('div', { class: 'term-main' }, screen, note), touch() ? keyBar(t) : null)
   say(t, h('span', { class: 'spinner' }), 'Opening the terminal…')
   loadLibs().then(([{ Terminal }, { FitAddon }]) => {
     if (t.gone) return
@@ -139,7 +144,7 @@ function start (id) {
     t.term.loadAddon(t.fit)
     t.term.open(t.screen)
     const enc = new TextEncoder()
-    t.term.onData((d) => send(t, enc.encode(d)))
+    t.term.onData((d) => send(t, enc.encode(held(t, d))))
     t.term.onBinary((d) => send(t, Uint8Array.from(d, c => c.charCodeAt(0))))
     t.term.onResize(({ cols, rows }) => { if (t.ws?.readyState === WebSocket.OPEN) t.ws.send(JSON.stringify({ cols, rows })) })
     // the panel is resized by its edge, the window, and a phone's keyboard
@@ -154,6 +159,92 @@ function start (id) {
     say(t, h('b', null, 'The terminal could not be loaded'), String(err.message || err))
   })
   return t
+}
+
+// touch says the screen is one a finger types on: it gets the key bar
+const touch = () => isMobile() || matchMedia('(pointer: coarse)').matches
+
+// KEYS is the bar, in order. seq is what a key sends: a string, or for the
+// keys a modifier changes the code of, [final byte, prefix without one].
+const KEYS = [
+  { id: 'esc', label: 'esc', seq: '\x1b' },
+  { id: 'tab', label: 'tab', seq: '\t' },
+  { id: 'ctrl', label: 'ctrl', mod: 'ctrl' },
+  { id: 'alt', label: 'alt', mod: 'alt' },
+  { id: 'left', label: '←', name: 'Left', csi: 'D' },
+  { id: 'down', label: '↓', name: 'Down', csi: 'B' },
+  { id: 'up', label: '↑', name: 'Up', csi: 'A' },
+  { id: 'right', label: '→', name: 'Right', csi: 'C' },
+  { id: 'home', label: 'home', csi: 'H' },
+  { id: 'end', label: 'end', csi: 'F' },
+  { id: 'pgup', label: 'pgup', tilde: 5 },
+  { id: 'pgdn', label: 'pgdn', tilde: 6 },
+  { id: 'dash', label: '-', seq: '-' },
+  { id: 'slash', label: '/', seq: '/' },
+  { id: 'pipe', label: '|', seq: '|' },
+  { id: 'tilde', label: '~', seq: '~' }
+]
+
+function keyBar (t) {
+  const bar = h('div', { class: 'term-keys', testid: 'terminal-keys', role: 'toolbar', 'aria-label': 'Terminal keys' })
+  for (const k of KEYS) {
+    const b = h('button', {
+      class: 'term-key',
+      type: 'button',
+      tabIndex: -1,
+      testid: `terminal-key-${k.id}`,
+      'aria-label': k.name || k.label,
+      onclick: () => {
+        if (k.mod) { t[k.mod] = !t[k.mod]; paintMods(t) } else send(t, new TextEncoder().encode(keySeq(t, k)))
+        // the keyboard stays up if it was: the bar is part of typing
+        if (t.focus) t.term?.focus()
+      }
+    }, k.label)
+    if (k.mod) { b.dataset.mod = k.mod; b.setAttribute('aria-pressed', 'false') }
+    // a press must not take the focus (and with it the keyboard) from the shell
+    b.addEventListener('pointerdown', (e) => e.preventDefault())
+    b.addEventListener('mousedown', (e) => e.preventDefault())
+    bar.append(b)
+  }
+  t.keys = bar
+  return bar
+}
+
+function paintMods (t) {
+  for (const b of t.keys?.querySelectorAll('[data-mod]') || []) b.setAttribute('aria-pressed', String(!!t[b.dataset.mod]))
+}
+
+// mods takes the held modifiers, releasing them: xterm's number for them
+// (1 + alt 2 + ctrl 4), 1 when none is held.
+function mods (t) {
+  const m = 1 + (t.alt ? 2 : 0) + (t.ctrl ? 4 : 0)
+  if (m > 1) { t.ctrl = t.alt = false; paintMods(t) }
+  return m
+}
+
+// keySeq is what a bar key sends, under the held modifiers and, for the
+// arrows, the mode a full-screen program put the cursor keys in.
+function keySeq (t, k) {
+  if (k.seq) return held(t, k.seq)
+  const m = mods(t)
+  if (k.tilde) return m > 1 ? `\x1b[${k.tilde};${m}~` : `\x1b[${k.tilde}~`
+  if (m > 1) return `\x1b[1;${m}${k.csi}`
+  return (t.term?.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[') + k.csi
+}
+
+// held applies the bar's ctrl and alt to one typed key, releasing them:
+// ctrl takes a letter to its control code, alt sends esc before it. More
+// than one character is a paste or a key's own sequence, and passes as is.
+function held (t, d) {
+  if (!(t.ctrl || t.alt) || [...d].length !== 1) return d
+  const m = mods(t)
+  if (m & 4) {
+    const c = d.toUpperCase().charCodeAt(0)
+    if (c >= 0x40 && c <= 0x5f) d = String.fromCharCode(c - 0x40)
+    else if (d === ' ') d = '\x00'
+    else if (d === '?') d = '\x7f'
+  }
+  return m & 2 ? '\x1b' + d : d
 }
 
 function send (t, bytes) {

@@ -607,7 +607,14 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 /* the Terminal tab: the shell fills the pane, which does not scroll (the
    terminal has its own scrollback); its note sits over it */
 .pane[data-tab="terminal"]{overflow:hidden;display:flex;flex-direction:column}
-.term{flex:1;min-height:0;position:relative;display:flex;background:var(--bg)}
+.term{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--bg)}
+.term-main{flex:1;min-height:0;position:relative;display:flex}
+/* a touch screen's missing keys, under the shell; the row scrolls sideways */
+.term-keys{flex:none;display:flex;gap:6px;padding:6px 8px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;background:var(--panel);border-top:1px solid var(--line);touch-action:pan-x}
+.term-keys::-webkit-scrollbar{display:none}
+.term-key{flex:none;min-width:44px;height:38px;padding:0 10px;font-family:var(--mono);font-size:13px;color:var(--fg2);background:var(--sunk);border:1px solid var(--line2);border-radius:8px;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+.term-key:active{background:var(--band)}
+.term-key[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .term-screen{flex:1;min-width:0;min-height:0;padding:8px 4px 8px 10px}
 .term-screen .xterm{height:100%}
 .term-note{position:absolute;inset:auto 0 0 0;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;padding:10px 12px;font-size:13px;color:var(--fg3);background:var(--panel);border-top:1px solid var(--line)}
