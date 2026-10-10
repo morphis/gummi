@@ -154,8 +154,8 @@ var logCmd = &cobra.Command{
 
 // rewriteCmd implements `gummi rewrite <id|ref> --plan <file|->`.
 var rewriteCmd = &cobra.Command{
-	Use:   "rewrite <id|ref> --plan <file|->",
-	Short: "Reword or squash a card's commits in place; its content never changes",
+	Use:   "rewrite <id|ref> [--plan <file|->] [--sign]",
+	Short: "Reword, squash or sign a card's commits in place; its content never changes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRewrite(cmdFlags(cmd), args)
 	},
@@ -625,6 +625,7 @@ func bindSquashFlags(fs *pflag.FlagSet) {
 func bindRewriteFlags(fs *pflag.FlagSet) {
 	fs.String("plan", "", `the branch as it should read, oldest first (a file path, or - for stdin): {"head":"<tip>","groups":[{"commits":["<sha>",…],"message":"…"},…]} — every commit in exactly one group`)
 	fs.Bool("dry-run", false, "say what the plan would do and move nothing")
+	fs.Bool("sign", false, "sign the card's commits: every commit from the first unsigned one up is made again, signed; alone it needs no --plan. Refused where commits are not signed")
 	fs.Bool("allow-pushed", false, "rewrite commits the remote already has; the branch will then need a force push, which gummi prints and never runs")
 }
 

@@ -198,7 +198,8 @@ SHAs). `gummi rewrite <id> --plan <file|->` rewords or squashes them in place:
 the plan lists every commit, oldest first, in contiguous groups, each group
 becoming one commit with the message given. Reordering and dropping cannot be
 expressed, so the branch's content never changes; `--dry-run` shows the result
-first. It refuses while an agent holds the card, on an adopted branch, and on
+first. `--sign` (alone, or with a plan) makes every commit from the first
+unsigned one up again, signed, where commits are signed at all. It refuses while an agent holds the card, on an adopted branch, and on
 commits already pushed unless `--allow-pushed` — then prints the force push,
 which it never runs. Like `squash`, rewriting history is the human's call: ask
 before you run it.

@@ -18,6 +18,9 @@ type Log struct {
 	// PushCommand is what publishes a rewrite of pushed commits. gummi
 	// never runs it.
 	PushCommand string `json:"pushCommand,omitempty"`
+	// Signable: commits are signed here and some of these are not, so a
+	// plan may ask for them signed.
+	Signable bool `json:"signable,omitempty"`
 }
 
 // LogCommit is one commit of a Log.
@@ -35,6 +38,8 @@ type LogCommit struct {
 	Checkpoint bool `json:"checkpoint,omitempty"`
 	// Pushed: the branch's upstream already has it.
 	Pushed bool `json:"pushed,omitempty"`
+	// Signed: the commit carries a signature.
+	Signed bool `json:"signed,omitempty"`
 	// Warning names agent-authorship metadata in the message.
 	Warning string `json:"warning,omitempty"`
 }
@@ -49,6 +54,9 @@ type RewriteRequest struct {
 	// AcknowledgePushed is the yes to a rewrite that replaces commits the
 	// remote already has, which will need a force push.
 	AcknowledgePushed bool `json:"acknowledgePushed,omitempty"`
+	// Sign makes again every commit from the first unsigned one up,
+	// signed. Refused where commits are not signed.
+	Sign bool `json:"sign,omitempty"`
 }
 
 // RewriteGroup is one commit of the result: the commits it replaces and

@@ -1014,7 +1014,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .commit .subj{font-size:13.5px;font-weight:500;overflow-wrap:anywhere;min-width:0}
 .commit.cp .subj{color:var(--fg2);font-weight:400}
 .commit .tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);border:1px solid var(--line2);border-radius:4px;padding:0 5px}
-.commit .tag.pushed{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line2))}
+.commit .tag.pushed,.commit .tag.tosign{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line2))}
 .commit .tag.warn{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line2))}
 .commit .cm{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:12px;color:var(--fg3)}
 .commit .cm .into{color:var(--accent)}

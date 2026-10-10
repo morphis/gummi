@@ -77,3 +77,39 @@ func TestRewriteNeedsAPlan(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// `gummi rewrite --sign` needs no plan: where commits are signed it makes
+// the card's unsigned ones again, signed, and says so where they are not.
+func TestRewriteSignsWithoutAPlan(t *testing.T) {
+	_, f := squashCLIRepo(t)
+	wt := filepath.Join(".gummi", "worktrees", string(f.ID))
+	if err := runCLI("rewrite", string(f.ID), "--sign"); err == nil || !strings.Contains(err.Error(), "not signed here") {
+		t.Fatalf("signing where nothing signs: err = %v", err)
+	}
+
+	stub := filepath.Join(t.TempDir(), "sign")
+	script := "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED ' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nstub\\n-----END PGP SIGNATURE-----\\n'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, wt, "config", "gpg.program", stub)
+	cliGit(t, wt, "config", "commit.gpgsign", "true")
+	subjects := cliGit(t, wt, "log", "--format=%s", "origin/main..HEAD")
+
+	var runErr error
+	out := captureStdout(t, func() { runErr = runCLI("rewrite", string(f.ID), "--sign") })
+	if runErr != nil || !strings.Contains(out, "history rewritten") {
+		t.Fatalf("rewrite --sign: %v %q", runErr, out)
+	}
+	if got := cliGit(t, wt, "log", "--format=%s", "origin/main..HEAD"); got != subjects {
+		t.Errorf("subjects = %q, want %q", got, subjects)
+	}
+	text := captureStdout(t, func() { runErr = runCLI("log", string(f.ID)) })
+	if runErr != nil || strings.Count(text, "signed") != 3 {
+		t.Errorf("log after signing: %v %q", runErr, text)
+	}
+	out = captureStdout(t, func() { runErr = runCLI("rewrite", string(f.ID), "--sign") })
+	if runErr != nil || !strings.Contains(out, "leaves the branch as it is") {
+		t.Errorf("signing again: %v %q", runErr, out)
+	}
+}

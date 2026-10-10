@@ -49,6 +49,7 @@ func (e Env) Read(ctx context.Context, f domain.Feature, busy bool) (Log, error)
 		out.Why = string(f.ID) + " has no commits of its own yet"
 	}
 	out.PushCommand = engine.PushCommandFor(ctx, mgr, &f)
+	out.Signing = mgr.Signing(ctx, &f)
 	return out, nil
 }
 

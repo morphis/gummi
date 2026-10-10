@@ -194,13 +194,7 @@ func TestRewriteOfPushedCommitsNeedsAnAcknowledgement(t *testing.T) {
 func TestRewriteSignsWhereCommitsAreSigned(t *testing.T) {
 	root := newRepo(t)
 	m, f, p, base := checkpointedFeature(t, root)
-	stub := filepath.Join(t.TempDir(), "sign")
-	script := "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED ' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nstub\\n-----END PGP SIGNATURE-----\\n'\n"
-	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	mustGit(t, root, "config", "gpg.program", stub)
-	mustGit(t, root, "config", "commit.gpgsign", "true")
+	signWithStub(t, root)
 	c := shas(t, m, base, f, root)
 
 	if _, err := m.Rewrite(ctx, f, base, RewritePlan{Head: c[2], Groups: []RewriteGroup{
@@ -210,5 +204,90 @@ func TestRewriteSignsWhereCommitsAreSigned(t *testing.T) {
 	}
 	if raw := mustGit(t, p, "cat-file", "commit", "HEAD"); !strings.Contains(raw, "gpgsig -----BEGIN PGP SIGNATURE-----") {
 		t.Fatalf("the rewritten commit is not signed:\n%s", raw)
+	}
+}
+
+// signWithStub switches commit signing on in root, through a program
+// that answers git as gpg does without holding a key.
+func signWithStub(t *testing.T, root string) {
+	t.Helper()
+	stub := filepath.Join(t.TempDir(), "sign")
+	script := "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED ' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nstub\\n-----END PGP SIGNATURE-----\\n'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "config", "gpg.program", stub)
+	mustGit(t, root, "config", "commit.gpgsign", "true")
+}
+
+// A plan that asks for signatures makes every unsigned commit again,
+// signed, with its message, author and tree as they were; a second ask
+// finds nothing left to do.
+func TestRewriteSignsEveryUnsignedCommit(t *testing.T) {
+	root := newRepo(t)
+	m, f, p, base := checkpointedFeature(t, root)
+	c := shas(t, m, base, f, root)
+	plan := func(c []string) RewritePlan {
+		pl := RewritePlan{Head: c[len(c)-1], Sign: true}
+		for _, sha := range c {
+			pl.Groups = append(pl.Groups, RewriteGroup{Commits: []string{sha}})
+		}
+		return pl
+	}
+
+	if _, err := m.Rewrite(ctx, f, base, plan(c), false); !errors.Is(err, ErrNotSigning) {
+		t.Fatalf("signing where nothing signs: err = %v, want ErrNotSigning", err)
+	}
+	if got := shas(t, m, base, f, root); got[2] != c[2] {
+		t.Fatal("a refused plan moved the branch")
+	}
+
+	signWithStub(t, root)
+	if !m.Signing(ctx, f) {
+		t.Fatal("Signing is false with commit.gpgsign on")
+	}
+	preTree := mustGit(t, p, "rev-parse", "HEAD^{tree}")
+	before := mustGit(t, p, "log", "--format=%s|%an|%aI|%T", base+"..HEAD")
+	prev, err := m.PlanRewrite(ctx, f, base, plan(c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev.Noop || prev.Changed != 3 || !prev.Entries[0].Signed {
+		t.Fatalf("preview = %+v, want 3 commits changed and signed", prev)
+	}
+	if _, err := m.Rewrite(ctx, f, base, plan(c), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustGit(t, p, "log", "--format=%s|%an|%aI|%T", base+"..HEAD"); got != before {
+		t.Errorf("messages, authors or trees changed:\n%s\nwant\n%s", got, before)
+	}
+	if got := mustGit(t, p, "rev-parse", "HEAD^{tree}"); got != preTree {
+		t.Errorf("tree changed")
+	}
+	log, err := m.Log(ctx, f, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range log {
+		if !e.Signed {
+			t.Errorf("%s %q is not signed", e.Short, e.Subject)
+		}
+	}
+
+	// signed already: kept as they are
+	signed := shas(t, m, base, f, root)
+	if tip, err := m.Rewrite(ctx, f, base, plan(signed), false); err != nil || tip != "" {
+		t.Fatalf("signing a signed branch: tip %q err %v, want a no-op", tip, err)
+	}
+
+	// an unsigned commit on top: the signed ones below keep their SHAs
+	mustGit(t, p, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "wip: unsigned")
+	mixed := shas(t, m, base, f, root)
+	if _, err := m.Rewrite(ctx, f, base, plan(mixed), false); err != nil {
+		t.Fatal(err)
+	}
+	after := shas(t, m, base, f, root)
+	if after[2] != signed[2] || after[3] == mixed[3] {
+		t.Errorf("after = %v: want the signed three kept and the fourth made again", after)
 	}
 }

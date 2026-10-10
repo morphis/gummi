@@ -18,10 +18,11 @@ import (
 )
 
 // The log tab: the card's own commits, oldest first, and the one thing
-// that can be done to them — reword a commit, or squash it into the one
-// before. Both keep the branch's content exactly as it was, so the verify
-// that ran on it and the comments on its diff stay true; reordering and
-// dropping are not offered because either would change what was verified.
+// that can be done to them — reword a commit, squash it into the one
+// before, or sign the ones that are not. All of it keeps the branch's
+// content exactly as it was, so the verify that ran on it and the comments
+// on its diff stay true; reordering and dropping are not offered because
+// either would change what was verified.
 //
 // It reads branchlog, the same fold as the web page's Log tab and
 // `gummi log`, and refuses for branchlog.Refusal's reasons, so the two
@@ -40,6 +41,8 @@ type logView struct {
 	// the first commit of their group
 	squash map[string]bool
 	msg    map[string]string
+	// sign asks for the unsigned commits made again, signed
+	sign bool
 	// open holds the commits whose changes are drawn under them, and
 	// patches what was read for each
 	open    map[string]bool
@@ -111,6 +114,7 @@ func (m *Shell) logLoaded(msg logLoadedMsg) tea.Cmd { //nolint:unparam // a mess
 		lv.cursor, lv.scroll = old.cursor, old.scroll
 		if old.head() == lv.head() {
 			lv.squash, lv.msg, lv.open, lv.patches = old.squash, old.msg, old.open, old.patches
+			lv.sign = old.sign && lv.log.Signable()
 		}
 	}
 	lv.cursor = min(lv.cursor, max(len(lv.log.Rows)-1, 0))
@@ -125,7 +129,12 @@ func (lv *logView) head() string {
 	return ""
 }
 
-func (lv *logView) dirty() bool { return len(lv.squash) > 0 || len(lv.msg) > 0 }
+func (lv *logView) dirty() bool { return len(lv.squash) > 0 || len(lv.msg) > 0 || lv.sign }
+
+// reset drops the draft.
+func (lv *logView) reset() {
+	lv.squash, lv.msg, lv.sign = map[string]bool{}, map[string]string{}, false
+}
 
 func (lv *logView) rewritable() bool { return lv.log.Why == "" && len(lv.log.Rows) > 0 }
 
@@ -147,7 +156,7 @@ func (lv *logView) groupSize(i int) int {
 }
 
 func (lv *logView) plan() worktree.RewritePlan {
-	return worktree.RewritePlan{Head: lv.head(), Groups: branchlog.PlanGroups(lv.log.Rows, lv.squash, lv.msg)}
+	return worktree.RewritePlan{Head: lv.head(), Groups: branchlog.PlanGroups(lv.log.Rows, lv.squash, lv.msg), Sign: lv.sign}
 }
 
 func (lv *logView) bindings() []binding {
@@ -158,6 +167,9 @@ func (lv *logView) bindings() []binding {
 			binding{key: "e", label: "reword", help: "edit the message of the commit (or of the squashed group it leads)", bar: true},
 			binding{key: "s", label: "squash", help: "fold the commit into the one before it, or unfold it", bar: true},
 		)
+		if lv.log.Signable() {
+			bs = append(bs, binding{key: "S", label: "sign", help: "sign the commits that are not signed — each is made again, with the same content and message", bar: true})
+		}
 		if lv.dirty() {
 			bs = append(bs,
 				binding{key: "a", label: "apply", help: "rewrite the branch to the draft — its content stays exactly the same", bar: true, sticky: true},
@@ -231,14 +243,25 @@ func (m *Shell) handleLogKey(key string) tea.Cmd {
 			return nil
 		}
 		m.Overlay.Push(m.newRewordDialog(lv, lv.lead(lv.cursor)))
+	case "S":
+		switch {
+		case !lv.rewritable():
+			return m.logRefused()
+		case lv.log.Signable():
+			lv.sign = !lv.sign
+		case !lv.log.Signing:
+			m.notice = noticeMsg{text: "commits are not signed here — switch signing on first"}
+		default:
+			m.notice = noticeMsg{text: "every commit is already signed"}
+		}
 	case "u":
-		lv.squash, lv.msg = map[string]bool{}, map[string]string{}
+		lv.reset()
 	case "a":
 		if !lv.rewritable() {
 			return m.logRefused()
 		}
 		if !lv.dirty() {
-			m.notice = noticeMsg{text: "nothing to rewrite — reword a commit (e) or squash one (s) first"}
+			m.notice = noticeMsg{text: "nothing to rewrite — reword a commit (e), squash one (s) or sign them (S) first"}
 			return nil
 		}
 		return m.prepareRewrite(lv.f, lv.plan())
@@ -308,6 +331,9 @@ func (m *Shell) logPrepared(msg logPreparedMsg) tea.Cmd { //nolint:unparam // a 
 	}
 	before := len(m.logv.log.Rows)
 	detail := fmt.Sprintf("%d commit%s → %d · the branch's content stays exactly the same", before, plural(before), len(msg.preview.Entries))
+	if msg.plan.Sign {
+		detail += fmt.Sprintf("\n%d commit%s made again, signed", msg.preview.Changed, plural(msg.preview.Changed))
+	}
 	label := "Rewrite"
 	if msg.preview.Pushed {
 		detail += "\nthe remote already has commits this replaces — gummi will not push; afterwards run:\n  " + msg.push
@@ -350,7 +376,7 @@ func (m *Shell) rewriteFeature(f domain.Feature, plan worktree.RewritePlan, ackn
 func (m *Shell) logRewritten(msg logRewrittenMsg) tea.Cmd {
 	m.notice = msg.notice
 	if m.logv != nil && m.logv.f.ID == msg.f.ID && !msg.notice.isErr {
-		m.logv.squash, m.logv.msg = map[string]bool{}, map[string]string{}
+		m.logv.reset()
 	}
 	cmds := []tea.Cmd{m.loadRows}
 	if m.logv != nil && m.logv.f.ID == msg.f.ID {
@@ -415,6 +441,12 @@ func (lv *logView) lines(m *Shell, w int) ([]string, int) {
 		}
 		if r.Pushed {
 			tags = append(tags, s.Warning.Render("pushed"))
+		}
+		switch {
+		case r.Signed:
+			tags = append(tags, s.Faint.Render("signed"))
+		case lv.sign:
+			tags = append(tags, s.Warning.Render("to sign"))
 		}
 		if r.Warning != "" {
 			tags = append(tags, s.Error.Render("attribution"))

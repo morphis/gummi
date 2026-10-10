@@ -67,6 +67,9 @@ func printLog(w io.Writer, _ domain.Feature, l branchlog.Log) {
 		if r.Pushed {
 			tags = append(tags, "pushed")
 		}
+		if r.Signed {
+			tags = append(tags, "signed")
+		}
 		if r.Warning != "" {
 			tags = append(tags, "attribution")
 		}
@@ -93,16 +96,23 @@ func printLog(w io.Writer, _ domain.Feature, l branchlog.Log) {
 // prints. The branch's content cannot change: reordering and dropping are
 // not expressible. gummi never pushes; a rewrite of pushed commits needs
 // --allow-pushed and prints the push to run.
+//
+// --sign makes again every commit from the first unsigned one up, signed,
+// and needs no plan of its own: without one every commit keeps its
+// message and only the signatures are new.
 func runRewrite(fl cliFlags, args []string) error {
 	idArg, err := oneID("rewrite", args)
 	if err != nil {
 		return err
 	}
-	req, err := readRewritePlan(fl.String("plan"))
-	if err != nil {
-		return err
+	sign := fl.Bool("sign")
+	var req webapi.RewriteRequest
+	if !sign || fl.String("plan") != "" {
+		if req, err = readRewritePlan(fl.String("plan")); err != nil {
+			return err
+		}
 	}
-	plan := worktree.RewritePlan{Head: req.Head}
+	plan := worktree.RewritePlan{Head: req.Head, Sign: sign || req.Sign}
 	for _, g := range req.Groups {
 		plan.Groups = append(plan.Groups, worktree.RewriteGroup{Commits: g.Commits, Message: g.Message})
 	}
@@ -118,6 +128,17 @@ func runRewrite(fl cliFlags, args []string) error {
 		}
 		defer release()
 		env := branchlog.Env{Store: store, Pool: pool}
+		if len(plan.Groups) == 0 {
+			// --sign alone: the branch as it reads now
+			l, err := env.Read(ctx, f, false)
+			if err != nil {
+				return err
+			}
+			plan.Groups = branchlog.PlanGroups(l.Rows, nil, nil)
+			if n := len(l.Rows); n > 0 {
+				plan.Head = l.Rows[n-1].SHA
+			}
+		}
 		if fl.Bool("dry-run") {
 			prev, err := env.Plan(ctx, f, false, plan)
 			if err != nil {
@@ -157,7 +178,7 @@ func runRewrite(fl cliFlags, args []string) error {
 func readRewritePlan(src string) (webapi.RewriteRequest, error) {
 	var req webapi.RewriteRequest
 	if src == "" {
-		return req, errors.New("rewrite needs a plan: --plan <file> (or --plan - for stdin); see `gummi log <id> --json` for the commits it names")
+		return req, errors.New("rewrite needs a plan: --plan <file> (or --plan - for stdin), or --sign alone; see `gummi log <id> --json` for the commits it names")
 	}
 	var (
 		raw []byte

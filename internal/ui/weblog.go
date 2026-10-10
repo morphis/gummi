@@ -37,6 +37,7 @@ func logError(id domain.FeatureID, err error) error {
 	case errors.As(err, &refused),
 		errors.Is(err, worktree.ErrPlanMismatch),
 		errors.Is(err, worktree.ErrPushedNotAcknowledged),
+		errors.Is(err, worktree.ErrNotSigning),
 		errors.Is(err, worktree.ErrDirtyWorktree),
 		errors.Is(err, worktree.ErrRebaseInProgress),
 		errors.Is(err, worktree.ErrNoCommitsBeyondBase),
@@ -65,6 +66,7 @@ func WebLog(base string, l branchlog.Log) webapi.Log {
 	out := webapi.Log{
 		Base: base, Commits: make([]webapi.LogCommit, 0, len(l.Rows)),
 		Why: l.Why, Rewritable: l.Why == "" && len(l.Rows) > 0, PushCommand: l.PushCommand,
+		Signable: l.Signable(),
 	}
 	for _, r := range l.Rows {
 		out.Commits = append(out.Commits, webLogCommit(r))
@@ -78,7 +80,7 @@ func WebLog(base string, l branchlog.Log) webapi.Log {
 func webLogCommit(r branchlog.Row) webapi.LogCommit {
 	return webapi.LogCommit{
 		SHA: r.SHA, Short: r.Short, Subject: r.Subject, Body: r.Body, Author: r.Author, At: r.At,
-		Files: r.Files, Add: r.Add, Del: r.Del, Checkpoint: r.Checkpoint, Pushed: r.Pushed, Warning: r.Warning,
+		Files: r.Files, Add: r.Add, Del: r.Del, Checkpoint: r.Checkpoint, Pushed: r.Pushed, Signed: r.Signed, Warning: r.Warning,
 	}
 }
 
@@ -102,7 +104,7 @@ func workPlan(req webapi.RewriteRequest) (worktree.RewritePlan, error) {
 	if len(req.Groups) == 0 {
 		return worktree.RewritePlan{}, invalid("a plan needs at least one commit")
 	}
-	plan := worktree.RewritePlan{Head: req.Head}
+	plan := worktree.RewritePlan{Head: req.Head, Sign: req.Sign}
 	for _, g := range req.Groups {
 		plan.Groups = append(plan.Groups, worktree.RewriteGroup{Commits: g.Commits, Message: g.Message})
 	}

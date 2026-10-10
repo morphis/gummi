@@ -4658,6 +4658,19 @@ changed run keep their SHAs. It still asserts the tree afterwards, as
 `Collapse` does. Author and author date come from the first commit of
 each run.
 
+Where git signs commits (`commit.gpgsign`, whether from the switch of
+§22.2 or the person's own setup) the commits a rewrite writes are
+signed, and the log marks each commit that carries a signature — the
+header is read, not verified. A plan may also ask to **sign**: every
+commit from the first unsigned one up is then made again with its
+message, author and tree as they were, so a branch begun before signing
+was switched on ends signed without a rebase. A signed commit with
+nothing changing beneath it is kept, so asking twice is a no-op; where
+git signs nothing the plan is refused (`ErrNotSigning`) and no surface
+offers it (`branchlog.Log.Signable`). It is a rewrite like any other:
+new SHAs, the pushed acknowledgement, and the committer becomes whoever
+runs gummi.
+
 The plan carries the tip it was made against, and a branch that has
 moved since refuses it (`ErrPlanMismatch`) rather than being rewritten
 from a view that is no longer true. Every surface dry-runs the plan

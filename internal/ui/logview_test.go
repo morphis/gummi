@@ -139,3 +139,53 @@ func TestLogRewordRefusesAttribution(t *testing.T) {
 		t.Fatal("a message carrying attribution was kept")
 	}
 }
+
+// S is offered only where commits are signed and some are not; it drafts
+// every unsigned commit to be made again, and applying leaves them all
+// signed with the content as it was.
+func TestLogTabSignsTheUnsignedCommits(t *testing.T) {
+	m, wt := logFixture(t)
+	m = press(t, m, key('S'))
+	if m.logv.sign || !strings.Contains(m.notice.text, "not signed here") {
+		t.Fatalf("S where nothing signs: sign=%v notice=%q", m.logv.sign, m.notice.text)
+	}
+
+	stub := filepath.Join(t.TempDir(), "sign")
+	script := "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED ' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nstub\\n-----END PGP SIGNATURE-----\\n'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "config", "gpg.program", stub)
+	git(t, wt, "config", "commit.gpgsign", "true")
+	tree := gitOut(t, wt, "rev-parse", "HEAD^{tree}")
+
+	m = press(t, m, key('r'))
+	if !m.logv.log.Signable() {
+		t.Fatalf("log = %+v, want signable", m.logv.log)
+	}
+	m = press(t, m, key('S'))
+	if screen := ansi.Strip(m.mainView(100, 30)); strings.Count(screen, "to sign") != 3 {
+		t.Fatalf("the draft does not mark three commits to sign:\n%s", screen)
+	}
+	m = press(t, m, key('a'))
+	c, ok := m.Overlay.Top().(*confirmDialog)
+	if !ok || !strings.Contains(c.detail, "3 commits made again, signed") {
+		t.Fatalf("a did not ask first, or not about signing (notice %q)", m.notice.text)
+	}
+	m.Overlay.Pop()
+	m = pump(t, m, c.onConfirm())
+	if m.notice.isErr || !strings.Contains(m.notice.text, "history rewritten") {
+		t.Fatalf("notice = %q", m.notice.text)
+	}
+	if got := gitOut(t, wt, "rev-parse", "HEAD^{tree}"); got != tree {
+		t.Error("content changed")
+	}
+	for _, r := range m.logv.log.Rows {
+		if !r.Signed {
+			t.Errorf("%s %q is not signed", r.Short, r.Subject)
+		}
+	}
+	if m.logv.sign || m.logv.log.Signable() {
+		t.Error("a signed branch still offers signing")
+	}
+}
