@@ -2,6 +2,8 @@ package worktree
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -183,5 +185,30 @@ func TestRewriteOfPushedCommitsNeedsAnAcknowledgement(t *testing.T) {
 	}
 	if _, err := m.Rewrite(ctx, f, base, plan, true); err != nil {
 		t.Fatalf("acknowledged rewrite: %v", err)
+	}
+}
+
+// A rewrite builds its commits with commit-tree, which signs only when
+// told to: with commit.gpgsign on, the commits it writes are signed like
+// the ones they replace.
+func TestRewriteSignsWhereCommitsAreSigned(t *testing.T) {
+	root := newRepo(t)
+	m, f, p, base := checkpointedFeature(t, root)
+	stub := filepath.Join(t.TempDir(), "sign")
+	script := "#!/bin/sh\ncat >/dev/null\necho '[GNUPG:] SIG_CREATED ' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\n\\nstub\\n-----END PGP SIGNATURE-----\\n'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "config", "gpg.program", stub)
+	mustGit(t, root, "config", "commit.gpgsign", "true")
+	c := shas(t, m, base, f, root)
+
+	if _, err := m.Rewrite(ctx, f, base, RewritePlan{Head: c[2], Groups: []RewriteGroup{
+		{Commits: c, Message: "feat(x): all of it"},
+	}}, false); err != nil {
+		t.Fatal(err)
+	}
+	if raw := mustGit(t, p, "cat-file", "commit", "HEAD"); !strings.Contains(raw, "gpgsig -----BEGIN PGP SIGNATURE-----") {
+		t.Fatalf("the rewritten commit is not signed:\n%s", raw)
 	}
 }

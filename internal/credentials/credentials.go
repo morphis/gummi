@@ -6,7 +6,9 @@
 // gh commands gummi itself runs; the key is never written anywhere a
 // command reads it — gummi answers as an ssh-agent, on a private socket,
 // for exactly as long as one git command that reaches the remote runs.
-// No agent backend's environment carries either. A workspace with nothing
+// No agent backend's environment carries either. The key may also sign
+// commits (sign.go): then it is gummi that git calls to sign, and what an
+// agent's environment carries is that instruction, not the key. A workspace with nothing
 // stored changes nothing: gh and git authenticate as the machine already
 // does.
 //
@@ -61,6 +63,8 @@ type Status struct {
 	KeyType        string
 	KeyFingerprint string
 	KeyPublic      string
+	// Signing reports that commits are signed with the stored key.
+	Signing bool
 }
 
 func (s Store) read(name string) string {
@@ -107,12 +111,17 @@ func (s Store) SetToken(tok string) error {
 }
 
 // SetSSHKey stores body, a private key in OpenSSH or PEM form, as the key
-// gummi answers with; an empty body forgets it. A passphrase-protected key
+// gummi answers with; an empty body forgets it, and with it the switch
+// that signs commits. A key that replaces another is signed with in its
+// place. A passphrase-protected key
 // is refused: there is nobody to ask for the passphrase when a push runs.
 func (s Store) SetSSHKey(body string) error {
 	body = strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
 	if body == "" {
-		return s.write(keyFile, "")
+		if err := s.write(keyFile, ""); err != nil {
+			return err
+		}
+		return s.syncPublic()
 	}
 	if len(body) > maxKey {
 		return errors.New("that is too long to be an SSH private key")
@@ -124,7 +133,10 @@ func (s Store) SetSSHKey(body string) error {
 		}
 		return errors.New("that is not an SSH private key gummi can read (paste the whole file, from -----BEGIN to -----END)")
 	}
-	return s.write(keyFile, body)
+	if err := s.write(keyFile, body); err != nil {
+		return err
+	}
+	return s.syncPublic()
 }
 
 // GenerateSSHKey makes a fresh ed25519 key on this host and stores it in
@@ -139,7 +151,10 @@ func (s Store) GenerateSSHKey() error {
 	if err != nil {
 		return err
 	}
-	return s.write(keyFile, strings.TrimSpace(string(pem.EncodeToMemory(block))))
+	if err := s.write(keyFile, strings.TrimSpace(string(pem.EncodeToMemory(block)))); err != nil {
+		return err
+	}
+	return s.syncPublic()
 }
 
 // key is the stored private key, parsed; nil for none or one that no
@@ -172,6 +187,7 @@ func (s Store) Status() Status {
 			st.KeyType = pub.Type()
 			st.KeyFingerprint = ssh.FingerprintSHA256(pub)
 			st.KeyPublic = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub))) + " gummi"
+			st.Signing = s.read(signFile) != ""
 		}
 	}
 	return st
@@ -196,11 +212,14 @@ var (
 )
 
 // Use names the store this process reads; the commands call it once the
-// workspace is known. Until then nothing is stored.
+// workspace is known, and again when what it holds changes. Until then
+// nothing is stored. It is also what switches commit signing on or off
+// for the commands this process starts from here on.
 func Use(s Store) {
 	mu.Lock()
 	defer mu.Unlock()
 	current = s
+	applySigning()
 }
 
 // Current is the store Use named.

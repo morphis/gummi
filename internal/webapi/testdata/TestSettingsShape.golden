@@ -8,7 +8,8 @@
     "keySet": true,
     "keyType": "ssh-ed25519",
     "keyFingerprint": "SHA256:u1Yx0kq3",
-    "keyPublic": "ssh-ed25519 AAAAC3Nz gummi"
+    "keyPublic": "ssh-ed25519 AAAAC3Nz gummi",
+    "signing": true
   },
   "identity": {
     "name": "Ada Lovelace",

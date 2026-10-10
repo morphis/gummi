@@ -55,12 +55,24 @@ test('a token and a key are stored from settings and never shown again', async (
   await expect(page.getByTestId('settings-token-held')).toHaveCount(0);
   await expect(page.getByTestId('settings-sshkey-fp')).toBeVisible();
 
+  // signing commits with the key is a switch beside it, off until asked for
+  await expect(page.getByTestId('settings-sign')).not.toBeChecked();
+  await page.getByTestId('settings-sign').check();
+  await expect.poll(async () => (await api('GET', '/api/settings')).json.credentials.signing).toBe(true);
+  await expect(page.getByTestId('settings-sign')).toBeChecked();
+
   // a key made on the host replaces the pasted one; only its public half shows
   const pasted = await page.getByTestId('settings-sshkey-fp').textContent();
   await page.getByTestId('settings-sshkey-generate').click();
   await expect(page.getByTestId('settings-sshkey-fp')).not.toHaveText(pasted!);
   await expect(page.getByTestId('settings-sshkey-pub')).toContainText('ssh-ed25519 ');
   expect(await page.content()).not.toContain('PRIVATE KEY-----\n');
+
+  // forgetting the key takes the switch with it
+  await expect(page.getByTestId('settings-sign')).toBeChecked();
+  await page.getByTestId('settings-sshkey-forget').click();
+  await expect(page.getByTestId('settings-sign')).toHaveCount(0);
+  expect((await api('GET', '/api/settings')).json.credentials.signing).toBe(false);
 });
 
 test('the git identity is set from settings', async ({ pairedPage: page, api }) => {

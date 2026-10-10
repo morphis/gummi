@@ -279,7 +279,7 @@ func (m *Shell) WebSettings() webapi.Settings {
 		Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen,
 		Credentials: webapi.Credentials{
 			TokenSet: st.TokenSet, TokenHint: st.TokenHint,
-			KeySet: st.KeySet, KeyType: st.KeyType, KeyFingerprint: st.KeyFingerprint, KeyPublic: st.KeyPublic,
+			KeySet: st.KeySet, KeyType: st.KeyType, KeyFingerprint: st.KeyFingerprint, KeyPublic: st.KeyPublic, Signing: st.Signing,
 		},
 	}
 }
@@ -364,8 +364,9 @@ func (b *Bridge) SetSettings(ctx context.Context, req webapi.SettingsRequest) (w
 }
 
 // SetCredentials is PUT /api/settings/credentials: store, replace or
-// forget the GitHub token and the SSH key. The store is the one this
-// process's gh and git calls read from then on, and publishing is detected
+// forget the GitHub token and the SSH key, and switch signing commits with
+// that key on or off. The store is the one this process's gh and git calls
+// read from then on, and publishing is detected
 // again, since a token is what makes gh signed in.
 func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsRequest) (webapi.Settings, error) {
 	var refused error
@@ -388,6 +389,12 @@ func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsReque
 		}
 		if req.SSHKey != nil {
 			if err := store.SetSSHKey(*req.SSHKey); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		if req.SignCommits != nil {
+			if err := store.SetSigning(*req.SignCommits); err != nil {
 				refused = webErr(WebBadRequest, "%s", err.Error())
 				return nil
 			}

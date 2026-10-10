@@ -46,6 +46,14 @@ func version() string {
 }
 
 func main() {
+	// git signing a commit with the stored SSH key calls gummi as its
+	// signing program (credentials.UseSigner), in ssh-keygen's grammar
+	if credentials.IsSignerCall(os.Args[1:]) {
+		os.Exit(credentials.RunSigner(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	if exe, err := os.Executable(); err == nil {
+		credentials.UseSigner(exe)
+	}
 	if err := run(os.Args[1:]); err != nil {
 		// A driver invocation reports its typed exit via exitError, having
 		// already told the story on the NDJSON stream — exit with that code

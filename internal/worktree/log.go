@@ -393,6 +393,11 @@ func (m *Manager) commitTree(ctx context.Context, wt, tree, parent string, g res
 	// message via a file-less path: commit-tree reads -m as given, and
 	// --cleanup does not apply, so trailing newline is ours to add
 	args := []string{"commit-tree", tree, "-p", parent, "-m", g.message}
+	// commit-tree is the one commit git does not sign on commit.gpgsign
+	// alone, so a rewrite would otherwise strip the signatures it replaces
+	if on, _ := runGit(ctx, wt, "config", "--type=bool", "--get", "commit.gpgsign"); on == "true" {
+		args = append(args, "-S")
+	}
 	return runGitEnv(ctx, wt, []string{
 		"GIT_AUTHOR_NAME=" + fields[0],
 		"GIT_AUTHOR_EMAIL=" + fields[1],

@@ -4817,8 +4817,30 @@ and a workspace with neither behaves exactly as above.
   socket in a private temporary directory and points `SSH_AUTH_SOCK` at
   it. That agent lists and signs with the one key and refuses to be
   added to, emptied or locked.
-- Neither is put in an agent backend's environment, and nothing an
-  agent is given names where they are. That is not confinement: they
+- **The key may sign commits**, behind a switch beside it that is off
+  until a person turns it on (`signCommits`; refused with no key held,
+  and forgotten with the key). git signs through a program it runs as
+  `ssh-keygen -Y sign`, and gummi names *itself* as that program
+  (`gpg.format=ssh`, `gpg.ssh.program`, `user.signingkey`,
+  `commit.gpgsign`), so the key is still read by gummi alone. That
+  configuration is written to no repository: it rides git's own
+  `GIT_CONFIG_COUNT` variables in gummi's environment, after any the
+  environment already carried, and so reaches every process gummi
+  starts — its own checkpoints, landings, rebases and rewrites, the
+  commits a card's agent makes, and a person's terminal tab. Nothing
+  outside gummi is touched: a commit made in the main checkout from a
+  shell of your own is signed as the machine is set up to, or not at
+  all. The signer answers in git's namespace only, so it puts the
+  key's name to git objects and to nothing else. A session already
+  running keeps the environment it started with and picks the switch up
+  when it next starts. For GitHub to mark the commits verified the
+  public half must be added there as a *signing* key, and the git
+  identity must be an email verified on that account.
+- Neither is put in an agent backend's environment. With signing on, what
+  that environment carries is the instruction to call gummi and the path
+  of the key's public half — which is beside the key — and with it the
+  means to make a signed commit, which is the point of the switch.
+  Otherwise nothing an agent is given names where they are. That is not confinement: they
   are files of the account gummi runs as, so an unconfined agent can
   read them exactly as it can read `~/.ssh` (§22.7).
 - What is stored is part of the facts' fingerprint (§22.1): a credential

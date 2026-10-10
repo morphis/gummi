@@ -218,6 +218,9 @@ type Credentials struct {
 	KeyFingerprint string `json:"keyFingerprint,omitempty"`
 	// KeyPublic is the key's authorized_keys line, for adding to GitHub.
 	KeyPublic string `json:"keyPublic,omitempty"`
+	// Signing reports that commits made in this workspace are signed with
+	// the stored key.
+	Signing bool `json:"signing"`
 }
 
 // SettingsRequest is PUT /api/settings' body. An empty Name clears the
@@ -234,4 +237,7 @@ type CredentialsRequest struct {
 	// GenerateSSHKey makes a fresh key on the host in place of any held;
 	// it may not be sent together with SSHKey.
 	GenerateSSHKey bool `json:"generateSshKey,omitempty"`
+	// SignCommits switches signing commits with the stored key on or off;
+	// on is refused with no key held.
+	SignCommits *bool `json:"signCommits,omitempty"`
 }
