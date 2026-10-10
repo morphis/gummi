@@ -3,14 +3,18 @@ package ui
 import (
 	"context"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // Projections for the web face (DESIGN §20.1): the board as the TUI holds
@@ -86,6 +90,9 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		// the board counts from 1 at the bottom ("2/4"); the contract
 		// counts from 0, so the page can index with it.
 		row.Stack = &webapi.RowStack{ID: string(st.ID), Name: st.Name, Pos: st.Pos - 1, Of: st.Of, Stale: st.Stale}
+	}
+	if o := m.freeformObjective(r); o != nil {
+		row.Objective = string(o.State)
 	}
 	sess := m.sessionFor(f.ID)
 	it, needs := m.inbox.get(f.ID)
@@ -267,32 +274,143 @@ func (m *Shell) webResumeOffer() *webapi.ResumeOffer {
 
 // WebSettings is GET /api/settings: what the settings dialog holds.
 func (m *Shell) WebSettings() webapi.Settings {
-	return webapi.Settings{Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen}
+	st := m.credentialStore().Status()
+	return webapi.Settings{
+		Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen,
+		Credentials: webapi.Credentials{
+			TokenSet: st.TokenSet, TokenHint: st.TokenHint,
+			KeySet: st.KeySet, KeyType: st.KeyType, KeyFingerprint: st.KeyFingerprint, KeyPublic: st.KeyPublic, Signing: st.Signing,
+		},
+	}
 }
 
-// Settings is GET /api/settings.
+// credentialStore is where this board's GitHub token and SSH key are kept
+// (DESIGN §22.2); the zero store for a board with no workspace attached.
+func (m *Shell) credentialStore() credentials.Store {
+	if m.ws.Root == "" {
+		return credentials.Store{}
+	}
+	return credentials.Store{Dir: m.ws.CredentialsDir()}
+}
+
+// identityRoots are the repositories a git identity is written to: the
+// workspace's default and every named one.
+func (m *Shell) identityRoots() []string {
+	if m.wt == nil {
+		return nil
+	}
+	var roots []string
+	for _, name := range append([]string{""}, m.wt.Names()...) {
+		if root, ok := m.wt.RootForName(name); ok && !slices.Contains(roots, root) {
+			roots = append(roots, root)
+		}
+	}
+	return roots
+}
+
+// Settings is GET /api/settings. The git identity is read off the loop:
+// it asks git.
 func (b *Bridge) Settings(ctx context.Context) (webapi.Settings, error) {
 	var out webapi.Settings
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out = m.WebSettings(); return nil }); err != nil {
+	var roots []string
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out, roots = m.WebSettings(), m.identityRoots(); return nil }); err != nil {
 		return webapi.Settings{}, err
 	}
+	if len(roots) > 0 {
+		out.Identity.Name, out.Identity.Email = worktree.Identity(ctx, roots[0])
+	}
 	return out, nil
+}
+
+// SetIdentity is PUT /api/settings/identity: the name and email written
+// to the local git configuration of every repository this workspace
+// manages, so a card's commits and a landing are written as that person.
+func (b *Bridge) SetIdentity(ctx context.Context, req webapi.IdentityRequest) (webapi.Settings, error) {
+	name, email := strings.TrimSpace(req.Name), strings.TrimSpace(req.Email)
+	if err := worktree.CheckIdentity(name, email); err != nil {
+		return webapi.Settings{}, webErr(WebBadRequest, "%s", err.Error())
+	}
+	var roots []string
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { roots = m.identityRoots(); return nil }); err != nil {
+		return webapi.Settings{}, err
+	}
+	if len(roots) == 0 {
+		return webapi.Settings{}, webErr(WebBadRequest, "this workspace has no repository to set an identity in")
+	}
+	for _, root := range roots {
+		if err := worktree.SetIdentity(ctx, root, name, email); err != nil {
+			return webapi.Settings{}, err
+		}
+	}
+	return b.Settings(ctx)
 }
 
 // SetSettings is PUT /api/settings: the same write the terminal's
 // settings dialog makes. A name the workspace refuses is a bad request.
 func (b *Bridge) SetSettings(ctx context.Context, req webapi.SettingsRequest) (webapi.Settings, error) {
-	var out webapi.Settings
 	var refused error
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 		if err := m.setName(req.Name); err != nil {
 			refused = webErr(WebBadRequest, "%s", err.Error())
-			return nil
 		}
-		out = m.WebSettings()
 		return nil
 	}); err != nil {
 		return webapi.Settings{}, err
 	}
-	return out, refused
+	if refused != nil {
+		return webapi.Settings{}, refused
+	}
+	return b.Settings(ctx)
+}
+
+// SetCredentials is PUT /api/settings/credentials: store, replace or
+// forget the GitHub token and the SSH key, and switch signing commits with
+// that key on or off. The store is the one this process's gh and git calls
+// read from then on, and publishing is detected
+// again, since a token is what makes gh signed in.
+func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsRequest) (webapi.Settings, error) {
+	var refused error
+	if req.GenerateSSHKey && req.SSHKey != nil {
+		return webapi.Settings{}, webErr(WebBadRequest, "generate a key or store one, not both")
+	}
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		store := m.credentialStore()
+		// a request refused part-way has still written what came before
+		// the refusal, and this process must read the store as it now is
+		defer credentials.Use(store)
+		if req.GenerateSSHKey {
+			if err := store.GenerateSSHKey(); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		if req.GitHubToken != nil {
+			if err := store.SetToken(*req.GitHubToken); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		if req.SSHKey != nil {
+			if err := store.SetSSHKey(*req.SSHKey); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		if req.SignCommits != nil {
+			if err := store.SetSigning(*req.SignCommits); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
+		if m.publishEnabled {
+			return m.detectPublish
+		}
+		return nil
+	}); err != nil {
+		return webapi.Settings{}, err
+	}
+	if refused != nil {
+		return webapi.Settings{}, refused
+	}
+	return b.Settings(ctx)
 }

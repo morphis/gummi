@@ -17,6 +17,8 @@ export const agentScript = path.join(repoRoot, 'scripts', 'web-e2e-agent.py');
 
 /** The fake `gh` and the directory of canned answers it serves by default. */
 export const fakeGh = path.join(here, 'fake-gh');
+/** ssh for git, serving a workspace's stand-in github.com (see fake-ssh). */
+export const fakeSsh = path.join(here, 'fake-ssh');
 export const fakeGhData = path.join(here, 'gh');
 
 /**

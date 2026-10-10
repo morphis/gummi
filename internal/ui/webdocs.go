@@ -74,6 +74,9 @@ type WebDocs struct {
 	// two things a history rewrite asks of the model.
 	locks *state.CardLocks
 	busy  bool
+	// publish is the board's publishing switch and detection, captured:
+	// the PR tab's strip and the publish routes read it (publish.go)
+	publish webPublish
 	// attachments is the workspace's image store, for resolving a spec
 	// note's attachment ids into links; nil on a board with no engine.
 	attachments *attachment.Store
@@ -98,6 +101,7 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 		f: r.F, base: m.baseBranch(r.F), store: m.store, pool: m.wt, ws: m.ws,
 		now: m.now, threads: m.fetchPRReviewThreads,
 		locks: m.locks, busy: m.webCardBusy(r.F.ID) || m.cardBusy(r),
+		publish: webPublish{enabled: m.publishEnabled, checked: m.publishChecked, why: m.publishWhy, gh: m.publishGH, watch: r.watchOnly()},
 	}
 	if res := m.checksFor(r.F); len(res) > 0 {
 		d.manual = m.checks[r.F.ID]
@@ -537,12 +541,16 @@ func filesDir(ctx context.Context, pool *worktree.Pool, f domain.Feature) (strin
 // diffLines is the card's diff as the diff surface reads it, split in
 // the coordinates annotations use. why is set when there is none.
 func (d *WebDocs) diffLines(ctx context.Context) (lines []string, why string, err error) {
-	ok, err := d.pool.Exists(ctx, &d.f)
-	if err != nil {
-		return nil, "", err
-	}
-	if !ok {
-		return nil, noWorktreeYet(d.f), nil
+	// a main-checkout session has no worktree: its diff is the loose work
+	// in the checkout itself
+	if !d.f.MainCheckout {
+		ok, err := d.pool.Exists(ctx, &d.f)
+		if err != nil {
+			return nil, "", err
+		}
+		if !ok {
+			return nil, noWorktreeYet(d.f), nil
+		}
 	}
 	raw, err := d.pool.Diff(ctx, &d.f)
 	if err != nil {
@@ -760,6 +768,10 @@ func (d *WebDocs) PRLink(ctx context.Context) string {
 // its unresolved review threads and its conversation. A gh failure is
 // reported in Error, never as a failed read — the push command a person
 // needs does not depend on GitHub answering.
+//
+// The publish strip is not part of it: it follows the card's own tree as
+// much as GitHub, so the route asks PublishOffer on every read instead of
+// caching it with the rest.
 func (d *WebDocs) PR(ctx context.Context) webapi.PR {
 	f := d.fresh(ctx)
 	out := webapi.PR{PushCommand: d.pushCommand(ctx, f), Fetched: d.now()}

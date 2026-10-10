@@ -23,7 +23,7 @@ export function initKeys (a) {
     if (t.getAttribute?.('role') === 'button' && (e.key === 'Enter' || e.key === ' ')) return
     if (gAt && Date.now() - gAt < 1200) {
       gAt = 0
-      const tab = { s: 'spec', m: 'memory', d: 'diff', l: 'log', p: 'pr', r: 'stats' }[e.key]
+      const tab = { s: 'spec', m: 'memory', d: 'diff', l: 'log', p: 'pr', r: 'stats', t: 'terminal' }[e.key]
       if (tab) { e.preventDefault(); a.setTab(tab) }
       return
     }

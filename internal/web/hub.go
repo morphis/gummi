@@ -193,6 +193,14 @@ func (h *hub) subscribe(who Who, lastID string) (cl *client, backlog []sseEvent,
 	return cl, backlog, resync
 }
 
+// head is the id of the last event sent: a read that starts after taking it
+// is told of every later change by resuming the stream from it.
+func (h *hub) head() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return strconv.FormatUint(h.next, 10)
+}
+
 // sinceLocked is the ring's events after lastID, or resync when lastID is
 // outside what the ring can vouch for.
 func (h *hub) sinceLocked(lastID string) ([]sseEvent, bool) {
@@ -293,7 +301,13 @@ func (h *hub) close() {
 // handleEvents is GET /api/events.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	who, _ := WhoFrom(r.Context())
-	cl, backlog, resync := s.hub.subscribe(who, r.Header.Get("Last-Event-ID"))
+	// the browser's own retry names the last event it saw; a stream the
+	// page opens itself resumes from the read it drew last (?since=)
+	last := r.Header.Get("Last-Event-ID")
+	if last == "" {
+		last = r.URL.Query().Get("since")
+	}
+	cl, backlog, resync := s.hub.subscribe(who, last)
 	if cl == nil {
 		writeError(w, http.StatusServiceUnavailable, "the board is closing")
 		return

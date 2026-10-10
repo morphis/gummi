@@ -28,6 +28,9 @@ type LogEntry struct {
 	// Pushed marks a commit the branch's upstream already has: rewriting
 	// it means the remote needs a force push, which gummi never runs.
 	Pushed bool
+	// Signed marks a commit that carries a signature. Whose, and whether
+	// it verifies, is not read: that needs a keyring gummi does not keep.
+	Signed bool
 }
 
 // Message is the commit's whole message as git stores it.
@@ -60,6 +63,7 @@ func (m *Manager) logRange(ctx context.Context, dir string, f *domain.Feature, b
 		return nil, err
 	}
 	pushed := m.pushedSet(ctx, f, base)
+	signed := signedSet(ctx, dir, base, tip)
 	var entries []LogEntry
 	for rec := range strings.SplitSeq(out, "\x1e") {
 		if strings.TrimSpace(rec) == "" {
@@ -80,6 +84,7 @@ func (m *Manager) logRange(ctx context.Context, dir string, f *domain.Feature, b
 		e.Body = strings.TrimSpace(e.Body)
 		e.Files, e.Add, e.Del = sumNumstat(parts[4])
 		e.Pushed = pushed[e.SHA]
+		e.Signed = signed[e.SHA]
 		entries = append(entries, e)
 	}
 	return entries, nil
@@ -104,6 +109,44 @@ func (m *Manager) pushedSet(ctx context.Context, f *domain.Feature, base string)
 	return set
 }
 
+// signedSet is the commits of base..tip whose object carries a signature
+// header. It reads the header rather than asking git to verify, which
+// would need the signer's public key and say nothing more useful here.
+func signedSet(ctx context.Context, dir, base, tip string) map[string]bool {
+	out, err := runGitRaw(ctx, dir, "rev-list", "--header", base+".."+tip)
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for rec := range strings.SplitSeq(out, "\x00") {
+		head, _, _ := strings.Cut(rec, "\n\n")
+		sha, headers, _ := strings.Cut(strings.TrimLeft(head, "\n"), "\n")
+		for line := range strings.SplitSeq(headers, "\n") {
+			if strings.HasPrefix(line, "gpgsig ") || strings.HasPrefix(line, "gpgsig-sha256 ") {
+				set[sha] = true
+				break
+			}
+		}
+	}
+	return set
+}
+
+// Signing reports whether git signs the commits made in the card's
+// worktree (commit.gpgsign, wherever it is set: gummi's own switch rides
+// the environment, a person's own setup their git config).
+func (m *Manager) Signing(ctx context.Context, f *domain.Feature) bool {
+	wt, _, err := m.featurePaths(f)
+	if err != nil {
+		return false
+	}
+	return signing(ctx, wt)
+}
+
+func signing(ctx context.Context, wt string) bool {
+	on, _ := runGit(ctx, wt, "config", "--type=bool", "--get", "commit.gpgsign")
+	return on == "true"
+}
+
 // Refusals Rewrite and PlanRewrite return before any git mutation, each a
 // distinct precondition so a caller can say what to do about it. The
 // worktree preconditions Collapse has (ErrDirtyWorktree, ErrRebaseInProgress,
@@ -122,6 +165,9 @@ var (
 	// upstream already has, sent without the caller's yes to the force push
 	// it will need.
 	ErrPushedNotAcknowledged = errors.New("the plan rewrites commits already pushed")
+	// ErrNotSigning marks a plan that asks for its commits signed where
+	// git signs nothing: there is no key to sign them with.
+	ErrNotSigning = errors.New("commits are not signed here — switch signing on first")
 )
 
 // RewriteGroup is one commit of the rewritten branch: the run of
@@ -142,6 +188,11 @@ type RewritePlan struct {
 	// since is refused rather than rewritten from a stale view.
 	Head   string
 	Groups []RewriteGroup
+	// Sign makes again every commit from the first unsigned one up, so
+	// the whole branch ends signed. A commit already signed, with nothing
+	// below it changing, is kept as it is. Refused where git signs
+	// nothing (ErrNotSigning).
+	Sign bool
 }
 
 // RewritePreview is what a plan would do, computed without touching git.
@@ -162,6 +213,8 @@ type rewriteResolved struct {
 	branch  string
 	current []LogEntry
 	groups  []resolvedGroup
+	// signing is whether the commits this writes are signed.
+	signing bool
 	// firstChange is the index of the first group that is not kept as is.
 	firstChange int
 }
@@ -229,7 +282,10 @@ func (m *Manager) resolveRewrite(ctx context.Context, f *domain.Feature, base st
 		}
 		return idx, idx >= 0
 	}
-	r := &rewriteResolved{wt: wt, branch: branch, current: current, firstChange: -1}
+	r := &rewriteResolved{wt: wt, branch: branch, current: current, firstChange: -1, signing: signing(ctx, wt)}
+	if plan.Sign && !r.signing {
+		return nil, fmt.Errorf("%s: %w", f.ID, ErrNotSigning)
+	}
 	next := 0
 	for gi, g := range plan.Groups {
 		if len(g.Commits) == 0 {
@@ -256,7 +312,7 @@ func (m *Manager) resolveRewrite(ctx context.Context, f *domain.Feature, base st
 			return nil, fmt.Errorf("%s: %w: %q", f.ID, ErrAttribution, hit)
 		}
 		rg.keep = len(g.Commits) == 1 && strings.TrimSpace(rg.message) == strings.TrimSpace(rg.first.Message()) &&
-			(r.firstChange < 0)
+			(r.firstChange < 0) && (!plan.Sign || rg.first.Signed)
 		if !rg.keep && r.firstChange < 0 {
 			r.firstChange = gi
 		}
@@ -300,8 +356,10 @@ func (r *rewriteResolved) preview() RewritePreview {
 				}
 			}
 		}
+		e.Signed = g.last.Signed
 		if r.firstChange >= 0 && gi >= r.firstChange {
 			p.Changed++
+			e.Signed = r.signing
 			// a rewritten commit replaces whatever it was made from; if any
 			// of those was pushed, the remote has a commit this branch no
 			// longer does
@@ -321,7 +379,8 @@ func (r *rewriteResolved) preview() RewritePreview {
 // the branch's final tree is the old one by construction, nothing can
 // conflict, the worktree is never checked out from, and no hook runs.
 // Author identity and date are kept from the first commit of each run;
-// the committer is whoever is running gummi, now.
+// the committer is whoever is running gummi, now. Where git signs commits
+// these are signed, and plan.Sign makes again the ones that are not.
 //
 // It returns the new tip, or "" when the plan changes nothing. A plan that
 // replaces a pushed commit is refused unless acknowledgePushed is set, and
@@ -356,7 +415,7 @@ func (m *Manager) Rewrite(ctx context.Context, f *domain.Feature, base string, p
 		if err != nil {
 			return "", err
 		}
-		sha, err := m.commitTree(ctx, r.wt, tree, parent, g)
+		sha, err := m.commitTree(ctx, r.wt, tree, parent, g, r.signing)
 		if err != nil {
 			return "", err
 		}
@@ -381,7 +440,7 @@ func (m *Manager) Rewrite(ctx context.Context, f *domain.Feature, base string, p
 
 // commitTree writes one result commit, keeping the author of the first
 // commit of the run it replaces.
-func (m *Manager) commitTree(ctx context.Context, wt, tree, parent string, g resolvedGroup) (string, error) {
+func (m *Manager) commitTree(ctx context.Context, wt, tree, parent string, g resolvedGroup, sign bool) (string, error) {
 	meta, err := runGit(ctx, wt, "log", "-1", "--format=%an%x1f%ae%x1f%aI", g.first.SHA)
 	if err != nil {
 		return "", err
@@ -393,6 +452,11 @@ func (m *Manager) commitTree(ctx context.Context, wt, tree, parent string, g res
 	// message via a file-less path: commit-tree reads -m as given, and
 	// --cleanup does not apply, so trailing newline is ours to add
 	args := []string{"commit-tree", tree, "-p", parent, "-m", g.message}
+	// commit-tree is the one commit git does not sign on commit.gpgsign
+	// alone, so a rewrite would otherwise strip the signatures it replaces
+	if sign {
+		args = append(args, "-S")
+	}
 	return runGitEnv(ctx, wt, []string{
 		"GIT_AUTHOR_NAME=" + fields[0],
 		"GIT_AUTHOR_EMAIL=" + fields[1],

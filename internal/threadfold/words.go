@@ -191,6 +191,42 @@ func RebaseLine(p state.RebasePayload) string {
 	return Sanitize(line)
 }
 
+// PublishLine is the thread's line for a person's publish act (DESIGN §22).
+func PublishLine(p state.PublishPayload) string {
+	var parts []string
+	if p.Pushed != "" {
+		push := "pushed " + domain.ShortRev(p.Pushed)
+		if p.Repo != "" {
+			push += " to " + p.Repo
+		}
+		parts = append(parts, push)
+	}
+	pr := "PR #" + strconv.Itoa(p.Number)
+	switch p.Act {
+	case "create":
+		if p.Draft {
+			parts = append(parts, "opened draft "+pr)
+		} else {
+			parts = append(parts, "opened "+pr)
+		}
+	case "update":
+		if p.Pushed == "" {
+			parts = append(parts, "edited "+pr)
+		}
+	case "ready":
+		parts = append(parts, "marked "+pr+" ready for review")
+	case "draft":
+		parts = append(parts, "returned "+pr+" to draft")
+	}
+	if p.ToDraft {
+		parts = append(parts, "returned "+pr+" to draft")
+	}
+	if len(parts) == 0 {
+		parts = []string{"published it"}
+	}
+	return Sanitize(PersonWord(p.By) + " " + strings.Join(parts, " and "))
+}
+
 // PersonWord is ActorWord for a record a person made: a missing actor is
 // the terminal's own "you", as on every row written before names were.
 func PersonWord(actor string) string {
@@ -328,4 +364,14 @@ func ActorWord(actor string) string {
 		return "you"
 	}
 	return actor
+}
+
+// TurnBy names who sent a user turn in a thread: a person by name, "" for
+// the terminal's own (drawn as "you"), and "gummi" for a turn gummi sent
+// for a session's objective (DESIGN §19.11) — never drawn as the person's.
+func TurnBy(by string) string {
+	if by == state.ActorObjective {
+		return "gummi"
+	}
+	return state.PersonName(by)
 }

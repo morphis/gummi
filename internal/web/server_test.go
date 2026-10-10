@@ -2,6 +2,8 @@ package web
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -234,6 +236,66 @@ func TestAssetsRevalidateAndCarryAnETag(t *testing.T) {
 	_ = res.Body.Close()
 	if res.StatusCode != http.StatusNotModified {
 		t.Errorf("conditional GET = %d, want 304", res.StatusCode)
+	}
+}
+
+// An asset asked for under this binary's version is kept for good (the
+// version changes with any byte of it); asked for any other way it still
+// revalidates. Text goes compressed to a browser that takes it, under a
+// validator of its own, and plain to one that does not.
+func TestVersionedAssetsAreKeptAndTextIsCompressed(t *testing.T) {
+	h := newHarness(t)
+	get := func(path, enc string, hdr ...string) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, h.http.URL+path, nil)
+		// set by hand, Go's client leaves the body compressed and the header as sent
+		req.Header.Set("Accept-Encoding", enc)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		res, err := http.DefaultTransport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		return res
+	}
+	v := h.srv.assetV
+	if res := get("/assets/app.js?v="+v, "gzip"); res.Header.Get("Cache-Control") != versionedCache {
+		t.Errorf("versioned asset cache = %q, want %q", res.Header.Get("Cache-Control"), versionedCache)
+	}
+	for _, stale := range []string{"/assets/app.js", "/assets/app.js?v=000000000000"} {
+		if res := get(stale, "gzip"); res.Header.Get("Cache-Control") != assetCache {
+			t.Errorf("%s cache = %q, want %q", stale, res.Header.Get("Cache-Control"), assetCache)
+		}
+	}
+
+	zipped := get("/assets/app.js?v="+v, "br, gzip;q=0.8")
+	if zipped.Header.Get("Content-Encoding") != "gzip" || !strings.Contains(zipped.Header.Get("Vary"), "Accept-Encoding") {
+		t.Fatalf("compressed asset headers: encoding %q, vary %q", zipped.Header.Get("Content-Encoding"), zipped.Header.Get("Vary"))
+	}
+	zr, err := gzip.NewReader(zipped.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unzipped, _ := io.ReadAll(zr)
+	plain := get("/assets/app.js?v="+v, "gzip;q=0")
+	if plain.Header.Get("Content-Encoding") != "" {
+		t.Errorf("gzip;q=0 was answered with %q", plain.Header.Get("Content-Encoding"))
+	}
+	body, _ := io.ReadAll(plain.Body)
+	if len(body) == 0 || !bytes.Equal(body, unzipped) {
+		t.Errorf("the compressed body (%d bytes) does not unpack to the plain one (%d bytes)", len(unzipped), len(body))
+	}
+	if zipped.Header.Get("ETag") == plain.Header.Get("ETag") {
+		t.Errorf("both representations carry ETag %s", plain.Header.Get("ETag"))
+	}
+	if res := get("/assets/app.js?v="+v, "gzip", "If-None-Match", zipped.Header.Get("ETag")); res.StatusCode != http.StatusNotModified {
+		t.Errorf("conditional GET of the compressed copy = %d, want 304", res.StatusCode)
+	}
+	// already compressed: a font goes as it is
+	if res := get("/assets/fonts/Geist-Variable.woff2", "gzip"); res.Header.Get("Content-Encoding") != "" {
+		t.Errorf("a woff2 font was compressed again (%q)", res.Header.Get("Content-Encoding"))
 	}
 }
 
@@ -555,6 +617,51 @@ func TestAChangeInTheModelReachesAnOpenPage(t *testing.T) {
 	stale := h.events(c, "1")
 	if m := stale.next(); m.event != webapi.EventResync {
 		t.Errorf("a stale Last-Event-ID got %+v, want a resync", m)
+	}
+}
+
+// A page's first stream resumes from the id its board read began at: what
+// changed after that read is replayed, and nothing tells it to refetch
+// what it has just read. An id the server cannot vouch for still resyncs.
+func TestTheFirstStreamResumesFromTheBoardRead(t *testing.T) {
+	h := newHarness(t)
+	c := h.client()
+	h.pair(c, "Simon")
+	_, body := h.do(c, http.MethodGet, "/api/board", "")
+	since, _ := body["eventId"].(string)
+	if since == "" {
+		t.Fatalf("the board read carries no eventId: %v", body)
+	}
+	h.srv.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: "FD-007"})
+	open := func(id string) *sseReader {
+		req, _ := http.NewRequest(http.MethodGet, h.http.URL+"/api/events?since="+id, nil)
+		res, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		return &sseReader{t: t, res: res, sc: bufio.NewScanner(res.Body), end: make(chan struct{})}
+	}
+	// the change waits out its coalescing window before it has an id
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		_, b := h.do(c, http.MethodGet, "/api/board", "")
+		if b["eventId"] != since || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stream := open(since)
+	for {
+		m := stream.next()
+		if m.event == webapi.EventResync {
+			t.Fatal("a stream resuming from the board read was told to resync")
+		}
+		if m.event == "card" {
+			break
+		}
+	}
+	if m := open("1").next(); m.event != webapi.EventResync {
+		t.Errorf("?since=1 got %+v, want a resync", m)
 	}
 }
 

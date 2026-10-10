@@ -26,6 +26,7 @@ func TestLiveShape(t *testing.T) {
 			Spent: 0.5, Model: "claude-opus", Context: &AgentContext{Tokens: 41000, Limit: 200000},
 			Tasks:  []Task{{Text: "read the adapter", Status: "completed"}, {Text: "Fixing the leak", Status: "in_progress"}},
 			Queued: []string{"also fix the docs"}, Watches: []string{"w1 · go test ./... | grep FAIL"},
+			Objective: &Objective{Text: "the parser is under 10ms", Check: "go test ./parser", State: "active", Turns: 3, Cap: 20, Note: "the lexer is still slow", Auditing: true},
 		},
 		Elsewhere: &Elsewhere{PID: 4411, Stage: "verify", Role: "gummi", Since: at, Busy: true, Watching: true, Note: "read-only: another gummi process owns this run"},
 	}))
@@ -74,6 +75,31 @@ func TestPRShape(t *testing.T) {
 		Threads:     []PRThread{{Path: "main.go", Line: 3, Notes: []PRNote{{Author: "octo", Body: "name it better"}}}},
 		Comments:    []PRNote{{Author: "octo", Body: "thanks"}},
 		PushCommand: "git push origin fd-012-dark-mode", CommentCount: 2, HeadSHA: "0123abc", Fetched: at,
+	}))
+}
+
+func TestPublishShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Facts   PublishFacts   `json:"facts"`
+		Refused PublishFacts   `json:"refused"`
+		Request PublishRequest `json:"request"`
+		Result  PublishResult  `json:"result"`
+		Offer   PublishOffer   `json:"offer"`
+	}{
+		Facts: PublishFacts{
+			Act: "create", Summary: "Push fd-012-dark-mode (2 commits) to me/demo and open a draft PR into octo/demo main.",
+			Fingerprint: "9f2c", Branch: "fd-012-dark-mode", Tip: "0123abc", TipSubject: "feat: dark mode", Ahead: 2, Base: "main",
+			Remote: "origin", PushURL: "git@github.com:me/demo.git", Push: "new", Head: "me:fd-012-dark-mode", BaseRepo: "octo/demo",
+			GH: "/usr/bin/gh", Hook: ".git/hooks/pre-push", Draft: true, DraftLocked: true, DraftWhy: "the tip 0123abc is not verified",
+			Title: "feat: dark mode", Body: "why", Commands: []string{"git push origin 0123abc:refs/heads/fd-012-dark-mode"},
+		},
+		Refused: PublishFacts{
+			Act: "push", ToDraft: true, PR: &PublishPR{Number: 12, URL: "https://github.com/octo/demo/pull/12", State: "OPEN", HeadSHA: "0123abc"},
+			Error: &PublishError{Code: "pr-exists", Text: "PR #12 is already open", Fix: "link it instead", PR: 12},
+		},
+		Request: PublishRequest{Act: "create", Fingerprint: "9f2c", Title: "feat: dark mode", Body: "why", Draft: true},
+		Result:  PublishResult{Act: "create", Pushed: "0123abc", URL: "https://github.com/octo/demo/pull/12", Number: 12, Draft: true, ToDraft: true, LinkError: "could not link"},
+		Offer:   PublishOffer{Available: true, Why: "", Acts: []string{"push", "ready"}, Unpushed: 2, Draft: true},
 	}))
 }
 

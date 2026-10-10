@@ -1,7 +1,8 @@
-// pr.js — the PR tab: the linked pull request, read from GitHub and never
-// written to (DESIGN §20.5): its state, its review threads (each can jump
-// to the file in the diff), top-level comments, and the push command a
-// person runs themselves.
+// pr.js — the PR tab: the linked pull request as GitHub has it (DESIGN
+// §20.5): its state, its review threads (each can jump to the file in the
+// diff), top-level comments, and the push command a person can run
+// themselves. Where the board publishes (DESIGN §22) a strip offers the act
+// that fits the card now; each one opens the publish dialog (publish.js).
 
 import { h, clock, plural } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
@@ -9,6 +10,7 @@ import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
 import { reveal } from './diff.js?v=__ASSET_V__'
+import { openPublish, publishLabel } from './publish.js?v=__ASSET_V__'
 
 export const prTab = {
   name: 'pr',
@@ -24,12 +26,17 @@ function render (pane, entry, ctx) {
   const p = entry.data
   if (!p || !p.linked) {
     const link = (ctx.card?.actions || []).find(a => a.id === 'prlink')
+    const create = (p?.publish?.acts || []).includes('create')
     pane.append(h('div', { class: 'empty', testid: 'pr-none' }, h('b', null, 'No pull request linked'),
-      p?.error || 'Link one to read its review threads beside the diff.',
-      link
-        ? h('button', { class: 'btn', type: 'button', testid: 'pr-link', onclick: () => runAction(ctx.card, link) }, 'Link a pull request')
+      p?.error || (create ? 'Open one from here, or link one that exists to read its review threads beside the diff.' : 'Link one to read its review threads beside the diff.'),
+      create
+        ? h('button', { class: 'btn pri', type: 'button', testid: 'pr-publish-create', onclick: () => publish(ctx, 'create') }, 'Open a pull request…')
         : null,
-      pushBox(p?.pushCommand, ctx)))
+      link
+        ? h('button', { class: 'btn', type: 'button', testid: 'pr-link', onclick: () => runAction(ctx.card, link) }, create ? 'Link an existing one' : 'Link a pull request')
+        : null,
+      publishWhy(p?.publish),
+      pushBox(p?.pushCommand, ctx, p?.publish)))
     return
   }
   const threads = p.threads || []
@@ -41,6 +48,7 @@ function render (pane, entry, ctx) {
         h('span', { testid: 'pr-open' }, plural(threads.filter(t => !t.resolved).length, 'open thread')),
         p.url ? h('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener noreferrer' }, 'open on GitHub') : null),
       p.error ? h('div', { class: 'badc' }, p.error) : null,
+      publishStrip(p.publish, ctx),
       h('div', { class: 'prmeta' },
         p.fetched ? h('span', { testid: 'pr-fetched' }, `read from GitHub ${clock(p.fetched)}`) : null,
         p.headSha ? h('span', { class: 'mono' }, `head ${p.headSha.slice(0, 7)}`) : null,
@@ -59,8 +67,34 @@ function render (pane, entry, ctx) {
     sect.append(h('p', { class: 'label' }, 'Comments'))
     sect.append(h('div', { class: 'rthread' }, p.comments.map(n => note(n))))
   }
-  sect.append(pushBox(p.pushCommand, ctx))
+  sect.append(pushBox(p.pushCommand, ctx, p.publish))
   pane.append(sect)
+}
+
+// publish opens the publish dialog for act; the tab reads GitHub again
+// when the act went through.
+function publish (ctx, act) {
+  openPublish(ctx.card || { id: ctx.id }, act, { returnTo: `[data-testid="pr-publish-${act}"]`, done: () => refresh(ctx) })
+}
+
+// publishWhy is why nothing is offered: publishing is not set up on this
+// machine, or the card cannot be published as it stands.
+function publishWhy (pub) {
+  return pub?.why ? h('p', { class: 'pubwhy', testid: 'pr-publish-why' }, pub.why) : null
+}
+
+// publishStrip is a linked PR's publish row: what GitHub does not have yet
+// and the acts that fit — the first one the primary.
+function publishStrip (pub, ctx) {
+  if (!pub) return null
+  const acts = pub.acts || []
+  if (!acts.length && !pub.draft) return publishWhy(pub)
+  return [h('div', { class: 'pubstrip', testid: 'pr-publish' },
+    h('span', { class: 'what' }, pub.draft ? 'draft' : 'ready for review',
+      pub.unpushed ? ` · ${plural(pub.unpushed, 'commit')} not on GitHub` : ''),
+    acts.map((act, i) => h('button', { class: ['btn', i === 0 && 'pri'], type: 'button', testid: `pr-publish-${act}`, onclick: () => publish(ctx, act) },
+      act === 'ready' ? 'Mark ready…' : publishLabel(act) + '…'))),
+  publishWhy(pub)]
 }
 
 function note (n) {
@@ -69,11 +103,13 @@ function note (n) {
 
 // pushAdvice is what the push box says about when to push, for the card
 // as it stands; null when there is nothing to push at all.
-function pushAdvice (c, cmd) {
-  if (c?.landed) return { text: 'This card has landed: its work is on its base. gummi does not push; there is nothing left that needs pushing.', cmd: null }
+function pushAdvice (c, cmd, pub) {
+  if (c?.landed) return { text: 'This card has landed: its work is on its base; there is nothing left that needs pushing.', cmd: null }
   if (c?.scratch || c?.kind === 'research') return { text: 'A research card works in a scratch tree and never gets a branch: there is nothing to push.', cmd: null }
-  if (!cmd) return c?.stage === 'todo' ? { text: 'This card has no branch yet: it is cut when the card starts. gummi never pushes it for you.', cmd: null } : null
+  if (!cmd) return c?.stage === 'todo' ? { text: 'This card has no branch yet: it is cut when the card starts.', cmd: null } : null
   const forced = /--force-with-lease/.test(cmd)
+  // where the board publishes, the command is the by-hand way
+  if (pub?.available) return { text: forced ? 'By hand — the branch was rewritten after it was pushed, so this is a force push:' : 'Or push it yourself:', cmd }
   const lead = forced
     ? 'gummi does not push. The branch was rewritten after it was pushed, so the remote needs a force push:'
     : 'gummi does not push.'
@@ -84,8 +120,8 @@ function pushAdvice (c, cmd) {
   return { text: `${lead} When the card is verified, push it yourself:`, cmd }
 }
 
-function pushBox (command, ctx) {
-  const say = pushAdvice(ctx.card, command)
+function pushBox (command, ctx, pub) {
+  const say = pushAdvice(ctx.card, command, pub)
   if (!say) return null
   if (!say.cmd) return h('p', { class: 'push none', testid: 'pr-push' }, say.text)
   const cmd = say.cmd

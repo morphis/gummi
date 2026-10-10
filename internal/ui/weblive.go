@@ -5,7 +5,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -153,15 +152,24 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 	verb := "working"
 	if snap.Briefing {
 		verb = engine.BriefDrafting
+	} else if snap.Auditing && !snap.Busy {
+		verb = engine.ObjectiveAuditing
 	}
-	return webConversation(snap, sending, verb)
+	c := webConversation(snap, sending, verb)
+	if o := snap.Objective; o != nil {
+		c.Objective = &webapi.Objective{
+			Text: threadfold.Sanitize(o.Text), Check: threadfold.Sanitize(o.Check), State: string(o.State),
+			Turns: o.Turns, Cap: domain.ObjectiveTurnCap, Note: threadfold.Sanitize(o.Note), Auditing: snap.Auditing,
+		}
+	}
+	return c
 }
 
 func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Conversation {
 	// a handoff brief in flight is activity the page should spin on, the
 	// same way it spins on a turn — the brief turn runs on a session of
 	// its own, so Busy alone would miss it
-	busy := snap.Busy || snap.Briefing
+	busy := snap.Busy || snap.Briefing || snap.Auditing
 	c := &webapi.Conversation{Busy: busy, Role: string(snap.Role), Spent: snap.SpentCredits, Model: runModel(snap)}
 	c.Turns, c.Streaming, c.Tool = webTranscript(snap)
 	if ctx := snap.Context; ctx.Tokens > 0 {
@@ -232,7 +240,7 @@ func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string,
 		}
 		turns = append(turns, webapi.Turn{
 			Author: threadfold.AuthorLabel(string(msg.Author), string(snap.Role)),
-			By:     state.PersonName(msg.By),
+			By:     threadfold.TurnBy(msg.By),
 			Text:   boundTail(threadfold.Sanitize(msg.Content), webapi.LiveText),
 			Time:   msg.At,
 		})

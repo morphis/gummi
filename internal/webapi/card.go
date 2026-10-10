@@ -35,6 +35,9 @@ type Card struct {
 	// Files is where the page may open the card's worktree files from;
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`
+	// Terminal says the page may open a shell in the card's worktree: the
+	// server was started with --terminal and the card has one.
+	Terminal bool `json:"terminal,omitempty"`
 }
 
 // Files maps a card's worktree onto the server: a file at Dir/<path> is
@@ -177,6 +180,10 @@ const (
 	// schedule form aimed at the card and writes through /api/schedules;
 	// the action itself takes no request.
 	ActionNeedsSchedule ActionNeeds = "schedule"
+	// ActionNeedsPublish opens the publish dialog: the page reads the
+	// facts from GET /api/cards/{id}/publish?act= and sends the person's
+	// confirm to POST /api/cards/{id}/publish (DESIGN §22).
+	ActionNeedsPublish ActionNeeds = "publish"
 )
 
 // Action is one entry in a card's menu.
@@ -361,6 +368,10 @@ type SendRequest struct {
 	// and freeform-turn routes accept them; every other route refuses a
 	// line that carries any with a 4xx, and nothing is recorded.
 	Attachments []string `json:"attachments,omitempty"`
+	// Confirm is the token a "confirm" refusal of this same line handed
+	// out; the line sent again with it is that question's yes, and
+	// nothing else's (AnswerRequest.Confirm).
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // SendResponse says where the line went and returns the card as it now

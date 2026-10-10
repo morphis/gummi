@@ -2,7 +2,10 @@ package web
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -608,6 +614,97 @@ func TestSettingsNameThroughTheBoard(t *testing.T) {
 	}
 	if code := b.call(http.MethodPut, "/api/settings", webapi.SettingsRequest{Name: strings.Repeat("x", 99)}, nil); code != http.StatusBadRequest {
 		t.Fatalf("a too long name = %d, want 400", code)
+	}
+}
+
+// A credential stored from the page is kept on the host and described back,
+// never returned; a field left out is left alone, an empty one forgets.
+func TestCredentialsThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	t.Cleanup(func() { credentials.Use(credentials.Store{}) })
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, token := string(pem.EncodeToMemory(block)), "ghp_abcdefghijklmnop1234"
+
+	var raw json.RawMessage
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GitHubToken: &token, SSHKey: &key}, &raw)
+	if strings.Contains(string(raw), token) || strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Fatalf("the answer carries a secret back: %s", raw)
+	}
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &raw)
+	if strings.Contains(string(raw), token) || strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Fatalf("the settings carry a secret back: %s", raw)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if c := got.Credentials; !c.TokenSet || c.TokenHint != "1234" || !c.KeySet || c.KeyType != "ssh-ed25519" || c.KeyFingerprint == "" {
+		t.Fatalf("credentials = %+v", c)
+	}
+	if credentials.Current().Token() != token {
+		t.Fatal("the board's own gh calls do not read the stored token")
+	}
+
+	empty := ""
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GitHubToken: &empty}, &got)
+	if c := got.Credentials; c.TokenSet || !c.KeySet {
+		t.Fatalf("after forgetting the token alone = %+v", c)
+	}
+	bad := "-----BEGIN OPENSSH PRIVATE KEY-----\nnope\n-----END OPENSSH PRIVATE KEY-----"
+	if code := b.call(http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{SSHKey: &bad}, nil); code != http.StatusBadRequest {
+		t.Fatalf("a key that does not parse = %d, want 400", code)
+	}
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &got)
+	if !got.Credentials.KeySet {
+		t.Fatal("a refused key replaced the stored one")
+	}
+
+	// a key made on the host replaces the one held, and only its public
+	// half is ever said
+	held := got.Credentials.KeyFingerprint
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GenerateSSHKey: true}, &raw)
+	if strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Fatalf("generating carries the private key back: %s", raw)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if c := got.Credentials; !c.KeySet || c.KeyFingerprint == held || !strings.HasPrefix(c.KeyPublic, "ssh-ed25519 ") {
+		t.Fatalf("after generating = %+v", c)
+	}
+	if code := b.call(http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GenerateSSHKey: true, SSHKey: &key}, nil); code != http.StatusBadRequest {
+		t.Fatalf("generate and store together = %d, want 400", code)
+	}
+}
+
+// The git identity set from the page is the repository's own: what git
+// then writes a commit as there.
+func TestGitIdentityThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/identity", webapi.IdentityRequest{Name: " Ada Lovelace ", Email: "ada@example.com"}, &got)
+	if got.Identity != (webapi.Identity{Name: "Ada Lovelace", Email: "ada@example.com"}) {
+		t.Fatalf("identity = %+v", got.Identity)
+	}
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &got)
+	if got.Identity.Name != "Ada Lovelace" {
+		t.Fatalf("settings identity = %+v", got.Identity)
+	}
+	out, err := exec.CommandContext(context.Background(), "git", "-C", b.root, "config", "--local", "user.email").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "ada@example.com" {
+		t.Fatalf("the repository's own user.email = %q, %v", out, err)
+	}
+	for _, bad := range []webapi.IdentityRequest{{Name: "Ada"}, {Name: "Ada", Email: "nope"}} {
+		if code := b.call(http.MethodPut, "/api/settings/identity", bad, nil); code != http.StatusBadRequest {
+			t.Fatalf("%+v = %d, want 400", bad, code)
+		}
 	}
 }
 

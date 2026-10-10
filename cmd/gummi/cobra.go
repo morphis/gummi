@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	"github.com/morphis/gummi/internal/publish"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -152,8 +154,8 @@ var logCmd = &cobra.Command{
 
 // rewriteCmd implements `gummi rewrite <id|ref> --plan <file|->`.
 var rewriteCmd = &cobra.Command{
-	Use:   "rewrite <id|ref> --plan <file|->",
-	Short: "Reword or squash a card's commits in place; its content never changes",
+	Use:   "rewrite <id|ref> [--plan <file|->] [--sign]",
+	Short: "Reword, squash or sign a card's commits in place; its content never changes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRewrite(cmdFlags(cmd), args)
 	},
@@ -371,6 +373,51 @@ var prCommentsCmd = &cobra.Command{
 	},
 }
 
+// The publish verbs (DESIGN §22): a person pushes a card's branch and opens,
+// updates or readies its PR through gh. Each prints the resolved facts and
+// the exact commands and runs them once confirmed — at the terminal, or with
+// --yes=<fingerprint> of the facts read. They are left out of the agent
+// skill bundle and refuse inside a gummi session.
+var pushCmd = &cobra.Command{
+	Use:   "push <card> [--remote <name>] [--draft] [--yes <facts>]",
+	Short: "Push a card's branch to its remote (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActPush, args)
+	},
+}
+
+var prCreateCmd = &cobra.Command{
+	Use:   "create <card> [--title <t>] [--body-file <f|->] [--draft] [--yes <facts>]",
+	Short: "Push a card's branch and open its pull request (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActCreate, args)
+	},
+}
+
+var prUpdateCmd = &cobra.Command{
+	Use:   "update <card> [--title <t>] [--body-file <f|->] [--draft] [--yes <facts>]",
+	Short: "Push new commits to a card's PR and edit its title or body (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActUpdate, args)
+	},
+}
+
+var prReadyCmd = &cobra.Command{
+	Use:   "ready <card> [--yes <facts>]",
+	Short: "Mark a card's draft PR ready for review, at a verified tip (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActReady, args)
+	},
+}
+
+var prDraftCmd = &cobra.Command{
+	Use:   "draft <card> [--yes <facts>]",
+	Short: "Turn a card's PR back into a draft (a person's act)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runPublish(cmdFlags(cmd), publish.ActDraft, args)
+	},
+}
+
 // skillCmd groups the skill file operations.
 var skillCmd = &cobra.Command{
 	Use:   "skill",
@@ -400,7 +447,7 @@ var skillListCmd = &cobra.Command{
 // webCmd implements `gummi web`: the board in a browser, hosted by this
 // process with the TUI's own model running without a screen.
 var webCmd = &cobra.Command{
-	Use:   "web [--addr host:port] [--allow-host names] [--tls-cert file --tls-key file] [--tailscale [--ts-hostname name] [--ts-authkey key] [--ts-tls] [--verbose]] [--no-pairing]",
+	Use:   "web [--addr host:port] [--allow-host names] [--tls-cert file --tls-key file] [--tailscale [--ts-hostname name] [--ts-authkey key] [--ts-tls] [--verbose]] [--no-pairing] [--terminal]",
 	Short: "Serve the board to a browser",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runWeb(cmdFlags(cmd), args)
@@ -460,6 +507,9 @@ func init() {
 	bindPRLinkFlags(prLinkCmd.Flags())
 	bindPRStatusFlags(prStatusCmd.Flags())
 	bindPRCommentsFlags(prCommentsCmd.Flags())
+	for _, c := range []*cobra.Command{pushCmd, prCreateCmd, prUpdateCmd, prReadyCmd, prDraftCmd} {
+		bindPublishFlags(c, c.Flags())
+	}
 	bindSkillInstallFlags(skillInstallCmd.Flags())
 	bindWebFlags(webCmd.Flags())
 	bindWebPairFlags(webPairCmd.Flags())
@@ -470,7 +520,7 @@ func init() {
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	scheduleCmd.AddCommand(scheduleListCmd, scheduleAddCmd, scheduleEnableCmd, scheduleDisableCmd, scheduleRunNowCmd, scheduleRmCmd)
-	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd)
+	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd, prCreateCmd, prUpdateCmd, prReadyCmd, prDraftCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 	webCmd.AddCommand(webPairCmd, webDevicesCmd, webUnpairCmd)
 }
@@ -575,6 +625,7 @@ func bindSquashFlags(fs *pflag.FlagSet) {
 func bindRewriteFlags(fs *pflag.FlagSet) {
 	fs.String("plan", "", `the branch as it should read, oldest first (a file path, or - for stdin): {"head":"<tip>","groups":[{"commits":["<sha>",…],"message":"…"},…]} — every commit in exactly one group`)
 	fs.Bool("dry-run", false, "say what the plan would do and move nothing")
+	fs.Bool("sign", false, "sign the card's commits: every commit from the first unsigned one up is made again, signed; alone it needs no --plan. Refused where commits are not signed")
 	fs.Bool("allow-pushed", false, "rewrite commits the remote already has; the branch will then need a force push, which gummi prints and never runs")
 }
 
@@ -690,6 +741,23 @@ func bindPRCommentsFlags(fs *pflag.FlagSet) {
 	jsonFlag(fs, "emit machine-readable JSON instead of the text summary")
 }
 
+func bindPublishFlags(cmd *cobra.Command, fs *pflag.FlagSet) {
+	fs.String("yes", "", "run without the terminal confirm: the fingerprint of the facts you read (printed as `facts`)")
+	jsonFlag(fs, "emit the facts, the plan and the result as JSON; without --yes nothing is run")
+	switch cmd {
+	case pushCmd:
+		fs.String("remote", "", "push to this remote, remembered as the branch's pushRemote")
+		fs.Bool("draft", false, "when the linked PR is ready and the tip is not verified, turn it back into a draft first")
+	case prCreateCmd, prUpdateCmd:
+		if cmd == prCreateCmd {
+			fs.String("repo", "", "open the PR in this repository (`owner/name`): a fork's own or its parent's, remembered once the PR opens")
+		}
+		fs.String("title", "", "the PR's title (create: default from the card and its commits)")
+		fs.String("body-file", "", "read the PR's body from this file, or - for stdin")
+		fs.Bool("draft", false, "create: open as a draft; update: turn a ready PR back into a draft before pushing an unverified tip")
+	}
+}
+
 func bindSkillInstallFlags(fs *pflag.FlagSet) {
 	fs.String("agent", "", "target a specific agent: "+skillAgentList+" (default: detect)")
 	fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
@@ -712,6 +780,7 @@ func bindWebFlags(fs *pflag.FlagSet) {
 	fs.Bool("ts-tls", false, "serve HTTPS on 443 with a tailnet certificate (with --tailscale; needs MagicDNS and HTTPS enabled for the tailnet)")
 	fs.Bool("verbose", false, "log the tailnet node's own messages (with --tailscale)")
 	fs.Bool("no-pairing", false, "serve without pairing, to anything that can reach the listener (refused unless every listener is loopback)")
+	fs.Bool("terminal", false, "give paired devices a Terminal tab: a shell in each card's worktree, running as you (refused with --no-pairing)")
 }
 
 func bindWebPairFlags(fs *pflag.FlagSet) {

@@ -131,11 +131,11 @@ test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info
   await expect(page.getByTestId('pr-push-cmd')).toHaveText('git push origin feat/add-a-wave-helper');
   await shot(page, info, 'pr');
   await page.getByTestId('tab-stats').click();
-  await expect(page.getByTestId('stats-spent')).toContainText('11.0');
+  await expect(page.getByTestId('stats-spent')).toContainText('$0.11');
   await expect(page.getByTestId('stats-table').locator('tr.rework')).toHaveCount(1);
   // where it went: the stage/role/model bars, the estimated mark among them
   await expect(page.getByTestId('stats-bars')).toContainText('implement');
-  await expect(page.getByTestId('stats-bars')).toContainText('6.5');
+  await expect(page.getByTestId('stats-bars')).toContainText('$0.07');
   await expect(page.getByTestId('stats-bars')).toContainText('estimated');
   // the redo block names the pass, and flags the one that cost more than
   // the first pass of the same work

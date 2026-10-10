@@ -108,16 +108,21 @@ func readAcceptance(pathOrDash string) (string, error) {
 	}
 }
 
+// envEnvelope is GUMMI_ENVELOPE in credits: a dollar amount, like
+// --envelope, or 0 when it is unset or not a positive amount.
+func envEnvelope() int {
+	if n, err := domain.ParseDollars(os.Getenv("GUMMI_ENVELOPE")); err == nil && n > 0 {
+		return n
+	}
+	return 0
+}
+
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
 func driverOptions(fl cliFlags, acceptance string) (driver.Options, error) {
 	envelope := fl.Budget("envelope")
 	if envelope == 0 {
-		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
-			if n, err := domain.ParseDollars(v); err == nil && n > 0 {
-				envelope = n
-			}
-		}
+		envelope = envEnvelope()
 	}
 	if envelope <= 0 {
 		return driver.Options{}, fmt.Errorf("an envelope is required: pass --envelope <dollars> (or set GUMMI_ENVELOPE); runs refuse to start without one")

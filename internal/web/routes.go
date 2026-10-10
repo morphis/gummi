@@ -9,8 +9,10 @@ package web
 //	routes_card.go     a card: head, thread, live, answer, send, actions
 //	routes_docs.go     a card's spec, diff, pull request and stats
 //	routes_files.go    a card's worktree files, opened in the browser
+//	routes_term.go     a shell in a card's worktree (--terminal)
 //	routes_create.go   the new-card form
 //	routes_goals.go    goals and stacks
+//	routes_repos.go    repositories and their branches
 //	routes_schedules.go  schedules and heartbeats
 //	routes_ingest.go   spec ingest and bug import
 //	routes_system.go   doctor and the fleet's stats
@@ -27,8 +29,10 @@ func (s *Server) routes() {
 	s.cardRoutes()
 	s.docsRoutes()
 	s.fileRoutes()
+	s.termRoutes()
 	s.createRoutes()
 	s.goalRoutes()
+	s.repoRoutes()
 	s.scheduleRoutes()
 	s.ingestRoutes()
 	s.systemRoutes()

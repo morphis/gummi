@@ -38,6 +38,12 @@ const (
 	// conducted, not written), and a profile need not declare it: an
 	// undeclared lead falls back to the architect's backend and model.
 	RoleLead Role = "lead"
+	// RoleAuditor judges a freeform session's turn against its objective
+	// (domain.Objective): a tool-less one-shot that answers CONTINUE, MET
+	// or STUCK. Not a stage role, and a profile need not declare it: an
+	// undeclared auditor falls back to the scribe, the profile's cheap
+	// model, and failing that to the session's own.
+	RoleAuditor Role = "auditor"
 )
 
 // Permission is the policy a session applies to tool calls. gummi's

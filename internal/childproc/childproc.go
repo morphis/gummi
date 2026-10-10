@@ -42,6 +42,25 @@ func Group(cmd *exec.Cmd) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setpgid = true
+	supervise(cmd)
+}
+
+// Session is Group for a child that gets a terminal of its own: it leads a
+// new session whose controlling terminal is its stdin, which must be the
+// pty's slave. A session leader leads its process group too, so cancelling
+// it kills the group the same way; it cannot also be given Setpgid.
+func Session(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setsid = true
+	cmd.SysProcAttr.Setctty = true
+	supervise(cmd)
+}
+
+// supervise is what Group and Session share: the death signal, the group
+// kill on cancel and the bound on Wait.
+func supervise(cmd *exec.Cmd) {
 	setDeathSignal(cmd.SysProcAttr)
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {

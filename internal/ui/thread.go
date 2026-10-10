@@ -1052,7 +1052,11 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 	// out, and the closest thing a freeform card has to "how far along".
 	if f.IsFreeform() {
 		pill := s.StagePill(f.Stage).Render("freeform")
-		if branch := f.BranchName(); branch != "" {
+		branch := f.BranchName()
+		if f.MainCheckout {
+			branch = "main checkout"
+		}
+		if branch != "" {
 			if full := pill + s.Faint.Render(" · "+branch); width <= 0 || ansi.StringWidth(full) <= width {
 				return full
 			}
@@ -1733,6 +1737,8 @@ func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
 	// names it rather than the bare "working" (engine.BriefDrafting).
 	if snap.Briefing {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+engine.BriefDrafting+"…"))
+	} else if snap.Auditing && !snap.Busy {
+		lines = append(lines, "  "+s.Info.Render(m.spinner()+" "+engine.ObjectiveAuditing+"…"))
 	} else if snap.Busy {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" working…"))
 	}
@@ -1764,6 +1770,16 @@ func (m *Shell) freeformAbsentLines(s *theme.Styles, r featureRow, w int) []stri
 		said = []string{
 			"its work is on " + r.F.BranchName() + " — alt+d to read the diff",
 			"no conversation on record here; say what you want next and it picks the branch up",
+		}
+	}
+	if r.F.MainCheckout {
+		// no branch of its own: it works in the repository checkout itself
+		said = []string{"type below to start — it works in the main checkout, in place"}
+		if r.HasWorktree {
+			said = []string{
+				"its work is in the main checkout — alt+d to read the diff",
+				"no conversation on record here; say what you want next and it picks the work up",
+			}
 		}
 	}
 	out := make([]string, 0, len(said))
@@ -1975,6 +1991,10 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		var p state.RebasePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(threadfold.RebaseLine(p), max(w-2, 8), "…"))
+	case state.EventPublish:
+		var p state.PublishPayload
+		_ = json.Unmarshal([]byte(ev.Payload), &p)
+		return s.Success.Render("⇡ ") + s.Subtle.Render(ansi.Truncate(threadfold.PublishLine(p), max(w-2, 8), "…"))
 	case state.EventDecisionOpen:
 		var p state.DecisionPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)

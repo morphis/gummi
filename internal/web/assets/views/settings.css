@@ -1,0 +1,16 @@
+@import url("kit.css?v=__ASSET_V__");
+/* views/settings.css — Settings: the name, and the stored GitHub credentials. */
+.vsettings > *{flex-shrink:0}
+.vcreds{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.vcreds .vform{display:flex;flex-direction:column;gap:8px}
+.vcreds textarea{min-height:76px;font-size:12px}
+.vcreds code{font-family:var(--mono);font-size:12px;color:var(--fg2);overflow-wrap:anywhere}
+.vcreds .pub{margin:6px 0 0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:11.5px;color:var(--fg2);white-space:pre-wrap;overflow-wrap:anywhere;user-select:all}
+.vsettings .vform{display:flex;flex-direction:column;gap:8px}
+.vsettings .vhead,.vsettings .vlab{position:relative}
+.vlab{display:flex;align-items:center;gap:6px}
+.vtip{display:inline-flex}
+.vtip-b{width:16px;height:16px;border:1px solid var(--line2);border-radius:50%;font-size:10.5px;line-height:1;color:var(--fg3);display:inline-flex;align-items:center;justify-content:center;cursor:help}
+.vtip-b:hover,.vtip-b:focus-visible{color:var(--fg);border-color:var(--accent)}
+.vtip-t{display:none;position:absolute;z-index:5;top:calc(100% + 4px);left:0;max-width:min(100%,460px);padding:8px 10px;border:1px solid var(--line2);border-radius:8px;background:var(--panel);box-shadow:0 6px 20px rgb(0 0 0 / .18);font-size:12.5px;font-weight:400;line-height:1.45;color:var(--fg2);text-transform:none;letter-spacing:0}
+.vtip:hover .vtip-t,.vtip:focus-within .vtip-t{display:block}

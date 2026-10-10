@@ -8,10 +8,12 @@ import { get, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
 import { isMobile } from './dom.js?v=__ASSET_V__'
+import { readAt } from './events.js?v=__ASSET_V__'
 
 export async function loadBoard () {
   try {
     const b = await get('/api/board')
+    readAt(b.eventId)
     const patch = { board: b }
     if (Array.isArray(b.viewers) && b.viewers.length) patch.viewers = b.viewers
     set(patch)

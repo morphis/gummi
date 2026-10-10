@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/hooks"
 	"github.com/morphis/gummi/internal/notify"
@@ -45,6 +46,14 @@ func version() string {
 }
 
 func main() {
+	// git signing a commit with the stored SSH key calls gummi as its
+	// signing program (credentials.UseSigner), in ssh-keygen's grammar
+	if credentials.IsSignerCall(os.Args[1:]) {
+		os.Exit(credentials.RunSigner(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	if exe, err := os.Executable(); err == nil {
+		credentials.UseSigner(exe)
+	}
 	if err := run(os.Args[1:]); err != nil {
 		// A driver invocation reports its typed exit via exitError, having
 		// already told the story on the NDJSON stream — exit with that code
@@ -70,6 +79,9 @@ func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code
 // with no arguments launches the board, creating the .gummi workspace lazily
 // on first run.
 func run(args []string) error {
+	// everything this process starts — an agent backend and its shell
+	// above all — inherits the marker the publish verbs refuse under
+	_ = os.Setenv(spawnedMarker, "1")
 	resetFlags(rootCmd)
 	rootCmd.SetArgs(args)
 	return rootCmd.Execute()
@@ -540,6 +552,9 @@ func ensureWorkspace(ws, repo string) (state.Workspace, error) {
 			}
 		}
 	}
+	// what a person stored in the web page's settings is read by every
+	// command's own gh calls and by publishing (DESIGN §22.2)
+	credentials.Use(credentials.Store{Dir: w.CredentialsDir()})
 	return w, nil
 }
 

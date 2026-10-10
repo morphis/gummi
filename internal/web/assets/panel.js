@@ -1,4 +1,4 @@
-// panel.js — the right panel: the Memory, Spec, Diff, Log, PR and Stats tabs beside the
+// panel.js — the right panel: the Memory, Spec, Diff, Log, PR, Stats and Terminal tabs beside the
 // conversation (never over it), the resizer between them, and hiding it
 // with `]`. On a phone the tabs lead the card's screen, with its Thread first. It fetches the open tab for the open card, refetches it when
 // the card changes, and hands each tab module an entry { data, fresh, err }
@@ -15,8 +15,9 @@ import { diffTab } from './diff.js?v=__ASSET_V__'
 import { logTab } from './log.js?v=__ASSET_V__'
 import { prTab } from './pr.js?v=__ASSET_V__'
 import { statsTab } from './stats.js?v=__ASSET_V__'
+import { terminalTab } from './terminal.js?v=__ASSET_V__'
 
-const TABS = [memoryTab, specTab, diffTab, logTab, prTab, statsTab]
+const TABS = [memoryTab, specTab, diffTab, logTab, prTab, statsTab, terminalTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
 // shown is the tabs the open card has: a tab may hide itself for a kind
@@ -59,6 +60,9 @@ export function initPanel (c) {
     if (state.card && byName[state.tab]?.hidden?.(state.card)) { set({ tab: 'diff' }); writeHash(state.sel, 'diff') }
     prefetch()
     renderTabs()
+    // the tab may have been drawn before the head arrived (its read can
+    // answer first): one drawn open for a card that has closed is redrawn
+    if (drawnClosed !== null && drawnClosed !== isClosed()) renderPane(true)
   })
   on(['rightHidden'], applyHidden)
   // on a phone the row holds the card's Thread too, and says which is shown
@@ -196,6 +200,14 @@ function tabKeys (e) {
   $(`#tab-${names[(to + names.length) % names.length]}`)?.focus()
 }
 
+// a landed (or otherwise finished) card takes no more review input: its
+// notes and comments have no one left to go to
+function isClosed () { return state.card?.stage === 'done' || !!state.card?.landed }
+
+// drawnClosed is isClosed() as the pane last drew a tab, null when it drew
+// none
+let drawnClosed = null
+
 function renderPane (keepScroll) {
   const pane = $('#pane')
   const top = pane.scrollTop
@@ -204,6 +216,7 @@ function renderPane (keepScroll) {
   const a = document.activeElement
   const typing = pane.contains(a) && a.closest?.('[data-draft]') ? { key: a.closest('[data-draft]').dataset.draft, from: a.selectionStart, to: a.selectionEnd } : null
   clear(pane)
+  drawnClosed = null
   pane.dataset.tab = state.tab
   const tab = byName[state.tab]
   const e = entry(state.tab)
@@ -223,12 +236,11 @@ function renderPane (keepScroll) {
   } else if (!e.data && e.loading) {
     pane.append(h('div', { class: 'empty', testid: 'panel-loading' }, h('span', { class: 'spinner' })))
   } else {
+    drawnClosed = isClosed()
     const tctx = {
       id: state.sel,
       card: state.card,
-      // a landed (or otherwise finished) card takes no more review input:
-      // its notes and comments have no one left to go to
-      closed: state.card?.stage === 'done' || !!state.card?.landed,
+      closed: drawnClosed,
       person: state.session?.person,
       setTab,
       select: ctx.select,

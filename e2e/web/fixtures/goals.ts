@@ -36,7 +36,7 @@ export function goalDoc(cards: string[]): string {
 }
 
 export interface GoalOpts {
-  /** The goal's whole budget (default 3000). */
+  /** The goal's whole budget in dollars (default 30). */
   envelope?: number;
   /** Card titles for the doc's gummi-cards block. */
   cards?: string[];
@@ -47,7 +47,7 @@ export async function seedGoalAtPlan(ws: Workspace, objective: string, opts: Goa
   const doc = path.join(ws.root, 'tmp', `goal-${Date.now()}.md`);
   await fs.promises.writeFile(doc, goalDoc(opts.cards ?? ['Add a hola helper', 'Add a bonjour helper']));
   const r = await ws.gummi(['goal', '--plan-file', doc, '--gate-approval', 'attended', '--until', 'plan',
-    '--envelope', String(opts.envelope ?? 3000), objective]);
+    '--envelope', String(opts.envelope ?? 30), objective]);
   const events = parseEvents(r.stdout);
   const created = events.find((e) => e.event === 'created');
   if (!created || !events.some((e) => e.event === 'stopped')) {

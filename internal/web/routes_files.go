@@ -49,6 +49,28 @@ func (s *Server) filesURL(id string) string {
 	return filesPrefix + id + "/" + s.filesKey(id) + "/"
 }
 
+// worktreeDir is card id's worktree on this machine. When the card has
+// none it has answered the request and reports false.
+func (s *Server) worktreeDir(w http.ResponseWriter, r *http.Request, id string) (string, bool) {
+	var (
+		d   *ui.WebDocs
+		err error
+	)
+	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { d, err = m.WebDocs(id); return nil }) {
+		return "", false
+	}
+	if err != nil {
+		writeDocsError(w, err, id)
+		return "", false
+	}
+	dir, ok := d.FilesDir(r.Context())
+	if !ok {
+		writeError(w, http.StatusNotFound, id+" has no worktree")
+		return "", false
+	}
+	return dir, true
+}
+
 // handleFile is GET /files/{id}/{key}/{path...}: one file from the card's
 // worktree, read through an os.Root so neither ".." nor a symlink leaves it.
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -57,20 +79,8 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such file")
 		return
 	}
-	var (
-		d   *ui.WebDocs
-		err error
-	)
-	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { d, err = m.WebDocs(id); return nil }) {
-		return
-	}
-	if err != nil {
-		writeDocsError(w, err, id)
-		return
-	}
-	dir, ok := d.FilesDir(r.Context())
+	dir, ok := s.worktreeDir(w, r, id)
 	if !ok {
-		writeError(w, http.StatusNotFound, id+" has no worktree")
 		return
 	}
 	rel = path.Clean("/" + rel)[1:]

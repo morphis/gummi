@@ -162,6 +162,8 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	shell.SetPRSquashMergeChecker(func(ctx context.Context, repo string) (bool, error) {
 		return pr.RepoAllowsSquashMerge(ctx, pr.GHBinary(), repo)
 	})
+	// publishing (DESIGN §22) is offered once gh is found signed in
+	shell.EnablePublishing(pr.GHBinary())
 	// GUMMI_COPILOT_HINT=off hides the status-bar Copilot quota pill
 	// (on by default; it needs an authenticated gh CLI to show anything).
 	if strings.EqualFold(os.Getenv("GUMMI_COPILOT_HINT"), "off") {

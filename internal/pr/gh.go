@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -55,6 +56,7 @@ func run(ctx context.Context, ghBinary, dir string, args ...string) ([]byte, err
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	cmd.Env = credentials.WithToken(nil)
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError

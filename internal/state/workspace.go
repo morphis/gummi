@@ -40,6 +40,12 @@ func (w Workspace) DraftsDir() string { return filepath.Join(w.StateDir(), "draf
 // to somebody's board.
 func (w Workspace) WebDir() string { return filepath.Join(w.StateDir(), "web") }
 
+// CredentialsDir holds the GitHub token and SSH key a person stored from
+// the web page's settings (internal/credentials). Under StateDir for
+// WebDir's reason: a repository that commits its .gummi must not carry
+// them.
+func (w Workspace) CredentialsDir() string { return filepath.Join(w.StateDir(), "credentials") }
+
 // SpecsDir holds approved specs — the artifact's workspace home from
 // spec approval on. Workspace content, never committed.
 func (w Workspace) SpecsDir() string { return filepath.Join(w.GummiDir(), "specs") }

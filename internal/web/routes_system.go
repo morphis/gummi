@@ -11,6 +11,8 @@ func (s *Server) systemRoutes() {
 	s.api("POST /api/doctor", s.handleDeepDoctor)
 	s.api("GET /api/settings", s.handleSettings)
 	s.api("PUT /api/settings", s.handleSetSettings)
+	s.api("PUT /api/settings/credentials", s.handleSetCredentials)
+	s.api("PUT /api/settings/identity", s.handleSetIdentity)
 }
 
 // handleSettings is GET /api/settings: the workspace's own knobs.
@@ -33,6 +35,39 @@ func (s *Server) handleSetSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.opt.Board.SetSettings(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSetCredentials is PUT /api/settings/credentials: the GitHub token
+// and SSH key gummi's own gh and push commands use. The answer describes
+// what is stored and never carries it back.
+func (s *Server) handleSetCredentials(w http.ResponseWriter, r *http.Request) {
+	var req webapi.CredentialsRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		return
+	}
+	out, err := s.opt.Board.SetCredentials(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSetIdentity is PUT /api/settings/identity: who git writes this
+// workspace's commits as, set in its repositories' own configuration.
+func (s *Server) handleSetIdentity(w http.ResponseWriter, r *http.Request) {
+	var req webapi.IdentityRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		return
+	}
+	out, err := s.opt.Board.SetIdentity(r.Context(), req)
 	if err != nil {
 		s.fail(w, err)
 		return

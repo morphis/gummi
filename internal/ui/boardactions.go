@@ -465,6 +465,13 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 			return m.openWritespec(r.F)
 		}
 		return nil
+	case "objective":
+		// the composer is where an objective is written: it is the
+		// session's own /objective command, with its completions
+		m.threadInput.SetValue("/objective ")
+		m.threadInput.CursorEnd()
+		m.focusThreadInput()
+		return nil
 	case "heartbeat":
 		// the freeform card's recurring turn (cardactions.go): the
 		// schedule dialog, already a heartbeat aimed at this card
@@ -501,6 +508,10 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 	case "prlink":
 		if r, ok := m.selected(); ok {
 			return m.openPRLinkDialog(r.F)
+		}
+	case "prcreate", "push", "prready", "prdraft":
+		if r, ok := m.selected(); ok {
+			return m.openPublish(r, publishActs[a.id], "")
 		}
 	case "prunlink":
 		if r, ok := m.selected(); ok {

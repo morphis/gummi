@@ -36,6 +36,14 @@ func TestWebRefusesNoPairingBehindAProxy(t *testing.T) {
 	}
 }
 
+// A shell is never served to a browser that did not pair.
+func TestWebTerminalRefusesNoPairing(t *testing.T) {
+	err := runCLI("web", "--addr", "127.0.0.1:0", "--no-pairing", "--terminal")
+	if err == nil || !strings.Contains(err.Error(), "--terminal") {
+		t.Errorf("web --no-pairing --terminal = %v, want a refusal", err)
+	}
+}
+
 // --tailscale is the only way off loopback that --no-pairing cannot follow,
 // and a --ts-* flag without it would configure a node nobody starts.
 func TestWebTailnetFlagRefusals(t *testing.T) {

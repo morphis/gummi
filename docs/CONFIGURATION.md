@@ -378,6 +378,20 @@ until a browser already paired approves it on its page.
 Plain HTTP on an address other than loopback carries the pairing code and
 the token in clear; the server warns when it starts that way.
 
+`--terminal` gives paired devices a **Terminal** tab on every card that
+has a worktree: your own shell (`$SHELL`), started in that worktree. It is
+off by default and refused with `--no-pairing`, because it is more than
+the board: a paired device can then run any command as you, outside any
+agent sandbox. The shell stays running when the page closes and is
+replayed when it comes back; it ends on `exit`, with the tab's **End
+shell** button (for one that no longer answers), when the card's worktree
+is removed, after an hour with no page attached, or when the server
+stops. A board runs at most four at once. Opening one is logged by the
+server and announced on every other open page. On a touch screen a bar
+under the shell has the keys a phone's keyboard lacks: esc, tab, the
+arrows, home, end, page up and down, a few symbols, and ctrl and alt,
+which hold for the next key (ctrl, then c, interrupts).
+
 Every request's `Host` must be one of the server's own names — loopback,
 the address it was reached on, the `--addr` name, the `--tls-cert`
 certificate's names, the tailnet node's name and addresses once it is up,

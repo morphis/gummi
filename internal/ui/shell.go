@@ -21,6 +21,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/pr"
+	"github.com/morphis/gummi/internal/publish"
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
@@ -509,6 +510,13 @@ type Shell struct {
 	// prepareMerge's own provenance warn: nil or a failing lookup just
 	// skips the caution, never blocks the link.
 	prSquashMergeAllowed func(ctx context.Context, repo string) (bool, error)
+	// publishEnabled, publishGH: EnablePublishing's switch and gh binary;
+	// publishChecked and publishWhy are detection's answer (publish.go),
+	// nil Why meaning gh is there and signed in.
+	publishEnabled bool
+	publishGH      string
+	publishChecked bool
+	publishWhy     *publish.Error
 
 	// shared activity spinner (spinner.go): frame is the current cycle
 	// position; spinning guards the single live tick loop; motionEnabled
@@ -1564,6 +1572,9 @@ func (m *Shell) Init() tea.Cmd {
 		// inference behind it is the part that needs an engine, and it
 		// no-ops without one.
 		cmds = append(cmds, m.fetchOpenDecisions)
+		if m.publishEnabled {
+			cmds = append(cmds, m.detectPublish)
+		}
 		// How far through each card the reader already got. Loaded once,
 		// in bulk, for the same reason the decision records are: the board
 		// renders every card and a per-card query here would be one round
@@ -1691,6 +1702,15 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 		}
 		m.alert(ev.Feature, "handoff brief finished — write a spec to review it")
 		return nil
+	case engine.EventObjective:
+		// a session's objective settled: the one notification it gives
+		// (DESIGN §19.11), with the auditor's last word on it
+		if ff := m.engine.Freeform(ev.Feature); ff != nil {
+			if o := ff.Snapshot().Objective; o != nil {
+				m.alert(ev.Feature, "objective "+string(o.State)+" — "+sanitize(o.Note))
+			}
+		}
+		return m.loadRows
 	case engine.EventDelegateCreated:
 		// a freeform session created a card under its delegation: it was
 		// minted on autopilot, and the board starts it the way a goal's
@@ -2277,6 +2297,14 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prLinkProbeMsg:
 		m.handlePRLinkProbe(msg)
+		return m, nil
+
+	case publishDetectedMsg:
+		m.publishChecked, m.publishWhy = true, msg.err
+		return m, nil
+
+	case publishFactsMsg:
+		m.handlePublishFacts(msg)
 		return m, nil
 
 	case sessionModelsMsg:

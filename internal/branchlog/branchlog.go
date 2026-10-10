@@ -34,6 +34,8 @@ type Row struct {
 	Checkpoint bool
 	// Pushed marks a commit the branch's upstream already has.
 	Pushed bool
+	// Signed marks a commit that carries a signature.
+	Signed bool
 	// Warning names agent-authorship metadata in the message, the same
 	// match the landing message is scrubbed for.
 	Warning string
@@ -47,7 +49,26 @@ type Log struct {
 	// PushCommand is what publishes a rewritten branch over the pushed
 	// one. gummi never runs it.
 	PushCommand string
+	// Signing: git signs the commits made on this branch now, so a
+	// rewrite's are signed too.
+	Signing bool
 }
+
+// Unsigned is how many of the card's commits carry no signature.
+func (l Log) Unsigned() int {
+	n := 0
+	for _, r := range l.Rows {
+		if !r.Signed {
+			n++
+		}
+	}
+	return n
+}
+
+// Signable is whether signing the branch's commits is on offer: the
+// history is the card's to rewrite, git signs here, and a commit lacks a
+// signature. It is the one rule; the surfaces only show it.
+func (l Log) Signable() bool { return l.Why == "" && l.Signing && l.Unsigned() > 0 }
 
 // the goal path commits "final checkpoint" with no card id in front
 var checkpointRe = regexp.MustCompile(`^[A-Z]{2,}-\d+: (.+ )?checkpoint$|^[A-Z]{2,}-\d+: dropped by its goal$|^final checkpoint$`)
@@ -63,7 +84,7 @@ func Rows(entries []worktree.LogEntry) []Row {
 		rows = append(rows, Row{
 			SHA: e.SHA, Short: e.Short, Subject: e.Subject, Body: e.Body,
 			Author: e.Author, At: e.At, Files: e.Files, Add: e.Add, Del: e.Del,
-			Checkpoint: IsCheckpoint(e.Subject), Pushed: e.Pushed,
+			Checkpoint: IsCheckpoint(e.Subject), Pushed: e.Pushed, Signed: e.Signed,
 			Warning: worktree.MatchesAttribution(e.Message()),
 		})
 	}
@@ -91,6 +112,8 @@ func Refusal(f domain.Feature, s State) string {
 		return string(f.ID) + " is a research card: it works in a scratch tree and never gets a branch"
 	case f.Stage == domain.StageTodo:
 		return string(f.ID) + " has no branch yet"
+	case f.MainCheckout:
+		return string(f.ID) + " runs in the main checkout: it holds no branch, so it has no commits of its own"
 	case f.Kind == domain.KindGoal:
 		return string(f.ID) + " is a goal: its branch is built from its cards' landings, not from commits to rewrite"
 	case f.Adopted():

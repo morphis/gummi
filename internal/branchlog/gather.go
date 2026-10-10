@@ -49,13 +49,14 @@ func (e Env) Read(ctx context.Context, f domain.Feature, busy bool) (Log, error)
 		out.Why = string(f.ID) + " has no commits of its own yet"
 	}
 	out.PushCommand = engine.PushCommandFor(ctx, mgr, &f)
+	out.Signing = mgr.Signing(ctx, &f)
 	return out, nil
 }
 
 // hasBranch is whether a card, whatever refuses it rewriting, has a branch
 // whose log can still be read: an adopted or landed card's is.
 func hasBranch(f domain.Feature) bool {
-	return f.Kind != domain.KindResearch && f.Stage != domain.StageTodo
+	return f.Kind != domain.KindResearch && f.Stage != domain.StageTodo && !f.MainCheckout
 }
 
 // Plan is what plan would do, refusing it as Apply would. Nothing moves.

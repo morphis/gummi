@@ -46,10 +46,14 @@ type diffLoadedMsg struct {
 func (m *Shell) openDiff(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		if ok, err := m.wt.Exists(ctx, &f); err != nil {
-			return diffLoadedMsg{err: err}
-		} else if !ok {
-			return diffLoadedMsg{err: errors.New(noWorktreeYet(f))}
+		// a main-checkout session has no worktree to look for: its diff is
+		// the loose work in the checkout itself
+		if !f.MainCheckout {
+			if ok, err := m.wt.Exists(ctx, &f); err != nil {
+				return diffLoadedMsg{err: err}
+			} else if !ok {
+				return diffLoadedMsg{err: errors.New(noWorktreeYet(f))}
+			}
 		}
 		diff, err := m.wt.Diff(ctx, &f)
 		if err != nil {

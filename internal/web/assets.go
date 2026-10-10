@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,14 +24,17 @@ import (
 //go:embed assets
 var assetsFS embed.FS
 
-// Cache-Control for the two kinds of thing this server hands out: the
-// page, which is never cached, and the assets beside it, which revalidate.
-// Neither may be served stale — both change when the binary does, and a
-// phone holding yesterday's app.js against today's server is a bug report
-// nobody can reproduce. The ETag makes revalidation cheap.
+// Cache-Control for the three kinds of thing this server hands out: the
+// page, which is never cached; an asset asked for under this binary's
+// version (every link the page and its modules carry), which can never
+// change and is kept; and an asset asked for any other way, which
+// revalidates. None may be served stale — they change when the binary
+// does, and a phone holding yesterday's app.js against today's server is a
+// bug report nobody can reproduce. The ETag makes revalidation cheap.
 const (
-	noCache    = "no-store"
-	assetCache = "no-cache"
+	noCache        = "no-store"
+	assetCache     = "no-cache"
+	versionedCache = "private, max-age=31536000, immutable"
 )
 
 // assetVersionToken is replaced, in every file that carries it, by a hash
@@ -44,24 +49,28 @@ const (
 const assetVersionToken = "__ASSET_V__" //nolint:gosec // a placeholder in the page text, not a credential
 
 // asset is one prepared file: its bytes, its type, and a validator over
-// the content.
+// the content. gz is the same bytes gzipped, for the text a browser takes
+// compressed (two thirds of the page's weight), or nil where it would not
+// save anything.
 type asset struct {
 	body  []byte
 	etag  string
 	ctype string
+	gz    []byte
 }
 
-func loadAssets() (map[string]asset, error) {
+func loadAssets() (map[string]asset, string, error) {
 	page, err := fs.Sub(assetsFS, "assets")
 	if err != nil {
-		return nil, fmt.Errorf("web assets are missing from the binary: %w", err)
+		return nil, "", fmt.Errorf("web assets are missing from the binary: %w", err)
 	}
 	return buildAssets(page)
 }
 
 // buildAssets reads every embedded file once, stamps the version into the
-// ones that link to others, and precomputes each one's validator.
-func buildAssets(page fs.FS) (map[string]asset, error) {
+// ones that link to others, and precomputes each one's validator and
+// compressed copy. It answers the version it stamped.
+func buildAssets(page fs.FS) (map[string]asset, string, error) {
 	raw := map[string][]byte{}
 	err := fs.WalkDir(page, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -75,10 +84,10 @@ func buildAssets(page fs.FS) (map[string]asset, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if len(raw) == 0 {
-		return nil, errors.New("no assets are embedded in this binary")
+		return nil, "", errors.New("no assets are embedded in this binary")
 	}
 
 	version := assetVersion(raw)
@@ -87,9 +96,24 @@ func buildAssets(page fs.FS) (map[string]asset, error) {
 		if bytes.Contains(b, []byte(assetVersionToken)) {
 			b = bytes.ReplaceAll(b, []byte(assetVersionToken), []byte(version))
 		}
-		out[name] = asset{body: b, etag: etagFor(b), ctype: contentType(name)}
+		out[name] = asset{body: b, etag: etagFor(b), ctype: contentType(name), gz: gzipped(name, b)}
 	}
-	return out, nil
+	return out, version, nil
+}
+
+// gzipped is b compressed, for the types that compress (fonts and images
+// already are), or nil when that would not make it smaller.
+func gzipped(name string, b []byte) []byte {
+	if !strings.HasPrefix(contentType(name), "text/") && !strings.HasSuffix(name, ".svg") &&
+		!strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".webmanifest") {
+		return nil
+	}
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if _, err := zw.Write(b); err != nil || zw.Close() != nil || buf.Len() >= len(b) {
+		return nil
+	}
+	return buf.Bytes()
 }
 
 // assetVersion hashes every file, name included, so any change to what
@@ -134,7 +158,11 @@ func (s *Server) serveOne(route, name string) http.Handler {
 // serveTree serves the asset directory — files only, never a listing.
 func (s *Server) serveTree() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.writeAsset(w, r, strings.TrimPrefix(r.URL.Path, "/"), assetCache)
+		cache := assetCache
+		if r.URL.Query().Get("v") == s.assetV {
+			cache = versionedCache
+		}
+		s.writeAsset(w, r, strings.TrimPrefix(r.URL.Path, "/"), cache)
 	})
 }
 
@@ -148,9 +176,35 @@ func (s *Server) writeAsset(w http.ResponseWriter, r *http.Request, name, cache 
 	w.Header().Set("Cache-Control", cache)
 	// The content is the version: an embedded file has no useful mod time,
 	// so ServeContent has nothing to answer a conditional request with
-	// unless we hand it one.
-	w.Header().Set("ETag", a.etag)
-	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(a.body))
+	// unless we hand it one. The compressed copy is another representation
+	// of it, and so carries a validator of its own.
+	body, etag := a.body, a.etag
+	if a.gz != nil {
+		w.Header().Add("Vary", "Accept-Encoding")
+		if acceptsGzip(r) {
+			body, etag = a.gz, strings.TrimSuffix(a.etag, `"`)+`-gz"`
+			w.Header().Set("Content-Encoding", "gzip")
+		}
+	}
+	w.Header().Set("ETag", etag)
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
+}
+
+// acceptsGzip reports whether the request's Accept-Encoding takes gzip
+// (every browser's does) and does not refuse it with q=0.
+func acceptsGzip(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		coding, params, _ := strings.Cut(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(coding), "gzip") {
+			continue
+		}
+		if v, ok := strings.CutPrefix(strings.TrimSpace(params), "q="); ok {
+			q, err := strconv.ParseFloat(v, 64)
+			return err == nil && q > 0
+		}
+		return true
+	}
+	return false
 }
 
 // etagFor is a strong validator over the bytes themselves.

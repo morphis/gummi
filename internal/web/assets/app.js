@@ -163,8 +163,12 @@ async function startBoard () {
   })
 
   let routed = false
+  // a card opened before the board's first read answered was read before
+  // the id the stream would resume from: that first stream resyncs
+  let early = false
   onRoute(async ({ id, tab }) => {
     routed = true
+    if (!state.board) early = true
     if (!id) return
     // a hash naming a card the board does not hold (once asked again: a
     // card made a moment ago may not have reached this page yet) says so,
@@ -183,7 +187,7 @@ async function startBoard () {
     if (id !== state.sel || (tab && tab !== state.tab) || opens) select(id, { tab })
   }, () => ({ id: state.sel, tab: state.tab }))
   await loadBoard()
-  if (routed && state.sel) { startFocus(); return connectEvents() }
+  if (routed && state.sel) { startFocus(); return connectEvents(early) }
   const route = parse()
   if (route.tab) set({ tab: route.tab })
   const first = (route.id && rows().some(r => r.id === route.id) && route.id) ||
@@ -220,7 +224,7 @@ function startFocus () {
   app.focus({ preventScroll: true })
 }
 
-function connectEvents () {
+function connectEvents (resync = false) {
   connect({
     board: () => loadBoard(),
     // a card that is gone has nothing to refetch: the board change that
@@ -230,7 +234,7 @@ function connectEvents () {
     toast: (c) => toast(c.text, { err: c.err }),
     viewers: (c) => set({ viewers: c.viewers || [] }),
     resync: () => refreshAll()
-  })
+  }, { resync })
 }
 
 boot()

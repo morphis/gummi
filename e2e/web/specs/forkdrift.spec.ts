@@ -125,6 +125,12 @@ test.describe('a rewritten base the card really conflicts with', () => {
     await open(page, server, id);
     const opts = async () => (await api('GET', `/api/cards/${id}`)).json.decision?.options?.map((o: any) => o.id).join(',');
     await expect.poll(opts).toMatch(/^rebase,/);
+    // the seed ran on autopilot, which answers the hand-off itself; an
+    // attended card waits for a yes before an agent session spends
+    const against = (await api('GET', `/api/cards/${id}`)).json.decision.against.token;
+    let mode = await api('POST', `/api/cards/${id}/actions/gate`, { mode: 'attended', against });
+    if (mode.status === 409 && mode.json?.confirm) mode = await api('POST', `/api/cards/${id}/actions/gate`, { mode: 'attended', against, confirm: mode.json.confirm });
+    expect(mode.status, mode.text).toBe(200);
     await page.waitForTimeout(1000);
     await (await option(page, phone, 'rebase')).click();
 

@@ -60,6 +60,12 @@ test('a landed freeform card claims no stages', async ({ pairedPage: page, serve
   // an idle session pins no decision: its landing is its menu's merge
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.actions?.some((a: any) => a.id === 'merge'), { timeout: 30_000 }).toBe(true);
   expect((await api('GET', `/api/cards/${id}`)).json.decision).toBeUndefined();
+  // landing refuses loose work: the session's notes are committed first,
+  // with a message of the person's own
+  if ((await api('GET', `/api/cards/${id}`)).json.actions?.some((a: any) => a.id === 'commit')) {
+    const c = await api('POST', `/api/cards/${id}/actions/commit`, { message: 'docs: note the padding' });
+    expect(c.status, c.text).toBe(200);
+  }
   let r = await api('POST', `/api/cards/${id}/actions/merge`, { message: 'chore: pad the padding' });
   for (let i = 0; i < 3 && r.json?.confirm; i++) {
     r = await api('POST', `/api/cards/${id}/actions/merge`, { message: 'chore: pad the padding', confirm: r.json.confirm });
@@ -242,7 +248,7 @@ test('commit and land say what each commits, and an empty commit message is refu
   const actions = (await api('GET', `/api/cards/${id}`)).json.actions as any[];
   expect(actions.find((a) => a.id === 'commit').detail).toContain('final checkpoint');
   expect(actions.find((a) => a.id === 'commit').detail).not.toContain('never commits');
-  expect(actions.find((a) => a.id === 'merge').detail).toContain('uncommitted is committed first');
+  expect(actions.find((a) => a.id === 'merge').detail).toContain('uncommitted work has to be committed first');
 
   const refused = await api('POST', `/api/cards/${id}/actions/commit`, { message: '' });
   expect(refused.status).toBe(400);

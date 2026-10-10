@@ -270,7 +270,11 @@ type Snapshot struct {
 	// Briefing is true while gummi's own handoff-brief turn is in flight
 	// on a freeform card (freeformhandoff.go): the busy word names what is
 	// happening rather than the bare "working".
-	Briefing           bool
+	Briefing bool
+	// Objective is a freeform card's objective (DESIGN §19.11), nil when
+	// it has none; Auditing is true while its audit runs between turns.
+	Objective          *domain.Objective
+	Auditing           bool
 	PendingAsk         *Ask   // the agent's open ask_user question, if any
 	Verdict            string // review verdict via submit_verdict, if submitted
 	VerdictFloor       string // deterministic ceiling applied before returning the stage verdict

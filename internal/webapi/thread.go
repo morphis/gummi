@@ -259,6 +259,24 @@ type Conversation struct {
 	// Watches is the session's running gummi watches ("w1 · command"),
 	// each of which reports back to the agent as a turn of its own.
 	Watches []string `json:"watches,omitempty"`
+	// Objective is a freeform session's objective (DESIGN §19.11), absent
+	// when it has none: the strip above the composer draws it.
+	Objective *Objective `json:"objective,omitempty"`
+}
+
+// Objective is what a session keeps going toward, and where it stands.
+type Objective struct {
+	Text  string `json:"text"`
+	Check string `json:"check,omitempty"`
+	// State is active, paused, met, stuck, exhausted, capped or failed.
+	State string `json:"state"`
+	// Turns is how many turns gummi has sent for it, of Cap.
+	Turns int `json:"turns"`
+	Cap   int `json:"cap"`
+	// Note is the auditor's (or the check's) last word on it.
+	Note string `json:"note,omitempty"`
+	// Auditing is true while the turn that just ended is being judged.
+	Auditing bool `json:"auditing,omitempty"`
 }
 
 // DelegationRequest is POST /api/cards/{id}/delegation's body: the

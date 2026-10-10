@@ -105,9 +105,12 @@ func reworkStage(s domain.Stage) string {
 // nextInput is the in-memory state the suggestions derive from. All
 // fields come from what the Update loop already tracks.
 type nextInput struct {
-	stage  domain.Stage
-	kind   domain.Kind
-	landed bool
+	// publish is whether this board publishes at all (gh found signed in,
+	// Shell.publishOffered) — the publish rows' first condition
+	publish bool
+	stage   domain.Stage
+	kind    domain.Kind
+	landed  bool
 	// mergeChoice: the card may land as a merge commit keeping its commits
 	// as well as a squash (domain.Feature.Offers), so the landing's wording
 	// says both are on offer
@@ -520,6 +523,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		verifyBounces:    verifyBounces(r.History),
 		openSpecQs:       r.OpenSpecQs,
 		openDiffComments: r.OpenDiffComments,
+		publish:          m.publishOffered(),
 		undrafted:        r.Undrafted,
 		pullRequest:      r.F.PullRequest,
 		exited:           r.Exited,
@@ -1459,7 +1463,7 @@ func stageAnswers(in nextInput) []nextAction {
 		if hint := in.pullRequest.NextStepsHint(true); hint != "" {
 			gate = nextStep("advance", "g", "merge the PR", hint)
 			// With a PR open, hand-off is usually the real answer rather
-			// than the alternative one: gummi never writes to GitHub, so
+			// than the alternative one: gummi never merges on GitHub, so
 			// the landing is already someone else's, and waiting at verify
 			// for your own `git pull` is not a workflow step.
 			keep = nextStep("handoff", "h", "hand off",

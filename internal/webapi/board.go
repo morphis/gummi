@@ -24,6 +24,10 @@ type Board struct {
 	// quit stopped: pick them back up, or not now. Nil when there is
 	// nothing to offer. Answer it with POST /api/board/resume.
 	Resume *ResumeOffer `json:"resume,omitempty"`
+	// EventID is the event stream's last id as this read began: a page
+	// opens GET /api/events?since=<it> and is told only what changed after
+	// the read, rather than refetching everything it just read.
+	EventID string `json:"eventId,omitempty"`
 }
 
 // ResumeOffer is the quit-resume question: the cards the last quit
@@ -108,6 +112,10 @@ type Row struct {
 	// Stack and Goal place the card in a stack or under a goal.
 	Stack *RowStack `json:"stack,omitempty"`
 	Goal  *RowGoal  `json:"goal,omitempty"`
+	// Objective is a freeform card's objective state (active, paused, met,
+	// stuck, exhausted, capped, failed), empty when it has none: the row's
+	// mark, coloured by it.
+	Objective string `json:"objective,omitempty"`
 	// Waits names the cards this one's dependencies are waiting on.
 	Waits []string `json:"waits,omitempty"`
 	// Landed marks a card whose branch was squash-merged; PR is the linked
@@ -175,10 +183,61 @@ type Settings struct {
 	Repo string `json:"repo"`
 	// MaxName is the longest name the workspace accepts, in characters.
 	MaxName int `json:"maxName"`
+	// Credentials is what the workspace holds for GitHub, described and
+	// never disclosed.
+	Credentials Credentials `json:"credentials"`
+	// Identity is who git writes this workspace's commits as.
+	Identity Identity `json:"identity"`
+}
+
+// Identity is a git author: user.name and user.email as git resolves them
+// in the workspace's repository, from whichever scope sets them. Either is
+// empty where nothing does.
+type Identity struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// IdentityRequest is PUT /api/settings/identity's body: the name and email
+// to write to the repository's own git configuration. Both empty removes
+// that setting and leaves the machine's.
+type IdentityRequest struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// Credentials describes the GitHub token and SSH key stored for this
+// workspace. Neither secret is ever in an answer: a token is named by its
+// last characters, a key by its type, fingerprint and public half.
+type Credentials struct {
+	TokenSet  bool   `json:"tokenSet"`
+	TokenHint string `json:"tokenHint,omitempty"`
+	KeySet    bool   `json:"keySet"`
+	KeyType   string `json:"keyType,omitempty"`
+	// KeyFingerprint is the key's SHA256 fingerprint, as GitHub lists it.
+	KeyFingerprint string `json:"keyFingerprint,omitempty"`
+	// KeyPublic is the key's authorized_keys line, for adding to GitHub.
+	KeyPublic string `json:"keyPublic,omitempty"`
+	// Signing reports that commits made in this workspace are signed with
+	// the stored key.
+	Signing bool `json:"signing"`
 }
 
 // SettingsRequest is PUT /api/settings' body. An empty Name clears the
 // name.
 type SettingsRequest struct {
 	Name string `json:"name"`
+}
+
+// CredentialsRequest is PUT /api/settings/credentials' body. A field left
+// out is left as it is; an empty one forgets what was stored.
+type CredentialsRequest struct {
+	GitHubToken *string `json:"githubToken,omitempty"`
+	SSHKey      *string `json:"sshKey,omitempty"`
+	// GenerateSSHKey makes a fresh key on the host in place of any held;
+	// it may not be sent together with SSHKey.
+	GenerateSSHKey bool `json:"generateSshKey,omitempty"`
+	// SignCommits switches signing commits with the stored key on or off;
+	// on is refused with no key held.
+	SignCommits *bool `json:"signCommits,omitempty"`
 }

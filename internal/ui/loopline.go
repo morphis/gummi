@@ -121,6 +121,11 @@ func (m *Shell) cardBusyWord(r featureRow) string {
 		return "asking"
 	}
 	if m.freeformTurnBusy(r) {
+		if ff := m.engine.Freeform(r.F.ID); ff != nil {
+			if snap := ff.Snapshot(); snap.Auditing && !snap.Busy {
+				return engine.ObjectiveAuditing
+			}
+		}
 		return "working"
 	}
 	if sess := m.sessionFor(r.F.ID); sess != nil {

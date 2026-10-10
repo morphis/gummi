@@ -85,6 +85,10 @@ const (
 	// person's rebase that applied cleanly, or by the agent a conflicted
 	// one was handed to once its resolution was judged good.
 	EventRebase = "rebase"
+	// EventPublish marks a person publishing the card: its branch pushed,
+	// or its pull request opened, updated, readied or returned to draft
+	// (DESIGN §22). Only a person's confirmed act writes one.
+	EventPublish = "publish"
 )
 
 // Event outcomes: the closed vocabulary stored in card_events.status.
@@ -268,6 +272,22 @@ type RebasePayload struct {
 	Onto  string `json:"onto,omitempty"`
 	By    string `json:"by,omitempty"`
 	Agent bool   `json:"agent,omitempty"`
+}
+
+// PublishPayload is the JSON shape of an EventPublish event's Payload: the
+// act, the revision pushed (empty when the remote already had it), the
+// repository it went to, and the pull request it concerned.
+type PublishPayload struct {
+	Act    string `json:"act"`
+	Pushed string `json:"pushed,omitempty"`
+	Repo   string `json:"repo,omitempty"`
+	Number int    `json:"number,omitempty"`
+	URL    string `json:"url,omitempty"`
+	// Draft is a PR opened as a draft; ToDraft a ready PR returned to
+	// draft ahead of a push of an unverified tip.
+	Draft   bool   `json:"draft,omitempty"`
+	ToDraft bool   `json:"toDraft,omitempty"`
+	By      string `json:"by,omitempty"`
 }
 
 // ToolPayload is the JSON shape of an EventTool and EventToolResult
@@ -769,6 +789,16 @@ func (s *Store) AppendPause(ctx context.Context, id domain.FeatureID, stage doma
 		return fmt.Errorf("encoding pause event for %s: %w", id, err)
 	}
 	return s.AppendEvent(ctx, CardEvent{Feature: id, Stage: stage, Kind: EventPause, At: at, Payload: string(payload)})
+}
+
+// AppendPublish records a person's publish act. Best-effort by contract,
+// like AppendRebase: GitHub already has what was sent.
+func (s *Store) AppendPublish(ctx context.Context, id domain.FeatureID, stage domain.Stage, p PublishPayload, at time.Time) error {
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("encoding publish event for %s: %w", id, err)
+	}
+	return s.AppendEvent(ctx, CardEvent{Feature: id, Stage: stage, Kind: EventPublish, At: at, Payload: string(payload)})
 }
 
 // AppendRebase records a card's branch rebased onto its base.

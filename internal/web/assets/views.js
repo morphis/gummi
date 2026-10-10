@@ -24,6 +24,7 @@ export const VIEW_LABELS = {
   goals: 'Goals',
   goal: 'Goal',
   stacks: 'Stacks',
+  repos: 'Repositories',
   schedules: 'Schedules',
   ingest: 'Import spec',
   bugs: 'Import bugs',

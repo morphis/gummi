@@ -1,6 +1,7 @@
 // log.js — the Log tab: the card's own commits, oldest first, and the one
-// thing that can be done to them here: reword a commit, or squash it into
-// the one before. Both leave the branch's content exactly as it was, so
+// thing that can be done to them here: reword a commit, squash it into
+// the one before, or — where commits are signed — sign the ones that are
+// not. All of it leaves the branch's content exactly as it was, so
 // what verify saw and the comments on the diff stay true; the server
 // refuses anything else, and refuses to rewrite while an agent is working.
 //
@@ -32,7 +33,7 @@ function draftFor (id, head) {
   let d = drafts.get(id)
   // the branch moved since the draft was made: its commits are not these
   if (!d || d.head !== head) {
-    d = { head, squash: new Set(), msg: new Map(), typing: new Map(), editing: null, open: new Set(), preview: null, seq: 0, confirming: false }
+    d = { head, squash: new Set(), msg: new Map(), sign: false, typing: new Map(), editing: null, open: new Set(), preview: null, seq: 0, confirming: false }
     drafts.set(id, d)
   }
   return d
@@ -56,7 +57,15 @@ function groupsOf (commits, dr) {
   })
 }
 
-const dirty = (dr) => dr.squash.size > 0 || dr.msg.size > 0
+const dirty = (dr) => dr.squash.size > 0 || dr.msg.size > 0 || dr.sign
+
+// planOf is the request a draft makes: its groups, and whether the
+// unsigned commits are to be made again, signed.
+const planOf = (d, dr, groups) => dr.sign ? { head: d.head, groups, sign: true } : { head: d.head, groups }
+
+// keyOf names the draft a dry run answered, so an answer to an earlier
+// one is not read as this one's.
+const keyOf = (dr, groups) => JSON.stringify([groups, dr.sign])
 
 function render (pane, entry, ctx) {
   const d = entry.data
@@ -95,6 +104,9 @@ function commitRow (c, i, { d, dr, ctx, can, folded, lead }) {
       h('span', { class: 'subj' }, reworded && lead ? (dr.msg.get(c.sha).split('\n')[0] || c.subject) : c.subject),
       c.checkpoint ? h('span', { class: 'tag', title: 'gummi committed this itself between turns' }, 'checkpoint') : null,
       c.pushed ? h('span', { class: 'tag pushed', title: 'The remote already has this commit; rewriting it needs a force push' }, 'pushed') : null,
+      c.signed
+        ? h('span', { class: 'tag', title: 'This commit carries a signature' }, 'signed')
+        : dr.sign ? h('span', { class: 'tag tosign', title: 'Apply makes this commit again, signed' }, 'to sign') : null,
       c.warning ? h('span', { class: 'tag warn', title: `The message carries “${c.warning}” — a rewrite refuses it, and landing scrubs it` }, 'attribution') : null),
     h('div', { class: 'cm' },
       h('span', null, c.author),
@@ -201,12 +213,12 @@ function patchView (c, ctx) {
 
 function planBar (d, dr, ctx, groups) {
   // a dry run of an earlier draft says nothing about this one
-  const p = dr.preview?.for === JSON.stringify(groups) ? dr.preview : null
+  const p = dr.preview?.for === keyOf(dr, groups) ? dr.preview : null
   const changed = dirty(dr)
   const line = !changed
-    ? 'Reword a commit, or squash it into the one before. The content of the branch never changes.'
+    ? `Reword a commit, ${d.signable ? 'squash it into the one before, or sign the ones that are not signed' : 'or squash it into the one before'}. The content of the branch never changes.`
     : p?.error ? p.error
-      : p ? (p.noop ? 'No change.' : `${plural(d.commits.length, 'commit')} → ${plural(p.commits.length, 'commit')} · content unchanged`)
+      : p ? (p.noop ? 'No change.' : `${plural(d.commits.length, 'commit')} → ${plural(p.commits.length, 'commit')} · content unchanged${dr.sign ? ` · ${plural(p.changed, 'commit')} made again, signed` : ''}`)
         : 'Checking…'
   return h('div', { class: ['plan', p?.error && 'bad'], testid: 'log-plan', 'aria-live': 'polite' },
     h('span', { class: 'pl', testid: 'log-plan-line' }, line),
@@ -214,6 +226,7 @@ function planBar (d, dr, ctx, groups) {
       h('span', null, 'The remote already has commits this replaces. gummi will not push; afterwards you run:'),
       h('div', { class: 'cmd' }, h('span', { testid: 'log-confirm-cmd' }, p.pushCommand || d.pushCommand || ''), copyButton(p.pushCommand || d.pushCommand || '', 'log-confirm-copy'))) : null,
     h('div', { class: 'row' },
+      d.signable ? h('button', { class: ['btn', dr.sign && 'on'], type: 'button', testid: 'log-sign', 'aria-pressed': String(dr.sign), title: 'Make every commit from the first unsigned one up again, signed. Messages and content stay as they are; the commits get new SHAs', onclick: () => { dr.sign = !dr.sign; dr.confirming = false; ctx.rerender() } }, dr.sign ? 'Don’t sign' : 'Sign all commits') : null,
       h('button', { class: 'btn', type: 'button', testid: 'log-reset', disabled: !changed, onclick: () => { drafts.delete(ctx.id); ctx.rerender() } }, 'Reset'),
       h('button', { class: 'btn pri', type: 'button', testid: 'log-apply', disabled: !changed || !p || !!p.error || p.noop, onclick: () => apply(d, dr, ctx, groups, p) },
         dr.confirming ? 'Rewrite anyway' : (p?.pushed ? 'Rewrite (needs a force push)' : 'Apply'))))
@@ -221,14 +234,15 @@ function planBar (d, dr, ctx, groups) {
 
 async function dryRun (d, dr, ctx, groups) {
   const seq = ++dr.seq
-  if (dr.preview?.for === JSON.stringify(groups)) return
+  const key = keyOf(dr, groups)
+  if (dr.preview?.for === key) return
   try {
-    const p = await post(cardPath(ctx.id, 'log/plan'), { head: d.head, groups })
+    const p = await post(cardPath(ctx.id, 'log/plan'), planOf(d, dr, groups))
     if (dr.seq !== seq) return
-    dr.preview = { ...p, for: JSON.stringify(groups) }
+    dr.preview = { ...p, for: key }
   } catch (err) {
     if (dr.seq !== seq) return
-    dr.preview = { error: err.message, for: JSON.stringify(groups) }
+    dr.preview = { error: err.message, for: key }
   }
   ctx.rerender()
 }
@@ -236,7 +250,7 @@ async function dryRun (d, dr, ctx, groups) {
 async function apply (d, dr, ctx, groups, p) {
   if (p.pushed && !dr.confirming) { dr.confirming = true; ctx.rerender(); return }
   try {
-    const res = await post(cardPath(ctx.id, 'log/rewrite'), { head: d.head, groups, acknowledgePushed: !!p.pushed })
+    const res = await post(cardPath(ctx.id, 'log/rewrite'), { ...planOf(d, dr, groups), acknowledgePushed: !!p.pushed })
     drafts.delete(ctx.id)
     if (res.pushCommand) pushes.set(ctx.id, res.pushCommand); else pushes.delete(ctx.id)
     toast('History rewritten; the branch’s content is unchanged')
@@ -250,7 +264,7 @@ async function apply (d, dr, ctx, groups, p) {
 
 function pushBox (cmd, ctx) {
   return h('div', { class: 'push', testid: 'log-push' },
-    h('span', null, 'gummi does not push. The remote still has the old commits; to replace them, run:'),
+    h('span', null, 'The remote still has the old commits. To replace them, run this, or push from the PR tab where publishing is set up:'),
     h('div', { class: 'cmd' }, h('span', { testid: 'log-push-cmd' }, cmd),
       copyButton(cmd, 'log-push-copy'),
       h('button', { type: 'button', onclick: () => { pushes.delete(ctx.id); ctx.rerender() } }, 'Dismiss')))

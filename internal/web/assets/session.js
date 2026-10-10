@@ -315,8 +315,9 @@ function openBudget (anchor) {
   const d = state.sessionDraft
   const input = h('input', { class: 'inp', type: 'text', inputmode: 'decimal', value: dollarsInput(d.envelope ?? form?.envelope ?? 0), testid: 'draft-budget-input', 'aria-label': 'Budget in dollars', 'aria-describedby': 'draft-budget-err' })
   const err = h('p', { class: 'ferr', id: 'draft-budget-err', testid: 'draft-budget-error', role: 'alert', hidden: true })
+  // a preset is already credits; only what was typed is dollars to read
   const apply = (v) => {
-    const b = budgetOf(v)
+    const b = typeof v === 'number' ? { n: v } : budgetOf(v)
     if (b.err) { err.textContent = b.err; err.hidden = false; input.focus(); return }
     set({ sessionDraft: { ...state.sessionDraft, envelope: b.n } })
     closePop()

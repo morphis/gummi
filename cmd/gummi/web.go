@@ -83,6 +83,11 @@ func runWeb(fl cliFlags, args []string) error {
 		return errors.New("--no-pairing serves the board to anyone who can reach it, so it is only allowed " +
 			"when every listener is loopback — drop --tailscale, or pair the browser instead")
 	}
+	terminal := fl.Bool("terminal")
+	if terminal && noPairing {
+		return errors.New("--terminal gives every browser that reaches the board a shell on this machine, " +
+			"so it is only served to paired devices — drop --no-pairing")
+	}
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, time.Now().Format("15:04:05")+" "+format+"\n", args...)
 	}
@@ -197,6 +202,7 @@ func runWeb(fl cliFlags, args []string) error {
 		Version:    version(),
 		WebDir:     h.ws.WebDir(),
 		OpenAccess: noPairing,
+		Terminal:   terminal,
 		Hosts:      hosts,
 		Secure:     secure,
 		AdminToken: adminToken,
@@ -246,6 +252,9 @@ func runWeb(fl cliFlags, args []string) error {
 	defer func() { _ = os.Remove(filepath.Join(h.ws.WebDir(), serverFile)) }()
 
 	announce(logf, url, noPairing, devices, pairing)
+	if terminal {
+		logf("web: --terminal — every paired device can open a shell in a card's worktree, running as you and outside any agent sandbox")
+	}
 	if !secure && !loopbackOnly(ln) {
 		logf("web: WARNING — serving plain HTTP on %s, which is not loopback: the pairing code and every device's token cross the network in clear, readable by anyone on the path. "+
 			"Serve on 127.0.0.1 behind `tailscale serve`, use --tailscale, or give --tls-cert/--tls-key.", ln.Addr())

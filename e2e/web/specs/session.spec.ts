@@ -178,7 +178,7 @@ test('the session stats tab draws its spend, bars and envelope', async ({ paired
   await page.route(`**/api/cards/${id}/stats`, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sessionStats) }));
   await page.goto(`${server.url}/#${id}/stats`);
   if (info.project.name === 'phone') await page.getByTestId('tab-stats').click();
-  await expect(page.getByTestId('stats-spent')).toContainText('3.2');
+  await expect(page.getByTestId('stats-spent')).toContainText('$0.03');
   await expect(page.getByTestId('stats-bars')).toContainText('open');
   await expect(page.getByTestId('stats-bars')).toContainText('session');
   await expect(page.getByTestId('stats-table')).toContainText('e2e-implementer');

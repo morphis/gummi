@@ -1,0 +1,107 @@
+{
+  "list": {
+    "repos": [
+      {
+        "name": "gummi",
+        "path": "git/gummi",
+        "base": "main",
+        "origin": "git@github.com:morphis/gummi.git",
+        "remote": true,
+        "remotes": [
+          {
+            "name": "origin",
+            "url": "git@github.com:morphis/gummi.git",
+            "tracking": 2
+          },
+          {
+            "name": "fork",
+            "url": "https://•••@github.com/simon/gummi.git",
+            "pushUrl": "git@github.com:simon/gummi.git",
+            "secret": true
+          }
+        ],
+        "remoteBranches": [
+          "origin/main",
+          "origin/release"
+        ],
+        "dirty": true,
+        "fetched": "2026-09-27T09:12:00Z",
+        "cards": 3,
+        "branches": [
+          {
+            "name": "main",
+            "group": "base",
+            "sha": "7f5dac70a1b2",
+            "subject": "fix(web): keep the rail",
+            "at": "2026-09-27T09:12:00Z",
+            "upstream": "origin/main",
+            "remote": "origin",
+            "ahead": 2,
+            "behind": 3,
+            "push": "git push origin main"
+          },
+          {
+            "name": "feat/loader",
+            "group": "cards",
+            "sha": "ace70de9c3d4",
+            "aheadBase": 4,
+            "behindBase": 1,
+            "worktree": ".gummi/worktrees/FD-012",
+            "card": {
+              "id": "FD-012",
+              "title": "Loader",
+              "stage": "done",
+              "landed": true,
+              "clean": true
+            }
+          },
+          {
+            "name": "release",
+            "group": "unowned",
+            "sha": "9a8ca12ae5f6",
+            "upstream": "origin/release",
+            "gone": true,
+            "forkedBy": [
+              "FD-020"
+            ],
+            "why": "FD-020 forks from it"
+          },
+          {
+            "name": "wip/simon",
+            "group": "unowned",
+            "sha": "b9128d40a7b8",
+            "aheadBase": 2,
+            "delete": "confirm"
+          }
+        ]
+      },
+      {
+        "name": "",
+        "path": ".",
+        "cards": 0,
+        "branches": [],
+        "error": "not the root of a git repository"
+      }
+    ],
+    "discovered": true,
+    "ambiguous": [
+      {
+        "name": "tools",
+        "paths": [
+          "a/tools",
+          "b/tools"
+        ]
+      }
+    ]
+  },
+  "request": {
+    "repo": "gummi",
+    "all": true,
+    "branch": "wip/simon",
+    "force": true,
+    "remote": "fork",
+    "newName": "simon",
+    "url": "git@github.com:simon/gummi.git",
+    "upstream": "fork/wip/simon"
+  }
+}

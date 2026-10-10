@@ -74,3 +74,21 @@ func TestPlanGroups(t *testing.T) {
 		t.Errorf("groups = %+v", g)
 	}
 }
+
+func TestSignable(t *testing.T) {
+	mixed := []Row{{SHA: "a", Signed: true}, {SHA: "b"}}
+	for _, tc := range []struct {
+		name string
+		l    Log
+		want bool
+	}{
+		{"unsigned commits where git signs", Log{Rows: mixed, Signing: true}, true},
+		{"nothing signs here", Log{Rows: mixed}, false},
+		{"all signed", Log{Rows: mixed[:1], Signing: true}, false},
+		{"not the card's to rewrite", Log{Rows: mixed, Signing: true, Why: "an agent is working"}, false},
+	} {
+		if got := tc.l.Signable(); got != tc.want {
+			t.Errorf("%s: Signable = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

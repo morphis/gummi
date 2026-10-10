@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
@@ -79,6 +80,10 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 		switch msg.Author {
 		case engine.AuthorUser:
 			label = s.KeyHint.Render("you")
+			if threadfold.TurnBy(msg.By) == "gummi" {
+				// a turn gummi sent for the session's objective, never the person's
+				label = s.Faint.Render("gummi · objective")
+			}
 			// EVERY answer to an ask carries its outcome, not just the
 			// happy one. The suffix used to appear only for a clean
 			// capture, so a typed answer read "you · recorded in the spec"
@@ -130,7 +135,36 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 	}
 	lines = append(lines, taskLines(s, snap.Tasks, w)...)
 	lines = append(lines, watchLines(s, snap.Watches, w)...)
+	lines = append(lines, objectiveLines(s, snap.Objective, w)...)
 	return append(lines, queuedLines(s, snap.Queued, w)...)
+}
+
+// objectiveLines is the strip a session's objective draws above the
+// composer (DESIGN §19.11): where it stands, what it is, the auditor's
+// last note, and the verbs that act on it.
+func objectiveLines(s *theme.Styles, o *domain.Objective, w int) []string {
+	if o == nil {
+		return nil
+	}
+	verbs := "/objective pause · stop · clear"
+	switch {
+	case o.State == domain.ObjectivePaused:
+		verbs = "/objective resume · clear"
+	case o.State.Settled():
+		verbs = "/objective clear · or set a new one"
+	}
+	head := fmt.Sprintf("objective · %s · %d/%d turns · %s", o.State, o.Turns, domain.ObjectiveTurnCap, verbs)
+	fit := func(t string) string {
+		return ansi.Truncate(sanitize(strings.Join(strings.Fields(t), " ")), max(w-4, 8), "…")
+	}
+	lines := []string{s.Faint.Render(ansi.Truncate(head, max(w, 8), "…")), "  " + s.Base.Render(fit(o.Text))}
+	if o.Check != "" {
+		lines = append(lines, "  "+s.Subtle.Render(fit("check: "+o.Check)))
+	}
+	if o.Note != "" {
+		lines = append(lines, "  "+s.Subtle.Render(fit("note: "+o.Note)))
+	}
+	return append(lines, "")
 }
 
 // queuedLines renders what was said while the agent was mid-turn, waiting

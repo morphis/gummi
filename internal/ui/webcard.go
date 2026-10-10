@@ -324,6 +324,11 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 		// head asserting a checkout that does not exist
 		st.card.Branch, st.card.Base, st.card.Scratch = "", "", true
 	}
+	if r.F.MainCheckout {
+		// a main-checkout session works in the repository's own checkout:
+		// no branch of its own, and nothing it would land onto
+		st.card.Branch, st.card.Base = "", ""
+	}
 	if od := m.webOpenDecision(r); od != nil {
 		dec := od.api
 		st.card.Decision, st.rev = &dec, od.rev
@@ -569,6 +574,9 @@ func (m *Shell) webRevision(ctx context.Context, f domain.Feature, rev string) (
 		if len(head) > 7 {
 			head = head[:7]
 		}
+		if f.MainCheckout {
+			return head, "main checkout at " + head
+		}
 		return head, f.BranchName() + " at " + head
 	}
 	return "", ""
@@ -737,6 +745,16 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 				a.Choices = append(a.Choices, webapi.Choice{Value: p.Name, Label: p.Name, Detail: backend + " · " + model})
 			}
 		}
+	case "objective":
+		// the text, or one of the verbs the page's strip sends as it
+		a.Needs = webapi.ActionNeedsText
+		a.Detail = "what done looks like — the session keeps going until an auditor finds it met. " +
+			"Start with --check 'cmd' to make a command the judge; pause, resume, stop or clear act on the one it has"
+		if ff := m.engine.Freeform(r.F.ID); ff != nil {
+			if o := ff.Snapshot().Objective; o != nil && !o.State.Settled() {
+				a.Default = o.Text
+			}
+		}
 	case "heartbeat":
 		// the page opens its own schedule form for this card; the
 		// definition is written through /api/schedules, not this action
@@ -748,6 +766,11 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		}
 	case "gate":
 		a.Default = autopilotSwitchTo(r.F.GateApproval)
+	case "prcreate", "push", "prready", "prdraft":
+		// the page's publish dialog reads the facts itself and confirms
+		// through POST /api/cards/{id}/publish, never through this action
+		a.Needs = webapi.ActionNeedsPublish
+		a.Default = string(publishActs[a.ID])
 	case "delete", "clean", "duplicate", "handoff", "adopt", "prunlink", "goalstop":
 		a.Needs = webapi.ActionNeedsConfirm
 	}

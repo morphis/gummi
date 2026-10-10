@@ -405,7 +405,7 @@ func (ff *FreeformSession) liveBrief(ctx context.Context, sess *Session) (string
 		ff.noteBriefFailure(sess, err)
 		return "", err
 	}
-	brief, err := collectBrief(ctx, e, ff, briefSess)
+	brief, err := collectOneShot(ctx, e, ff, briefSess, "brief")
 	if err != nil {
 		ff.noteBriefFailure(sess, err)
 		return "", err
@@ -415,17 +415,18 @@ func (ff *FreeformSession) liveBrief(ctx context.Context, sess *Session) (string
 	return brief, nil
 }
 
-// collectBrief drains the brief session's event stream to the turn's end
-// and returns the reply, booking its usage against the card as the session's
-// own turns are booked.
-func collectBrief(ctx context.Context, e *Engine, ff *FreeformSession, briefSess agent.Session) (string, error) {
+// collectOneShot drains a one-shot session's event stream (the handoff
+// brief, an objective's audit) to the turn's end and returns the reply,
+// booking its usage against the card as the session's own turns are
+// booked. what names the turn in its errors.
+func collectOneShot(ctx context.Context, e *Engine, ff *FreeformSession, s agent.Session, what string) (string, error) {
 	var text assistantText
 	for {
 		select {
-		case ev, ok := <-briefSess.Events():
+		case ev, ok := <-s.Events():
 			if !ok {
 				if strings.TrimSpace(text.String()) == "" {
-					return "", errors.New("the backend stopped before the brief was written")
+					return "", errors.New("the backend stopped before the " + what + " was written")
 				}
 				return text.String(), nil
 			}
@@ -438,7 +439,7 @@ func collectBrief(ctx context.Context, e *Engine, ff *FreeformSession, briefSess
 				e.recordOneShotUsage(ff.id, domain.StageOpen, ev.Usage)
 			case agent.EventIdle, agent.EventBudgetExhausted:
 				if strings.TrimSpace(text.String()) == "" {
-					return "", errors.New("the backend answered the brief turn with nothing")
+					return "", errors.New("the backend answered the " + what + " turn with nothing")
 				}
 				return text.String(), nil
 			case agent.EventError:

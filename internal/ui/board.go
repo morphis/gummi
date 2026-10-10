@@ -80,7 +80,23 @@ func (m *Shell) freeformTurnBusy(r featureRow) bool {
 		return false
 	}
 	ff := m.engine.Freeform(r.F.ID)
-	return ff != nil && ff.Snapshot().Busy
+	if ff == nil {
+		return false
+	}
+	// an objective's audit between turns is the card at work too
+	snap := ff.Snapshot()
+	return snap.Busy || snap.Auditing
+}
+
+// freeformObjective is a freeform card's objective, nil when it has none.
+func (m *Shell) freeformObjective(r featureRow) *domain.Objective {
+	if !r.F.IsFreeform() || m.engine == nil {
+		return nil
+	}
+	if ff := m.engine.Freeform(r.F.ID); ff != nil {
+		return ff.Snapshot().Objective
+	}
+	return nil
 }
 
 // freeformWatching reports a freeform card with a watch open and no turn in
@@ -163,6 +179,20 @@ func (m *Shell) cardLine(r featureRow, shortcut int, selected, paneFocused bool,
 		loop = " " + s.Info.Render(m.spinnerGlyph(selected)) + " " + faint.Render(m.cardBusyWord(r))
 	} else if m.freeformWatching(r) {
 		loop = " " + s.Info.Render("◎") + " " + faint.Render("watching")
+	}
+	if o := m.freeformObjective(r); o != nil {
+		// the objective's mark, coloured by where it stands: running,
+		// paused, met, or ended without being met
+		mark := s.Info
+		switch {
+		case o.State == domain.ObjectiveMet:
+			mark = s.Success
+		case o.State == domain.ObjectivePaused:
+			mark = faint
+		case o.State.Settled():
+			mark = s.Warning
+		}
+		loop += " " + mark.Render("◆") + " " + faint.Render("objective "+string(o.State))
 	}
 	// the marker sits flush against the shortcut number, so it can't use
 	// BandMarker's padded form — same two styles, one column.

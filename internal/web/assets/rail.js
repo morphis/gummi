@@ -181,6 +181,7 @@ function rowEl (r, spread) {
     spread && r.repo ? h('span', { class: 'repo', style: { '--rc': `var(--r${repoSlot(r.repo)})` }, title: `repository ${r.repo}`, testid: `rail-row-repo-${r.id}` }, r.repo) : null,
     r.stage === 'open' || r.kind === 'freeform' ? h('span', { class: 'ff' }, 'session') : strip(r.stage),
     badge,
+    r.objective ? h('span', { class: ['badge obj', `obj-${r.objective}`], title: `objective ${r.objective}`, testid: `rail-row-objective-${r.id}` }, `◆ ${r.objective}`) : null,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.join(', ')}`) : null,
     r.stack ? h('span', { class: ['badge stack', r.stack.stale && 'stale'], title: r.stack.name }, `stack ${r.stack.pos + 1} of ${r.stack.of}`) : null,
     r.elsewhere ? h('span', { class: 'badge else', title: 'Another gummi is driving this card' }, 'elsewhere') : null,
@@ -205,6 +206,7 @@ function renderFoot (unpair, newSession) {
     const items = [
       item('goals', 'Goals', 'goal'),
       item('stacks', 'Stacks', 'stack'),
+      item('repos', 'Repositories', 'repo'),
       item('schedules', 'Schedules', 'clock'),
       item('ingest', 'Import spec', 'import'),
       item('bugs', 'Import bugs', 'bug'),
