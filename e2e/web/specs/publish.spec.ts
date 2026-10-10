@@ -207,6 +207,43 @@ test.describe('a card that may not be published as it stands', () => {
   });
 });
 
+// A session lands on a person's read of its diff, so that is its floor here
+// too: a comment still open on the diff holds its pull request at draft.
+test.describe('a session with a comment still open on its diff', () => {
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); } } });
+
+  test('opens its pull request as a draft the person cannot untick', async ({ pairedPage: page, server, api, workspace }, info) => {
+    test.setTimeout(120_000);
+    const made = await api('POST', '/api/cards', { kind: 'freeform', description: 'Poke at the rounding', backend: 'headless', model: 'e2e-implementer' });
+    const id = String(made.json?.id);
+    await page.goto(`${server.url}/#${id}`);
+    await expect(page.getByTestId('card-id')).toHaveText(id);
+    await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
+    // the opening turn leaves its edit uncommitted: commit it as the person would
+    await workspace.exec('sh', ['-c', 'git add -A && git commit -q -m "Note the rounding"'], { cwd: workspace.worktree(id) });
+    const diff = (await api('GET', `/api/cards/${id}/diff`)).json;
+    const line = diff.files.flatMap((f: any) => f.hunks.flatMap((hk: any) => hk.lines)).find((l: any) => l.t === '+');
+    const ann = await api('POST', `/api/cards/${id}/diff/annotations`, { idx: line.idx, comment: 'Say which rounding.' });
+    expect(ann.status, ann.text).toBe(200);
+
+    await openPR(page, server, id, phone(info));
+    await page.getByTestId('pr-publish-create').click({ timeout: 20_000 });
+    await expect(page.getByTestId('publish-summary')).toContainText('open a draft PR', { timeout: 20_000 });
+    await expect(page.getByTestId('publish-draft')).toBeChecked();
+    await expect(page.getByTestId('publish-draft')).toBeDisabled();
+    await expect(page.getByTestId('publish-draft-why')).toContainText('unresolved');
+    await shot(page, info, 'publish-session-locked-draft');
+    await page.getByTestId('publish-confirm').click();
+    await expect(page.getByTestId('publish-dialog')).toHaveCount(0, { timeout: 30_000 });
+    const created = workspace.ghCalls().find((a) => a[0] === 'pr' && a[1] === 'create');
+    expect(created).toContain('--draft');
+    expect(await remoteTip(workspace, await branchOf(workspace, id))).toBe(await tipOf(workspace, id));
+    // and the strip says why it cannot be marked ready, instead of offering it
+    await expect(page.getByTestId('pr-publish-why')).toContainText('unresolved', { timeout: 15_000 });
+    await expect(page.getByTestId('pr-publish-ready')).toHaveCount(0);
+  });
+});
+
 test.describe('a machine where gh is not signed in', () => {
   let id: string;
   test.use({

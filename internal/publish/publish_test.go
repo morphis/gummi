@@ -64,6 +64,15 @@ func TestTheFloorIsTheLandingFloor(t *testing.T) {
 	if e := Floor(verified("abc"), "def", 0); e == nil || e.Code != CodeNotVerified {
 		t.Fatalf("a tip past the verified rev = %v, want not-verified", e)
 	}
+	// the reason reads as one sentence, whichever shape the landing rule
+	// words it in
+	mid := verified("abc")
+	mid.Stage, mid.VerifiedAt, mid.VerifiedRev = domain.StageImplement, time.Time{}, ""
+	for _, e := range []*Error{Floor(mid, "abc1234", 0), Floor(verified("abc"), "def", 0)} {
+		if e == nil || !strings.HasPrefix(e.Text, "the tip ") || strings.Contains(e.Text, ":  ") || strings.Contains(e.Text, ": (") || strings.Contains(e.Text, "not verified: not") {
+			t.Fatalf("the floor's reason reads %q", e)
+		}
+	}
 	ff := &domain.Feature{ID: "FF-1", Kind: domain.KindFreeform, Stage: domain.StageOpen}
 	if Floor(ff, "abc", 0) != nil {
 		t.Fatal("a freeform card with no open comments should be ready")
@@ -159,22 +168,26 @@ func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 type fakeRepo struct {
 	dir    string
 	target worktree.PushTarget
+	terr   error
 }
 
 func (r fakeRepo) RepoRoot() string                     { return r.dir }
 func (r fakeRepo) Path(*domain.Feature) (string, error) { return r.dir, nil }
 func (r fakeRepo) PushTarget(context.Context, *domain.Feature) (worktree.PushTarget, error) {
-	return r.target, nil
+	return r.target, r.terr
 }
 
 const ghShim = `#!/bin/sh
 echo "$*" >> "$GH_FAKE/log"
+test -f "$GH_FAKE/hang" && sleep 20
+test -f "$GH_FAKE/fail-$1-$2" && { cat "$GH_FAKE/fail-$1-$2" >&2; exit 1; }
 case "$1 $2" in
 "auth status") exit 0 ;;
 "repo view") cat "$GH_FAKE/repo.json" ;;
-"pr list") cat "$GH_FAKE/list.json" 2>/dev/null || echo '[]' ;;
+"pr list") test -f "$GH_FAKE/move" && { git update-ref refs/heads/feat/rate-limit "$(cat "$GH_FAKE/move")"; rm "$GH_FAKE/move"; }; cat "$GH_FAKE/list.json" 2>/dev/null || echo '[]' ;;
 "pr view") cat "$GH_FAKE/view.json" ;;
-"pr create") test -f "$GH_FAKE/fail-create" && { echo "boom" >&2; exit 1; }; cat > "$GH_FAKE/body"; echo "https://github.com/acme/widget/pull/512" ;;
+"pr create") test -f "$GH_FAKE/fail-create" && { echo "boom" >&2; exit 1; }; cat > "$GH_FAKE/body"; cat "$GH_FAKE/create-says" 2>/dev/null || echo "https://github.com/acme/widget/pull/512" ;;
+"pr edit") cat > "$GH_FAKE/edit-body" ;;
 *) exit 0 ;;
 esac
 `

@@ -258,7 +258,7 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 			return res, fail(CodeBranchMoved, "the branch moved from "+domain.ShortRev(fx.Tip)+" to "+domain.ShortRev(now)+" since you confirmed", "review again")
 		}
 		if stdout, stderr, err := run(ctx, tree, nil, "git", fx.pushArgs()...); err != nil {
-			return res, after(res, fx, pushError(stderr+"\n"+stdout, err))
+			return res, after(res, fx, pushError(stderr+"\n"+stdout, err, strings.Contains(fx.Hook, "pre-push")))
 		}
 		res.Pushed, res.Repo = fx.Tip, fx.HeadRepo
 		trackIfUntracked(ctx, env, fx)

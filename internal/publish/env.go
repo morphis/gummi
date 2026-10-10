@@ -139,7 +139,10 @@ func ghError(args []string, stderr string, err error) *Error {
 
 // pushError types git push's refusal from what it printed: with --porcelain
 // the per-ref reason is on stdout and the rest on stderr, so said is both.
-func pushError(said string, err error) *Error {
+// hooked is whether a pre-push hook ran: git names no cause when one says
+// no, so a push that failed with no ref rejected and nothing fatal is the
+// hook's refusal.
+func pushError(said string, err error, hooked bool) *Error {
 	if pe := AsError(err); pe.Code == CodeTimeout {
 		return pe
 	}
@@ -157,8 +160,8 @@ func pushError(said string, err error) *Error {
 		return fail(CodeLeaseStale, "the remote branch moved since its tip was shown; nothing was overwritten", "review again")
 	case strings.Contains(s, "gh006") || strings.Contains(s, "protected branch"):
 		return fail(CodeProtected, "GitHub refused the push: the branch is protected", "")
-	case strings.Contains(s, "pre-push hook") || strings.Contains(s, "failed to push some refs") && strings.Contains(s, "hook") && !strings.Contains(s, "remote rejected"):
-		return fail(CodeHookRejected, "a local hook refused the push: "+line, "")
+	case hooked && strings.Contains(s, "failed to push some refs") && !strings.Contains(s, "rejected") && !strings.Contains(s, "fatal:"):
+		return fail(CodeHookRejected, "a local hook refused the push: "+firstLine(said, err), "read what it printed, or push it yourself")
 	case strings.Contains(s, "remote rejected"):
 		// the server said no (a push rule, a pre-receive hook): not the
 		// remote being ahead, and nothing a fetch would fix

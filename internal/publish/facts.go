@@ -285,7 +285,7 @@ func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *
 	}
 	ls, err := env.git(ctx, "ls-remote", fx.Remote, "refs/heads/"+fx.RemoteBranch)
 	if err != nil {
-		return pushError(err.Error(), err)
+		return pushError(err.Error(), err, false)
 	}
 	fx.RemoteTip, _, _ = strings.Cut(ls, "\t")
 	fx.RemoteTip = strings.TrimSpace(fx.RemoteTip)

@@ -196,9 +196,12 @@ func Floor(f *domain.Feature, tip string, openComments int) *Error {
 	} else if err := f.MayLandAt(tip); err != nil {
 		// MayLandAt's errors all open with ErrNotVerified's words, which
 		// this sentence has already said
-		why := strings.TrimPrefix(strings.TrimPrefix(err.Error(), domain.ErrNotVerified.Error()), ": ")
+		why := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(err.Error(), domain.ErrNotVerified.Error()), ":"))
 		text := "the tip " + domain.ShortRev(tip) + " is not verified"
-		if why != "" {
+		switch {
+		case strings.HasPrefix(why, "("):
+			text += " " + why
+		case why != "":
 			text += ": " + why
 		}
 		return fail(CodeNotVerified, text, "verify the card again")
