@@ -19,6 +19,14 @@ test('a token and a key are stored from settings and never shown again', async (
   await expect(page.getByTestId('settings-token')).toBeVisible();
   await expect(page.getByTestId('settings-token-held')).toHaveCount(0);
 
+  // the explanations are asked for, not always on the page
+  await expect(page.getByText('Set as GH_TOKEN')).toBeHidden();
+  await page.getByTestId('settings-token-tip').focus();
+  await expect(page.getByText('Set as GH_TOKEN')).toBeVisible();
+  await expect(page.getByLabel('GitHub token')).toHaveAttribute('data-testid', 'settings-token');
+  await page.getByTestId('settings-token').focus();
+  await expect(page.getByText('Set as GH_TOKEN')).toBeHidden();
+
   await page.getByTestId('settings-token').fill(token);
   await page.getByTestId('settings-token-save').click();
   await expect(page.getByTestId('settings-token-held')).toContainText('ending in 7788');

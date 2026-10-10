@@ -11,6 +11,27 @@ import { h, clear } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
 import { field, errorBox } from './kit.js?v=__ASSET_V__'
 
+// tip is the "?" beside a label: the explanation a person asks for instead
+// of one the form always carries. Hover, focus or a tap shows it; the
+// styles do the showing, so it needs no listeners.
+let tips = 0
+function tip (text, testid) {
+  const id = `settings-tip-${++tips}`
+  return h('span', { class: 'vtip' },
+    h('button', { type: 'button', class: 'vtip-b', 'aria-label': 'What is this?', 'aria-describedby': id, testid }, '?'),
+    h('span', { class: 'vtip-t', role: 'tooltip', id }, text))
+}
+
+// tipField is kit's field with a tip beside its words. The tip sits
+// outside the <label>, which would otherwise name the tip's button rather
+// than the control.
+function tipField (words, text, control, testid) {
+  control.id = control.id || `settings-f-${++tips}`
+  return h('div', { class: 'field' },
+    h('div', { class: 'vlab' }, h('label', { for: control.id }, words), tip(text, testid)),
+    control)
+}
+
 registerView('settings', {
   title: 'Settings',
   css: 'views/settings.css',
@@ -66,8 +87,8 @@ registerView('settings', {
       const name = h('input', { type: 'text', testid: 'settings-git-name', value: id.name || '', placeholder: 'Your Name', autocomplete: 'off' })
       const email = h('input', { type: 'email', testid: 'settings-git-email', value: id.email || '', placeholder: 'you@example.com', autocomplete: 'off' })
       return h('section', { class: 'vcreds' },
-        h('div', { class: 'vhead' }, h('b', null, 'Git identity')),
-        h('div', { class: 'vnote' }, 'Who commits in this workspace are written as: the ones a card’s agent makes and the ones made when a card lands. Saved to the repository’s own git configuration, not the machine’s. Clear both to use the machine’s.'),
+        h('div', { class: 'vhead' }, h('b', null, 'Git identity'),
+          tip('Who commits in this workspace are written as: the ones a card’s agent makes and the ones made when a card lands. Saved to the repository’s own git configuration, not the machine’s. Clear both to use the machine’s.', 'settings-git-tip')),
         h('form', { class: 'vform', onsubmit: (e) => { e.preventDefault(); saveIdentity(name.value, email.value) } },
           h('div', { class: 'vrow' }, field('Name', name), field('Email', email)),
           h('div', { class: 'vrow' },
@@ -78,7 +99,7 @@ registerView('settings', {
     // to replace it, and a button to forget it.
     function secret ({ id, label, held, control, hint, key, saved, forgotten, extra }) {
       const form = h('form', { class: 'vform', onsubmit: (e) => { e.preventDefault(); if (control.value.trim()) saveCredentials({ [key]: control.value }, saved) } },
-        field(label, control, { hint }),
+        tipField(label, hint, control, `${id}-tip`),
         held ? h('div', { class: 'vnote', testid: `${id}-held` }, held) : null,
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: `${id}-save`, disabled: v.saving }, held ? 'Replace' : 'Save'),
@@ -92,8 +113,8 @@ registerView('settings', {
       const token = h('input', { type: 'password', testid: 'settings-token', placeholder: c.tokenSet ? 'Paste a new token to replace it' : 'ghp_… or github_pat_…', autocomplete: 'off', spellcheck: 'false' })
       const key = h('textarea', { class: 'mono', testid: 'settings-sshkey', rows: 4, placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----', autocomplete: 'off', spellcheck: 'false' })
       return h('section', { class: 'vcreds' },
-        h('div', { class: 'vhead' }, h('b', null, 'GitHub credentials')),
-        h('div', { class: 'vnote' }, 'Optional. Without them gummi uses whatever gh and git already have on this machine. Both are kept on the host, readable only by the account gummi runs as, and are never shown again.'),
+        h('div', { class: 'vhead' }, h('b', null, 'GitHub credentials'),
+          tip('Optional. Without them gummi uses whatever gh and git already have on this machine. Both are kept on the host, readable only by the account gummi runs as, and are never shown again.', 'settings-creds-tip')),
         secret({
           id: 'settings-token',
           label: 'GitHub token',
@@ -125,7 +146,7 @@ registerView('settings', {
       if (!v.cur) return
       const input = h('input', { type: 'text', testid: 'settings-name', value: v.cur.name, maxlength: v.cur.maxName, placeholder: `e.g. staging, laptop, ${v.cur.repo}`, autocomplete: 'off' })
       const form = h('form', { class: 'vform', onsubmit: (e) => { e.preventDefault(); save(input.value) } },
-        field('Instance name', input, { hint: 'Shown in this header, the browser tab and the terminal’s status bar. Leave empty for none.' }),
+        tipField('Instance name', 'Shown in this header, the browser tab and the terminal’s status bar. Leave empty for none.', input, 'settings-name-tip'),
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: 'settings-save', disabled: v.saving }, 'Save')))
       body.append(form, drawIdentity(), drawCredentials())
