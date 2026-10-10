@@ -125,7 +125,7 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 		case !fx.PR.Draft:
 			return p, fail(CodeAlreadyReady, fmt.Sprintf("PR #%d is already ready for review", fx.PR.Number), "")
 		case fx.ReadyWhy != "":
-			return p, fail(CodeNotVerified, fx.ReadyWhy, "")
+			return p, fail(CodeNotVerified, fx.ReadyWhy, fx.ReadyFix)
 		case fx.PR.HeadSHA != fx.Tip:
 			return p, fail(CodeHeadElsewhere, fmt.Sprintf("GitHub's head for PR #%d is %s, not the verified tip %s", fx.PR.Number, domain.ShortRev(fx.PR.HeadSHA), domain.ShortRev(fx.Tip)), "push the card's branch first, or fetch what was pushed and verify it")
 		}

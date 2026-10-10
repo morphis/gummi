@@ -21,6 +21,7 @@ package publish
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -193,7 +194,14 @@ func Floor(f *domain.Feature, tip string, openComments int) *Error {
 			return fail(CodeNotVerified, "the tip "+domain.ShortRev(tip)+" is not the revision this card was verified at", "")
 		}
 	} else if err := f.MayLandAt(tip); err != nil {
-		return fail(CodeNotVerified, "the tip "+domain.ShortRev(tip)+" is not verified: "+err.Error(), "verify the card again")
+		// MayLandAt's errors all open with ErrNotVerified's words, which
+		// this sentence has already said
+		why := strings.TrimPrefix(strings.TrimPrefix(err.Error(), domain.ErrNotVerified.Error()), ": ")
+		text := "the tip " + domain.ShortRev(tip) + " is not verified"
+		if why != "" {
+			text += ": " + why
+		}
+		return fail(CodeNotVerified, text, "verify the card again")
 	}
 	if openComments > 0 {
 		return fail(CodeUnresolved, fmt.Sprintf("%d review comment(s) on the diff are unresolved", openComments), "resolve them first")

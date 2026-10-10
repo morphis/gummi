@@ -1,0 +1,13 @@
+#!/bin/sh
+# A stand-in for ssh, for the one thing gummi's publishing needs of it:
+# `git push` and `git ls-remote` against git@github.com:<owner>/<repo>.git.
+# The suite points GIT_SSH_COMMAND at this file; whatever host git names,
+# the command it asks for (git-receive-pack '<owner>/<repo>.git') runs here
+# against the bare repositories under $FAKE_GH_REMOTE — so the remote's URL
+# is a real github.com one, with no insteadOf rule publishing would refuse.
+case "$1" in
+-G) exit 1 ;; # git probing for an OpenSSH; it then speaks the plain form
+esac
+for last; do :; done
+cd "$FAKE_GH_REMOTE" || exit 255
+exec sh -c "$last"

@@ -81,6 +81,8 @@ type Facts struct {
 	// ReadyWhy is why the branch may not be offered as ready ("" when it
 	// may): the quality floor (Floor).
 	ReadyWhy string `json:"readyWhy,omitempty"`
+	// ReadyFix is what a person does about ReadyWhy.
+	ReadyFix string `json:"readyFix,omitempty"`
 	// Adopted cards add commits and never rewrite.
 	Adopted bool `json:"adopted,omitempty"`
 }
@@ -234,7 +236,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 		return Facts{}, r
 	}
 	if fl := Floor(f, fx.Tip, in.OpenComments+in.OpenSpec); fl != nil {
-		fx.ReadyWhy = fl.Text
+		fx.ReadyWhy, fx.ReadyFix = fl.Text, fl.Fix
 	}
 	return fx, nil
 }

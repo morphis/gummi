@@ -525,7 +525,11 @@ func (d *WebDocs) PublishOffer(ctx context.Context) *webapi.PublishOffer {
 		}
 		out.Acts = append(out.Acts, string(publish.ActPush))
 	}
-	if p.Draft {
+	if fl := publish.Floor(&f, tip, in.OpenComments+in.OpenSpec); p.Draft && fl != nil {
+		// a draft whose tip may not be offered as ready: the strip says
+		// why instead of offering an act that would be refused
+		out.Why = fl.Error()
+	} else if p.Draft {
 		out.Acts = append(out.Acts, string(publish.ActReady))
 	} else {
 		out.Acts = append(out.Acts, string(publish.ActDraft))

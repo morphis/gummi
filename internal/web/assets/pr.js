@@ -88,12 +88,13 @@ function publishWhy (pub) {
 function publishStrip (pub, ctx) {
   if (!pub) return null
   const acts = pub.acts || []
-  if (!acts.length) return publishWhy(pub)
-  return h('div', { class: 'pubstrip', testid: 'pr-publish' },
+  if (!acts.length && !pub.draft) return publishWhy(pub)
+  return [h('div', { class: 'pubstrip', testid: 'pr-publish' },
     h('span', { class: 'what' }, pub.draft ? 'draft' : 'ready for review',
       pub.unpushed ? ` · ${plural(pub.unpushed, 'commit')} not on GitHub` : ''),
     acts.map((act, i) => h('button', { class: ['btn', i === 0 && 'pri'], type: 'button', testid: `pr-publish-${act}`, onclick: () => publish(ctx, act) },
-      act === 'ready' ? 'Mark ready…' : publishLabel(act) + '…')))
+      act === 'ready' ? 'Mark ready…' : publishLabel(act) + '…'))),
+  publishWhy(pub)]
 }
 
 function note (n) {

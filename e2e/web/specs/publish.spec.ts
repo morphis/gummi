@@ -1,0 +1,230 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { Page } from '@playwright/test';
+import { expect, test, type GummiServer, type Workspace } from '../fixtures/test';
+import { shot } from '../fixtures/shots';
+
+// Publishing a card from the page (DESIGN §22): a person pushes the card's
+// branch and opens, updates, readies and drafts its pull request. GitHub is
+// two stand-ins: fake-gh keeps the pull requests, and fake-ssh serves a
+// bare repository as git@github.com:e2e/tiny.git, so every push here is a
+// real `git push` to a real github.com URL.
+
+const phone = (info: { project: { name: string } }) => info.project.name === 'phone';
+
+async function openPR(page: Page, server: GummiServer, id: string, isPhone: boolean) {
+  await page.goto(`${server.url}/#${id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  if (isPhone) await page.getByTestId('tab-thread').click();
+  await page.getByTestId('tab-pr').click();
+}
+
+async function branchOf(ws: Workspace, id: string): Promise<string> {
+  return (await ws.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: ws.worktree(id) })).stdout.trim();
+}
+
+async function tipOf(ws: Workspace, id: string): Promise<string> {
+  return (await ws.exec('git', ['rev-parse', 'HEAD'], { cwd: ws.worktree(id) })).stdout.trim();
+}
+
+/** The branch's tip on the stand-in github.com, "" when it is not there. */
+async function remoteTip(ws: Workspace, branch: string): Promise<string> {
+  const r = await ws.exec('git', ['--git-dir', ws.remotePath(), 'rev-parse', '--verify', '-q', `refs/heads/${branch}`]);
+  return r.code === 0 ? r.stdout.trim() : '';
+}
+
+/** One more commit on the card's branch, as a person fixing something by hand makes. */
+async function commitOn(ws: Workspace, id: string, subject: string): Promise<void> {
+  const cwd = ws.worktree(id);
+  await fs.promises.appendFile(path.join(cwd, 'README.md'), `\n${subject}.\n`);
+  for (const args of [['add', '-A'], ['commit', '-q', '-m', subject]]) {
+    const r = await ws.exec('git', args, { cwd });
+    if (r.code !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  }
+}
+
+test.describe('a verified card on a repository with a github.com remote', () => {
+  let id: string;
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedVerified('Add a wave helper'); } } });
+
+  test('is opened as a pull request, updated and readied from the page', async ({ pairedPage: page, server, api, workspace }, info) => {
+    test.setTimeout(120_000);
+    const branch = await branchOf(workspace, id);
+    const tip = await tipOf(workspace, id);
+    await openPR(page, server, id, phone(info));
+
+    // nothing is on GitHub yet: the tab offers to open one, and so does
+    // the card's head where there is room for it
+    await expect(page.getByTestId('pr-publish-create')).toBeVisible({ timeout: 20_000 });
+    if (!phone(info)) await expect(page.getByTestId('card-publish')).toBeVisible();
+    await shot(page, info, 'publish-1-offer');
+
+    // the confirm: one sentence, the words the PR opens with, and the
+    // resolved facts behind a fold
+    await page.getByTestId('pr-publish-create').click();
+    const dialog = page.getByTestId('publish-dialog');
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('publish-summary')).not.toBeEmpty();
+    await expect(page.getByTestId('publish-title')).not.toHaveValue('');
+    // a verified tip may open ready: the draft box is the person's
+    await expect(page.getByTestId('publish-draft')).toBeEnabled();
+    await shot(page, info, 'publish-2-create');
+    await page.getByTestId('publish-details').locator('summary').click();
+    await expect(page.getByTestId('publish-commands')).toContainText('git push');
+    await expect(page.getByTestId('publish-commands')).toContainText('gh pr create');
+    await expect(page.getByTestId('publish-details')).toContainText('git@github.com:e2e/tiny.git');
+    await shot(page, info, 'publish-3-create-details');
+
+    await page.getByTestId('publish-title').fill('Add a wave helper');
+    await page.getByTestId('publish-confirm').click();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    // the branch is on the remote at the tip that was shown, the PR
+    // exists, and the card is linked to it
+    expect(await remoteTip(workspace, branch)).toBe(tip);
+    const created = workspace.ghCalls().find((a) => a[0] === 'pr' && a[1] === 'create');
+    expect(created).toBeTruthy();
+    expect(created).toEqual(expect.arrayContaining(['--repo', 'e2e/tiny', '--head', `e2e:${branch}`, '--base', 'main', '--title=Add a wave helper']));
+    expect(created).not.toContain('--draft');
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.pr).toBeTruthy();
+    await expect(page.getByTestId('pr-state')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('pr-publish')).toContainText('ready for review');
+    await shot(page, info, 'publish-4-opened');
+
+    // a commit made since is not on GitHub, and it is not verified: the
+    // one push on offer returns the ready PR to draft first
+    await commitOn(workspace, id, 'Fix a typo by hand');
+    await page.getByTestId('pr-refresh').click();
+    await expect(page.getByTestId('pr-publish')).toContainText('1 commit not on GitHub', { timeout: 15_000 });
+    await shot(page, info, 'publish-5-unpushed');
+    await page.getByTestId('pr-publish').getByRole('button').first().click();
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('publish-confirm')).toHaveText('Push and return to draft');
+    await page.getByTestId('publish-details').locator('summary').click();
+    await shot(page, info, 'publish-6-update');
+    await page.getByTestId('publish-confirm').click();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    expect(await remoteTip(workspace, branch)).toBe(await tipOf(workspace, id));
+    expect(workspace.ghCalls().some((a) => a[0] === 'pr' && a[1] === 'ready' && a.includes('--undo'))).toBe(true);
+    await expect(page.getByTestId('pr-publish')).toContainText('draft', { timeout: 15_000 });
+    await expect(page.getByTestId('pr-publish')).not.toContainText('not on GitHub');
+
+    // the floor: a tip nobody verified is not marked ready from here, and
+    // the strip says why instead of offering it
+    await expect(page.getByTestId('pr-publish-ready')).toHaveCount(0);
+    await expect(page.getByTestId('pr-publish-why')).toContainText('is not verified');
+    const facts = (await api('GET', `/api/cards/${id}/publish?act=ready`)).json;
+    expect(facts.error?.code).toBe('not-verified');
+    expect(facts.error?.fix).toBeTruthy();
+    await shot(page, info, 'publish-7-updated');
+
+    // the card's thread says what was published, and who did it
+    const thread = JSON.stringify((await api('GET', `/api/cards/${id}/thread`)).json.items);
+    expect(thread).toContain('Tester');
+    expect(thread).toMatch(/#12/);
+    if (phone(info)) await page.getByTestId('tab-thread').click();
+    await shot(page, info, 'publish-8-thread');
+  });
+
+  test('is opened as a draft and marked ready when the person says so', async ({ pairedPage: page, server, workspace }, info) => {
+    await openPR(page, server, id, phone(info));
+    await page.getByTestId('pr-publish-create').click({ timeout: 20_000 });
+    const dialog = page.getByTestId('publish-dialog');
+    await page.getByTestId('publish-draft').check({ timeout: 20_000 });
+    await page.getByTestId('publish-body').fill('Adds `Wave`, with its test.');
+    await page.getByTestId('publish-confirm').click();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    const created = workspace.ghCalls().find((a) => a[0] === 'pr' && a[1] === 'create');
+    expect(created).toContain('--draft');
+    expect(JSON.parse(fs.readFileSync(path.join(workspace.ghData, 'pr-12.json'), 'utf8')).body).toBe('Adds `Wave`, with its test.');
+    // a draft at a verified tip: ready is the act on offer
+    await expect(page.getByTestId('pr-publish')).toContainText('draft', { timeout: 15_000 });
+    await shot(page, info, 'publish-draft-1-opened');
+    await page.getByTestId('pr-publish-ready').click();
+    await expect(page.getByTestId('publish-summary')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('publish-details').locator('summary').click();
+    await expect(page.getByTestId('publish-commands')).toHaveText('gh pr ready 12 --repo e2e/tiny');
+    await shot(page, info, 'publish-draft-2-ready');
+    await page.getByTestId('publish-confirm').click();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('pr-publish')).toContainText('ready for review', { timeout: 15_000 });
+    await expect(page.getByTestId('pr-publish-draft')).toBeVisible();
+    await shot(page, info, 'publish-draft-3-readied');
+  });
+});
+
+test.describe('a repository whose push runs a hook', () => {
+  let id: string;
+  test.use({
+    seed: {
+      run: async (ws) => {
+        await ws.addGitHubRemote();
+        id = await ws.seedVerified('Add a wave helper');
+        const hook = path.join(ws.repo, '.git', 'hooks', 'pre-push');
+        await fs.promises.writeFile(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      },
+    },
+  });
+
+  test('asks for the hook to be read before the push', async ({ pairedPage: page, server, workspace }, info) => {
+    const branch = await branchOf(workspace, id);
+    await openPR(page, server, id, phone(info));
+    await page.getByTestId('pr-publish-create').click({ timeout: 20_000 });
+    await expect(page.getByTestId('publish-hook')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('publish-confirm').click();
+    await expect(page.getByTestId('publish-error')).toContainText('pre-push hook');
+    expect(await remoteTip(workspace, branch)).toBe('');
+    await shot(page, info, 'publish-hook');
+    await page.getByTestId('publish-hook').check();
+    await page.getByTestId('publish-confirm').click();
+    await expect(page.getByTestId('publish-dialog')).toHaveCount(0, { timeout: 30_000 });
+    expect(await remoteTip(workspace, branch)).not.toBe('');
+  });
+});
+
+test.describe('a card that may not be published as it stands', () => {
+  let id: string;
+  test.use({ seed: { run: async (ws) => { await ws.addGitHubRemote(); id = await ws.seedVerified('Add a wave helper'); } } });
+
+  test('is refused in the dialog, in words, with nothing to confirm', async ({ pairedPage: page, server, workspace }, info) => {
+    const branch = await branchOf(workspace, id);
+    // somebody else's commits already sit under the branch's name
+    const foreign = (await workspace.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'somebody else')).trim();
+    await workspace.git('push', '-q', 'origin', `${foreign}:refs/heads/${branch}`);
+    await openPR(page, server, id, phone(info));
+    await page.getByTestId('pr-publish-create').click({ timeout: 20_000 });
+    await expect(page.getByTestId('publish-refusal')).toContainText('never overwrites', { timeout: 20_000 });
+    await expect(page.getByTestId('publish-confirm')).toHaveCount(0);
+    await shot(page, info, 'publish-refused-name-taken');
+    await page.getByTestId('publish-cancel').click();
+    expect(await remoteTip(workspace, branch)).toBe(foreign);
+
+    // uncommitted work is never published around
+    await fs.promises.appendFile(path.join(workspace.worktree(id), 'README.md'), '\nhalf a thought\n');
+    await page.getByTestId('pr-publish-create').click();
+    await expect(page.getByTestId('publish-refusal')).toBeVisible({ timeout: 20_000 });
+    await shot(page, info, 'publish-refused-dirty');
+  });
+});
+
+test.describe('a machine where gh is not signed in', () => {
+  let id: string;
+  test.use({
+    seed: {
+      run: async (ws) => {
+        await ws.addGitHubRemote();
+        id = await ws.seedVerified('Add a wave helper');
+        await fs.promises.writeFile(path.join(ws.ghData, 'signed-out'), '');
+      },
+    },
+  });
+
+  test('offers no publishing at all', async ({ pairedPage: page, server }, info) => {
+    await openPR(page, server, id, phone(info));
+    await expect(page.getByTestId('pr-none')).toBeVisible();
+    await expect(page.getByTestId('pr-push')).toBeVisible();
+    await expect(page.getByTestId('pr-publish-create')).toHaveCount(0);
+    await expect(page.getByTestId('card-publish')).toHaveCount(0);
+    await shot(page, info, 'publish-not-set-up');
+  });
+});

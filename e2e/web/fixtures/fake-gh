@@ -16,10 +16,22 @@ file into the workspace's copy of that directory:
                        on headRefName)
     threads-<N>.json   `gh api graphql ... -F number=<N>` (review threads)
     repo.json          `gh api repos/<owner>/<repo>` (squash-merge setting)
+    repo-view.json     `gh repo view <owner>/<repo> --json <fields>`; without
+                       the file the viewer has WRITE on a repository
+                       that is no fork
+    signed-out         (any content) makes `gh auth status` fail, as a gh
+                       nobody logged in to does
     issues.json        `gh issue list` (filtered on --state and --label,
                        capped by --limit) and `gh issue view <N>`; a
                        --repo ending in /missing fails as an unknown
                        repository does
+
+Publishing (internal/publish) writes as well as reads, so those calls keep
+state in the same directory: `gh pr create` writes a new pr-<N>.json
+(numbered from 12) and adds it to pr-list.json, `gh pr edit` and `gh pr
+ready [--undo]` rewrite it. A PR made that way reads its head back from
+the stand-in remote ($FAKE_GH_REMOTE/<owner>/<repo>.git, the bare
+repository fake-ssh serves), so it follows what was really pushed.
 
 A missing file answers the way gh does when the thing is not there: a
 message on stderr and exit 1. Every invocation is appended, one JSON array
@@ -29,6 +41,7 @@ gummi asked for.
 
 import json
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -47,6 +60,31 @@ def load(name):
             return json.load(fh)
     except FileNotFoundError:
         return None
+
+
+def save(name, obj):
+    with open(os.path.join(DATA, name), "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, indent=2)
+
+
+def remote_tip(repo, branch):
+    """The branch's tip in the stand-in remote, "" when it has none."""
+    root = os.environ.get("FAKE_GH_REMOTE")
+    if not root or not repo:
+        return ""
+    r = subprocess.run(
+        ["git", "--git-dir", os.path.join(root, repo + ".git"), "rev-parse", "--verify", "-q", "refs/heads/" + branch],
+        capture_output=True, text=True, check=False)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def live(data):
+    """A PR `gh pr create` made, with its head as the remote has it now."""
+    if data.get("fake"):
+        tip = remote_tip(data.get("headRepository"), data.get("headRefName", ""))
+        if tip:
+            data["headRefOid"] = tip
+    return data
 
 
 def out(obj):
@@ -82,7 +120,7 @@ def positional(args):
             skip = False
             continue
         if a.startswith("-"):
-            skip = "=" not in a and a not in ("--paginate", "--auto")
+            skip = "=" not in a and a not in ("--paginate", "--auto", "--draft", "--undo")
             continue
         return a
     return None
@@ -95,13 +133,54 @@ def pr(args):
         data = load("pr-%s.json" % number)
         if data is None:
             fail("GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)" % number)
-        out(pick(data, fields(rest)))
+        out(pick(live(data), fields(rest)))
     elif sub == "list":
         head = flag(rest, "--head")
         data = load("pr-list.json") or []
         if head:
             data = [p for p in data if p.get("headRefName") == head]
         out([pick(p, fields(rest)) for p in data])
+    elif sub == "create":
+        repo, head = flag(rest, "--repo"), flag(rest, "--head", "")
+        owner, _, branch = head.rpartition(":")
+        owner = owner or (repo or "/").split("/")[0]
+        listed = load("pr-list.json") or []
+        number = max([11] + [p.get("number", 0) for p in listed]) + 1
+        made = {
+            "fake": True,
+            "number": number,
+            "url": "https://github.com/%s/pull/%d" % (repo, number),
+            "state": "OPEN",
+            "isDraft": "--draft" in rest,
+            "headRefOid": "",
+            "headRefName": branch,
+            "headRepository": "%s/%s" % (owner, (repo or "/").split("/")[1]),
+            "baseRefName": flag(rest, "--base", ""),
+            "isCrossRepository": owner != (repo or "/").split("/")[0],
+            "headRepositoryOwner": {"login": owner},
+            "title": flag(rest, "--title", ""),
+            "body": sys.stdin.read() if flag(rest, "--body-file") == "-" else "",
+            "comments": [],
+        }
+        if not remote_tip(made["headRepository"], branch):
+            fail("pull request create failed: GraphQL: Head sha can't be blank, Head ref must be a branch (createPullRequest)")
+        save("pr-%d.json" % number, live(made))
+        save("pr-list.json", listed + [made])
+        print(made["url"])
+    elif sub in ("edit", "ready"):
+        number = positional(rest)
+        data = load("pr-%s.json" % number)
+        if data is None:
+            fail("GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)" % number)
+        if sub == "ready":
+            data["isDraft"] = "--undo" in rest
+        else:
+            if flag(rest, "--title") is not None:
+                data["title"] = flag(rest, "--title")
+            if flag(rest, "--body-file") == "-":
+                data["body"] = sys.stdin.read()
+        save("pr-%s.json" % number, data)
+        print(data["url"])
     else:
         fail("fake-gh: unsupported `gh pr %s`" % sub)
 
@@ -126,6 +205,15 @@ def api(args):
         out(data)
     else:
         fail("gh: Not Found (HTTP 404)")
+
+
+def repo(args):
+    sub, rest = args[0], args[1:]
+    if sub != "view":
+        fail("fake-gh: unsupported `gh repo %s`" % sub)
+    data = load("repo-view.json") or {
+        "nameWithOwner": positional(rest), "viewerPermission": "WRITE", "isFork": False, "parent": None}
+    out(pick(data, fields(rest)))
 
 
 def issue(args):
@@ -168,7 +256,11 @@ def main(argv):
         api(rest)
     elif cmd == "issue" and rest:
         issue(rest)
+    elif cmd == "repo" and rest:
+        repo(rest)
     elif cmd == "auth":
+        if os.path.exists(os.path.join(DATA, "signed-out")):
+            fail("You are not logged into any GitHub hosts. To log in, run: gh auth login")
         print("github.com\n  ✓ Logged in to github.com account e2e (fake-gh)")
     else:
         fail("fake-gh: unsupported `gh %s`" % " ".join(argv))

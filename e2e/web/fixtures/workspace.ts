@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { agentScript, fakeGh, fakeGhData, gummiBin } from './paths';
+import { agentScript, fakeGh, fakeGhData, fakeSsh, gummiBin } from './paths';
 
 /**
  * A throwaway gummi workspace: a git repository holding a tiny Go module,
@@ -51,6 +51,10 @@ export class Workspace {
       GUMMI_GH_CMD: fakeGh,
       FAKE_GH_DATA: path.join(root, 'gh'),
       FAKE_GH_LOG: path.join(root, 'logs', 'gh.log'),
+      // publishing: git's ssh is fake-ssh, serving the bare repositories
+      // under remote/ as github.com (see addGitHubRemote)
+      FAKE_GH_REMOTE: path.join(root, 'remote'),
+      GIT_SSH_COMMAND: fakeSsh,
       GUMMI_E2E_FAST: '1',
       GUMMI_E2E_AGENT_LOG: path.join(root, 'logs', 'agent.log'),
       // a stray web address in the caller's shell must not leak into a test
@@ -320,6 +324,25 @@ export class Workspace {
     const args = ['resume', id, '--answer', text];
     if (opts.untilPlan !== false) args.push('--until', 'plan');
     return this.drive(args);
+  }
+
+  /**
+   * Give the repository a github.com remote that works: `origin` is
+   * git@github.com:e2e/tiny.git, and fake-ssh serves it from a bare
+   * repository under remote/ that starts with main pushed. With it (and
+   * fake-gh signed in) the board offers its publish acts.
+   */
+  async addGitHubRemote(repo = 'e2e/tiny'): Promise<void> {
+    const bare = this.remotePath(repo);
+    await fs.promises.mkdir(path.dirname(bare), { recursive: true });
+    await this.git('init', '-q', '--bare', '-b', 'main', bare);
+    await this.git('remote', 'add', 'origin', `git@github.com:${repo}.git`);
+    await this.git('push', '-q', 'origin', 'main');
+  }
+
+  /** The bare repository standing in for github.com/<repo>. */
+  remotePath(repo = 'e2e/tiny'): string {
+    return path.join(this.root, 'remote', `${repo}.git`);
   }
 
   /** Link a card to fake-gh's PR (7 by default) with `gummi pr link`. */
