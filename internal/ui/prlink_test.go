@@ -267,3 +267,36 @@ func TestPRLinkFailureReadsInThePagesWords(t *testing.T) {
 		t.Errorf("a gh failure reads %q", got)
 	}
 }
+
+// Both of prlink's reads are GitHub's to answer: the bar spins on the card
+// while the probe is out and again while the link is resolved, and neither
+// wait outlives its answer.
+func TestPRLinkSaysItIsWaitingOnGitHub(t *testing.T) {
+	m, _, _ := rebaseFeatureFixture(t)
+	m.resolvePR = func(context.Context, string, string, string) (domain.PullRequestRef, error) {
+		return domain.PullRequestRef{Repo: "o/r", Number: 42, URL: "https://github.com/o/r/pull/42"}, nil
+	}
+	r, ok := m.selected()
+	if !ok {
+		t.Fatal("no selected card")
+	}
+	id := r.F.ID
+
+	probe := m.openPRLinkDialog(r.F)
+	if pill := m.ghWorkPill(); !strings.Contains(pill, string(id)+": looking for an open PR on this branch") || !m.spinnerActive() {
+		t.Fatalf("while the probe is out the bar says %q (spinning %v)", pill, m.spinnerActive())
+	}
+	m = update(m, probe())
+	if _, ok := m.Overlay.Top().(*prLinkDialog); !ok || len(m.ghWork) != 0 {
+		t.Fatalf("after the probe: dialog %v, work %v", ok, m.ghWork)
+	}
+
+	link := m.submitPRLink(r.F, "42")
+	if pill := m.ghWorkPill(); !strings.Contains(pill, string(id)+": reading pull request 42 from GitHub") {
+		t.Fatalf("while the link is resolved the bar says %q", pill)
+	}
+	m = update(m, link())
+	if len(m.ghWork) != 0 || !strings.Contains(m.notice.text, "linked to o/r#42") {
+		t.Fatalf("after the link: work %v, notice %q", m.ghWork, m.notice.text)
+	}
+}

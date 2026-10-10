@@ -159,6 +159,13 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	shell.SetPRThreadFetcher(func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error) {
 		return pr.FetchReviewThreads(ctx, pr.GHBinary(), ref)
 	})
+	shell.SetPRChecksFetcher(func(ctx context.Context, ref domain.PullRequestRef) (pr.Checks, error) {
+		checks, err := pr.FetchChecks(ctx, pr.GHBinary(), ref)
+		if err == nil {
+			pr.FetchFailedLogs(ctx, pr.GHBinary(), &checks)
+		}
+		return checks, err
+	})
 	shell.SetPRSquashMergeChecker(func(ctx context.Context, repo string) (bool, error) {
 		return pr.RepoAllowsSquashMerge(ctx, pr.GHBinary(), repo)
 	})

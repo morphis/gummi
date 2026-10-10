@@ -73,6 +73,9 @@ type publishDoer struct {
 	store        *state.Store
 	pool         *worktree.Pool
 	locks        *state.CardLocks
+	// progress hears each step of the act as it starts and ends, off the
+	// loop; nil for a face that draws none
+	progress func(publish.Step, publish.StepState)
 }
 
 func (m *Shell) publishDoerFor(r featureRow) publishDoer {
@@ -156,6 +159,9 @@ func (p publishDoer) prepare(ctx context.Context, act publish.Act, draft bool, b
 	out.Error = publishErr(perr)
 	out.ToDraft = plan.ToDraft
 	out.Summary, out.Fingerprint, out.Commands = plan.Summary, fx.Fingerprint(), plan.Commands
+	for _, s := range plan.Steps {
+		out.Steps = append(out.Steps, webapi.PublishStep{ID: string(s.ID), Text: s.Text})
+	}
 	out.Branch, out.Tip, out.TipSubject, out.Ahead, out.Base = fx.Branch, fx.Tip, fx.TipSubject, fx.Ahead, fx.Base
 	out.Remote, out.PushURL, out.Push = fx.Remote, fx.PushURL, string(fx.Push)
 	out.Head, out.BaseRepo, out.GH, out.Hook = fx.HeadRef(), fx.BaseRepo, fx.GH, fx.Hook
@@ -189,7 +195,7 @@ func (p publishDoer) run(ctx context.Context, req webapi.PublishRequest) (webapi
 		return webapi.PublishResult{}, publish.AsError(err)
 	}
 	in.BaseRepo = req.BaseRepo
-	res, perr := publish.Do(ctx, publish.Env{GH: p.gh}, mgr, in,
+	res, perr := publish.Do(ctx, publish.Env{GH: p.gh, Progress: p.progress}, mgr, in,
 		publish.Request{Act: act, Fingerprint: req.Fingerprint, Title: req.Title, Body: req.Body, Draft: req.Draft},
 		func(ctx context.Context, ref domain.PullRequestRef) error {
 			return p.store.SetPullRequest(ctx, p.f.ID, ref)
@@ -273,13 +279,15 @@ type publishFactsMsg struct {
 // repository the person chose for the PR, "" for the recorded one.
 func (m *Shell) openPublish(r featureRow, act publish.Act, baseRepo string) tea.Cmd {
 	p := m.publishDoerFor(r)
-	m.notice = noticeMsg{text: string(r.F.ID) + ": reading where the branch goes…"}
+	m.notice = noticeMsg{}
+	m.markGHWork(r.F.ID, "reading where the branch goes", "")
 	return func() tea.Msg {
 		return publishFactsMsg{f: r.F, facts: p.prepare(context.Background(), act, false, baseRepo), baseRepo: baseRepo}
 	}
 }
 
 func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
+	m.endGHWork(msg.f.ID)
 	// a fork nobody has chosen a target for is a question, not a refusal:
 	// the confirm opens on the choice
 	unchosen := msg.facts.Error != nil && msg.facts.Error.Code == string(publish.CodeBaseUnchosen) && len(msg.facts.BaseRepos) > 1
@@ -295,15 +303,36 @@ func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
 		}
 		// busy is read on the loop, as the person confirms
 		p := m.publishDoerFor(r)
-		m.notice = noticeMsg{text: string(msg.f.ID) + ": publishing…"}
-		return func() tea.Msg {
+		steps := msg.facts.Steps
+		// the act runs off the loop and says each step it starts; the
+		// loop reads them one at a time and draws the one in flight
+		said := make(chan publishStepMsg, len(steps)+1)
+		p.progress = func(s publish.Step, st publish.StepState) {
+			if st != publish.StepRunning {
+				return
+			}
+			at := publishStepMsg{id: msg.f.ID, step: string(s.ID), text: s.Text, of: len(steps), next: said}
+			for i, known := range steps {
+				if known.ID == string(s.ID) {
+					at.n = i + 1
+				}
+			}
+			select {
+			case said <- at:
+			default:
+			}
+		}
+		m.notice = noticeMsg{}
+		m.markGHWork(msg.f.ID, "publishing", "")
+		return tea.Batch(func() tea.Msg {
+			defer close(said)
 			res, err := p.run(context.Background(), req)
 			if err != nil {
-				return noticeMsg{text: sanitize(publishErrorText(msg.f.ID, publishErr(err))), isErr: true, reload: true}
+				return ghDoneMsg{id: msg.f.ID, inner: noticeMsg{text: sanitize(publishErrorText(msg.f.ID, publishErr(err))), isErr: true, reload: true}}
 			}
 			text := sanitize(publishResultText(msg.f.ID, res))
-			return noticeMsg{text: text, web: text, reload: true}
-		}
+			return ghDoneMsg{id: msg.f.ID, inner: noticeMsg{text: text, web: text, reload: true}}
+		}, nextPublishStep(said))
 	})
 	d.baseRepo = msg.baseRepo
 	// the facts and their fingerprint are the chosen repository's, so a
@@ -316,6 +345,78 @@ func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
 		return m.openPublish(r, publish.ActCreate, repo)
 	}
 	m.Overlay.Push(d)
+}
+
+// publishStepMsg is one step of a running act, as it starts: the nth of
+// the plan's steps. next is where the step after it will be said.
+type publishStepMsg struct {
+	id         domain.FeatureID
+	step, text string
+	n, of      int
+	next       <-chan publishStepMsg
+}
+
+// nextPublishStep waits for the act's next step; it ends, saying nothing,
+// when the act does.
+func nextPublishStep(said <-chan publishStepMsg) tea.Cmd {
+	return func() tea.Msg {
+		if s, ok := <-said; ok {
+			return s
+		}
+		return nil
+	}
+}
+
+func (m *Shell) handlePublishStep(msg publishStepMsg) tea.Cmd {
+	// a step read after the act's last word is not drawn over its outcome
+	if _, running := m.ghWork[msg.id]; running {
+		text := msg.text
+		if msg.n > 0 {
+			text += fmt.Sprintf(" (%d/%d)", msg.n, msg.of)
+		}
+		m.markGHWork(msg.id, text, msg.step)
+	}
+	return nextPublishStep(msg.next)
+}
+
+// ghDoneMsg ends the wait markGHWork began on a card and carries what the
+// work came to, handled as if it had arrived alone.
+type ghDoneMsg struct {
+	id    domain.FeatureID
+	inner tea.Msg
+}
+
+// markGHWork notes that the board is waiting on GitHub for a card and what
+// for — a publish's facts, a step of the act, a PR's checks or threads —
+// so the status bar spins on it and a page watching the card draws the
+// same wait. step names the publish step, "" for any other work.
+func (m *Shell) markGHWork(id domain.FeatureID, text, step string) {
+	if m.ghWork == nil {
+		m.ghWork = map[domain.FeatureID]string{}
+	}
+	m.ghWork[id] = text
+	m.EmitChange(webapi.Change{Kind: webapi.ChangeWork, ID: string(id), Text: text, Step: step})
+}
+
+// endGHWork ends the wait on a card, if one is up.
+func (m *Shell) endGHWork(id domain.FeatureID) {
+	if _, ok := m.ghWork[id]; !ok {
+		return
+	}
+	delete(m.ghWork, id)
+	m.EmitChange(webapi.Change{Kind: webapi.ChangeWork, ID: string(id), Done: true})
+}
+
+// ghWorkPill is the status bar's line for what the board is waiting on
+// GitHub for: the one card's work, or how many cards have some.
+func (m *Shell) ghWorkPill() string {
+	if len(m.ghWork) != 1 {
+		return fmt.Sprintf("%s GitHub · %d cards", m.spinner(), len(m.ghWork))
+	}
+	for id, text := range m.ghWork {
+		return m.spinner() + " " + string(id) + ": " + sanitize(text)
+	}
+	return ""
 }
 
 // publishDialog is the confirm (DESIGN §22): one
@@ -540,16 +641,31 @@ func (d *WebDocs) PublishFacts(ctx context.Context, act string, draft bool, base
 
 // Publish is POST /api/cards/{id}/publish: the act the person confirmed.
 // person is who confirmed it, as the thread will name them.
-func (d *WebDocs) Publish(ctx context.Context, req webapi.PublishRequest, person string) webapi.PublishResult {
+// work is told each step as it starts, the one that failed, and the act's
+// end, as "work" changes on the act's goroutine; nil for none.
+func (d *WebDocs) Publish(ctx context.Context, req webapi.PublishRequest, person string, work func(webapi.Change)) webapi.PublishResult {
 	if off := d.publishOff(); off != nil {
 		return webapi.PublishResult{Act: req.Act, Error: off}
 	}
+	if work == nil {
+		work = func(webapi.Change) {}
+	}
 	p := d.publishDoer()
 	p.by = state.PersonActor(person)
+	id := string(d.f.ID)
+	p.progress = func(s publish.Step, st publish.StepState) {
+		switch st {
+		case publish.StepRunning:
+			work(webapi.Change{Kind: webapi.ChangeWork, ID: id, Step: string(s.ID), Text: s.Text})
+		case publish.StepFailed:
+			work(webapi.Change{Kind: webapi.ChangeWork, ID: id, Step: string(s.ID), Err: true, Done: true})
+		}
+	}
 	res, err := p.run(ctx, req)
 	if err != nil {
 		return webapi.PublishResult{Act: req.Act, Error: publishErr(err)}
 	}
+	work(webapi.Change{Kind: webapi.ChangeWork, ID: id, Done: true})
 	return res
 }
 

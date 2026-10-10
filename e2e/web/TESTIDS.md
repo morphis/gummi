@@ -19,6 +19,7 @@ in `internal/web/assets/*.js`; keep this list in step when adding one.
 | `btn-palette`, `btn-keys`, `btn-theme` | ⌘K palette, `?` sheet, theme toggle (`data-theme` = current) |
 | `rail-toggle` | compact/full rail (`[`), `aria-pressed` = full |
 | `toasts`, `toast` | the toast stack and each toast |
+| `work-toast` | what the board is waiting on GitHub for on a card (a PR's checks or threads being read, a publish another face started): it stays, with a clock, until the work ends |
 | `toast-show`, `toast-cmds`, `toast-copy`, `toast-close` | on a toast that carries commands to run (a stack replay's pushes): unfold the commands, the commands themselves, copy them, dismiss it (it stays a minute, and while pointed at or focused) |
 
 ## Pairing
@@ -181,10 +182,15 @@ whose line the moved diff no longer has), `diff-none`. A done or landed card's
 line numbers open no comment box.
 
 PR: `pr`, `pr-state`, `pr-open` (open threads), `pr-fetched`, `pr-refresh`,
-`pr-pull`, `pr-thread-<i>`, `pr-thread-show-<i>` (opens the diff at the
+`pr-pull` (off, as `pr-checks-send` is, while the board is reading the PR for the card), `pr-thread-<i>`, `pr-thread-show-<i>` (opens the diff at the
 thread's file and line), `pr-push` (what to push and when, or why there is
 nothing to push), `pr-push-cmd`, `pr-push-copy`, `pr-none`, `pr-link` (link a pull
 request, when the card's menu offers it).
+
+Publishing waits: `publish-reading` (the dialog while GitHub answers for its
+facts), `publish-steps` and `publish-step-<id>` (the act's steps once
+confirmed; `data-state` is `todo`, `run`, `done` or `fail`; ids are `check`,
+`todraft`, `push`, `create`, `edit`, `ready`, `draft`).
 
 Log: `log`, `log-head`, `log-why` (why the history is read-only),
 `log-none`, `log-commit-<i>` (oldest first), `log-show-<i>` (a commit's

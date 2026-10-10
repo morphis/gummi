@@ -43,6 +43,16 @@ type PublishFacts struct {
 	Title    string   `json:"title,omitempty"`
 	Body     string   `json:"body,omitempty"`
 	Commands []string `json:"commands,omitempty"`
+	// Steps are what the act does, in order: the dialog draws them as a
+	// checklist while the act runs, each one marked by the "work" change
+	// that names it.
+	Steps []PublishStep `json:"steps,omitempty"`
+}
+
+// PublishStep is one stretch of an act a person waits on.
+type PublishStep struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // PublishPR is a linked pull request as GitHub has it now.

@@ -22,6 +22,16 @@
     "body": "why",
     "commands": [
       "git push origin 0123abc:refs/heads/fd-012-dark-mode"
+    ],
+    "steps": [
+      {
+        "id": "check",
+        "text": "Check nothing changed since you confirmed"
+      },
+      {
+        "id": "push",
+        "text": "Push 0123abc to me/demo"
+      }
     ]
   },
   "refused": {

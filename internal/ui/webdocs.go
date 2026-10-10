@@ -792,6 +792,17 @@ func (d *WebDocs) PR(ctx context.Context) webapi.PR {
 		if head != "" {
 			out.HeadSHA = head
 		}
+		// asked only where GitHub just answered: a gh that cannot reach it
+		// has said so once already
+		checks, err := pr.FetchChecks(ctx, pr.GHBinary(), ref)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		for _, c := range checks.Items {
+			out.Checks = append(out.Checks, webapi.PRCheck{
+				Name: threadfold.Sanitize(c.Name), Workflow: threadfold.Sanitize(c.Workflow), Bucket: c.Bucket, URL: c.URL,
+			})
+		}
 	}
 	fetch := d.threads
 	if fetch == nil {

@@ -58,10 +58,17 @@ func (m *Shell) openPRLinkDialog(f domain.Feature) tea.Cmd {
 			f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL), isErr: true}
 		return nil
 	}
+	if m.resolvePR == nil {
+		return func() tea.Msg { return prLinkProbeMsg{f: f} }
+	}
+	// the probe is GitHub's to answer, and the dialog waits for it
+	m.markGHWork(f.ID, "looking for an open PR on this branch", "")
+	probe := m.probePRLink(f)
+	return func() tea.Msg { return ghDoneMsg{id: f.ID, inner: probe()} }
+}
+
+func (m *Shell) probePRLink(f domain.Feature) tea.Cmd {
 	return func() tea.Msg {
-		if m.resolvePR == nil {
-			return prLinkProbeMsg{f: f}
-		}
 		ctx := context.Background()
 		mgr, err := m.wt.ManagerFor(ctx, &f)
 		if err != nil {
@@ -207,6 +214,16 @@ func (d *prLinkDialog) View(s *theme.Styles, w, h int) string {
 // dialog was built from — the board row may be stale against a concurrent
 // `gummi pr link` elsewhere.
 func (m *Shell) submitPRLink(f domain.Feature, spec string) tea.Cmd {
+	what := "finding the pull request on GitHub"
+	if spec != "" {
+		what = "reading pull request " + spec + " from GitHub"
+	}
+	m.markGHWork(f.ID, what, "")
+	link := m.linkPR(f, spec)
+	return func() tea.Msg { return ghDoneMsg{id: f.ID, inner: link()} }
+}
+
+func (m *Shell) linkPR(f domain.Feature, spec string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		if m.resolvePR == nil {

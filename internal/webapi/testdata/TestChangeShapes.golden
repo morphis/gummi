@@ -21,6 +21,19 @@
     "text": "FD-012: paused"
   },
   {
+    "kind": "work",
+    "id": "FD-012",
+    "text": "Push 4f1c2aa to morphis/gummi",
+    "step": "push"
+  },
+  {
+    "kind": "work",
+    "id": "FD-012",
+    "err": true,
+    "step": "push",
+    "done": true
+  },
+  {
     "kind": "viewers",
     "viewers": [
       {

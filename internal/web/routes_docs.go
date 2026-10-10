@@ -607,7 +607,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, cache *pr
 	// a confirmed act is not the request's to cancel: a page that reloads
 	// or a phone that locks must not kill a push mid-flight or leave a PR
 	// opened and unlinked. The act carries its own timeouts.
-	res := d.Publish(context.WithoutCancel(r.Context()), req, person(r))
+	// the act's steps go out as it runs them: a page draws the plan's
+	// steps as a checklist while this request is out
+	res := d.Publish(context.WithoutCancel(r.Context()), req, person(r), s.Publish)
 	cache.drop(id)
 	_ = s.opt.Board.Do(context.Background(), func(m *ui.Shell) tea.Cmd { return m.WebPublished(id) })
 	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})

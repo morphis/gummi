@@ -24,7 +24,7 @@ export function h (tag, props, ...kids) {
 }
 
 export function append (el, kids) {
-  for (const k of kids.flat(Infinity)) {
+  for (const k of [kids].flat(Infinity)) {
     if (k == null || k === false || k === '') continue
     el.append(k instanceof Node ? k : document.createTextNode(String(k)))
   }
@@ -37,6 +37,18 @@ export function setVars (el, vars) {
     if (val == null) el.style.removeProperty(p)
     else el.style.setProperty(p, String(val))
   }
+}
+
+// busy marks a button as waiting on what it just started: off, with a
+// spinner, until the returned function is called. A button a redraw has
+// replaced by then is simply gone.
+export function busy (btn) {
+  if (!btn || btn.disabled) return () => {}
+  const spin = h('span', { class: 'spinner sm' })
+  btn.disabled = true
+  btn.setAttribute('aria-busy', 'true')
+  btn.prepend(spin)
+  return () => { spin.remove(); btn.removeAttribute('aria-busy'); btn.disabled = false }
 }
 
 export function clear (el) {

@@ -72,6 +72,7 @@ func TestDiffShape(t *testing.T) {
 func TestPRShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, PR{
 		Linked: true, Ref: "octo/demo#12", URL: "https://github.com/octo/demo/pull/12", State: "OPEN",
+		Checks:      []PRCheck{{Name: "test", Workflow: "CI", Bucket: "fail", URL: "https://github.com/o/r/actions/runs/1/job/2"}},
 		Threads:     []PRThread{{Path: "main.go", Line: 3, Notes: []PRNote{{Author: "octo", Body: "name it better"}}}},
 		Comments:    []PRNote{{Author: "octo", Body: "thanks"}},
 		PushCommand: "git push origin fd-012-dark-mode", CommentCount: 2, HeadSHA: "0123abc", Fetched: at,
@@ -92,6 +93,7 @@ func TestPublishShapes(t *testing.T) {
 			Remote: "origin", PushURL: "git@github.com:me/demo.git", Push: "new", Head: "me:fd-012-dark-mode", BaseRepo: "octo/demo",
 			GH: "/usr/bin/gh", Hook: ".git/hooks/pre-push", Draft: true, DraftLocked: true, DraftWhy: "the tip 0123abc is not verified",
 			Title: "feat: dark mode", Body: "why", Commands: []string{"git push origin 0123abc:refs/heads/fd-012-dark-mode"},
+			Steps: []PublishStep{{ID: "check", Text: "Check nothing changed since you confirmed"}, {ID: "push", Text: "Push 0123abc to me/demo"}},
 		},
 		Refused: PublishFacts{
 			Act: "push", ToDraft: true, PR: &PublishPR{Number: 12, URL: "https://github.com/octo/demo/pull/12", State: "OPEN", HeadSHA: "0123abc"},

@@ -10,7 +10,7 @@
 //   openModal({...})         a dialog with a title, a body and buttons.
 //   openMenu(anchor, items)  a small popup menu under or over a button.
 
-import { h, icon } from './dom.js?v=__ASSET_V__'
+import { h, icon, busy } from './dom.js?v=__ASSET_V__'
 import { pushLayer } from './back.js?v=__ASSET_V__'
 import { on, state } from './store.js?v=__ASSET_V__'
 
@@ -122,7 +122,22 @@ export function openModal ({ title, body, bodyEl, actions = [], wide = false, te
         testid: a.testid,
         type: 'button',
         onclick: async () => {
-          const keep = await a.onClick?.()
+          // an action that takes time holds the dialog's buttons off and
+          // spins on the one pressed until it has its answer: a wait is
+          // never a dialog that looks idle, and never a second submit
+          let keep = a.onClick?.()
+          if (keep && typeof keep.then === 'function') {
+            const mine = [...foot.querySelectorAll('button:not(:disabled)')].filter(x => x !== b)
+            const focused = document.activeElement === b
+            for (const x of mine) x.disabled = true
+            const done = busy(b)
+            if (focused) box.focus({ preventScroll: true })
+            try { keep = await keep } finally {
+              done()
+              for (const x of mine) x.disabled = false
+              if (focused && document.activeElement === box) b.focus({ preventScroll: true })
+            }
+          }
           if (keep !== false) close()
         }
       }, a.label)

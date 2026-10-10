@@ -269,6 +269,9 @@ still work — the board just stays static. Key env vars are tabled in
   (TUI dialog and what the web page is told) and
   `internal/web/assets/publish.js`. A face never decides: a difference
   between two of them is a bug in the shared code.
+- "hand this card's failing PR checks to its session" → `internal/pr/checks.go`
+  for the read and the message, `internal/ui/prchecks.go` for who gets it
+  (DESIGN §22.11). A snapshot a person sends: never stored, never a gate.
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - "why can this card land without verifying" / freeform cards →
   `domain.Feature.MayLand` for the rule, `internal/engine/freeformsession.go`

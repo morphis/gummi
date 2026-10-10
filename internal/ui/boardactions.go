@@ -525,6 +525,14 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 			}
 			return m.pullPRReview(r.F)
 		}
+	case "prchecks":
+		if r, ok := m.selected(); ok {
+			if r.F.PullRequest.Empty() {
+				m.notice = noticeMsg{text: string(r.F.ID) + " has no linked PR", isErr: true}
+				return nil
+			}
+			return m.sendPRChecks(r.F)
+		}
 	}
 	return nil
 }

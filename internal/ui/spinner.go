@@ -47,7 +47,7 @@ func (m *Shell) spinnerActive() bool {
 	if !m.motionEnabled {
 		return false
 	}
-	if m.ingestRun != nil || len(m.mergePrep) > 0 || m.squashPrep || len(m.baselining) > 0 || len(m.scribing) > 0 {
+	if m.ingestRun != nil || len(m.mergePrep) > 0 || m.squashPrep || len(m.baselining) > 0 || len(m.scribing) > 0 || len(m.ghWork) > 0 {
 		return true
 	}
 	// a line on its way to a consult session that has not opened yet: no

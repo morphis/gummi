@@ -151,8 +151,11 @@ type Shell struct {
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
 
-	mergePrep  map[domain.FeatureID]bool // cards whose landing preconditions are being checked (one landing per card at a time)
-	squashPrep bool                      // a squash-in-place's preconditions are being checked (one at a time)
+	mergePrep map[domain.FeatureID]bool // cards whose landing preconditions are being checked (one landing per card at a time)
+	// ghWork is what the board is waiting on GitHub for, per card
+	// (markGHWork): the status bar spins on it until its ghDoneMsg
+	ghWork     map[domain.FeatureID]string
+	squashPrep bool // a squash-in-place's preconditions are being checked (one at a time)
 
 	// The dashboard's action list is the second focus region on the board:
 	// → moves into it, ← back to the cards. Only the cursor and the focus
@@ -505,6 +508,9 @@ type Shell struct {
 	// pr.Resolve's own contract.
 	resolvePR            func(ctx context.Context, spec, repoDir, branch string) (domain.PullRequestRef, error)
 	fetchPRReviewThreads func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error)
+	// fetchPRChecks backs prchecks: the PR's checks with the end of each
+	// failed job's log. nil leaves the action reporting it is unavailable.
+	fetchPRChecks func(ctx context.Context, ref domain.PullRequestRef) (pr.Checks, error)
 	// prSquashMergeAllowed backs prlink's non-blocking squash-method
 	// caution (the same one `gummi pr link` prints). Best-effort like
 	// prepareMerge's own provenance warn: nil or a failing lookup just
@@ -1021,6 +1027,13 @@ func (m *Shell) SetPRResolver(fn func(ctx context.Context, spec, repoDir, branch
 // silently ingesting nothing.
 func (m *Shell) SetPRThreadFetcher(fn func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error)) {
 	m.fetchPRReviewThreads = fn
+}
+
+// SetPRChecksFetcher wires prchecks' read of a PR's checks and failed-job
+// logs to a real gh call. Without it prchecks reports that it is
+// unavailable rather than telling a session nothing is failing.
+func (m *Shell) SetPRChecksFetcher(fn func(ctx context.Context, ref domain.PullRequestRef) (pr.Checks, error)) {
+	m.fetchPRChecks = fn
 }
 
 // SetPRSquashMergeChecker wires prlink's non-blocking squash-method
@@ -2307,6 +2320,13 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePublishFacts(msg)
 		return m, nil
 
+	case publishStepMsg:
+		return m, m.handlePublishStep(msg)
+
+	case ghDoneMsg:
+		m.endGHWork(msg.id)
+		return m.update(msg.inner)
+
 	case sessionModelsMsg:
 		m.handleSessionModelsMsg(msg)
 		return m, nil
@@ -2316,6 +2336,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// was dismissed is dropped (the card check inside answers for it)
 		m.handleWritespecDraftMsg(msg)
 		return m, nil
+
+	case prChecksReadyMsg:
+		return m, m.deliverPRChecks(msg)
 
 	case prPullDoneMsg:
 		m.notice = msg.notice
@@ -4748,6 +4771,9 @@ func (m *Shell) statusView(w int) string {
 	}
 	if len(m.mergePrep) > 0 {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " merging", Kind: statusbar.KindNeutral})
+	}
+	if len(m.ghWork) > 0 {
+		pills = append(pills, statusbar.Pill{Text: m.ghWorkPill(), Kind: statusbar.KindNeutral})
 	}
 	if m.squashPrep {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " squashing", Kind: statusbar.KindNeutral})

@@ -4757,7 +4757,8 @@ words is GitHub's own page):
 | ready | `gh pr ready` of a draft | `gummi pr ready <id>` |
 | draft | `gh pr ready --undo` | `gummi pr draft <id>` |
 
-It is not merge, not review, not retarget, and not CI.
+It is not merge, not review, not retarget, and not CI: gummi reads a
+PR's checks (§22.11) and never runs, re-runs or waits on one.
 
 Every act is two steps, on every face. First the **facts** are resolved
 and shown: the branch and its tip, the remote and the URL git will
@@ -5044,6 +5045,22 @@ One seam, three faces:
    runs nothing — but it is as strong as pairing is (§20.3), no
    stronger.
 
+**No face waits in silence.** Reading the facts and running the act are
+both GitHub's to answer, and each call may take up to `publish.Timeout`.
+The plan carries its steps in a person's words (`Plan.Steps`: the
+re-read of the facts, the push, each `gh` call) and `Do` reports each
+one to `Env.Progress` as it starts and as it ends, so the faces draw the
+same progress from the same list: the CLI prints each step to stderr as
+it starts; the TUI's status bar spins on the card with the step and its
+place in the plan; the web dialog is up before its facts are, and once
+confirmed turns the steps into a checklist with the buttons held off,
+the failed step marked where it stopped. The board says what it is
+waiting on as `work` changes (`webapi.ChangeWork`), which also carry the
+PR reads of §22.11, the thread pull and a link's lookup, so a page shows
+a wait whichever
+face started it. They are a display: nothing is stored and nothing is
+decided from them.
+
 ### 22.10 Deferred
 
 - **Stacked cards** (§18.5).
@@ -5062,3 +5079,43 @@ One seam, three faces:
   fight its checkpoints.
 - **Fetching and conflict surfacing** beyond what `ForkDriftError` and
   the rebase dialog already do, until publishing shows the need.
+
+### 22.11 Failing checks — read by gummi, sent by a person
+
+A PR's review threads reach a card as diff comments. Its checks had no
+way in at all, and a session cannot be told to look for itself: the
+token a person stored is never in an agent's environment (§22.2), so
+`gh run view` inside a session works on one machine and not the next.
+So the read is gummi's, with the same `gh` and the same lent token as
+every other read here, and it is the same on a freeform card and a
+workflow card.
+
+- **The read** (`internal/pr/checks.go`). `FetchChecks` asks `gh pr view
+  --json headRefOid,statusCheckRollup` and sorts each entry into `gh`'s
+  own buckets (pass, fail, pending, skipping, cancel); only what GitHub
+  itself called failed is failing. `FetchFailedLogs` adds, for a failing
+  GitHub Actions job, the end of what its failed steps printed (`gh run
+  view --job --log-failed`), bounded per line, per job and in the number
+  of jobs. Another CI's status carries its name, description and link.
+- **Shown** in the web page's PR tab and in `gummi pr status`, without
+  logs.
+- **Sent** by one card action, "send failing checks" (`prchecks`), which
+  only a person starts. A freeform card's session gets them as its next
+  turn. A workflow card's writer is its implement stage: a running one
+  gets a live turn, an idle one is run again with the checks in its
+  kickoff, and a card at verify goes back over its rerun edge first —
+  the route "request changes" takes. A critique, a rebase or a verify
+  in flight is not interrupted.
+- **A snapshot, not state.** Nothing is stored, no gate is held and no
+  floor reads it: a check's answer belongs to a commit and is stale the
+  moment the branch is pushed again. The message names the commit the
+  checks ran on, and says so when the card's branch is no longer there.
+- **A log is somebody else's text.** It is stripped of escape sequences
+  and control characters, bounded, and handed over as quoted evidence —
+  the same class of input as a review comment's body.
+- **Not offered to an agent.** There is no session tool for it and no
+  autopilot, goal or schedule step: a loop that read GitHub with a
+  person's token unasked is a different decision. A tool for "more of
+  this job's log" is the follow-up if the bounded end proves too short.
+- **Not followed.** gummi does not poll a PR's checks or raise attention
+  when they turn red; that needs the per-card remote read §22.10 defers.

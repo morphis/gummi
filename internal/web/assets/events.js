@@ -17,8 +17,9 @@
 import { set, state } from './store.js?v=__ASSET_V__'
 
 // ingest runs report progress on their own kind; a view listens with onEvent
-// and a device asking to join is "pairing" (approvals.js)
-const KINDS = ['board', 'card', 'live', 'toast', 'viewers', 'ingest', 'pairing']
+// and a device asking to join is "pairing" (approvals.js); "work" is what
+// the board is waiting on GitHub for (work.js)
+const KINDS = ['board', 'card', 'live', 'toast', 'viewers', 'ingest', 'pairing', 'work']
 const listeners = new Map()
 
 let es = null
