@@ -24,7 +24,7 @@ export function h (tag, props, ...kids) {
 }
 
 export function append (el, kids) {
-  for (const k of kids.flat(Infinity)) {
+  for (const k of [kids].flat(Infinity)) {
     if (k == null || k === false || k === '') continue
     el.append(k instanceof Node ? k : document.createTextNode(String(k)))
   }
