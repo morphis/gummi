@@ -54,6 +54,7 @@ function render (pane, entry, ctx) {
         p.headSha ? h('span', { class: 'mono' }, `head ${p.headSha.slice(0, 7)}`) : null,
         h('button', { class: 'btn', type: 'button', testid: 'pr-refresh', onclick: () => refresh(ctx) }, 'Refresh'),
         h('button', { class: 'btn', type: 'button', testid: 'pr-pull', title: 'Bring the open review threads into the diff as comments', onclick: () => pull(ctx) }, 'Pull threads into the diff'))))
+  sect.append(checksBox(p, ctx))
   if (threads.length) {
     sect.append(h('p', { class: 'label' }, 'Review threads, read from GitHub'))
     threads.forEach((t, i) => sect.append(h('div', { class: 'rthread', testid: `pr-thread-${i}` },
@@ -69,6 +70,32 @@ function render (pane, entry, ctx) {
   }
   sect.append(pushBox(p.pushCommand, ctx, p.publish))
   pane.append(sect)
+}
+
+// checksBox is the PR's checks as GitHub has them for its head, failing
+// first. The send is the card's own "prchecks" action: the board reads the
+// failed jobs' logs and hands them to the card's session.
+const checkWords = { fail: 'failing', pending: 'running', pass: 'passed', skipping: 'skipped', cancel: 'cancelled' }
+const checkClass = { fail: 'badc', pending: 'warnc', pass: 'okc' }
+function checksBox (p, ctx) {
+  const checks = p.checks || []
+  if (!checks.length) return null
+  const order = ['fail', 'pending', 'cancel', 'pass', 'skipping']
+  const sorted = [...checks].sort((a, b) => order.indexOf(a.bucket) - order.indexOf(b.bucket))
+  const failing = checks.filter(c => c.bucket === 'fail').length
+  const send = (ctx.card?.actions || []).find(a => a.id === 'prchecks')
+  return [h('p', { class: 'label' }, 'Checks, read from GitHub'),
+    h('div', { class: 'rthread', testid: 'pr-checks' },
+      h('div', { class: 'rh' },
+        h('span', { class: failing ? 'badc' : 'okc', testid: 'pr-checks-summary' }, failing ? `${failing} failing` : 'none failing'),
+        `of ${checks.length}`,
+        failing && send
+          ? h('button', { class: 'link go', type: 'button', testid: 'pr-checks-send', title: 'Read the failed jobs’ logs and hand them to this card’s session to fix', onclick: () => runAction(ctx.card, send) }, 'send failing checks to the session')
+          : null),
+      sorted.map((c, i) => h('div', { class: 'c1 check', testid: `pr-check-${i}` },
+        h('span', { class: checkClass[c.bucket] || 'nonec' }, checkWords[c.bucket] || c.bucket),
+        h('span', { class: 'mono' }, c.workflow ? `${c.workflow} / ${c.name}` : c.name),
+        c.url ? h('a', { href: safeUrl(c.url), target: '_blank', rel: 'noopener noreferrer' }, 'details') : null)))]
 }
 
 // publish opens the publish dialog for act; the tab reads GitHub again

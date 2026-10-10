@@ -72,6 +72,7 @@ func TestDiffShape(t *testing.T) {
 func TestPRShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, PR{
 		Linked: true, Ref: "octo/demo#12", URL: "https://github.com/octo/demo/pull/12", State: "OPEN",
+		Checks:      []PRCheck{{Name: "test", Workflow: "CI", Bucket: "fail", URL: "https://github.com/o/r/actions/runs/1/job/2"}},
 		Threads:     []PRThread{{Path: "main.go", Line: 3, Notes: []PRNote{{Author: "octo", Body: "name it better"}}}},
 		Comments:    []PRNote{{Author: "octo", Body: "thanks"}},
 		PushCommand: "git push origin fd-012-dark-mode", CommentCount: 2, HeadSHA: "0123abc", Fetched: at,

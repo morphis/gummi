@@ -22,6 +22,14 @@
       "body": "thanks"
     }
   ],
+  "checks": [
+    {
+      "name": "test",
+      "workflow": "CI",
+      "bucket": "fail",
+      "url": "https://github.com/o/r/actions/runs/1/job/2"
+    }
+  ],
   "pushCommand": "git push origin fd-012-dark-mode",
   "commentCount": 2,
   "headSha": "0123abc",

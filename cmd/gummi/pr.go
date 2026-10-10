@@ -170,6 +170,17 @@ type prStatusView struct {
 	HeadSHA  string `json:"head_sha"`
 	State    string `json:"state"`
 	Comments int    `json:"comments"`
+	// Checks are the PR's checks on HeadSHA; absent when it has none.
+	Checks []prCheckView `json:"checks,omitempty"`
+}
+
+// prCheckView is one check in `gummi pr status`: bucket is gh's word for
+// where it stands (pass, fail, pending, skipping, cancel).
+type prCheckView struct {
+	Name     string `json:"name"`
+	Workflow string `json:"workflow,omitempty"`
+	Bucket   string `json:"bucket"`
+	URL      string `json:"url,omitempty"`
 }
 
 // runPRStatus implements `gummi pr status <card> [--json]`: a live query of
@@ -214,6 +225,13 @@ func runPRStatus(fl cliFlags, args []string) error {
 		URL: f.PullRequest.URL, HeadSHA: headSHA,
 		State: state, Comments: comments,
 	}
+	checks, err := pr.FetchChecks(ctx, ghBinary, f.PullRequest)
+	if err != nil {
+		return fmt.Errorf("querying PR checks for %s: %w", f.ID, err)
+	}
+	for _, c := range checks.Items {
+		view.Checks = append(view.Checks, prCheckView{Name: c.Name, Workflow: c.Workflow, Bucket: c.Bucket, URL: c.URL})
+	}
 	if jsonOut {
 		b, err := json.MarshalIndent(view, "", "  ")
 		if err != nil {
@@ -226,6 +244,13 @@ func runPRStatus(fl cliFlags, args []string) error {
 	fmt.Printf("  URL:      %s\n", view.URL)
 	fmt.Printf("  State:    %s\n", strings.ToLower(view.State))
 	fmt.Printf("  Comments: %d\n", view.Comments)
+	if len(view.Checks) > 0 {
+		fmt.Printf("  Checks:   %d failing, %d running, %d passed\n",
+			checks.Count(pr.CheckFail), checks.Count(pr.CheckPending), checks.Count(pr.CheckPass))
+		for _, c := range checks.Failing() {
+			fmt.Printf("    ✗ %s  %s\n", c.Name, c.URL)
+		}
+	}
 	return nil
 }
 

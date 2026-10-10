@@ -210,13 +210,17 @@ type AnnotationResolveRequest struct {
 // as comments; it runs on the board and reports back as a toast and a card
 // change.
 type PR struct {
-	Linked      bool       `json:"linked"`
-	Ref         string     `json:"ref,omitempty"`
-	URL         string     `json:"url,omitempty"`
-	State       string     `json:"state,omitempty"`
-	Threads     []PRThread `json:"threads,omitempty"`
-	Comments    []PRNote   `json:"comments,omitempty"`
-	PushCommand string     `json:"pushCommand,omitempty"`
+	Linked   bool       `json:"linked"`
+	Ref      string     `json:"ref,omitempty"`
+	URL      string     `json:"url,omitempty"`
+	State    string     `json:"state,omitempty"`
+	Threads  []PRThread `json:"threads,omitempty"`
+	Comments []PRNote   `json:"comments,omitempty"`
+	// Checks are the PR's checks on HeadSHA, in GitHub's order. Read only:
+	// the card's "prchecks" action is what hands the failing ones to its
+	// session.
+	Checks      []PRCheck `json:"checks,omitempty"`
+	PushCommand string    `json:"pushCommand,omitempty"`
 	// Comments counts the PR's conversation comments, as gh reports them.
 	CommentCount int    `json:"commentCount,omitempty"`
 	HeadSHA      string `json:"headSha,omitempty"`
@@ -238,6 +242,15 @@ type PRThread struct {
 	Resolved bool     `json:"resolved"`
 	Outdated bool     `json:"outdated,omitempty"`
 	Notes    []PRNote `json:"notes"`
+}
+
+// PRCheck is one of the PR's checks. Bucket is gh's word for where it
+// stands: pass, fail, pending, skipping or cancel.
+type PRCheck struct {
+	Name     string `json:"name"`
+	Workflow string `json:"workflow,omitempty"`
+	Bucket   string `json:"bucket"`
+	URL      string `json:"url,omitempty"`
 }
 
 // PRNote is one comment in a thread, or a top-level PR comment.

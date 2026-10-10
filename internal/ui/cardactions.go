@@ -560,6 +560,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"prpull", "", "pull PR review", "read the PR's review comments back onto the diff", false,
 			!r.F.PullRequest.Empty() && needsWT,
 		},
+		// read from GitHub by gummi, with the person's own gh: a session is
+		// never lent the credential to look for itself
+		{
+			"prchecks", "", "send failing checks", prChecksDetail(in.stage), false,
+			!r.F.PullRequest.Empty() && needsWT &&
+				(freeform || in.stage == domain.StageImplement || in.stage == domain.StageVerify),
+		},
 		// no accelerator: y is "yes" in the confirm this very action raises,
 		// so binding it here made one letter mean two things one keystroke
 		// apart. The list and the command menu are how you reach it now.

@@ -773,6 +773,12 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		a.Default = string(publishActs[a.ID])
 	case "delete", "clean", "duplicate", "handoff", "adopt", "prunlink", "goalstop":
 		a.Needs = webapi.ActionNeedsConfirm
+	case "prchecks":
+		// from verify the card goes back to implement: a stage move is
+		// confirmed, a message to a session is not
+		if r.F.Stage == domain.StageVerify {
+			a.Needs = webapi.ActionNeedsConfirm
+		}
 	}
 }
 
