@@ -1398,7 +1398,21 @@ board where it raises a card to the inbox (`Shell.logDecision`).
   branch may fork from another card's branch, and gummi replays the cards
   above one that changed. Those replays are local `rebase --onto` on
   branches gummi cut, and the stack still reaches main one accepted
-  landing at a time, bottom first. Releasing stays in your hands. A card
+  landing at a time, bottom first. The web face's repositories view
+  adds the one write to a base that is not a landing: it fetches
+  (`git fetch --all --prune`, a read of the remotes) and, when asked,
+  fast-forwards a repository's base to its upstream — only ever a
+  fast-forward, refused over a dirty main checkout or a base with
+  commits of its own, so it is the `git pull --ff-only` a person would
+  have run and never a merge gummi chose. It also deletes a local branch
+  no card holds; a card's branch goes only through the card's own
+  clean-up, and an adopted one not at all. The same view edits a
+  repository's own git config and nothing past it: which remotes it
+  knows (add, rename, point elsewhere, remove) and which remote branch
+  a local one tracks. None of that contacts a remote or moves a commit;
+  a URL naming a transport helper (`ext::…`) is refused, and a
+  credential in a URL is stored as given and never sent to the page.
+  Releasing stays in your hands. A card
   may name and read the PR it lands through — linking it and pulling its
   review threads in as diff annotations — and, on a person's explicit
   act (decision 25, §22), **publish**: push its own branch and open,
@@ -1607,6 +1621,14 @@ Decided in the design interview (2026-07-03):
     so a multi-repo board keeps one `.gummi`. Dependency edges cross repos
     freely — `feature_deps` references `features(id)` with no repo
     awareness.
+
+    The web face lists the set (`GET /api/repos`, the Repositories
+    view): each repository with its local branches sorted by who holds
+    them — the base, a card's, an adopted one, a goal's, or nobody's
+    (`internal/repoview`) — where it stands against its upstream, and
+    the fetch, fast-forward and branch clean-up §7 allows. Each
+    repository's remotes are listed and edited there too, and a branch's
+    upstream chosen. The set itself is still edited in `config.yaml`.
 
     A **goal** is the one card that is not a per-card choice: it is in no
     repository, its cards each name one, and it keeps a branch in every

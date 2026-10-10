@@ -77,7 +77,7 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
       ['newcard', () => page.getByTestId('rail-new').click()],
       ['fleet', () => page.getByTestId('rail-fleet').click()],
     ];
-    for (const name of ['goals', 'stacks', 'ingest', 'bugs', 'doctor']) {
+    for (const name of ['goals', 'stacks', 'repos', 'ingest', 'bugs', 'doctor']) {
       views.push([name, async () => { await page.getByTestId('rail-more').click(); await page.getByTestId(`menu-${name}`).click(); }]);
     }
     for (const [name, go] of views) {

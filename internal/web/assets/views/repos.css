@@ -1,0 +1,77 @@
+@import url("kit.css?v=__ASSET_V__");
+/* views/repos.css — the repositories view: each repository a box, its
+   branches grouped by who holds them. */
+
+.rp{--tc:var(--fg3)}
+.rp > *{flex-shrink:0}
+.rp .t-ok{--tc:var(--ok)} .rp .t-err{--tc:var(--err)} .rp .t-warn{--tc:var(--warn)}
+.rp .t-run{--tc:var(--accent)} .rp .t-mute{--tc:var(--fg3)}
+.rp-bar{display:flex;align-items:center;gap:8px}
+.rp-count{color:var(--fg3);font-size:12.5px;margin-right:auto}
+.rp-lede{margin:0;font-size:12.5px;color:var(--fg3)}
+.rp-list{display:flex;flex-direction:column;gap:12px}
+.rp-clash{border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel));border-radius:10px;padding:8px 12px;font-size:12.5px;color:var(--fg2);overflow-wrap:anywhere}
+.rp-clash b{display:block;color:var(--fg);font-weight:600}
+.rp-clash code{font-family:var(--mono);font-size:12px}
+
+.rp-box{border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.rp-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;padding:11px 14px;cursor:pointer;list-style:none;border-radius:12px}
+.rp-head::-webkit-details-marker{display:none}
+.rp-head::before{content:"▸";color:var(--fg3);font-size:11px;align-self:center}
+.rp-box[open] > .rp-head::before{content:"▾"}
+.rp-title{display:flex;align-items:baseline;gap:8px;min-width:0}
+.rp-title b{font:600 14.5px var(--mono);color:var(--fg)}
+.rp-title b.default{font-family:inherit;font-style:italic;font-weight:500}
+.rp-path{font-size:11.5px;color:var(--fg3);overflow-wrap:anywhere}
+.rp-meta{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;font-size:12px;color:var(--fg3);margin-left:auto}
+.rp-basename{color:var(--fg2);font-size:12px}
+.rp-body{display:flex;flex-direction:column;gap:14px;padding:0 14px 14px}
+.rp-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.rp-actions .vbusy{font-size:12.5px;margin-right:4px}
+
+/* a section opens with a band across the box, so where one group of
+   rows stops and the next starts reads at a glance */
+.rp-group{display:flex;flex-direction:column;gap:2px}
+.rp-group h4{margin:0;display:flex;align-items:center;gap:8px;min-height:30px;padding:3px 10px;border-radius:7px;background:var(--band);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--fg)}
+.rp-group h4 .n{font-weight:600;color:var(--fg2);letter-spacing:0}
+.rp-group h4 .hint{text-transform:none;letter-spacing:0;font-weight:400;font-size:11.5px;color:var(--fg2)}
+.rp-group .rp-branches{padding:0 10px}
+.rp-group > .vconfirm{margin:4px 0}
+.rp-branches{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.rp-branch{display:flex;flex-direction:column;gap:6px;padding:6px 0;border-top:1px solid var(--line)}
+.rp-branch:first-child{border-top:0}
+.rp-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:4px 12px;align-items:center}
+.rp-main{display:flex;align-items:baseline;gap:8px;min-width:0}
+.rp-name{font-size:12.5px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:60px}
+.rp-card{font-family:var(--mono);font-size:11.5px;flex-shrink:0}
+.rp-t{font-size:12.5px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 0}
+.rp-marks{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:3px 8px;font-size:11.5px;color:var(--fg3)}
+.rp-mark{font-size:10.5px;font-weight:600;padding:0 6px;height:17px;display:inline-flex;align-items:center;border-radius:4px;color:color-mix(in srgb,var(--tc) var(--t-keep),#000);background:color-mix(in srgb,var(--tc) 13%,transparent);white-space:nowrap}
+.rp-stage{color:color-mix(in srgb,var(--sc,var(--fg3)) var(--t-keep),#000);white-space:nowrap}
+.rp-n,.rp-age{white-space:nowrap}
+.rp-age{color:var(--fg3)}
+.rp-act{display:flex;justify-content:flex-end;min-width:28px}
+.rp-more{width:28px;height:26px}
+.rp-why{font-size:11.5px;color:var(--fg3);overflow-wrap:anywhere}
+.rp-cmdrow{display:flex;align-items:center;gap:8px;min-width:0}
+.rp-cmdlbl{font-size:11.5px;color:var(--fg3);white-space:nowrap}
+.rp-cmd{flex:1;min-width:0;font:12px/1.4 var(--mono);color:var(--fg);background:var(--sunk);border:1px solid var(--line);border-radius:6px;padding:5px 9px;overflow-x:auto;white-space:nowrap;user-select:all}
+.rp-copy{height:26px;padding:0 10px;flex-shrink:0}
+.rp-add{margin-left:auto;width:26px;height:24px;padding:0;justify-content:center;background:var(--panel);font-size:16px;line-height:1;font-weight:400;letter-spacing:0}
+.rp-url{font-size:12px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 0}
+.rp-form .q{flex:1 1 320px}
+.rp-form .vrow{margin-top:8px}
+.rp-form input,.rp-form select{width:100%;font-size:12.5px}
+.rp-form input.mono{font-family:var(--mono)}
+.rp-typed input{margin-top:8px;width:100%;max-width:340px;height:32px;font-family:var(--mono);font-size:12.5px}
+
+@media (max-width:760px){
+  .rp-head{padding:10px}
+  .rp-body{padding:0 10px 12px}
+  .rp-meta{margin-left:0}
+  .rp-row{grid-template-columns:minmax(0,1fr) auto}
+  .rp-marks{grid-column:1 / -1;grid-row:2;justify-content:flex-start}
+  .rp-main{flex-wrap:wrap}
+  .rp-url{flex-basis:100%;white-space:normal;overflow-wrap:anywhere}
+  .rp-t{flex-basis:100%}
+}

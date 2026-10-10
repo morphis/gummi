@@ -257,6 +257,18 @@ func (p *Pool) ClashError(name string) error {
 	return &repoNotConfiguredError{msg: fmt.Sprintf("repository %q is ambiguous: %s all share that folder name; pin the one you mean under `repos:` in .gummi/config.yaml", name, strings.Join(clash, ", "))}
 }
 
+// Ambiguous reports the folder names discovery's last scan left unnamed,
+// each with the checkouts sharing it. Empty for a fixed set.
+func (p *Pool) Ambiguous() map[string][]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string][]string, len(p.ambiguous))
+	for name, paths := range p.ambiguous {
+		out[name] = append([]string(nil), paths...)
+	}
+	return out
+}
+
 // DefaultName is the empty string: the conventional name for the workspace
 // default repository, used by creation surfaces to mean "no explicit choice".
 func (p *Pool) DefaultName() string { return "" }

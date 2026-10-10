@@ -72,6 +72,40 @@ func TestStackShape(t *testing.T) {
 	}))
 }
 
+func TestReposShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		List    Repos       `json:"list"`
+		Request RepoRequest `json:"request"`
+	}{
+		List: Repos{
+			Discovered: true,
+			Ambiguous:  []RepoClash{{Name: "tools", Paths: []string{"a/tools", "b/tools"}}},
+			Repos: []Repo{
+				{
+					Name: "gummi", Path: "git/gummi", Base: "main", Origin: "git@github.com:morphis/gummi.git",
+					Remote: true, Dirty: true, Fetched: at, Cards: 3,
+					Remotes: []RepoRemote{
+						{Name: "origin", URL: "git@github.com:morphis/gummi.git", Tracking: 2},
+						{Name: "fork", URL: "https://•••@github.com/simon/gummi.git", PushURL: "git@github.com:simon/gummi.git", Secret: true},
+					},
+					RemoteBranches: []string{"origin/main", "origin/release"},
+					Branches: []RepoBranch{
+						{Name: "main", Group: "base", SHA: "7f5dac70a1b2", Subject: "fix(web): keep the rail", At: at, Upstream: "origin/main", Remote: "origin", Ahead: 2, Behind: 3, Push: "git push origin main"},
+						{Name: "feat/loader", Group: "cards", SHA: "ace70de9c3d4", AheadBase: 4, BehindBase: 1, Worktree: ".gummi/worktrees/FD-012", Card: &RepoBranchCard{ID: "FD-012", Title: "Loader", Stage: "done", Landed: true, Clean: true}},
+						{Name: "release", Group: "unowned", SHA: "9a8ca12ae5f6", Upstream: "origin/release", Gone: true, ForkedBy: []string{"FD-020"}, Why: "FD-020 forks from it"},
+						{Name: "wip/simon", Group: "unowned", SHA: "b9128d40a7b8", AheadBase: 2, Delete: "confirm"},
+					},
+				},
+				{Name: "", Path: ".", Branches: []RepoBranch{}, Error: "not the root of a git repository"},
+			},
+		},
+		Request: RepoRequest{
+			Repo: "gummi", All: true, Branch: "wip/simon", Force: true,
+			Remote: "fork", NewName: "simon", URL: "git@github.com:simon/gummi.git", Upstream: "fork/wip/simon",
+		},
+	}))
+}
+
 func TestIngestShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, struct {
 		Request IngestRequest     `json:"request"`
