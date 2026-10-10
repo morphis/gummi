@@ -79,7 +79,7 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 		} else if fx.OpenPR > 0 {
 			// an open PR this card does not link would gain the commits
 			// with no floor asked of it
-			e := fail(CodePRExists, fmt.Sprintf("PR #%d is open for %s and not linked to this card; a push would add to it unchecked", fx.OpenPR, fx.HeadRef()), "link it first")
+			e := fail(CodePRExists, fmt.Sprintf("PR #%d is open for %s in %s and not linked to this card; a push would add to it unchecked", fx.OpenPR, fx.HeadRef(), fx.OpenPRRepo), "link it first")
 			e.PR = fx.OpenPR
 			return p, e
 		}
@@ -91,9 +91,12 @@ func PlanFor(fx Facts, req Request) (Plan, *Error) {
 		case fx.PR != nil:
 			return p, fail(CodePRExists, fmt.Sprintf("this card is already linked to PR #%d", fx.PR.Number), "")
 		case fx.OpenPR > 0:
-			e := fail(CodePRExists, fmt.Sprintf("PR #%d is already open for %s", fx.OpenPR, fx.HeadRef()), "link it instead")
+			e := fail(CodePRExists, fmt.Sprintf("PR #%d is already open for %s in %s", fx.OpenPR, fx.HeadRef(), fx.OpenPRRepo), "link it instead")
 			e.PR = fx.OpenPR
 			return p, e
+		case fx.BaseRepo == "":
+			return p, fail(CodeBaseUnchosen, fx.HeadRepo+" is a fork: the pull request can open in "+strings.Join(fx.BaseRepos, " or "),
+				"choose one (`gummi pr create --repo <owner/name>`); it is remembered for this repository")
 		case strings.TrimSpace(req.Title) == "":
 			return p, fail(CodeConfirmationNeeded, "a pull request needs a title", "")
 		}
@@ -279,8 +282,9 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		}
 		out, err := env.gh(ctx, []byte(req.Body), args...)
 		if err != nil {
-			return res, after(res, fx, AsError(err))
+			return res, after(res, fx, createError(fx, AsError(err)))
 		}
+		rememberBase(ctx, env, fx)
 		ref, rerr := refFromCreate(out, fx)
 		if rerr != nil {
 			return res, after(res, fx, rerr)
@@ -316,6 +320,22 @@ func Do(ctx context.Context, env Env, repo Repo, in Input, req Request, link Lin
 		res.PR = domain.PullRequestRef{Repo: fx.PR.Repo, Number: fx.PR.Number, URL: fx.PR.URL, HeadSHA: fx.PR.HeadSHA}
 	}
 	return res, nil
+}
+
+// createError names the repository in GitHub's refusal of a token: a PR
+// into a fork's parent needs a token that may write there, and GitHub's
+// own words name neither the repository nor the way out.
+func createError(fx Facts, e *Error) *Error {
+	if e.Code != CodeTokenRefused {
+		return e
+	}
+	fix := "give the token pull-request write access to " + fx.BaseRepo
+	for _, r := range fx.BaseRepos {
+		if r != fx.BaseRepo {
+			fix += ", or open the pull request in " + r
+		}
+	}
+	return fail(CodeTokenRefused, "GitHub refused to open a pull request in "+fx.BaseRepo+": the token gh uses may not create one there", fix)
 }
 
 // after words a failure that came after part of the act had already

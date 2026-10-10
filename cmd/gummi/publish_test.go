@@ -120,6 +120,24 @@ func TestPRCreateRunsOnlyOnTheConfirmedFacts(t *testing.T) {
 	}
 }
 
+// --repo is a choice between the repositories the PR can open in, never a
+// way to open one somewhere else.
+func TestPRCreateRefusesARepoThePRCannotOpenIn(t *testing.T) {
+	_, fake := publishFixture(t)
+	err := runCLI("pr", "create", "FD-002", "--repo", "acme/elsewhere")
+	if err == nil || !strings.Contains(err.Error(), "base-unchosen") || !strings.Contains(err.Error(), "opens in me/widget") {
+		t.Fatalf("--repo acme/elsewhere: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(fake, "log")); strings.Contains(string(b), "pr create") {
+		t.Fatal("gh pr create ran")
+	}
+	var facts error
+	out := captureStdout(t, func() { facts = runCLI("pr", "create", "FD-002", "--repo", "me/widget") })
+	if facts == nil || !strings.Contains(facts.Error(), "confirmation-needed") || !strings.Contains(out, "gh pr create --repo me/widget") {
+		t.Fatalf("--repo me/widget: %v\n%s", facts, out)
+	}
+}
+
 // Inside a gummi session — anything gummi started, an agent's shell above
 // all — the publish verbs refuse before they read anything.
 func TestPublishVerbsRefuseInsideASession(t *testing.T) {

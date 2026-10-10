@@ -156,6 +156,8 @@ func ghError(args []string, stderr string, err error) *Error {
 		return fail(CodeAuthFailed, what+": the organization requires SSO for this token", "run `gh auth refresh`")
 	case strings.Contains(s, "gh auth login") || strings.Contains(s, "not logged in") || strings.Contains(s, "authentication required") || strings.Contains(s, "bad credentials"):
 		return fail(CodeGHNotSignedIn, what+": gh is not signed in", "run `gh auth login`")
+	case strings.Contains(s, "resource not accessible by"):
+		return fail(CodeTokenRefused, what+": GitHub refused the token gh uses: "+firstLine(stderr, err), "give the token access to the repository")
 	}
 	return fail(CodeFailed, what+": "+firstLine(stderr, err), "")
 }

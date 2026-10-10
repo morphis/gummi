@@ -4911,10 +4911,27 @@ else `origin` under the branch's own name). The log's **pushed** mark,
 the printed push command and publishing all read it, so they cannot
 disagree about where a branch lives.
 
+Where a PR opens is one function too, `resolveBase`. A linked PR has
+settled it, and a repository that is no fork has one answer. A fork has
+two — itself and its parent — and gummi does not guess between them: the
+answer is the one the person gives in the confirm (`--repo`, the TUI's
+`ctrl+t`, the page's **Opens in**), else the one recorded for the
+repository, else none, and a create with none is refused
+(`base-unchosen`) with both named. The record is `gh`'s own,
+`remote.<name>.gh-resolved` (what `gh repo set-default` writes), so the
+question is asked once per repository and `gh` run by hand agrees with
+the answer; it is written only once a PR has opened there. Which remotes
+the repository has says nothing: a rule that read them moved a fork's
+PRs to its parent, where the token could not open one, the day somebody
+added `upstream` to fetch from. An open PR for the head is looked for in
+both repositories whichever is chosen.
+
 Failures are typed (`publish.Code`), the same word on every face and in
 the CLI's output: not signed in, no write access, non-fast-forward, a
 stale lease, a protected branch, a hook refusing, a PR already open for
-the head, the branch moved, the facts changed.
+the head, the branch moved, the facts changed, a token GitHub will not
+let open a PR in that repository (`token-refused`, naming the repository
+and the other target).
 
 ### 22.5 What a push does
 

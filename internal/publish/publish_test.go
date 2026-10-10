@@ -231,6 +231,8 @@ func newWorld(t *testing.T) *world {
 	w.git("commit", "-q", "--allow-empty", "-m", "base")
 	w.git("remote", "add", "origin", "git@github.com:me/widget.git")
 	w.git("remote", "add", "upstream", "https://github.com/acme/widget.git")
+	// the person chose the parent for this fork's PRs
+	w.git("config", "remote.upstream.gh-resolved", "base")
 	w.git("config", "url."+w.bare+".insteadOf", "git@github.com:me/widget.git")
 	w.git("checkout", "-q", "-b", "feat/rate-limit")
 	w.git("commit", "-q", "--allow-empty", "-m", "feat: limit")

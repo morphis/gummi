@@ -62,9 +62,13 @@ type Facts struct {
 	// RemoteBranch is the branch's name on the remote.
 	RemoteBranch string `json:"remoteBranch"`
 	// PushURL is where git will actually push, after pushurl and insteadOf.
-	PushURL   string   `json:"pushUrl"`
-	HeadRepo  string   `json:"headRepo"`
+	PushURL  string `json:"pushUrl"`
+	HeadRepo string `json:"headRepo"`
+	// BaseRepo is the repository the PR opens in. A fork's PR can open in
+	// the fork or in its parent (BaseRepos), and until a person has chosen
+	// it is "": gummi does not guess between them.
 	BaseRepo  string   `json:"baseRepo"`
+	BaseRepos []string `json:"baseRepos,omitempty"`
 	RemoteTip string   `json:"remoteTip"`
 	Push      PushMode `json:"push"`
 	GH        string   `json:"gh"`
@@ -77,8 +81,9 @@ type Facts struct {
 	ConfigSum string `json:"-"`
 	PR        *PR    `json:"pr,omitempty"`
 	// OpenPR is an open pull request GitHub already has for this head,
-	// when none is linked.
-	OpenPR int `json:"openPr,omitempty"`
+	// when none is linked, and OpenPRRepo the repository it is open in.
+	OpenPR     int    `json:"openPr,omitempty"`
+	OpenPRRepo string `json:"openPrRepo,omitempty"`
 	// ReadyWhy is why the branch may not be offered as ready ("" when it
 	// may): the quality floor (Floor).
 	ReadyWhy string `json:"readyWhy,omitempty"`
@@ -105,7 +110,7 @@ func (f Facts) Fingerprint() string {
 	parts := []string{
 		string(f.Card), f.Branch, f.Tip, f.Base, f.Remote, f.RemoteBranch, f.PushURL,
 		f.HeadRepo, f.BaseRepo, f.RemoteTip, string(f.Push), f.GH, f.HookSum, f.ConfigSum, pr,
-		strconv.Itoa(f.OpenPR), f.ReadyWhy,
+		strconv.Itoa(f.OpenPR), f.OpenPRRepo, f.ReadyWhy,
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return hex.EncodeToString(sum[:])[:12]
@@ -123,6 +128,9 @@ type Input struct {
 	Card Card
 	// Base is the branch the card lands on (and its PR targets).
 	Base string
+	// BaseRepo is the repository the person chose for the PR to open in,
+	// "" for the one recorded for this repository (Facts.BaseRepo).
+	BaseRepo string
 	// OpenComments counts unresolved review comments on its diff, and
 	// OpenSpec the open threads on its spec that hold its gate: the two
 	// counts a landing refuses on.
@@ -230,7 +238,7 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 	}
 	fx.Hook, fx.HookSum = pushHooks(ctx, env)
 	fx.ConfigSum = configSum(ctx, env, fx.Branch)
-	if r := resolveRemote(ctx, env, &fx, f); r != nil {
+	if r := resolveRemote(ctx, env, &fx, f, in.BaseRepo); r != nil {
 		return Facts{}, r
 	}
 	if r := resolvePR(ctx, env, &fx, f); r != nil {
@@ -243,10 +251,9 @@ func Resolve(ctx context.Context, env Env, repo Repo, in Input) (Facts, *Error) 
 }
 
 // resolveRemote reads the repositories and the remote branch: write access
-// to the head repository, the PR's base (the head's parent for a fork that
-// this repository also has as a remote, else the head itself), and what a
-// push would do.
-func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *Error {
+// to the head repository, the PR's base (resolveBase), and what a push
+// would do.
+func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature, want string) *Error {
 	out, err := env.gh(ctx, nil, "repo", "view", fx.HeadRepo, "--json", "nameWithOwner,viewerPermission,isFork,parent")
 	if err != nil {
 		return AsError(err)
@@ -274,15 +281,12 @@ func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *
 		}
 		return fail(code, "you cannot push to "+fx.HeadRepo+" (permission "+strings.ToLower(view.ViewerPermission)+")", "add a fork you own as a remote and set it as the branch's push remote")
 	}
-	fx.BaseRepo = fx.HeadRepo
+	parent := ""
 	if view.IsFork && view.Parent != nil {
-		parent := view.Parent.Owner.Login + "/" + view.Parent.Name
-		if remoteRepos(ctx, env)[strings.ToLower(parent)] {
-			fx.BaseRepo = parent
-		}
+		parent = view.Parent.Owner.Login + "/" + view.Parent.Name
 	}
-	if !f.PullRequest.Empty() {
-		fx.BaseRepo = f.PullRequest.Repo
+	if r := resolveBase(ctx, env, fx, f, parent, want); r != nil {
+		return r
 	}
 	ls, err := env.git(ctx, "ls-remote", fx.Remote, "refs/heads/"+fx.RemoteBranch)
 	if err != nil {
@@ -317,25 +321,116 @@ func resolveRemote(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *
 	return nil
 }
 
+// resolveBase names the repository the PR opens in. A linked PR has
+// settled it. A repository that is no fork has one answer. A fork has two,
+// itself and its parent, and the answer is the person's: want, the choice
+// made in this confirm, else the one recorded for the repository
+// (recordedBase), else none yet — a create is refused until there is one
+// (PlanFor), because every rule that guessed sent somebody's PR where
+// their token could not open it.
+func resolveBase(ctx context.Context, env Env, fx *Facts, f *domain.Feature, parent, want string) *Error {
+	if !f.PullRequest.Empty() {
+		fx.BaseRepo = f.PullRequest.Repo
+		return nil
+	}
+	if parent == "" || strings.EqualFold(parent, fx.HeadRepo) {
+		fx.BaseRepo = fx.HeadRepo
+		if want != "" && !strings.EqualFold(want, fx.HeadRepo) {
+			return fail(CodeBaseUnchosen, "a pull request from "+fx.HeadRepo+" opens in "+fx.HeadRepo+", not "+strconv.Quote(want), "")
+		}
+		return nil
+	}
+	fx.BaseRepos = []string{fx.HeadRepo, parent}
+	pick := func(repo string) string {
+		for _, c := range fx.BaseRepos {
+			if strings.EqualFold(c, repo) {
+				return c
+			}
+		}
+		return ""
+	}
+	if want != "" {
+		if fx.BaseRepo = pick(want); fx.BaseRepo == "" {
+			return fail(CodeBaseUnchosen, "a pull request from "+fx.HeadRepo+" opens in "+fx.HeadRepo+" or "+parent+", not "+strconv.Quote(want), "")
+		}
+		return nil
+	}
+	fx.BaseRepo = pick(recordedBase(ctx, env))
+	return nil
+}
+
+// ghResolved is where gh records the repository a checkout's pull requests
+// go to (`gh repo set-default`): remote.<name>.gh-resolved, "base" for the
+// remote's own repository or an "owner/name". gummi reads and writes the
+// same key, so the choice is asked once and gh agrees with it.
+const ghResolved = ".gh-resolved"
+
+// recordedBase is the repository recorded as the PR target, "" for none.
+func recordedBase(ctx context.Context, env Env) string {
+	out, _ := env.git(ctx, "config", "--get-regexp", `^remote\..*\.gh-resolved$`)
+	for line := range strings.SplitSeq(out, "\n") {
+		key, val, _ := strings.Cut(strings.TrimSpace(line), " ")
+		name := strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ghResolved)
+		switch {
+		case name == "" || val == "":
+		case val != "base":
+			return val
+		default:
+			if u, err := env.git(ctx, "config", "--get", "remote."+name+".url"); err == nil && RepoOfURL(u) != "" {
+				return RepoOfURL(u)
+			}
+		}
+	}
+	return ""
+}
+
+// rememberBase records the repository a PR was just opened in as the
+// repository's PR target: on the remote that names it, else as an
+// "owner/name" on the push remote. Best-effort — the PR is already open.
+func rememberBase(ctx context.Context, env Env, fx Facts) {
+	if len(fx.BaseRepos) < 2 || strings.EqualFold(recordedBase(ctx, env), fx.BaseRepo) {
+		return
+	}
+	out, _ := env.git(ctx, "remote")
+	at, val := fx.Remote, fx.BaseRepo
+	for _, r := range strings.Fields(out) {
+		_, _ = env.git(ctx, "config", "--unset-all", "remote."+r+ghResolved)
+		if u, err := env.git(ctx, "config", "--get", "remote."+r+".url"); err == nil && val != "base" && strings.EqualFold(RepoOfURL(u), fx.BaseRepo) {
+			at, val = r, "base"
+		}
+	}
+	_, _ = env.git(ctx, "config", "remote."+at+ghResolved, val)
+}
+
 // resolvePR reads the linked PR as GitHub has it now, or looks for an open
-// one for this head when none is linked.
+// one for this head when none is linked — in every repository it could be
+// open in, so a PR opened in the fork is found when the target is the
+// parent.
 func resolvePR(ctx context.Context, env Env, fx *Facts, f *domain.Feature) *Error {
 	if f.PullRequest.Empty() {
 		owner, _, _ := strings.Cut(fx.HeadRepo, "/")
-		out, err := env.gh(ctx, nil, "pr", "list", "--repo", fx.BaseRepo, "--head", fx.RemoteBranch, "--state", "open", "--json", "number,headRepositoryOwner")
-		if err != nil {
-			return AsError(err)
+		repos := fx.BaseRepos
+		if len(repos) == 0 {
+			repos = []string{fx.BaseRepo}
 		}
-		var list []struct {
-			Number int `json:"number"`
-			Owner  struct {
-				Login string `json:"login"`
-			} `json:"headRepositoryOwner"`
-		}
-		if json.Unmarshal([]byte(out), &list) == nil {
+		for _, repo := range repos {
+			out, err := env.gh(ctx, nil, "pr", "list", "--repo", repo, "--head", fx.RemoteBranch, "--state", "open", "--json", "number,headRepositoryOwner")
+			if err != nil {
+				return AsError(err)
+			}
+			var list []struct {
+				Number int `json:"number"`
+				Owner  struct {
+					Login string `json:"login"`
+				} `json:"headRepositoryOwner"`
+			}
+			if json.Unmarshal([]byte(out), &list) != nil {
+				continue
+			}
 			for _, p := range list {
-				if strings.EqualFold(p.Owner.Login, owner) {
-					fx.OpenPR = p.Number
+				// the chosen target's PR is the one named when both have one
+				if strings.EqualFold(p.Owner.Login, owner) && (fx.OpenPR == 0 || strings.EqualFold(repo, fx.BaseRepo)) {
+					fx.OpenPR, fx.OpenPRRepo = p.Number, repo
 				}
 			}
 		}
@@ -395,21 +490,6 @@ func RepoOfURL(u string) string {
 		return ""
 	}
 	return m[1] + "/" + m[2]
-}
-
-// remoteRepos is the set of github repositories this repository's remotes
-// fetch from.
-func remoteRepos(ctx context.Context, env Env) map[string]bool {
-	out, _ := env.git(ctx, "remote")
-	set := map[string]bool{}
-	for _, r := range strings.Fields(out) {
-		if u, err := env.git(ctx, "remote", "get-url", r); err == nil {
-			if repo := RepoOfURL(u); repo != "" {
-				set[strings.ToLower(repo)] = true
-			}
-		}
-	}
-	return set
 }
 
 func validRef(ctx context.Context, env Env, name string) bool {

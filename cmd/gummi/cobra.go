@@ -749,6 +749,9 @@ func bindPublishFlags(cmd *cobra.Command, fs *pflag.FlagSet) {
 		fs.String("remote", "", "push to this remote, remembered as the branch's pushRemote")
 		fs.Bool("draft", false, "when the linked PR is ready and the tip is not verified, turn it back into a draft first")
 	case prCreateCmd, prUpdateCmd:
+		if cmd == prCreateCmd {
+			fs.String("repo", "", "open the PR in this repository (`owner/name`): a fork's own or its parent's, remembered once the PR opens")
+		}
 		fs.String("title", "", "the PR's title (create: default from the card and its commits)")
 		fs.String("body-file", "", "read the PR's body from this file, or - for stdin")
 		fs.Bool("draft", false, "create: open as a draft; update: turn a ready PR back into a draft before pushing an unverified tip")

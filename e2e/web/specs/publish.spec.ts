@@ -265,3 +265,44 @@ test.describe('a machine where gh is not signed in', () => {
     await shot(page, info, 'publish-not-set-up');
   });
 });
+
+test.describe('a card on a fork', () => {
+  let id: string;
+  test.use({
+    seed: {
+      run: async (ws) => {
+        await ws.addGitHubRemote();
+        id = await ws.seedVerified('Add a wave helper');
+        await ws.setGh('repo-view.json', {
+          nameWithOwner: 'e2e/tiny', viewerPermission: 'WRITE', isFork: true, parent: { name: 'tiny', owner: { login: 'upstream' } },
+        });
+      },
+    },
+  });
+
+  test('asks where the pull request opens, and remembers the answer', async ({ pairedPage: page, server, workspace }, info) => {
+    await openPR(page, server, id, phone(info));
+    await page.getByTestId('pr-publish-create').click({ timeout: 20_000 });
+    // a fork's PR can open in the fork or its parent: nothing is guessed
+    await expect(page.getByTestId('publish-choose')).toContainText('e2e/tiny is a fork', { timeout: 20_000 });
+    await shot(page, info, 'publish-fork-1-choose');
+    await page.getByRole('button', { name: 'upstream/tiny' }).click();
+    const base = page.getByTestId('publish-base');
+    await expect(base).toHaveValue('upstream/tiny', { timeout: 20_000 });
+    await expect(page.getByTestId('publish-summary')).toContainText('upstream/tiny');
+
+    // the other one is a change of mind away, and what was typed stays
+    await page.getByTestId('publish-title').fill('Add a wave helper, typed');
+    await base.selectOption('e2e/tiny');
+    await expect(page.getByTestId('publish-summary')).toContainText('into e2e/tiny', { timeout: 20_000 });
+    await expect(page.getByTestId('publish-title')).toHaveValue('Add a wave helper, typed');
+    await shot(page, info, 'publish-fork-2-chosen');
+    await page.getByTestId('publish-confirm').click();
+    await expect(page.getByTestId('publish-dialog')).toHaveCount(0, { timeout: 30_000 });
+    const created = workspace.ghCalls().find((a) => a[0] === 'pr' && a[1] === 'create');
+    expect(created).toEqual(expect.arrayContaining(['--repo', 'e2e/tiny']));
+    // remembered where gh keeps it, so the next card is not asked
+    const kept = await workspace.exec('git', ['config', '--get', 'remote.origin.gh-resolved'], { cwd: workspace.worktree(id) });
+    expect(kept.stdout.trim()).toBe('base');
+  });
+});

@@ -124,14 +124,16 @@ func publishErr(e *publish.Error) *webapi.PublishError {
 }
 
 // prepare resolves the facts for act and the plan the confirm shows, with
-// the words a new PR starts from. draft is the person's choice so far.
-func (p publishDoer) prepare(ctx context.Context, act publish.Act, draft bool) webapi.PublishFacts {
+// the words a new PR starts from. draft is the person's choice so far, and
+// baseRepo the repository they chose for the PR ("" for the recorded one).
+func (p publishDoer) prepare(ctx context.Context, act publish.Act, draft bool, baseRepo string) webapi.PublishFacts {
 	out := webapi.PublishFacts{Act: string(act)}
 	mgr, in, err := p.input(ctx)
 	if err != nil {
 		out.Error = publishErr(publish.AsError(err))
 		return out
 	}
+	in.BaseRepo = baseRepo
 	env := publish.Env{GH: p.gh}
 	fx, perr := publish.Resolve(ctx, env, mgr, in)
 	if perr != nil {
@@ -157,6 +159,9 @@ func (p publishDoer) prepare(ctx context.Context, act publish.Act, draft bool) w
 	out.Branch, out.Tip, out.TipSubject, out.Ahead, out.Base = fx.Branch, fx.Tip, fx.TipSubject, fx.Ahead, fx.Base
 	out.Remote, out.PushURL, out.Push = fx.Remote, fx.PushURL, string(fx.Push)
 	out.Head, out.BaseRepo, out.GH, out.Hook = fx.HeadRef(), fx.BaseRepo, fx.GH, fx.Hook
+	if act == publish.ActCreate {
+		out.BaseRepos = fx.BaseRepos
+	}
 	out.Draft, out.DraftLocked, out.DraftWhy = plan.Draft, fx.ReadyWhy != "", fx.ReadyWhy
 	out.Title, out.Body = req.Title, req.Body
 	if fx.PR != nil {
@@ -183,6 +188,7 @@ func (p publishDoer) run(ctx context.Context, req webapi.PublishRequest) (webapi
 	if err != nil {
 		return webapi.PublishResult{}, publish.AsError(err)
 	}
+	in.BaseRepo = req.BaseRepo
 	res, perr := publish.Do(ctx, publish.Env{GH: p.gh}, mgr, in,
 		publish.Request{Act: act, Fingerprint: req.Fingerprint, Title: req.Title, Body: req.Body, Draft: req.Draft},
 		func(ctx context.Context, ref domain.PullRequestRef) error {
@@ -259,24 +265,30 @@ func publishErrorText(id domain.FeatureID, e *webapi.PublishError) string {
 type publishFactsMsg struct {
 	f     domain.Feature
 	facts webapi.PublishFacts
+	// baseRepo is the repository the facts were asked for, "" for none
+	baseRepo string
 }
 
-// openPublish resolves the facts for act off the loop.
-func (m *Shell) openPublish(r featureRow, act publish.Act) tea.Cmd {
+// openPublish resolves the facts for act off the loop. baseRepo is the
+// repository the person chose for the PR, "" for the recorded one.
+func (m *Shell) openPublish(r featureRow, act publish.Act, baseRepo string) tea.Cmd {
 	p := m.publishDoerFor(r)
 	m.notice = noticeMsg{text: string(r.F.ID) + ": reading where the branch goes…"}
 	return func() tea.Msg {
-		return publishFactsMsg{f: r.F, facts: p.prepare(context.Background(), act, false)}
+		return publishFactsMsg{f: r.F, facts: p.prepare(context.Background(), act, false, baseRepo), baseRepo: baseRepo}
 	}
 }
 
 func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
-	if e := msg.facts.Error; e != nil {
+	// a fork nobody has chosen a target for is a question, not a refusal:
+	// the confirm opens on the choice
+	unchosen := msg.facts.Error != nil && msg.facts.Error.Code == string(publish.CodeBaseUnchosen) && len(msg.facts.BaseRepos) > 1
+	if e := msg.facts.Error; e != nil && !unchosen {
 		m.notice = noticeMsg{text: sanitize(publishErrorText(msg.f.ID, e)), isErr: true}
 		return
 	}
 	m.notice = noticeMsg{}
-	m.Overlay.Push(newPublishDialog(msg.f, msg.facts, func(req webapi.PublishRequest) tea.Cmd {
+	d := newPublishDialog(msg.f, msg.facts, func(req webapi.PublishRequest) tea.Cmd {
 		r, ok := m.rowByID(msg.f.ID)
 		if !ok {
 			return nil
@@ -292,7 +304,18 @@ func (m *Shell) handlePublishFacts(msg publishFactsMsg) {
 			text := sanitize(publishResultText(msg.f.ID, res))
 			return noticeMsg{text: text, web: text, reload: true}
 		}
-	}))
+	})
+	d.baseRepo = msg.baseRepo
+	// the facts and their fingerprint are the chosen repository's, so a
+	// choice reads them again
+	d.onRetarget = func(repo string) tea.Cmd {
+		r, ok := m.rowByID(msg.f.ID)
+		if !ok {
+			return nil
+		}
+		return m.openPublish(r, publish.ActCreate, repo)
+	}
+	m.Overlay.Push(d)
 }
 
 // publishDialog is the confirm (DESIGN §22): one
@@ -307,6 +330,10 @@ type publishDialog struct {
 	details  bool
 	problem  string
 	onSubmit func(webapi.PublishRequest) tea.Cmd
+	// baseRepo is the repository the person chose in this confirm, sent
+	// back with the yes; onRetarget reopens the confirm on another
+	baseRepo   string
+	onRetarget func(repo string) tea.Cmd
 }
 
 func newPublishDialog(f domain.Feature, facts webapi.PublishFacts, onSubmit func(webapi.PublishRequest) tea.Cmd) *publishDialog {
@@ -324,6 +351,22 @@ func (d *publishDialog) ID() string { return "publish" }
 
 func (d *publishDialog) creates() bool { return d.facts.Act == string(publish.ActCreate) }
 
+// choosing reports a create on a fork: the PR can open in two repositories.
+func (d *publishDialog) choosing() bool {
+	return d.creates() && len(d.facts.BaseRepos) > 1 && d.onRetarget != nil
+}
+
+// retarget reopens the confirm on the next repository the PR can open in.
+func (d *publishDialog) retarget() (bool, tea.Cmd) {
+	next := d.facts.BaseRepos[0]
+	for i, r := range d.facts.BaseRepos {
+		if r == d.facts.BaseRepo {
+			next = d.facts.BaseRepos[(i+1)%len(d.facts.BaseRepos)]
+		}
+	}
+	return true, d.onRetarget(next)
+}
+
 // HandleKey implements overlay.Dialog.
 func (d *publishDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
@@ -340,12 +383,21 @@ func (d *publishDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "ctrl+k":
 		d.hookOK = !d.hookOK
 		return false, nil
+	case "ctrl+t":
+		if d.choosing() {
+			return d.retarget()
+		}
+		return false, nil
 	case "enter":
+		if d.choosing() && d.facts.BaseRepo == "" {
+			d.problem = "choose where the pull request opens: ctrl+t"
+			return false, nil
+		}
 		if d.facts.Hook != "" && !d.hookOK {
 			d.problem = "read the pre-push hook, then ctrl+k to run it"
 			return false, nil
 		}
-		req := webapi.PublishRequest{Act: d.facts.Act, Fingerprint: d.facts.Fingerprint, Draft: d.draft}
+		req := webapi.PublishRequest{Act: d.facts.Act, Fingerprint: d.facts.Fingerprint, Draft: d.draft, BaseRepo: d.baseRepo}
 		if d.creates() {
 			req.Title, req.Body = strings.TrimSpace(d.title.Value()), d.facts.Body
 			if req.Title == "" {
@@ -375,7 +427,24 @@ func (d *publishDialog) View(s *theme.Styles, w, h int) string {
 	var b strings.Builder
 	head := map[string]string{"create": "open pull request", "push": "push to GitHub", "ready": "mark PR ready", "draft": "PR back to draft", "update": "update PR"}[d.facts.Act]
 	b.WriteString(s.DialogTitle.Render(head+" · "+string(d.f.ID)) + "\n\n")
-	b.WriteString(sanitize(d.facts.Summary) + "\n")
+	if d.facts.Summary != "" {
+		b.WriteString(sanitize(d.facts.Summary) + "\n")
+	}
+	if d.choosing() {
+		// a fork's PR opens in the fork or in its parent, and the person
+		// says which: once, remembered when the PR opens
+		into := "nowhere yet"
+		if d.facts.BaseRepo != "" {
+			into = d.facts.BaseRepo
+		}
+		var others []string
+		for _, r := range d.facts.BaseRepos {
+			if r != d.facts.BaseRepo {
+				others = append(others, r)
+			}
+		}
+		b.WriteString("\nopens in " + sanitize(into) + s.Faint.Render("  ctrl+t for "+sanitize(strings.Join(others, " or "))) + "\n")
+	}
 	if d.creates() {
 		b.WriteString("\n" + d.title.View() + "\n")
 		// the description that will be sent, to be read here; it is
@@ -408,7 +477,9 @@ func (d *publishDialog) View(s *theme.Styles, w, h int) string {
 	}
 	if d.details {
 		b.WriteString("\n" + s.Faint.Render("push  "+sanitize(d.facts.Remote+" → "+d.facts.PushURL+" ("+d.facts.Push+")")) + "\n")
-		b.WriteString(s.Faint.Render("head  "+sanitize(d.facts.Head)+" → "+sanitize(d.facts.BaseRepo+":"+d.facts.Base)) + "\n")
+		if d.facts.BaseRepo != "" {
+			b.WriteString(s.Faint.Render("head  "+sanitize(d.facts.Head)+" → "+sanitize(d.facts.BaseRepo+":"+d.facts.Base)) + "\n")
+		}
 		b.WriteString(s.Faint.Render("gh    "+sanitize(d.facts.GH)) + "\n")
 		for _, c := range d.facts.Commands {
 			b.WriteString(s.Faint.Render("  "+sanitize(c)) + "\n")
@@ -456,7 +527,7 @@ func (d *WebDocs) publishOff() *webapi.PublishError {
 
 // PublishFacts is GET /api/cards/{id}/publish?act=: the facts the publish
 // dialog shows and the fingerprint its confirm sends back.
-func (d *WebDocs) PublishFacts(ctx context.Context, act string, draft bool) webapi.PublishFacts {
+func (d *WebDocs) PublishFacts(ctx context.Context, act string, draft bool, baseRepo string) webapi.PublishFacts {
 	a, ok := webPublishAct(act)
 	if !ok {
 		return webapi.PublishFacts{Act: act, Error: &webapi.PublishError{Code: string(publish.CodeFailed), Text: "unknown act " + act}}
@@ -464,7 +535,7 @@ func (d *WebDocs) PublishFacts(ctx context.Context, act string, draft bool) weba
 	if off := d.publishOff(); off != nil {
 		return webapi.PublishFacts{Act: act, Error: off}
 	}
-	return d.publishDoer().prepare(ctx, a, draft)
+	return d.publishDoer().prepare(ctx, a, draft, baseRepo)
 }
 
 // Publish is POST /api/cards/{id}/publish: the act the person confirmed.

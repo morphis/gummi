@@ -56,19 +56,25 @@ const (
 	CodeNothingToPublish Code = "nothing-to-publish"
 	CodeForkNotYours     Code = "fork-not-yours"
 	CodeOntoBase         Code = "onto-base"
+	// CodeBaseUnchosen is a fork whose PR target nobody has chosen yet,
+	// or a choice that is neither the fork nor its parent.
+	CodeBaseUnchosen Code = "base-unchosen"
 )
 
 // Failed: the act ran into the world (DESIGN §22.4).
 const (
-	CodeFactsChanged       Code = "facts-changed"
-	CodeBranchMoved        Code = "branch-moved"
-	CodeRemoteAhead        Code = "remote-ahead"
-	CodeNameTaken          Code = "name-taken"
-	CodeLeaseStale         Code = "lease-stale"
-	CodeProtected          Code = "protected-branch"
-	CodeHookRejected       Code = "hook-rejected"
-	CodeNeedsInteraction   Code = "credential-needs-interaction"
-	CodeAuthFailed         Code = "auth-failed"
+	CodeFactsChanged     Code = "facts-changed"
+	CodeBranchMoved      Code = "branch-moved"
+	CodeRemoteAhead      Code = "remote-ahead"
+	CodeNameTaken        Code = "name-taken"
+	CodeLeaseStale       Code = "lease-stale"
+	CodeProtected        Code = "protected-branch"
+	CodeHookRejected     Code = "hook-rejected"
+	CodeNeedsInteraction Code = "credential-needs-interaction"
+	CodeAuthFailed       Code = "auth-failed"
+	// CodeTokenRefused is GitHub answering that the token may not do
+	// this in that repository: signed in, and not allowed.
+	CodeTokenRefused       Code = "token-refused"
 	CodePRExists           Code = "pr-exists"
 	CodePRMerged           Code = "pr-merged"
 	CodePRClosed           Code = "pr-closed"

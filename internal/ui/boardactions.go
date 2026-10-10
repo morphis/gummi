@@ -511,7 +511,7 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "prcreate", "push", "prready", "prdraft":
 		if r, ok := m.selected(); ok {
-			return m.openPublish(r, publishActs[a.id])
+			return m.openPublish(r, publishActs[a.id], "")
 		}
 	case "prunlink":
 		if r, ok := m.selected(); ok {

@@ -5,7 +5,8 @@ package webapi
 // reads them again when the act runs and refuses it ("facts-changed") when
 // they no longer digest as Fingerprint.
 
-// PublishFacts is GET /api/cards/{id}/publish?act=push|create|update|ready|draft.
+// PublishFacts is GET /api/cards/{id}/publish?act=push|create|update|ready|draft
+// (and, for a create on a fork, &baseRepo= for the repository chosen).
 // Error is set, and the rest mostly empty, when the act is refused.
 type PublishFacts struct {
 	Act         string        `json:"act"`
@@ -21,8 +22,12 @@ type PublishFacts struct {
 	PushURL     string        `json:"pushUrl,omitempty"`
 	Push        string        `json:"push,omitempty"`
 	Head        string        `json:"head,omitempty"`
-	BaseRepo    string        `json:"baseRepo,omitempty"`
-	GH          string        `json:"gh,omitempty"`
+	// BaseRepo is the repository the PR opens in. BaseRepos, on a fork,
+	// are the two it can open in; BaseRepo is then empty until a person
+	// has chosen (the refusal "base-unchosen").
+	BaseRepo  string   `json:"baseRepo,omitempty"`
+	BaseRepos []string `json:"baseRepos,omitempty"`
+	GH        string   `json:"gh,omitempty"`
 	// Hook is a pre-push hook git will run with the person's credential;
 	// the page asks for it to be acknowledged before the act.
 	Hook string     `json:"hook,omitempty"`
@@ -67,6 +72,9 @@ type PublishRequest struct {
 	Title       string `json:"title,omitempty"`
 	Body        string `json:"body,omitempty"`
 	Draft       bool   `json:"draft,omitempty"`
+	// BaseRepo is the repository the facts were read for, when the person
+	// chose one.
+	BaseRepo string `json:"baseRepo,omitempty"`
 }
 
 // PublishResult is what an act did, or — Error set and nothing published

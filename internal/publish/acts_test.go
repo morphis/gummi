@@ -60,10 +60,11 @@ func TestPushErrorNamesWhatGitSaid(t *testing.T) {
 func TestGHErrorNamesSignInAndSSO(t *testing.T) {
 	exit := errors.New("exit status 1")
 	for said, want := range map[string]Code{
-		"GraphQL: Resource protected by organization SAML enforcement": CodeAuthFailed,
-		"To get started with GitHub CLI, please run:  gh auth login":   CodeGHNotSignedIn,
-		"HTTP 401: Bad credentials":                                    CodeGHNotSignedIn,
-		"GraphQL: Could not resolve to a Repository":                   CodeFailed,
+		"GraphQL: Resource protected by organization SAML enforcement":                                              CodeAuthFailed,
+		"To get started with GitHub CLI, please run:  gh auth login":                                                CodeGHNotSignedIn,
+		"HTTP 401: Bad credentials":                                                                                 CodeGHNotSignedIn,
+		"GraphQL: Could not resolve to a Repository":                                                                CodeFailed,
+		"pull request create failed: GraphQL: Resource not accessible by personal access token (createPullRequest)": CodeTokenRefused,
 	} {
 		if got := ghError([]string{"pr", "view", "7"}, said, exit); got.Code != want || !strings.HasPrefix(got.Text, "gh pr view: ") {
 			t.Errorf("ghError(%q) = %s %q, want %s", said, got.Code, got.Text, want)

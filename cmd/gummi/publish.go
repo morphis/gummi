@@ -129,6 +129,7 @@ func runPublish(fl cliFlags, act publish.Act, args []string) error {
 		return err
 	}
 	in := publish.InputFor(ctx, mgr, &f, false, anns, ui.OpenSpecThreads(pool.Root(), ws.DraftsDir(), f))
+	in.BaseRepo = str("repo")
 	env := publish.Env{GH: pr.GHBinary()}
 	fx, perr := publish.Resolve(ctx, env, mgr, in)
 	if perr != nil {
@@ -232,7 +233,11 @@ func printFacts(w io.Writer, f *domain.Feature, fx publish.Facts, p publish.Plan
 	row("tip", domain.ShortRev(fx.Tip)+"  "+clean(fx.TipSubject)+fmt.Sprintf("  (%d ahead of %s)", fx.Ahead, fx.Base))
 	row("push", fx.Remote+" → "+fx.PushURL+"  ("+string(fx.Push)+", from "+fx.RemoteHow+")")
 	row("head", fx.HeadRef())
-	row("base", fx.BaseRepo+":"+fx.Base)
+	if fx.BaseRepo != "" {
+		row("base", fx.BaseRepo+":"+fx.Base)
+	} else {
+		row("base", "not chosen yet: "+strings.Join(fx.BaseRepos, " or "))
+	}
 	if fx.PR != nil {
 		state := strings.ToLower(fx.PR.State)
 		if fx.PR.Draft {

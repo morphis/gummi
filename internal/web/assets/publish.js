@@ -24,15 +24,38 @@ function refusal (e) {
 
 // openPublish reads the facts for act and shows the confirm. A refusal is
 // shown in the dialog, in the server's words, with nothing to confirm.
-export async function openPublish (card, act, { returnTo = '[data-testid="card-actions"]', done } = {}) {
+// baseRepo is the repository the person chose for the PR to open in (a
+// fork's own or its parent's); the facts and their fingerprint are that
+// repository's, so a choice reads them again. typed carries the title and
+// description across that.
+export async function openPublish (card, act, { returnTo = '[data-testid="card-actions"]', done, baseRepo = '', typed = null } = {}) {
   let facts
   try {
-    facts = await get(cardPath(card.id, 'publish') + `?act=${encodeURIComponent(act)}`)
+    facts = await get(cardPath(card.id, 'publish') + `?act=${encodeURIComponent(act)}` + (baseRepo ? `&baseRepo=${encodeURIComponent(baseRepo)}` : ''))
   } catch (err) {
     toast(err.notBuilt ? 'Publishing from the web is not available on this board' : err.message, { err: !err.notBuilt })
     return
   }
   const title = `${TITLE[act] || act} · ${card.id}`
+  const repos = facts.baseRepos || []
+  const retarget = (repo, typed) => openPublish(card, act, { returnTo, done, baseRepo: repo, typed })
+  if (facts.error && facts.error.code === 'base-unchosen' && repos.length > 1) {
+    // a fork nobody has chosen a target for: a question, not a refusal
+    openModal({
+      title,
+      testid: 'publish-dialog',
+      card: card.id,
+      returnTo,
+      body: h('div', { class: 'aform' },
+        h('p', { class: 'aq', testid: 'publish-choose' }, `${repos[0]} is a fork. Where should the pull request open?`),
+        h('p', { class: 'sub' }, 'Your choice is remembered for this repository once the pull request opens.')),
+      actions: [
+        { label: 'Cancel', testid: 'publish-cancel' },
+        ...repos.map((r, i) => ({ label: r, primary: i === 0, testid: `publish-base-${i}`, onClick: () => { retarget(r, typed) } }))
+      ]
+    })
+    return
+  }
   if (facts.error) {
     openModal({
       title,
@@ -46,10 +69,17 @@ export async function openPublish (card, act, { returnTo = '[data-testid="card-a
   }
   const error = h('p', { class: 'aerr', testid: 'publish-error', role: 'alert', hidden: true })
   const body = h('div', { class: 'aform' }, h('p', { class: 'aq', testid: 'publish-summary' }, facts.summary))
-  let titleIn = null; let bodyIn = null; let draftIn = null; let hookIn = null
+  let titleIn = null; let bodyIn = null; let draftIn = null; let hookIn = null; let modal = null
   if (act === 'create') {
-    titleIn = h('input', { testid: 'publish-title', value: facts.title || '', autocomplete: 'off', spellcheck: 'true' })
-    bodyIn = h('textarea', { testid: 'publish-body', value: facts.body || '', rows: 6, spellcheck: 'true' })
+    titleIn = h('input', { testid: 'publish-title', value: typed?.title ?? facts.title ?? '', autocomplete: 'off', spellcheck: 'true' })
+    bodyIn = h('textarea', { testid: 'publish-body', value: typed?.body ?? facts.body ?? '', rows: 6, spellcheck: 'true' })
+    if (repos.length > 1) {
+      const baseIn = h('select', {
+        testid: 'publish-base',
+        onchange: () => { modal?.close(); retarget(baseIn.value, { title: titleIn.value, body: bodyIn.value }) }
+      }, repos.map(r => h('option', { value: r, selected: r === facts.baseRepo }, r)))
+      body.append(h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Opens in'), baseIn))
+    }
     draftIn = h('input', { type: 'checkbox', testid: 'publish-draft', checked: !!facts.draft, disabled: !!facts.draftLocked })
     body.append(
       h('label', { class: 'field' }, h('span', { class: 'fl' }, 'Title'), titleIn),
@@ -68,12 +98,12 @@ export async function openPublish (card, act, { returnTo = '[data-testid="card-a
       fact('Branch', `${facts.branch} @ ${(facts.tip || '').slice(0, 7)}${facts.tipSubject ? ' — ' + facts.tipSubject : ''}`),
       fact('Commits', plural(facts.ahead || 0, 'commit') + ` ahead of ${facts.base}`),
       fact('Pushes to', `${facts.remote} → ${facts.pushUrl}${facts.push ? ' (' + facts.push + ')' : ''}`),
-      fact('Pull request', facts.pr ? `#${facts.pr.number} · ${String(facts.pr.state || '').toLowerCase()}${facts.pr.draft ? ' · draft' : ''}` : `${facts.head} → ${facts.baseRepo}:${facts.base}`),
+      fact('Pull request', facts.pr ? `#${facts.pr.number} · ${String(facts.pr.state || '').toLowerCase()}${facts.pr.draft ? ' · draft' : ''}` : facts.baseRepo ? `${facts.head} → ${facts.baseRepo}:${facts.base}` : ''),
       fact('As', facts.gh)),
     (facts.commands || []).length ? h('pre', { class: 'pubcmds', testid: 'publish-commands' }, facts.commands.join('\n')) : null),
   error)
   const fail = (text) => { clear(error).append(text); error.hidden = false; return false }
-  openModal({
+  modal = openModal({
     title,
     testid: 'publish-dialog',
     card: card.id,
@@ -87,6 +117,7 @@ export async function openPublish (card, act, { returnTo = '[data-testid="card-a
         testid: 'publish-confirm',
         onClick: async () => {
           const req = { act, fingerprint: facts.fingerprint, draft: !!facts.toDraft }
+          if (baseRepo) req.baseRepo = baseRepo
           if (act === 'create') {
             req.title = titleIn.value.trim()
             req.body = bodyIn.value

@@ -83,6 +83,8 @@ func pressPublish(d *publishDialog, keys ...string) (closed bool) {
 			msg = tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
 		case "ctrl+k":
 			msg = tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
+		case "ctrl+t":
+			msg = tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
 		}
 		closed, _ = d.HandleKey(msg)
 	}
@@ -210,6 +212,45 @@ func publishDialogOn(t *testing.T, m *Shell) *publishDialog {
 // The board's own path, end to end: the act reads the facts, the confirm
 // shows them, and enter runs exactly that — push, PR, link, and a line in
 // the card's thread.
+// On a fork the PR can open in two repositories: the confirm does not run
+// until the person has said which, and the yes carries their choice.
+func TestThePublishConfirmAsksWhereAForksPROpens(t *testing.T) {
+	var sent []webapi.PublishRequest
+	var asked []string
+	f := domain.Feature{ID: "FD-001"}
+	open := func(facts webapi.PublishFacts, chosen string) *publishDialog {
+		d := newPublishDialog(f, facts, func(r webapi.PublishRequest) tea.Cmd { sent = append(sent, r); return nil })
+		d.baseRepo = chosen
+		d.onRetarget = func(repo string) tea.Cmd { asked = append(asked, repo); return nil }
+		return d
+	}
+	repos := []string{"me/widget", "acme/widget"}
+
+	d := open(webapi.PublishFacts{Act: "create", Fingerprint: "abc", Title: "t", BaseRepos: repos}, "")
+	if view := d.View(m0Styles(), 80, 24); !strings.Contains(view, "nowhere yet") || !strings.Contains(view, "me/widget or acme/widget") {
+		t.Fatalf("the confirm does not ask where the PR opens:\n%s", view)
+	}
+	if pressPublish(d, "enter") || len(sent) != 0 {
+		t.Fatal("the confirm ran with no target chosen")
+	}
+	// choosing reads the facts again for that repository
+	if !pressPublish(d, "ctrl+t") || len(asked) != 1 || asked[0] != "me/widget" {
+		t.Fatalf("ctrl+t asked for %v", asked)
+	}
+
+	d = open(webapi.PublishFacts{Act: "create", Fingerprint: "def", Title: "t", BaseRepo: "me/widget", BaseRepos: repos}, "me/widget")
+	if view := d.View(m0Styles(), 80, 24); !strings.Contains(view, "opens in me/widget") || !strings.Contains(view, "ctrl+t for acme/widget") {
+		t.Fatalf("the confirm does not show the target and the other one:\n%s", view)
+	}
+	if !pressPublish(d, "ctrl+t") || asked[len(asked)-1] != "acme/widget" {
+		t.Fatalf("ctrl+t asked for %v", asked)
+	}
+	d = open(webapi.PublishFacts{Act: "create", Fingerprint: "def", Title: "t", BaseRepo: "me/widget", BaseRepos: repos}, "me/widget")
+	if !pressPublish(d, "enter") || len(sent) != 1 || sent[0].BaseRepo != "me/widget" || sent[0].Fingerprint != "def" {
+		t.Fatalf("sent %+v", sent)
+	}
+}
+
 func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	m, fake, bare := publishWorkspace(t)
 	ctx := context.Background()
@@ -217,7 +258,7 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	if !ok {
 		t.Fatal("no row")
 	}
-	cmd := m.openPublish(r, publish.ActCreate)
+	cmd := m.openPublish(r, publish.ActCreate, "")
 	if !strings.Contains(m.notice.text, "reading where the branch goes") {
 		t.Fatalf("notice while the facts are read: %q", m.notice.text)
 	}
@@ -292,12 +333,12 @@ func TestTheBoardOpensAPullRequestFromItsConfirm(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fake, "view.json"), []byte(view512), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m = update(m, m.openPublish(r, publish.ActReady)())
+	m = update(m, m.openPublish(r, publish.ActReady, "")())
 	if m.Overlay.HasDialogs() || !m.notice.isErr || !strings.Contains(m.notice.text, "FD-001: ") || !strings.Contains(m.notice.text, "verif") {
 		t.Fatalf("ready on an unverified card: dialogs %v, notice %+v", m.Overlay.HasDialogs(), m.notice)
 	}
 	// nothing new to push either
-	m = update(m, m.openPublish(r, publish.ActPush)())
+	m = update(m, m.openPublish(r, publish.ActPush, "")())
 	if m.Overlay.HasDialogs() || !m.notice.isErr || !strings.Contains(m.notice.text, "already has") {
 		t.Fatalf("a push with nothing new: %+v", m.notice)
 	}
@@ -311,7 +352,7 @@ func TestTheBoardSaysWhatAFailedPublishAlreadyDid(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fake, "fail-pr-create"), []byte("HTTP 502: Bad Gateway"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m = update(m, m.openPublish(r, publish.ActCreate)())
+	m = update(m, m.openPublish(r, publish.ActCreate, "")())
 	publishDialogOn(t, m)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "HTTP 502") || !strings.Contains(m.notice.text, "was pushed to me/widget") {
@@ -329,7 +370,7 @@ func TestTheBoardSaysWhatAFailedPublishAlreadyDid(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ = m.rowByID("FD-001")
-	m = update(m, m.openPublish(r, publish.ActCreate)())
+	m = update(m, m.openPublish(r, publish.ActCreate, "")())
 	publishDialogOn(t, m)
 	release, err := state.AcquireLock(m.ws.CardLockFile("FD-001"))
 	if err != nil {

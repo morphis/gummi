@@ -578,7 +578,7 @@ func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
-// handlePublishFacts is GET /api/cards/{id}/publish?act=[&draft=1]: the
+// handlePublishFacts is GET /api/cards/{id}/publish?act=[&draft=1][&baseRepo=]: the
 // facts the publish dialog shows (DESIGN §22). A refusal is the answer's
 // Error, not a failed request: the dialog shows it in place.
 func (s *Server) handlePublishFacts(w http.ResponseWriter, r *http.Request) {
@@ -587,7 +587,7 @@ func (s *Server) handlePublishFacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	writeJSON(w, http.StatusOK, d.PublishFacts(r.Context(), q.Get("act"), q.Get("draft") == "1"))
+	writeJSON(w, http.StatusOK, d.PublishFacts(r.Context(), q.Get("act"), q.Get("draft") == "1", q.Get("baseRepo")))
 }
 
 // handlePublish is POST /api/cards/{id}/publish: the act a person confirmed,
