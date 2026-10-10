@@ -186,6 +186,24 @@ type Settings struct {
 	// Credentials is what the workspace holds for GitHub, described and
 	// never disclosed.
 	Credentials Credentials `json:"credentials"`
+	// Identity is who git writes this workspace's commits as.
+	Identity Identity `json:"identity"`
+}
+
+// Identity is a git author: user.name and user.email as git resolves them
+// in the workspace's repository, from whichever scope sets them. Either is
+// empty where nothing does.
+type Identity struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// IdentityRequest is PUT /api/settings/identity's body: the name and email
+// to write to the repository's own git configuration. Both empty removes
+// that setting and leaves the machine's.
+type IdentityRequest struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // Credentials describes the GitHub token and SSH key stored for this
@@ -213,4 +231,7 @@ type SettingsRequest struct {
 type CredentialsRequest struct {
 	GitHubToken *string `json:"githubToken,omitempty"`
 	SSHKey      *string `json:"sshKey,omitempty"`
+	// GenerateSSHKey makes a fresh key on the host in place of any held;
+	// it may not be sent together with SSHKey.
+	GenerateSSHKey bool `json:"generateSshKey,omitempty"`
 }

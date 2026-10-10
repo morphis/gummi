@@ -17,8 +17,11 @@ package credentials
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"net"
 	"os"
@@ -103,35 +106,50 @@ func (s Store) SetToken(tok string) error {
 	return s.write(tokenFile, tok)
 }
 
-// SetSSHKey stores pem, a private key in OpenSSH or PEM form, as the key
-// gummi answers with; an empty pem forgets it. A passphrase-protected key
+// SetSSHKey stores body, a private key in OpenSSH or PEM form, as the key
+// gummi answers with; an empty body forgets it. A passphrase-protected key
 // is refused: there is nobody to ask for the passphrase when a push runs.
-func (s Store) SetSSHKey(pem string) error {
-	pem = strings.TrimSpace(strings.ReplaceAll(pem, "\r\n", "\n"))
-	if pem == "" {
+func (s Store) SetSSHKey(body string) error {
+	body = strings.TrimSpace(strings.ReplaceAll(body, "\r\n", "\n"))
+	if body == "" {
 		return s.write(keyFile, "")
 	}
-	if len(pem) > maxKey {
+	if len(body) > maxKey {
 		return errors.New("that is too long to be an SSH private key")
 	}
-	if _, err := ssh.ParseRawPrivateKey([]byte(pem + "\n")); err != nil {
+	if _, err := ssh.ParseRawPrivateKey([]byte(body + "\n")); err != nil {
 		var missing *ssh.PassphraseMissingError
 		if errors.As(err, &missing) {
 			return errors.New("that key is protected by a passphrase; store one without (ssh-keygen -p -N '' -f <copy>), or keep it in your own ssh-agent")
 		}
 		return errors.New("that is not an SSH private key gummi can read (paste the whole file, from -----BEGIN to -----END)")
 	}
-	return s.write(keyFile, pem)
+	return s.write(keyFile, body)
+}
+
+// GenerateSSHKey makes a fresh ed25519 key on this host and stores it in
+// place of any key held. The private half never leaves the machine: what
+// a person takes away is Status's public line, to add to GitHub.
+func (s Store) GenerateSSHKey() error {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "gummi")
+	if err != nil {
+		return err
+	}
+	return s.write(keyFile, strings.TrimSpace(string(pem.EncodeToMemory(block))))
 }
 
 // key is the stored private key, parsed; nil for none or one that no
 // longer parses.
 func (s Store) key() any {
-	pem := s.read(keyFile)
-	if pem == "" {
+	body := s.read(keyFile)
+	if body == "" {
 		return nil
 	}
-	k, err := ssh.ParseRawPrivateKey([]byte(pem + "\n"))
+	k, err := ssh.ParseRawPrivateKey([]byte(body + "\n"))
 	if err != nil {
 		return nil
 	}

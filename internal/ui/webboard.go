@@ -3,6 +3,8 @@ package ui
 import (
 	"context"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // Projections for the web face (DESIGN §20.1): the board as the TUI holds
@@ -290,31 +293,74 @@ func (m *Shell) credentialStore() credentials.Store {
 	return credentials.Store{Dir: m.ws.CredentialsDir()}
 }
 
-// Settings is GET /api/settings.
+// identityRoots are the repositories a git identity is written to: the
+// workspace's default and every named one.
+func (m *Shell) identityRoots() []string {
+	if m.wt == nil {
+		return nil
+	}
+	var roots []string
+	for _, name := range append([]string{""}, m.wt.Names()...) {
+		if root, ok := m.wt.RootForName(name); ok && !slices.Contains(roots, root) {
+			roots = append(roots, root)
+		}
+	}
+	return roots
+}
+
+// Settings is GET /api/settings. The git identity is read off the loop:
+// it asks git.
 func (b *Bridge) Settings(ctx context.Context) (webapi.Settings, error) {
 	var out webapi.Settings
-	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out = m.WebSettings(); return nil }); err != nil {
+	var roots []string
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { out, roots = m.WebSettings(), m.identityRoots(); return nil }); err != nil {
 		return webapi.Settings{}, err
 	}
+	if len(roots) > 0 {
+		out.Identity.Name, out.Identity.Email = worktree.Identity(ctx, roots[0])
+	}
 	return out, nil
+}
+
+// SetIdentity is PUT /api/settings/identity: the name and email written
+// to the local git configuration of every repository this workspace
+// manages, so a card's commits and a landing are written as that person.
+func (b *Bridge) SetIdentity(ctx context.Context, req webapi.IdentityRequest) (webapi.Settings, error) {
+	name, email := strings.TrimSpace(req.Name), strings.TrimSpace(req.Email)
+	if err := worktree.CheckIdentity(name, email); err != nil {
+		return webapi.Settings{}, webErr(WebBadRequest, "%s", err.Error())
+	}
+	var roots []string
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { roots = m.identityRoots(); return nil }); err != nil {
+		return webapi.Settings{}, err
+	}
+	if len(roots) == 0 {
+		return webapi.Settings{}, webErr(WebBadRequest, "this workspace has no repository to set an identity in")
+	}
+	for _, root := range roots {
+		if err := worktree.SetIdentity(ctx, root, name, email); err != nil {
+			return webapi.Settings{}, err
+		}
+	}
+	return b.Settings(ctx)
 }
 
 // SetSettings is PUT /api/settings: the same write the terminal's
 // settings dialog makes. A name the workspace refuses is a bad request.
 func (b *Bridge) SetSettings(ctx context.Context, req webapi.SettingsRequest) (webapi.Settings, error) {
-	var out webapi.Settings
 	var refused error
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 		if err := m.setName(req.Name); err != nil {
 			refused = webErr(WebBadRequest, "%s", err.Error())
-			return nil
 		}
-		out = m.WebSettings()
 		return nil
 	}); err != nil {
 		return webapi.Settings{}, err
 	}
-	return out, refused
+	if refused != nil {
+		return webapi.Settings{}, refused
+	}
+	return b.Settings(ctx)
 }
 
 // SetCredentials is PUT /api/settings/credentials: store, replace or
@@ -322,10 +368,18 @@ func (b *Bridge) SetSettings(ctx context.Context, req webapi.SettingsRequest) (w
 // process's gh and git calls read from then on, and publishing is detected
 // again, since a token is what makes gh signed in.
 func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsRequest) (webapi.Settings, error) {
-	var out webapi.Settings
 	var refused error
+	if req.GenerateSSHKey && req.SSHKey != nil {
+		return webapi.Settings{}, webErr(WebBadRequest, "generate a key or store one, not both")
+	}
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 		store := m.credentialStore()
+		if req.GenerateSSHKey {
+			if err := store.GenerateSSHKey(); err != nil {
+				refused = webErr(WebBadRequest, "%s", err.Error())
+				return nil
+			}
+		}
 		if req.GitHubToken != nil {
 			if err := store.SetToken(*req.GitHubToken); err != nil {
 				refused = webErr(WebBadRequest, "%s", err.Error())
@@ -339,7 +393,6 @@ func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsReque
 			}
 		}
 		credentials.Use(store)
-		out = m.WebSettings()
 		if m.publishEnabled {
 			return m.detectPublish
 		}
@@ -347,5 +400,8 @@ func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsReque
 	}); err != nil {
 		return webapi.Settings{}, err
 	}
-	return out, refused
+	if refused != nil {
+		return webapi.Settings{}, refused
+	}
+	return b.Settings(ctx)
 }

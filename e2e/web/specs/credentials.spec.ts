@@ -46,4 +46,27 @@ test('a token and a key are stored from settings and never shown again', async (
   await page.getByTestId('settings-token-forget').click();
   await expect(page.getByTestId('settings-token-held')).toHaveCount(0);
   await expect(page.getByTestId('settings-sshkey-fp')).toBeVisible();
+
+  // a key made on the host replaces the pasted one; only its public half shows
+  const pasted = await page.getByTestId('settings-sshkey-fp').textContent();
+  await page.getByTestId('settings-sshkey-generate').click();
+  await expect(page.getByTestId('settings-sshkey-fp')).not.toHaveText(pasted!);
+  await expect(page.getByTestId('settings-sshkey-pub')).toContainText('ssh-ed25519 ');
+  expect(await page.content()).not.toContain('PRIVATE KEY-----\n');
+});
+
+test('the git identity is set from settings', async ({ pairedPage: page, api }) => {
+  await page.getByTestId('rail-more').click();
+  await page.getByTestId('menu-settings').click();
+  await page.getByTestId('settings-git-name').fill('Ada Lovelace');
+  await page.getByTestId('settings-git-email').fill('not-an-email');
+  await page.getByTestId('settings-git-email').evaluate((el: HTMLInputElement) => { el.type = 'text'; });
+  await page.getByTestId('settings-git-save').click();
+  await expect(page.getByTestId('view-error')).toContainText('email');
+
+  await page.getByTestId('settings-git-name').fill('Ada Lovelace');
+  await page.getByTestId('settings-git-email').fill('ada@example.com');
+  await page.getByTestId('settings-git-save').click();
+  await expect(page.getByTestId('settings-git-email')).toHaveValue('ada@example.com');
+  await expect.poll(async () => (await api('GET', '/api/settings')).json.identity).toEqual({ name: 'Ada Lovelace', email: 'ada@example.com' });
 });

@@ -4766,6 +4766,10 @@ and a workspace with neither behaves exactly as above.
   the page: an answer names a token by its last four characters and a
   key by its type, fingerprint and public half, never more. A key with a
   passphrase is refused at the door.
+- A key may be **generated on the host** instead of pasted (ed25519).
+  Its private half then never crosses the network at all; the page shows
+  the public line to add to GitHub. This is the way to prefer wherever
+  the page is not served over TLS.
 - **The token** is set as `GH_TOKEN` on the `gh` commands gummi itself
   runs — publishing, PR linking and review threads, issue import — in
   place of any token the environment carried. Detection runs again when
@@ -4785,6 +4789,13 @@ and a workspace with neither behaves exactly as above.
 - The token does not authenticate a push. A remote pushed to over HTTPS
   still needs a credential helper on the machine; the stored key serves
   an SSH remote, whose host key must already be known there.
+- **The git identity** sits beside them in settings and is not a secret:
+  `PUT /api/settings/identity` writes `user.name` and `user.email` to the
+  local configuration of each repository the workspace manages, which
+  every card's worktree shares. It is who an agent's commits and a
+  landing are written as. gummi never writes the global configuration;
+  clearing both removes the repository's own setting and leaves the
+  machine's.
 - A paired browser may store or replace them, which makes pairing
   (§20.3) the strength of this too. Off loopback without TLS the key
   crosses the network in the clear; serve the page over HTTPS

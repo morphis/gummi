@@ -240,10 +240,18 @@ func TestSettingsShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Settings{Name: "east", Repo: "gummi", MaxName: 40, Credentials: Credentials{
 		TokenSet: true, TokenHint: "9f2c",
 		KeySet: true, KeyType: "ssh-ed25519", KeyFingerprint: "SHA256:u1Yx0kq3", KeyPublic: "ssh-ed25519 AAAAC3Nz gummi",
-	}}))
+	}, Identity: Identity{Name: "Ada Lovelace", Email: "ada@example.com"}}))
 }
 
 func TestCredentialsRequestShape(t *testing.T) {
 	empty := ""
 	golden.RequireEqual(t, marshal(t, CredentialsRequest{GitHubToken: &empty}))
+}
+
+func TestGenerateKeyRequestShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, CredentialsRequest{GenerateSSHKey: true}))
+}
+
+func TestIdentityRequestShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, IdentityRequest{Name: "Ada Lovelace", Email: "ada@example.com"}))
 }

@@ -109,6 +109,23 @@ func TestSSHKeyIsValidatedAndNamedByItsPublicHalf(t *testing.T) {
 	if s.Identity() == before || before == "" {
 		t.Fatal("the identity did not follow the key")
 	}
+	// a key made on the host is one ssh can use, and replaces the one held
+	before = s.Identity()
+	if err := s.GenerateSSHKey(); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.Status(); !st.KeySet || st.KeyType != "ssh-ed25519" || s.Identity() == before {
+		t.Fatalf("after generating = %+v", st)
+	}
+	if fi, err := os.Stat(filepath.Join(s.Dir, keyFile)); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("generated key file = %v, %v; want 0600", fi, err)
+	}
+	if keygen, lerr := exec.LookPath("ssh-keygen"); lerr == nil {
+		out, err := exec.CommandContext(context.Background(), keygen, "-y", "-f", filepath.Join(s.Dir, keyFile)).CombinedOutput()
+		if err != nil || !strings.HasPrefix(s.Status().KeyPublic, strings.TrimSpace(string(out))[:40]) {
+			t.Fatalf("ssh-keygen -y = %q, %v; want the stored key's public half", out, err)
+		}
+	}
 	if err := s.SetSSHKey(""); err != nil {
 		t.Fatal(err)
 	}

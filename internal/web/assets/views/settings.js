@@ -2,8 +2,10 @@
 // instance goes by, so boards running side by side can be told apart in a
 // header and a browser tab (the terminal's settings dialog writes the same
 // config key), and the GitHub token and SSH key gummi's own gh and push
-// commands use where the machine has none set up. A stored secret is never
-// sent back: the page is told only what names it.
+// commands use where the machine has none set up, and who git writes this
+// workspace's commits as. A stored secret is never sent back: the page is
+// told only what names it, and a key can be made on the host so that its
+// private half never crosses the network at all.
 
 import { h, clear } from '../dom.js?v=__ASSET_V__'
 import { registerView } from '../views.js?v=__ASSET_V__'
@@ -47,14 +49,40 @@ registerView('settings', {
       if (v.alive) draw()
     }
 
+    async function saveIdentity (name, email) {
+      v.saving = true
+      v.err = null
+      draw()
+      try {
+        v.cur = await ctx.api.put('/api/settings/identity', { name, email })
+        ctx.toast?.(v.cur.identity.name ? `Commits are written as ${v.cur.identity.name}` : 'Git identity cleared')
+      } catch (err) { v.err = err }
+      v.saving = false
+      if (v.alive) draw()
+    }
+
+    function drawIdentity () {
+      const id = v.cur.identity || {}
+      const name = h('input', { type: 'text', testid: 'settings-git-name', value: id.name || '', placeholder: 'Your Name', autocomplete: 'off' })
+      const email = h('input', { type: 'email', testid: 'settings-git-email', value: id.email || '', placeholder: 'you@example.com', autocomplete: 'off' })
+      return h('section', { class: 'vcreds' },
+        h('div', { class: 'vhead' }, h('b', null, 'Git identity')),
+        h('div', { class: 'vnote' }, 'Who commits in this workspace are written as: the ones a card’s agent makes and the ones made when a card lands. Saved to the repository’s own git configuration, not the machine’s. Clear both to use the machine’s.'),
+        h('form', { class: 'vform', onsubmit: (e) => { e.preventDefault(); saveIdentity(name.value, email.value) } },
+          h('div', { class: 'vrow' }, field('Name', name), field('Email', email)),
+          h('div', { class: 'vrow' },
+            h('button', { type: 'submit', class: 'btn primary', testid: 'settings-git-save', disabled: v.saving }, 'Save'))))
+    }
+
     // secret is one stored credential: what names the one held, a control
     // to replace it, and a button to forget it.
-    function secret ({ id, label, held, control, hint, key, saved, forgotten }) {
+    function secret ({ id, label, held, control, hint, key, saved, forgotten, extra }) {
       const form = h('form', { class: 'vform', onsubmit: (e) => { e.preventDefault(); if (control.value.trim()) saveCredentials({ [key]: control.value }, saved) } },
         field(label, control, { hint }),
         held ? h('div', { class: 'vnote', testid: `${id}-held` }, held) : null,
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: `${id}-save`, disabled: v.saving }, held ? 'Replace' : 'Save'),
+          extra || null,
           held ? h('button', { type: 'button', class: 'btn', testid: `${id}-forget`, disabled: v.saving, onclick: () => saveCredentials({ [key]: '' }, forgotten) }, 'Forget') : null))
       return form
     }
@@ -84,7 +112,8 @@ registerView('settings', {
           held: c.keySet
             ? h('span', null, `A ${c.keyType} key is stored: `, h('code', { testid: 'settings-sshkey-fp' }, c.keyFingerprint), h('pre', { class: 'pub', testid: 'settings-sshkey-pub' }, c.keyPublic))
             : null,
-          hint: 'Offered to git over an ssh-agent only while gummi pushes a card’s branch. A key with a passphrase is refused.',
+          hint: 'Offered to git over an ssh-agent only while gummi pushes a card’s branch. Paste one (a key with a passphrase is refused), or generate one here and add its public half to GitHub: the private half then never leaves the host.',
+          extra: h('button', { type: 'button', class: 'btn', testid: 'settings-sshkey-generate', disabled: v.saving, onclick: () => saveCredentials({ generateSshKey: true }, 'New SSH key generated') }, c.keySet ? 'Generate a new key' : 'Generate a key'),
           saved: 'SSH key stored',
           forgotten: 'SSH key forgotten'
         }))
@@ -99,7 +128,7 @@ registerView('settings', {
         field('Instance name', input, { hint: 'Shown in this header, the browser tab and the terminal’s status bar. Leave empty for none.' }),
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: 'settings-save', disabled: v.saving }, 'Save')))
-      body.append(form, drawCredentials())
+      body.append(form, drawIdentity(), drawCredentials())
     }
 
     load()

@@ -665,6 +665,47 @@ func TestCredentialsThroughTheBoard(t *testing.T) {
 	if !got.Credentials.KeySet {
 		t.Fatal("a refused key replaced the stored one")
 	}
+
+	// a key made on the host replaces the one held, and only its public
+	// half is ever said
+	held := got.Credentials.KeyFingerprint
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GenerateSSHKey: true}, &raw)
+	if strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Fatalf("generating carries the private key back: %s", raw)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if c := got.Credentials; !c.KeySet || c.KeyFingerprint == held || !strings.HasPrefix(c.KeyPublic, "ssh-ed25519 ") {
+		t.Fatalf("after generating = %+v", c)
+	}
+	if code := b.call(http.MethodPut, "/api/settings/credentials", webapi.CredentialsRequest{GenerateSSHKey: true, SSHKey: &key}, nil); code != http.StatusBadRequest {
+		t.Fatalf("generate and store together = %d, want 400", code)
+	}
+}
+
+// The git identity set from the page is the repository's own: what git
+// then writes a commit as there.
+func TestGitIdentityThroughTheBoard(t *testing.T) {
+	b := newBoardHarness(t)
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/identity", webapi.IdentityRequest{Name: " Ada Lovelace ", Email: "ada@example.com"}, &got)
+	if got.Identity != (webapi.Identity{Name: "Ada Lovelace", Email: "ada@example.com"}) {
+		t.Fatalf("identity = %+v", got.Identity)
+	}
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &got)
+	if got.Identity.Name != "Ada Lovelace" {
+		t.Fatalf("settings identity = %+v", got.Identity)
+	}
+	out, err := exec.CommandContext(context.Background(), "git", "-C", b.root, "config", "--local", "user.email").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "ada@example.com" {
+		t.Fatalf("the repository's own user.email = %q, %v", out, err)
+	}
+	for _, bad := range []webapi.IdentityRequest{{Name: "Ada"}, {Name: "Ada", Email: "nope"}} {
+		if code := b.call(http.MethodPut, "/api/settings/identity", bad, nil); code != http.StatusBadRequest {
+			t.Fatalf("%+v = %d, want 400", bad, code)
+		}
+	}
 }
 
 func TestDoctorThroughTheBoard(t *testing.T) {

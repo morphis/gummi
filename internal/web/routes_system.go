@@ -12,6 +12,7 @@ func (s *Server) systemRoutes() {
 	s.api("GET /api/settings", s.handleSettings)
 	s.api("PUT /api/settings", s.handleSetSettings)
 	s.api("PUT /api/settings/credentials", s.handleSetCredentials)
+	s.api("PUT /api/settings/identity", s.handleSetIdentity)
 }
 
 // handleSettings is GET /api/settings: the workspace's own knobs.
@@ -51,6 +52,22 @@ func (s *Server) handleSetCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.opt.Board.SetCredentials(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSetIdentity is PUT /api/settings/identity: who git writes this
+// workspace's commits as, set in its repositories' own configuration.
+func (s *Server) handleSetIdentity(w http.ResponseWriter, r *http.Request) {
+	var req webapi.IdentityRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request body: "+err.Error())
+		return
+	}
+	out, err := s.opt.Board.SetIdentity(r.Context(), req)
 	if err != nil {
 		s.fail(w, err)
 		return
