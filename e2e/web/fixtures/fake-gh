@@ -16,6 +16,8 @@ file into the workspace's copy of that directory:
                        on headRefName)
     threads-<N>.json   `gh api graphql ... -F number=<N>` (review threads)
     repo.json          `gh api repos/<owner>/<repo>` (squash-merge setting)
+    job-<N>.log        `gh run view --job <N> --log-failed` (the failed
+                       steps' log, printed as it is)
     repo-view.json     `gh repo view <owner>/<repo> --json <fields>`; without
                        the file the viewer has WRITE on a repository
                        that is no fork
@@ -216,6 +218,18 @@ def repo(args):
     out(pick(data, fields(rest)))
 
 
+def run(args):
+    sub, rest = args[0], args[1:]
+    if sub != "view":
+        fail("fake-gh: unsupported `gh run %s`" % sub)
+    job = flag(rest, "--job")
+    try:
+        with open(os.path.join(DATA, "job-%s.log" % job), encoding="utf-8") as fh:
+            sys.stdout.write(fh.read())
+    except FileNotFoundError:
+        fail("failed to get job: HTTP 404: Not Found (https://api.github.com/repos/%s/actions/jobs/%s)" % (flag(rest, "--repo"), job))
+
+
 def issue(args):
     sub, rest = args[0], args[1:]
     issues = load("issues.json") or []
@@ -258,6 +272,8 @@ def main(argv):
         issue(rest)
     elif cmd == "repo" and rest:
         repo(rest)
+    elif cmd == "run" and rest:
+        run(rest)
     elif cmd == "auth":
         if os.path.exists(os.path.join(DATA, "signed-out")):
             fail("You are not logged into any GitHub hosts. To log in, run: gh auth login")
