@@ -35,6 +35,9 @@ type Card struct {
 	// Files is where the page may open the card's worktree files from;
 	// nil while the card has no worktree on this machine.
 	Files *Files `json:"files,omitempty"`
+	// Terminal says the page may open a shell in the card's worktree: the
+	// server was started with --terminal and the card has one.
+	Terminal bool `json:"terminal,omitempty"`
 }
 
 // Files maps a card's worktree onto the server: a file at Dir/<path> is

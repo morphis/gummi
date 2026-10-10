@@ -129,6 +129,8 @@ and `merge`. Choosing `merge` hides `action-input` and `action-hint`).
 |---|---|
 | `panel` | the right landmark |
 | `panel-tabs`, `tab-memory`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
+| `tab-terminal` | the Terminal tab (a board served with `--terminal`, a card with a worktree) |
+| `terminal`, `terminal-screen`, `terminal-note`, `terminal-again`, `terminal-off` | the shell (`data-state` = `open` \| `closed`), xterm's screen, the note over it (opening, reconnecting, exited), its retry / new-shell button, and the pane on a card with no worktree |
 | `panel-close` | hide the panel |
 | `panel-pane` | the tab body; `data-tab` = open tab |
 | `panel-loading`, `panel-unavailable`, `panel-error` | tab states (unavailable = the route answers 501) |

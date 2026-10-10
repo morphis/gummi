@@ -81,7 +81,7 @@ func writeFile(t *testing.T, path, content string) {
 // before its loop starts.
 var docsShellSetup func(*ui.Shell)
 
-func newDocsBoard(t *testing.T, ag agent.Agent) *docsBoard {
+func newDocsBoard(t *testing.T, ag agent.Agent, mutate ...func(*Options)) *docsBoard {
 	t.Helper()
 	ctx := context.Background()
 	root, err := filepath.EvalSymlinks(t.TempDir())
@@ -167,7 +167,7 @@ func newDocsBoard(t *testing.T, ag agent.Agent) *docsBoard {
 	go func() { _ = bridge.Run() }()
 	t.Cleanup(bridge.Stop)
 
-	h := newHarness(t, func(o *Options) { o.Board = bridge })
+	h := newHarness(t, append([]func(*Options){func(o *Options) { o.Board = bridge }}, mutate...)...)
 	pub := h.srv.Publish
 	publish.Store(&pub)
 	b := &docsBoard{harness: h, c: h.client(), root: root, wt: wt, f: f, store: store, eng: eng, rev1: rev1}

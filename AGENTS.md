@@ -76,6 +76,7 @@ leaf services.
 | `atomicfile` | Crash-safe file writes for pre-approval drafts (no git backstop). |
 | `rmtree` | `RemoveAll` that also takes read-only trees (a Go module cache under an agent home) without following links. Use it for any per-card directory an agent may have built in. |
 | `childproc` | How gummi starts a process it supervises: `Group` (own process group, killed whole on cancel) and `Start` (on Linux, dies with gummi even when gummi is killed outright). Use both for any agent backend, probe or watch you spawn. |
+| `term` | A person's own shell on a pty in a card's worktree, for the web face's Terminal tab (`gummi web --terminal`): one session per card, bounded scrollback replayed on reattach, a cap and an idle sweep. Not an agent surface and not sandboxed; `web/routes_term.go` decides who may open one (DESIGN §20.5). |
 | `ui` | The Bubbletea TUI: board, chat, diff/spec views, inbox, dialogs. |
 | `driver` | The headless counterpart of the TUI's autonomous loop: drives `run`/`resume` over the engine, emits NDJSON + typed exit statuses, holds the `.gummi` lock. |
 | `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |

@@ -604,6 +604,16 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .dtop{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line)}
 .dtop:has(> .fresh,> .pending){padding-bottom:10px}
 .dtop .diffhead{position:static;border-bottom:0}
+/* the Terminal tab: the shell fills the pane, which does not scroll (the
+   terminal has its own scrollback); its note sits over it */
+.pane[data-tab="terminal"]{overflow:hidden;display:flex;flex-direction:column}
+.term{flex:1;min-height:0;position:relative;display:flex;background:var(--bg)}
+.term-screen{flex:1;min-width:0;min-height:0;padding:8px 4px 8px 10px}
+.term-screen .xterm{height:100%}
+.term-note{position:absolute;inset:auto 0 0 0;display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;padding:10px 12px;font-size:13px;color:var(--fg3);background:var(--panel);border-top:1px solid var(--line)}
+.term-note[hidden]{display:none}
+.term-note b{color:var(--fg2);font-weight:500}
+xterm-style{display:none}
 .pane > .pending{position:sticky;top:0;z-index:2;background:var(--bg);margin:0;padding:10px 12px;border-bottom:1px solid var(--line)}
 .file{scroll-margin-top:110px}
 .ln.flash,.file.flash{outline:2px solid var(--accent);outline-offset:-2px}

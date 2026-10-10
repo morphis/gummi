@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morphis/gummi/internal/term"
 	"github.com/morphis/gummi/internal/ui"
 	"github.com/morphis/gummi/internal/webapi"
 )
@@ -85,6 +86,10 @@ type Options struct {
 	// Doctor runs the readiness checklist `gummi doctor` prints. It lives
 	// in the command package, so it is handed in rather than imported.
 	Doctor func(*http.Request) webapi.Doctor
+	// Terminal serves a shell in each card's worktree to a paired device
+	// (routes_term.go). It is more than the board: arbitrary commands as
+	// whoever runs the server. Refused together with OpenAccess.
+	Terminal bool
 	// Now is injectable for tests.
 	Now func() time.Time
 	// Heartbeat and Coalesce tune the event stream; zero takes the
@@ -106,6 +111,8 @@ type Server struct {
 	// filesSecret keys the URLs a card's files are served at
 	// (routes_files.go); drawn per start, so they lapse with the server.
 	filesSecret []byte
+	// terms holds the shells of the Terminal tab; nil unless Options.Terminal.
+	terms *term.Registry
 
 	hostsMu sync.RWMutex
 	hosts   map[string]struct{}
@@ -118,6 +125,9 @@ func New(o Options) (*Server, error) {
 	}
 	if o.Devices == nil || o.Pairing == nil {
 		return nil, errors.New("no pairing store to authenticate against")
+	}
+	if o.Terminal && o.OpenAccess {
+		return nil, errors.New("a terminal is a shell on this machine: it is not served without pairing")
 	}
 	if o.Now == nil {
 		o.Now = time.Now
@@ -143,6 +153,9 @@ func New(o Options) (*Server, error) {
 	s.filesSecret = make([]byte, 32)
 	if _, err := rand.Read(s.filesSecret); err != nil {
 		return nil, err
+	}
+	if o.Terminal {
+		s.terms = term.NewRegistry(term.DefaultMax, term.DefaultIdle)
 	}
 	s.AllowHosts(o.Hosts...)
 	if !o.OpenAccess {
@@ -182,5 +195,11 @@ func (s *Server) secure(r *http.Request) bool { return s.opt.Secure || r.TLS != 
 func (s *Server) Publish(c webapi.Change) { s.hub.publish(c) }
 
 // Close ends every event stream, so an http.Server.Shutdown that follows
-// is not left waiting on connections that never go idle.
-func (s *Server) Close() { s.hub.close() }
+// is not left waiting on connections that never go idle, and every shell
+// the Terminal tab started.
+func (s *Server) Close() {
+	s.hub.close()
+	if s.terms != nil {
+		s.terms.Close()
+	}
+}

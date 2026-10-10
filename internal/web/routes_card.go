@@ -36,6 +36,7 @@ func (s *Server) handleCard(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.Files != nil {
 		c.Files.URL = s.filesURL(c.ID)
+		c.Terminal = s.terms != nil
 	}
 	writeJSON(w, http.StatusOK, c)
 }

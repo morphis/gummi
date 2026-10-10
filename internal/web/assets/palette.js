@@ -85,6 +85,7 @@ export function keysHelp () {
       k('g', 'l'), h('span', null, 'Log'),
       k('g', 'p'), h('span', null, 'PR'),
       k('g', 'r'), h('span', null, 'Stats'),
+      k('g', 't'), h('span', null, 'Terminal (a board served with --terminal)'),
       h('h3', null, 'Open decision'),
       k('1–9'), h('span', null, 'Pick an answer — in an empty composer too, so to start a message with a digit type something before it'),
       k('↑', '↓'), h('span', null, 'Move between answers (composer empty)'),

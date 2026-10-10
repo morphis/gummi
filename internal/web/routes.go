@@ -9,6 +9,7 @@ package web
 //	routes_card.go     a card: head, thread, live, answer, send, actions
 //	routes_docs.go     a card's spec, diff, pull request and stats
 //	routes_files.go    a card's worktree files, opened in the browser
+//	routes_term.go     a shell in a card's worktree (--terminal)
 //	routes_create.go   the new-card form
 //	routes_goals.go    goals and stacks
 //	routes_repos.go    repositories and their branches
@@ -28,6 +29,7 @@ func (s *Server) routes() {
 	s.cardRoutes()
 	s.docsRoutes()
 	s.fileRoutes()
+	s.termRoutes()
 	s.createRoutes()
 	s.goalRoutes()
 	s.repoRoutes()

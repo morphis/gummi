@@ -1,4 +1,4 @@
-// panel.js — the right panel: the Memory, Spec, Diff, Log, PR and Stats tabs beside the
+// panel.js — the right panel: the Memory, Spec, Diff, Log, PR, Stats and Terminal tabs beside the
 // conversation (never over it), the resizer between them, and hiding it
 // with `]`. On a phone the tabs lead the card's screen, with its Thread first. It fetches the open tab for the open card, refetches it when
 // the card changes, and hands each tab module an entry { data, fresh, err }
@@ -15,8 +15,9 @@ import { diffTab } from './diff.js?v=__ASSET_V__'
 import { logTab } from './log.js?v=__ASSET_V__'
 import { prTab } from './pr.js?v=__ASSET_V__'
 import { statsTab } from './stats.js?v=__ASSET_V__'
+import { terminalTab } from './terminal.js?v=__ASSET_V__'
 
-const TABS = [memoryTab, specTab, diffTab, logTab, prTab, statsTab]
+const TABS = [memoryTab, specTab, diffTab, logTab, prTab, statsTab, terminalTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
 // shown is the tabs the open card has: a tab may hide itself for a kind

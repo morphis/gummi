@@ -447,7 +447,7 @@ var skillListCmd = &cobra.Command{
 // webCmd implements `gummi web`: the board in a browser, hosted by this
 // process with the TUI's own model running without a screen.
 var webCmd = &cobra.Command{
-	Use:   "web [--addr host:port] [--allow-host names] [--tls-cert file --tls-key file] [--tailscale [--ts-hostname name] [--ts-authkey key] [--ts-tls] [--verbose]] [--no-pairing]",
+	Use:   "web [--addr host:port] [--allow-host names] [--tls-cert file --tls-key file] [--tailscale [--ts-hostname name] [--ts-authkey key] [--ts-tls] [--verbose]] [--no-pairing] [--terminal]",
 	Short: "Serve the board to a browser",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runWeb(cmdFlags(cmd), args)
@@ -776,6 +776,7 @@ func bindWebFlags(fs *pflag.FlagSet) {
 	fs.Bool("ts-tls", false, "serve HTTPS on 443 with a tailnet certificate (with --tailscale; needs MagicDNS and HTTPS enabled for the tailnet)")
 	fs.Bool("verbose", false, "log the tailnet node's own messages (with --tailscale)")
 	fs.Bool("no-pairing", false, "serve without pairing, to anything that can reach the listener (refused unless every listener is loopback)")
+	fs.Bool("terminal", false, "give paired devices a Terminal tab: a shell in each card's worktree, running as you (refused with --no-pairing)")
 }
 
 func bindWebPairFlags(fs *pflag.FlagSet) {

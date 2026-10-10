@@ -4532,6 +4532,41 @@ start-up code. The boundary that keeps an agent out of those is the one
 the operator's browser, the workspace's `.gummi/state` or the host's
 loopback.
 
+**The terminal is the one thing here that is more than the board.**
+`gummi web --terminal` adds a Terminal tab to every card with a worktree:
+the operator's own shell, started in that worktree on a pty and drawn in
+the page (`internal/term`, `internal/web/routes_term.go`). It is not the
+pty face §20.1 set aside — the board stays a page, and the shell is one
+more pane beside a card's diff — and it is not an agent's surface: no
+session can reach it through §16. But it is not bounded by the workflow
+either. Everything else a paired device can do is something the TUI would
+do; a shell is anything the person running the server can do, outside any
+agent sandbox (§4.4). So it is off unless asked for, refused together
+with `--no-pairing`, and held to more than a read: the WebSocket upgrade
+is a GET, which the same-origin check passes as one, so the route checks
+the origin itself, and a socket whose device is unpaired is closed.
+Opening a shell is a line in the server's log and a notice on every other
+open page. With `--terminal`, the limit stated above costs more: an agent
+that becomes a paired browser by any of those routes has a shell as the
+operator, not only the board. On a bare host it already had one; behind a
+sandbox, `--terminal` is a door out of it for whatever reaches the page.
+
+The shell belongs to the card, not to the socket. It keeps running when
+the page goes away and the next socket is replayed the tail of its output
+(256 KB), so a phone that slept comes back to the same shell. It ends
+when the person exits it, when its worktree is removed, after an hour
+with no page attached, and with the server; a board runs four at most. It
+does not take the card's lock: typing in a worktree an agent is working
+in is what a person with SSH could always do, and verify still judges
+what ends up on the branch.
+
+xterm.js is vendored, with no build step, by `scripts/vendor-xterm.sh`.
+The page's CSP is unchanged by it: xterm.js writes generated `<style>`
+elements and per-cell `style` attributes, both of which `style-src
+'self'` drops, so the script rewrites those few call sites to go through
+the CSSOM (a constructed stylesheet, `style.cssText`) and fails if a new
+release has moved them.
+
 ### 20.6 Attachments
 
 A person on the page can attach an image where the terminal cannot offer
