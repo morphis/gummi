@@ -34,10 +34,11 @@ function renderCounts () {
   $('#p-run').textContent = b?.counts?.running ?? 0
   $('#p-running').classList.toggle('quiet', !b?.counts?.running)
   $('#p-today').textContent = cr(b?.today?.spent)
-  // a named instance leads the tab title: several boards open side by side
-  // are told apart by it
-  const who = [b?.name, b?.repo].filter(Boolean).join(' · ')
-  document.title = b?.counts?.needs ? `(${b.counts.needs}) gummi · ${who}` : `gummi · ${who}`
+  // a named instance leads the tab title, ahead of "gummi": a tab strip
+  // truncates long titles, and several boards open side by side are told
+  // apart by the name only if it survives that truncation
+  const title = [b?.name, 'gummi', b?.repo].filter(Boolean).join(' · ')
+  document.title = b?.counts?.needs ? `(${b.counts.needs}) ${title}` : title
 }
 
 function renderConn () {
