@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -74,10 +75,10 @@ func (s Store) syncPublic() error {
 var (
 	signer string
 	// signEnv is what applySigning last did to the process environment:
-	// the index its entries start at and whether GIT_CONFIG_COUNT was set
-	// before them.
+	// the entries it added, the index they start at and whether
+	// GIT_CONFIG_COUNT was set before them.
 	signEnv struct {
-		applied  bool
+		cfg      [][2]string
 		base     int
 		hadCount bool
 	}
@@ -108,36 +109,53 @@ func signConfig(s Store, program string) [][2]string {
 // store: git's GIT_CONFIG_COUNT/KEY/VALUE entries for signing while it is
 // on, after any the environment already carried, and none of gummi's when
 // it is off. mu must be held.
+//
+// A git command may be started at any moment, so the environment is never
+// left counting entries that are not there: the count is lowered before
+// entries are removed and raised after they are set, and a call that
+// changes nothing touches nothing.
 func applySigning() {
-	if signEnv.applied {
-		for i := range signConfig(current, signer) {
-			n := strconv.Itoa(signEnv.base + i)
-			_ = os.Unsetenv("GIT_CONFIG_KEY_" + n)
-			_ = os.Unsetenv("GIT_CONFIG_VALUE_" + n)
-		}
+	var want [][2]string
+	if signer != "" && current.Signing() {
+		want = signConfig(current, signer)
+	}
+	if slices.Equal(want, signEnv.cfg) {
+		return
+	}
+	if signEnv.cfg != nil {
 		if signEnv.hadCount {
 			_ = os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(signEnv.base))
 		} else {
 			_ = os.Unsetenv("GIT_CONFIG_COUNT")
 		}
-		signEnv.applied = false
+		for i := range signEnv.cfg {
+			n := strconv.Itoa(signEnv.base + i)
+			_ = os.Unsetenv("GIT_CONFIG_KEY_" + n)
+			_ = os.Unsetenv("GIT_CONFIG_VALUE_" + n)
+		}
+		signEnv.cfg = nil
 	}
-	if signer == "" || !current.Signing() {
+	if want == nil {
 		return
 	}
 	raw, had := os.LookupEnv("GIT_CONFIG_COUNT")
-	base, err := strconv.Atoi(raw)
-	if err != nil || base < 0 {
-		base, had = 0, false
+	base := 0
+	if had {
+		n, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || n < 0 {
+			// git refuses this environment as it stands; adding to it
+			// would only overwrite entries that are not gummi's
+			return
+		}
+		base = n
 	}
-	cfg := signConfig(current, signer)
-	for i, kv := range cfg {
+	for i, kv := range want {
 		n := strconv.Itoa(base + i)
 		_ = os.Setenv("GIT_CONFIG_KEY_"+n, kv[0])
 		_ = os.Setenv("GIT_CONFIG_VALUE_"+n, kv[1])
 	}
-	_ = os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(base+len(cfg)))
-	signEnv.applied, signEnv.base, signEnv.hadCount = true, base, had
+	_ = os.Setenv("GIT_CONFIG_COUNT", strconv.Itoa(base+len(want)))
+	signEnv.cfg, signEnv.base, signEnv.hadCount = want, base, had
 }
 
 // IsSignerCall reports whether args are git calling its signing program,
@@ -179,11 +197,14 @@ func RunSigner(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gummi: the stored key signs git objects only, not %q\n", namespace)
 		return 1
 	}
-	key := Store{Dir: filepath.Dir(keyPath)}.key()
-	if keyPath == "" || key == nil {
-		fmt.Fprintln(stderr, "gummi: no SSH key is stored to sign with; store one in settings, or start this session again if signing was switched off")
+	// the switch is read here too: a session started while it was on
+	// still carries the instruction to sign, and off has to mean off
+	store := Store{Dir: filepath.Dir(keyPath)}
+	if keyPath == "" || !store.Signing() {
+		fmt.Fprintln(stderr, "gummi: signing commits with the stored SSH key is switched off (or the key is gone); switch it on in settings, or start this session again to commit unsigned")
 		return 1
 	}
+	key := store.key()
 	var msg []byte
 	var err error
 	if file == "" {

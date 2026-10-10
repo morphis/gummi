@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -182,6 +184,12 @@ func TestTheSignerSignsGitObjectsOnlyAndAnRSAKeyVerifies(t *testing.T) {
 	if code := RunSigner([]string{"-Y", "sign", "-n", "git", "-f", filepath.Join(t.TempDir(), pubFile), msg}, nil, nil, &stderr); code == 0 {
 		t.Fatal("signed with no key stored")
 	}
+	if code := RunSigner([]string{"-Y", "sign", "-n", "git", "-f", pub, "-U", msg}, nil, nil, &stderr); code == 0 || !strings.Contains(stderr.String(), "switched off") {
+		t.Fatalf("signing with the switch off = %d, %q", code, stderr.String())
+	}
+	if err := s.SetSigning(true); err != nil {
+		t.Fatal(err)
+	}
 	if code := RunSigner([]string{"-Y", "sign", "-n", "git", "-f", pub, "-U", msg}, nil, nil, &stderr); code != 0 {
 		t.Fatalf("sign = %d, %q", code, stderr.String())
 	}
@@ -194,5 +202,72 @@ func TestTheSignerSignsGitObjectsOnlyAndAnRSAKeyVerifies(t *testing.T) {
 	verify.Stdin = in
 	if out, err := verify.CombinedOutput(); err != nil {
 		t.Fatalf("ssh-keygen does not accept the signature: %v\n%s", err, out)
+	}
+}
+
+// git reads GIT_CONFIG_COUNT more leniently than strconv does, and refuses
+// outright one it cannot read: gummi's entries go after the first kind and
+// nowhere near the second.
+func TestSigningLeavesTheEnvironmentsOwnGitConfigurationAlone(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "credentials")}
+	if err := s.SetSSHKey(testKey(t, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSigning(true); err != nil {
+		t.Fatal(err)
+	}
+	useSigner(t)
+	for _, tc := range []struct{ count, wantCount, wantKey0 string }{
+		{" 1", "5", "user.name"},
+		{"many", "many", "user.name"},
+	} {
+		t.Setenv("GIT_CONFIG_COUNT", tc.count)
+		t.Setenv("GIT_CONFIG_KEY_0", "user.name")
+		t.Setenv("GIT_CONFIG_VALUE_0", "Ada")
+		Use(s)
+		if got := os.Getenv("GIT_CONFIG_COUNT"); got != tc.wantCount {
+			t.Errorf("count %q: GIT_CONFIG_COUNT = %q, want %q", tc.count, got, tc.wantCount)
+		}
+		if got := os.Getenv("GIT_CONFIG_KEY_0"); got != tc.wantKey0 {
+			t.Errorf("count %q: GIT_CONFIG_KEY_0 = %q, want the environment's own", tc.count, got)
+		}
+		Use(Store{})
+		if got := os.Getenv("GIT_CONFIG_KEY_0"); got != tc.wantKey0 {
+			t.Errorf("count %q: GIT_CONFIG_KEY_0 = %q after switching off", tc.count, got)
+		}
+	}
+}
+
+// A git command started while the store is read again must never inherit
+// a count of entries that are not there.
+func TestReadingTheStoreAgainNeverTearsTheEnvironment(t *testing.T) {
+	s := Store{Dir: filepath.Join(t.TempDir(), "credentials")}
+	if err := s.SetSSHKey(testKey(t, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetSigning(true); err != nil {
+		t.Fatal(err)
+	}
+	useSigner(t)
+	use(t, s)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 2000 {
+			Use(s)
+		}
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		env := os.Environ()
+		for i := range 4 {
+			if !slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"=") }) {
+				t.Fatalf("GIT_CONFIG_KEY_%d is missing while signing is on", i)
+			}
+		}
 	}
 }

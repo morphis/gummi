@@ -375,6 +375,9 @@ func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsReque
 	}
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 		store := m.credentialStore()
+		// a request refused part-way has still written what came before
+		// the refusal, and this process must read the store as it now is
+		defer credentials.Use(store)
 		if req.GenerateSSHKey {
 			if err := store.GenerateSSHKey(); err != nil {
 				refused = webErr(WebBadRequest, "%s", err.Error())
@@ -399,7 +402,6 @@ func (b *Bridge) SetCredentials(ctx context.Context, req webapi.CredentialsReque
 				return nil
 			}
 		}
-		credentials.Use(store)
 		if m.publishEnabled {
 			return m.detectPublish
 		}

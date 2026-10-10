@@ -4832,8 +4832,9 @@ and a workspace with neither behaves exactly as above.
   shell of your own is signed as the machine is set up to, or not at
   all. The signer answers in git's namespace only, so it puts the
   key's name to git objects and to nothing else. A session already
-  running keeps the environment it started with and picks the switch up
-  when it next starts. For GitHub to mark the commits verified the
+  running keeps the environment it started with: switched on, it signs
+  from its next start; switched off, the signer refuses it — off means
+  off — and its commits fail, saying so, until it starts again. For GitHub to mark the commits verified the
   public half must be added there as a *signing* key, and the git
   identity must be an email verified on that account.
 - Neither is put in an agent backend's environment. With signing on, what

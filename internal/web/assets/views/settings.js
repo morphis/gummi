@@ -143,7 +143,7 @@ registerView('settings', {
             h('label', { class: 'pubcheck' },
               h('input', { type: 'checkbox', testid: 'settings-sign', checked: !!c.signing, disabled: v.saving, onchange: (e) => saveCredentials({ signCommits: e.target.checked }, e.target.checked ? 'Commits are signed with the stored key' : 'Commits are no longer signed with the stored key') }),
               h('span', null, 'Sign commits with this key')),
-            tip('Every commit made from here on in this workspace is signed with the stored key: the ones gummi makes (checkpoints, landings, rebases), the ones a card’s agent makes, and the ones made in a card’s terminal. A session already running picks it up when it next starts. For GitHub to show them as verified, add the public half above as a signing key and commit as an email verified on that account.', 'settings-sign-tip'))
+            tip('Every commit made from here on in this workspace is signed with the stored key: the ones gummi makes (checkpoints, landings, rebases), the ones a card’s agent makes, and the ones made in a card’s terminal. A session already running signs from its next start; switched off, a running session’s commits are refused until it starts again. For GitHub to show them as verified, add the public half above as a signing key and commit as an email verified on that account.', 'settings-sign-tip'))
           : null)
     }
 
