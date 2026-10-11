@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // A research card never gets a branch: its work is the document. Its
@@ -12,10 +12,10 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedResearch('How are gree
 test('a research card offers no branch to diff or push', async ({ pairedPage: page, server }, info) => {
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('panel-pane')).toContainText('carries no branch');
   await expect(page.getByTestId('panel-pane')).not.toContainText('when you approve');
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-none')).toBeVisible();
   await expect(page.getByTestId('pr-push-cmd')).toHaveCount(0);
   await shot(page, info, 'research-pr');

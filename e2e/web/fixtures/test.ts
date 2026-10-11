@@ -159,3 +159,17 @@ export async function showCard(page: Page, id: string): Promise<void> {
   if ((await page.getByTestId('app').getAttribute('data-view')) === 'cards') await page.getByTestId(`rail-row-${id}`).click();
   await expect(page.getByTestId('card-id')).toHaveText(id);
 }
+
+// showTab brings one of a card's documents on screen, whatever shows now.
+// Spec, Memory, Run and Terminal each have an icon (a tab, on a phone);
+// the diff, the log and the pull request share the Changes one, behind the
+// switch in its header. An icon pressed while its surface is open closes
+// it, so this presses only what is not already showing.
+export async function showTab(page: Page, name: string): Promise<void> {
+  const changes = ['diff', 'log', 'pr'].includes(name);
+  const icon = page.getByTestId(`tab-${changes ? 'diff' : name}`);
+  if ((await icon.getAttribute('aria-selected')) !== 'true') await icon.click();
+  if (!changes) return;
+  const leaf = page.getByTestId(name === 'diff' ? 'changes-diff' : `tab-${name}`);
+  if ((await leaf.getAttribute('aria-selected')) !== 'true') await leaf.click();
+}

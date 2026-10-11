@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { seedBoard, seedLive, type Board } from '../fixtures/board';
 
 // Accessibility: axe on the page's main surfaces — the board with a card
@@ -53,7 +53,7 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
     await open(page, b.failed);
     await audit(page, at('board, failed verify'), found);
     for (const tab of ['spec', 'diff', 'pr', 'stats']) {
-      await page.getByTestId(`tab-${tab}`).click();
+      await showTab(page, tab);
       await expect(page.getByTestId('panel-pane')).toHaveAttribute('data-tab', tab);
       await expect(page.getByTestId('panel-loading')).toHaveCount(0);
       await audit(page, at(`tab ${tab}`), found);
@@ -74,7 +74,7 @@ test('the main surfaces pass axe in both themes', async ({ pairedPage: page, ser
     await page.keyboard.press('Escape');
 
     const views: Array<[string, () => Promise<void>]> = [
-      ['newcard', () => page.getByTestId('rail-new').click()],
+      ['newcard', async () => { await page.getByTestId('rail-new-menu').click(); await page.getByTestId('rail-new').click(); }],
       ['fleet', () => page.getByTestId('rail-fleet').click()],
     ];
     for (const name of ['goals', 'stacks', 'repos', 'ingest', 'bugs', 'doctor']) {

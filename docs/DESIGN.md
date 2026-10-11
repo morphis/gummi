@@ -4229,8 +4229,11 @@ little to judge from.
 ## 20. The web face — the board in a browser
 
 `gummi web` serves the board to a browser as a page of its own: cards on
-the left, the open card's conversation in the middle, and its spec, diff, log,
-pull request and stats on the right. It exists for two situations the
+the left, the open card's conversation in the middle, and on the right a
+column of icons that opens one surface at a time beside it — the spec,
+the changes (diff, commits and pull request behind one switch), the run
+and, for a session, its memory. No surface is open until one is asked
+for: the conversation is what a card is opened to read. It exists for two situations the
 terminal serves badly. The board runs on a machine you are not sitting
 at, all day, and a card wants a gate crossed from a phone. And a person
 answering a gate wants to read the thing the gate is about *while*

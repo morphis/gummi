@@ -18,7 +18,7 @@ import { h, $, clear } from './dom.js?v=__ASSET_V__'
 import { post, cardPath, uploadAttachment } from './api.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
-import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick } from './decision.js?v=__ASSET_V__'
+import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick, NONE } from './decision.js?v=__ASSET_V__'
 import { openActions } from './head.js?v=__ASSET_V__'
 import { openView } from './views.js?v=__ASSET_V__'
 import { startSession, draftTakesImages } from './session.js?v=__ASSET_V__'
@@ -298,7 +298,7 @@ function renderSays () {
   const d = openDecision()
   const c = current()
   renderCompletions(state.draft.trim() ? c : { completions: [] })
-  box.classList.remove('blocked')
+  box.classList.remove('blocked', 'said')
   box.dataset.route = c?.route || ''
   btn.disabled = offline || sending || (!state.card && !state.sessionDraft)
   $('#composer-input').placeholder = placeholder()
@@ -321,7 +321,11 @@ function renderSays () {
     // server says them — "send it back with your words" would promise a
     // send-back enter does not make
     says.textContent = c?.read && state.draft.trim() && !(d.multi && state.picked?.length) ? c.says : enterSays(d)
-    btn.textContent = 'Answer'
+    // the button names the answer enter gives, so the line beside it need
+    // not say it a second time (it stays for a screen reader)
+    const names = says.textContent === enterSays(d) && says.textContent !== NONE
+    btn.textContent = names ? says.textContent : 'Answer'
+    box.classList.toggle('said', names)
     return
   }
   btn.textContent = 'Send'

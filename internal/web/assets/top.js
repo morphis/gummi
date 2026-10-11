@@ -1,12 +1,13 @@
-// top.js — the header bar: the workspace, the board's two counts and
-// today's spend, the connection state, and who else is looking.
+// top.js — the header bar: the workspace, the board's two counts (each
+// jumps to the next such card) and today's spend, the connection state
+// while it is anything but live, and who else is looking.
 
 import { $, h, icon, cr, initials, clear } from './dom.js?v=__ASSET_V__'
 import { on, state } from './store.js?v=__ASSET_V__'
 
 const VIEWER_TINTS = ['var(--accent)', 'var(--s-verify)', 'var(--s-plan)', 'var(--s-open)', 'var(--s-impl)']
 
-export function initTop ({ nextNeeding, palette, keysHelp, toggleRail }) {
+export function initTop ({ nextNeeding, nextRunning, palette, keysHelp, toggleRail }) {
   $('#rail-toggle').append(icon('rail'))
   $('#rail-toggle').addEventListener('click', toggleRail)
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || '')
@@ -15,6 +16,7 @@ export function initTop ({ nextNeeding, palette, keysHelp, toggleRail }) {
   $('#btn-palette').addEventListener('click', palette)
   $('#btn-keys').addEventListener('click', keysHelp)
   $('#p-next').addEventListener('click', nextNeeding)
+  $('#p-running').addEventListener('click', nextRunning)
   on(['board', 'session'], renderCounts)
   on(['conn'], renderConn)
   on(['viewers', 'session'], renderPresence)

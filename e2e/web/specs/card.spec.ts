@@ -1,4 +1,4 @@
-import { expect, showCard, test } from '../fixtures/test';
+import { expect, showCard, showTab, test } from '../fixtures/test';
 import { decision, mockCard, stats } from '../fixtures/contract';
 import { shot } from '../fixtures/shots';
 
@@ -47,7 +47,7 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
   await page.goto(page.url().replace(/#.*$/, '') + `#${id}/spec`);
   await page.reload();
   await showCard(page, id);
-  if (info.project.name === 'phone') await page.getByTestId('tab-spec').click();
+  await showTab(page, 'spec');
   const doc = page.getByTestId('spec-doc');
   await expect(doc.getByTestId('spec-section-1')).toContainText('Chosen approach');
   await expect(doc.getByTestId('spec-note')).toContainText('Does clean share');
@@ -70,7 +70,7 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   const m = await mockCard(page, id);
   await page.reload();
   await showCard(page, id);
-  if (info.project.name === 'phone') await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   // a verify-failed decision is about the diff: the panel follows it
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('diff-line-8')).toContainText('func Wave');
@@ -86,7 +86,7 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   await expect(page.getByTestId('diff-filebox-1')).toHaveClass(/viewed/);
   await page.reload();
   await showCard(page, id);
-  if (info.project.name === 'phone') await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('diff-viewed-1')).toBeChecked();
   expect(m.annotations).toHaveLength(2);
   // at verify the diff's comments send the card back to implement, and
@@ -116,7 +116,7 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
   await mockCard(page, id, { decision: { ...decision, options: options.map((o) => ({ ...o, carriesComments: false })) } });
   await page.reload();
   await showCard(page, id);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('diff-pending')).toHaveText('1 comment on this diff is still open.');
   await expect(page.getByTestId('decision-carry')).toHaveCount(0);
 });
@@ -125,12 +125,12 @@ test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info
   await mockCard(page, id);
   await page.reload();
   await showCard(page, id);
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-state')).toContainText('open');
   await expect(page.getByTestId('pr-thread-0')).toContainText('Should Wave trim');
   await expect(page.getByTestId('pr-push-cmd')).toHaveText('git push origin feat/add-a-wave-helper');
   await shot(page, info, 'pr');
-  await page.getByTestId('tab-stats').click();
+  await showTab(page, 'stats');
   await expect(page.getByTestId('stats-spent')).toContainText('$0.11');
   await expect(page.getByTestId('stats-table').locator('tr.rework')).toHaveCount(1);
   // where it went: the stage/role/model bars, the estimated mark among them
@@ -186,7 +186,7 @@ test('the stats tab says none recorded where a backend reports no tool calls', a
   }));
   await page.reload();
   await showCard(page, id);
-  await page.getByTestId('tab-stats').click();
+  await showTab(page, 'stats');
   await expect(page.getByTestId('stats-hands')).toContainText('turns 9');
   await expect(page.getByTestId('stats-no-tools')).toContainText('none recorded');
   await expect(page.getByTestId('stats-hands')).not.toContainText('0 calls');

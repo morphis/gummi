@@ -1,4 +1,4 @@
-import { expect, test, pair, type GummiServer } from '../fixtures/test';
+import { expect, pair, showTab, test, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,7 +25,7 @@ async function open(page: Page, server: GummiServer, id: string) {
 // a yes) is the server's to ask.
 async function answerOption(page: Page, phone: boolean, option: string) {
   if (phone) {
-    await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await page.getByTestId('mdec-toggle').click();
     await page.getByTestId(`mdec-option-${option}`).click();
     return;
@@ -187,7 +187,7 @@ test.describe('a design gate', () => {
       const phone = isPhone(info);
       const go = async (p: Page) => {
         if (phone) {
-          await p.getByTestId('tab-diff').click();
+          await showTab(p, 'diff');
           await p.getByTestId('mdec-toggle').click();
           return p.getByTestId('mdec-option-advance');
         }
@@ -263,7 +263,7 @@ test.describe('a failed verify', () => {
   test('a diff comment goes back with the failure', async ({ pairedPage: page, server, api }, info) => {
     const phone = isPhone(info);
     await open(page, server, id);
-    if (phone) await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
     await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
     await page.getByTestId('annotation-input').fill('Return early on an empty name');
@@ -321,7 +321,7 @@ test.describe('two cards at their design gates', () => {
     const [a, b] = ids;
     await open(page, server, a);
     if (isPhone(info)) {
-      await page.getByTestId('tab-spec').click();
+      await showTab(page, 'spec');
       await page.getByTestId('mdec-toggle').click();
       await page.getByTestId('mdec-option-advance').click();
     } else {
@@ -720,7 +720,7 @@ test('a phone sends a multi-pick answer from the docked bar', async ({ pairedPag
   card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
   await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.multi).toBe(true);
   await open(page, server, c.id);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await page.getByTestId('mdec-toggle').click();
   await expect(page.getByTestId('mdec-send')).toBeDisabled();
   await page.getByTestId('mdec-option-0').click();

@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { sessionStats } from '../fixtures/contract';
 import { shot } from '../fixtures/shots';
 
@@ -54,11 +54,12 @@ test('a session starts from its first message, on the model picked beside Send',
   // a session has no spec, so it has no Spec tab
   await expect(page.getByTestId('tab-diff')).toBeVisible();
   await expect(page.getByTestId('tab-spec')).toHaveCount(0);
-  await page.getByTestId('tab-stats').click();
+  await showTab(page, 'stats');
   await expect(page.locator('#pane')).not.toBeEmpty();
   await page.getByTestId('rail-new-session').click();
   await expect(page.getByTestId('draft-hero')).toBeVisible();
-  await expect(page.getByTestId('panel-draft')).toBeVisible();
+  // a draft has no documents: the surface that was open closes with the card
+  await expect(page.getByTestId('surface')).toBeHidden();
   await expect(page.getByTestId('stats')).toHaveCount(0);
 });
 
@@ -133,9 +134,7 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
     await page.getByTestId('card-actions').click();
     await page.getByTestId('action-writespec').click();
   } else {
-    // beside the open panel the title keeps its room and the button folds
-    // into the card's menu; with the panel hidden it is back in the head
-    await page.getByTestId('toggle-panel').click();
+    // no surface is open beside the thread, so the head has room for it
     await expect(page.getByTestId('write-spec')).toBeVisible();
     await page.getByTestId('write-spec').click();
   }
@@ -177,7 +176,7 @@ test('the session stats tab draws its spend, bars and envelope', async ({ paired
   const id = String(made.json?.id);
   await page.route(`**/api/cards/${id}/stats`, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(sessionStats) }));
   await page.goto(`${server.url}/#${id}/stats`);
-  if (info.project.name === 'phone') await page.getByTestId('tab-stats').click();
+  await showTab(page, 'stats');
   await expect(page.getByTestId('stats-spent')).toContainText('$0.03');
   await expect(page.getByTestId('stats-bars')).toContainText('open');
   await expect(page.getByTestId('stats-bars')).toContainText('session');

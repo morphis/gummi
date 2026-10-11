@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { expect, test, type BoundApi } from '../fixtures/test';
+import { expect, showTab, test, type BoundApi } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 
 // `gummi web --terminal` gives a card a Terminal tab: a shell in its
@@ -35,7 +35,7 @@ test.describe('a board served with --terminal', () => {
 
     await page.goto(`${server.url}/#${id}`);
     await expect(page.getByTestId('card-id')).toHaveText(id);
-    await page.getByTestId('tab-terminal').click();
+    await showTab(page, 'terminal');
     const term = page.getByTestId('terminal');
     await expect(term).toHaveAttribute('data-state', 'open');
     // the key bar is a touch screen's
@@ -60,9 +60,9 @@ test.describe('a board served with --terminal', () => {
     await expect(rows(page)).toContainText('kept-2');
 
     // the shell is the card's: leaving the tab and coming back finds it
-    await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await expect(term).toHaveCount(0);
-    await page.getByTestId('tab-terminal').click();
+    await showTab(page, 'terminal');
     await expect(term).toHaveAttribute('data-state', 'open');
     await expect(rows(page)).toContainText('sum-42');
 

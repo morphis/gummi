@@ -1,4 +1,4 @@
-import { expect, test, type GummiServer } from '../fixtures/test';
+import { expect, showTab, test, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,7 +20,7 @@ async function open(page: Page, server: GummiServer, id: string) {
 
 async function option(page: Page, phone: boolean, id: string) {
   if (phone) {
-    await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     const toggle = page.getByTestId('mdec-toggle');
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
     return page.getByTestId(`mdec-option-${id}`);

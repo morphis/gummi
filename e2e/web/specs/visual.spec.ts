@@ -1,5 +1,5 @@
 import type { Page, TestInfo } from '@playwright/test';
-import { expect, test, type GummiServer } from '../fixtures/test';
+import { expect, showTab, test, type GummiServer } from '../fixtures/test';
 import { seedBoard, seedLive, type Board } from '../fixtures/board';
 import { shot } from '../fixtures/shots';
 
@@ -64,7 +64,7 @@ class Look {
   }
 
   async tab(tab: string) {
-    await this.page.getByTestId(`tab-${tab}`).click();
+    await showTab(this.page, tab);
     await expect(this.page.getByTestId('panel-pane')).toHaveAttribute('data-tab', tab);
     await this.settle();
   }
@@ -192,7 +192,7 @@ test('every surface, in both themes', async ({ pairedPage: page, server, api }, 
     await L.snap('toasts');
 
     // the board's other surfaces
-    await L.view('newcard', async () => { await L.rail(); await page.getByTestId('rail-new').click(); });
+    await L.view('newcard', async () => { await L.rail(); await page.getByTestId('rail-new-menu').click(); await page.getByTestId('rail-new').click(); });
     await L.view('goals', () => L.more('goals'));
     await L.more('goals');
     await page.getByTestId(`goal-row-${b.goal}`).click();

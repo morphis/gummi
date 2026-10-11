@@ -338,12 +338,15 @@ function drawDecision (box) {
   h('header', null, decisionWord(d, stage),
     h('span', { class: 'more' },
       state.card.decisionsMore ? h('span', { testid: 'decision-more' }, `${state.card.decisionsMore} more after this`) : null,
+      // what the answer is given against, as one token: the sentence
+      // around it is its tooltip and what a screen reader hears
+      h('span', { class: ['against', offline && 'off'], testid: 'decision-against' }, offline
+        ? 'Reconnecting. Answers wait until the board is back.'
+        : [h('span', { class: 'sr-only' }, 'You are answering against '),
+            h('span', { class: 'mono', title: 'What you are answering against: the card as you read it. An answer to a card that has moved since is refused.' }, d.against?.label || d.against?.token || 'the card as shown'),
+            d.multi ? h('span', null, isMobile() ? ' · pick any, then Answer' : ' · pick any, then enter') : '']),
       jump ? h('button', { class: 'link', type: 'button', testid: 'decision-jump', onclick: () => ctx.setTab(jump[0]) }, jump[1]) : null)),
   h('div', { class: 'q', testid: 'decision-question' }, d.question),
-  h('div', { class: 'against', testid: 'decision-against' }, offline
-    ? 'Reconnecting. Answers wait until the board is back.'
-    : ['You are answering against ', h('span', { class: 'mono' }, d.against?.label || d.against?.token || 'the card as shown'),
-        d.multi ? (isMobile() ? ' · pick any, then Answer' : ' · pick any, then enter') : '']),
   optionButtons(d, false)),
   confirmEl(false) || '')
   const opts = box.querySelector('.decision > .opts')
@@ -403,12 +406,13 @@ function renderMdec () {
 
 function drawMdec (box) {
   const d = openDecision()
-  // the bar also carries the next card waiting after an answer — the
-  // chip in the dock sits with the composer, out of sight from a document
-  // tab (over the cards the list already shows it) — and, with no
-  // decision left, what the answer left to say
+  // the bar follows the card into its documents only: over the cards it
+  // would pin one card's decision under a list of every card that has one.
+  // It also carries the next card waiting after an answer — the chip in
+  // the dock sits with the composer, out of sight from a document tab —
+  // and, with no decision left, what the answer left to say
   const nx = state.view !== 'panel' ? null : nextRow()
-  const show = isMobile() && (!!d || !!state.decNote || !!nx) && state.view !== 'thread'
+  const show = isMobile() && (!!d || !!state.decNote || !!nx) && state.view === 'panel'
   box.hidden = !show
   clear(box)
   if (!show) return
@@ -421,8 +425,6 @@ function drawMdec (box) {
   box.style.setProperty('--dc', decisionColor(d, state.card.stage))
   box.classList.toggle('open', state.mdecOpen)
   box.append(h('button', { class: 'sum', type: 'button', testid: 'mdec-toggle', 'aria-expanded': String(state.mdecOpen), onclick: () => set({ mdecOpen: !state.mdecOpen }) },
-    // over the cards it would read as any card's: it says whose it is
-    state.view === 'cards' ? h('span', { class: 'cid', testid: 'mdec-card' }, state.card.id) : null,
     h('span', { class: 'k' }, decisionWord(d, state.card.stage)),
     h('span', { class: 'q' }, d.question),
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▴')))
@@ -458,7 +460,7 @@ function chosen (d) {
 }
 
 // NONE is what enter says, and does, with nothing highlighted.
-const NONE = 'pick an answer first'
+export const NONE = 'pick an answer first'
 
 // enterSays is what the composer's enter line reads with a decision pinned.
 export function enterSays (d) {

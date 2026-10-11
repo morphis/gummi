@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
-import { expect, test, type GummiServer, type Workspace } from '../fixtures/test';
+import { expect, showTab, test, type GummiServer, type Workspace } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // Publishing a card from the page (DESIGN §22): a person pushes the card's
@@ -17,7 +17,7 @@ async function openPR(page: Page, server: GummiServer, id: string, isPhone: bool
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
   if (isPhone) await page.getByTestId('tab-thread').click();
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
 }
 
 async function branchOf(ws: Workspace, id: string): Promise<string> {
@@ -57,7 +57,8 @@ test.describe('a verified card on a repository with a github.com remote', () => 
     // nothing is on GitHub yet: the tab offers to open one, and so does
     // the card's head where there is room for it
     await expect(page.getByTestId('pr-publish-create')).toBeVisible({ timeout: 20_000 });
-    if (!phone(info)) await expect(page.getByTestId('card-publish')).toBeVisible();
+    // (beside an open surface a laptop's head folds it into the card's menu)
+    if (info.project.name === 'desktop') await expect(page.getByTestId('card-publish')).toBeVisible();
     await shot(page, info, 'publish-1-offer');
 
     // the confirm: one sentence, the words the PR opens with, and the

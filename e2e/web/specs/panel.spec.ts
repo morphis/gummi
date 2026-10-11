@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { diff, mockCard } from '../fixtures/contract';
 import type { Page } from '@playwright/test';
 
@@ -39,14 +39,14 @@ test('a half-written note and comment outlive the card changing', async ({ paire
   await expect(page.getByTestId('spec-note-input')).toHaveValue('half a thought');
   await expect(page.getByTestId('spec-note-input')).toBeFocused();
 
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await page.getByTestId('diff-line-10').locator('.n').click();
   await page.getByTestId('annotation-input').fill('the brace');
   await bump(page);
   await expect(page.getByTestId('annotation-input')).toHaveValue('the brace');
   await expect(page.getByTestId('annotation-input')).toBeFocused();
   // and the spec's draft is still there when its tab comes back
-  await page.getByTestId('tab-spec').click();
+  await showTab(page, 'spec');
   await expect(page.getByTestId('spec-note-input')).toHaveValue('half a thought');
 });
 
@@ -61,7 +61,7 @@ test('a comment on a file the diff does not show is drawn and can be resolved', 
     await r.fulfill({ contentType: 'application/json', body: JSON.stringify(diff(m.diffRev, m.annotations)) });
   });
   await page.reload();
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   const box = page.getByTestId('diff-other');
   await expect(box).toContainText('Comments on files not in this diff');
   await expect(box.getByTestId('annotation-2')).toContainText('name it?');
@@ -80,7 +80,7 @@ test('a comment on a file the diff does not show is drawn and can be resolved', 
   // with no code at all, the loose comment is still there to resolve
   await page.route(`**/api/cards/${id}/diff`, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...diff(m.diffRev, m.annotations), files: [] }) }));
   await page.reload();
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('diff-none')).toBeVisible();
   await expect(page.getByTestId('diff-other').getByTestId('annotation-2')).toBeVisible();
 });
@@ -96,7 +96,7 @@ test('a comment can be edited in place', async ({ pairedPage: page }) => {
     await r.fulfill({ contentType: 'application/json', body: JSON.stringify(diff(m.diffRev, m.annotations)) });
   });
   await page.reload();
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await page.getByTestId('annotation-edit-1').click();
   const input = page.getByTestId('annotation-edit-input-1');
   await expect(input).toBeFocused();
@@ -110,7 +110,7 @@ test('a comment can be edited in place', async ({ pairedPage: page }) => {
 test('show in diff opens the diff at the thread’s line', async ({ pairedPage: page }) => {
   await mockCard(page, id);
   await page.reload();
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-open')).toHaveText('1 open thread');
   await page.getByTestId('pr-thread-show-0').click();
   await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
@@ -127,12 +127,12 @@ test('a landed card takes no more review input', async ({ pairedPage: page }) =>
   await expect(page.getByTestId('spec-comment-0')).toHaveCount(0);
   await expect(page.getByTestId('spec-note-resolve')).toHaveCount(0);
   await expect(page.getByTestId('spec-request-changes')).toHaveCount(0);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('diff-pending')).toContainText('still open when it closed');
   await expect(page.getByTestId('diff-request-changes')).toHaveCount(0);
   await expect(page.getByTestId('diff-line-10').locator('[role="button"]')).toHaveCount(0);
   await expect(page.getByTestId('annotation-edit-1')).toHaveCount(0);
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-push')).toContainText('nothing left that needs pushing');
   await expect(page.getByTestId('pr-push-cmd')).toHaveCount(0);
 });
@@ -146,7 +146,7 @@ test('the open comments’ bar stays in view down a long diff', async ({ pairedP
     return r.fulfill({ contentType: 'application/json', body: JSON.stringify(d) });
   });
   await page.reload();
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('diff-line-399')).toBeAttached();
   await page.locator('#pane').evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect(page.getByTestId('diff-request-changes')).toBeInViewport();
@@ -155,11 +155,15 @@ test('the open comments’ bar stays in view down a long diff', async ({ pairedP
 test('the tab a person picked on a card is where its next visit opens', async ({ pairedPage: page }) => {
   await mockCard(page, id);
   await page.reload();
-  // the verify-failed decision is about the diff: the panel follows it,
-  // and says so in the address
-  await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'true');
+  // the verify-failed decision is about the diff: that is what waits
+  // behind the Changes icon, and the address names it once it is open
+  await expect(page.getByTestId('decision')).toBeVisible();
+  await expect(page.getByTestId('tab-diff')).toHaveAttribute('aria-selected', 'false');
+  await expect(page).toHaveURL(new RegExp(`#${id}$`));
+  await page.getByTestId('tab-diff').click();
+  await expect(page.getByTestId('changes-diff')).toHaveAttribute('aria-selected', 'true');
   await expect(page).toHaveURL(new RegExp(`#${id}/diff$`));
-  await page.getByTestId('tab-log').click();
+  await showTab(page, 'log');
   await page.getByTestId(`rail-row-${other}`).click();
   await expect(page.getByTestId('card-id')).toHaveText(other);
   await page.getByTestId(`rail-row-${id}`).click();
@@ -174,7 +178,9 @@ test('a new session’s draft has no documents, and Cancel goes back', async ({ 
   await page.getByTestId('rail-new-session').click();
   await expect(page.getByTestId('draft-hero')).toBeVisible();
   await expect(page.getByTestId('tab-diff')).toHaveCount(0);
-  await expect(page.getByTestId('panel-draft')).toBeVisible();
+  // a draft has no documents, so no surface stands open beside it, even
+  // one that was open on the card before
+  await expect(page.getByTestId('surface')).toBeHidden();
   expect(new URL(page.url()).hash).toBe('');
   await page.getByTestId('draft-cancel').click();
   await expect(page.getByTestId('card-id')).toHaveText(other);

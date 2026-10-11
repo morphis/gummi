@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { expect, test, type GummiServer } from '../fixtures/test';
+import { expect, showTab, test, type GummiServer } from '../fixtures/test';
 import { seedGoalAtPlan } from '../fixtures/goals';
 import { shot } from '../fixtures/shots';
 
@@ -62,7 +62,7 @@ test.describe('a verified card', () => {
 
   test('links a pull request by its number', async ({ pairedPage: page, server, api, workspace }, info) => {
     await open(page, server, id, phone(info));
-    await page.getByTestId('tab-pr').click();
+    await showTab(page, 'pr');
     await expect(page.getByTestId('pr-none')).toBeVisible();
     // the PR tab offers the link the card's menu has
     await page.getByTestId('pr-link').click();
