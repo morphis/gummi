@@ -10,7 +10,7 @@ export const state = {
   session: null, // webapi.Session
   board: null, // webapi.Board
   sel: null, // selected card id
-  tab: 'spec', // right panel tab
+  tab: 'spec', // the tab that shows, or waits, beside the thread
   card: null, // webapi.Card of sel
   cardErr: null,
   thread: null, // { items: Item[], lastSeq, unavailable?, err? }
@@ -23,12 +23,15 @@ export const state = {
   decConfirm: null, // { question, yes, go }: a confirmation an answer's flow asked for
   showNext: null, // id of the next card needing you, after an answer
   railManual: storage.get('railManual', null), // null: follow the width
-  rightHidden: storage.get('rightHidden', false),
+  rightHidden: storage.get('rightHidden', true), // the surface beside the thread starts closed
   view: 'cards', // phone view: cards | thread | panel — the cards are the root screen
   mdecOpen: false,
   filter: '',
-  kind: 'all',
-  repo: 'all', // the rail's repo chip: 'all', or a repo's name ('' is the default)
+  kinds: [], // the rail's kind filter: card id prefixes, none meaning all
+  statuses: [], // and its status filter: the rail's groups, none meaning all
+  railGroup: storage.get('railGroup', 'status'), // status | repo
+  railShow: storage.get('railShow', ['stack', 'spend']), // what a row's second line adds
+  repo: 'all', // the rail's repo filter: 'all', or a repo's name ('' is the default)
   doneAll: false,
   draft: '' // composer text, so decision code can read it
 }
@@ -62,3 +65,10 @@ export function emit (key) { set({ [key]: state[key] }) }
 // rows is the board's rows, or none yet.
 export function rows () { return state.board?.rows || [] }
 export function row (id) { return rows().find(r => r.id === id) || null }
+
+// shownTab is the document on screen beside (on a phone, instead of) the
+// thread, or null when none is: what the address names.
+export function shownTab () {
+  const narrow = matchMedia('(max-width:760px)').matches
+  return (narrow ? state.view === 'panel' : !state.rightHidden) ? state.tab : null
+}

@@ -26,7 +26,9 @@
   --ui:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --brand:"Fredoka","Geist",ui-rounded,system-ui,sans-serif;
-  --rail-w:288px; --right-w:44%;
+  --rail-w:288px;
+  /* what a card is waiting on, as its row's dot: needs you, failed, ready to land, running */
+  --q-needs:#C77700; --q-fail:#C4334A; --q-ready:#23924A; --q-run:#1C7FC4;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -42,6 +44,7 @@
     --code-kw:#B9A6FF; --code-str:#F2C98B; --code-com:#9290A0; --code-fn:#7CC4FF;
     --shadow:0 16px 40px rgba(0,0,0,.5);
     --scrim:rgba(0,0,0,.5);
+    --q-needs:#F2B03B; --q-fail:#FF6B7F; --q-ready:#79E06A; --q-run:#4FB4FF;
   }
 }
 :root[data-theme="dark"]{
@@ -57,6 +60,7 @@
   --code-kw:#B9A6FF; --code-str:#F2C98B; --code-com:#9290A0; --code-fn:#7CC4FF;
   --shadow:0 16px 40px rgba(0,0,0,.5);
   --scrim:rgba(0,0,0,.5);
+  --q-needs:#F2B03B; --q-fail:#FF6B7F; --q-ready:#79E06A; --q-run:#4FB4FF;
 }
 
 /* stage tints: an element with .st-<stage> carries its colour as --sc */
@@ -110,6 +114,8 @@ kbd{font-family:var(--mono);font-size:11px;padding:1px 5px;border:1px solid var(
 .pills{display:flex;gap:6px;margin-left:auto;align-items:center}
 .pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:var(--panel);border:1px solid var(--line);font-size:12.5px;color:var(--fg2);white-space:nowrap}
 button.pill:hover{border-color:var(--line2);color:var(--fg)}
+/* the connection is said only while it is not live */
+#p-conn[data-state="live"]{display:none}
 .pill b{font-weight:600;color:var(--fg)}
 .pill b.mono{font-size:12px}
 .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
@@ -127,77 +133,96 @@ button.pill:hover{border-color:var(--line2);color:var(--fg)}
 .iconbtn.on{color:var(--accent)}
 svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 
-/* Three panes side by side at every desktop width. Narrower windows shrink the rail, never cover the conversation. */
-.main{display:grid;grid-template-columns:var(--rail-w) minmax(360px,1fr) minmax(326px,var(--right-w));min-height:0;min-width:0}
-.app.no-right .main{grid-template-columns:var(--rail-w) minmax(0,1fr) 0}
-.app.no-right .right,.app.no-right .resizer{display:none}
+/* The rail, the conversation and, beside it, a column of icons that opens
+   one surface at a time. The conversation keeps 400px whatever is open;
+   narrower windows shrink the rail, never cover the conversation. */
+.main{display:grid;grid-template-columns:var(--rail-w) minmax(400px,1fr) auto;min-height:0;min-width:0}
+.app.no-right .surface,.app.no-right .resizer{display:none}
 
 /* ---------- left rail ---------- */
 .rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0}
-.rail-head{padding:12px 12px 8px;display:flex;flex-direction:column;gap:8px}
-.search{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--fg3)}
+.rail-head{padding:12px 12px 6px;display:flex;flex-direction:column;gap:6px}
+.search{display:flex;align-items:center;gap:4px;height:32px;padding:0 4px 0 10px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--fg3)}
+.search label{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
 .search:focus-within{border-color:var(--accent)}
 .search input{border:0;outline:0;background:transparent;flex:1;min-width:0;font-size:13px}
 .search svg.i{width:14px;height:14px;stroke-width:1.8}
+.search .fbtn{position:relative;width:26px;height:24px;border-radius:6px;display:grid;place-items:center;flex-shrink:0;color:var(--fg3)}
+.search .fbtn:hover,.search .fbtn.on,.search .fbtn[aria-expanded="true"]{background:var(--accent-soft);color:var(--accent)}
+.search .fbtn .n{position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;border-radius:8px;background:var(--accent);color:var(--accent-fg);font:600 9.5px/15px var(--mono);text-align:center}
+/* the filters that apply, each with its own way off */
+.tokens{display:flex;flex-wrap:wrap;gap:4px}
+.tok{display:inline-flex;align-items:center;gap:2px;height:22px;padding:0 3px 0 8px;border-radius:11px;background:var(--accent-soft);color:var(--accent);font-size:12px;white-space:nowrap}
+.tok button{width:16px;height:16px;border-radius:50%;line-height:14px;font-size:13px;display:grid;place-items:center}
+.tok button:hover{background:var(--accent);color:var(--accent-fg)}
+button.tok.clear{background:none;color:var(--fg3);padding:0 6px;text-decoration:underline dotted;text-underline-offset:3px}
 .chips{display:flex;gap:4px;flex-wrap:wrap}
-#repos[hidden]{display:none}
 .chip{height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;font-weight:500;color:var(--fg3);border:1px solid transparent;font-family:var(--mono)}
 .chip:hover{color:var(--fg)}
-.chip.on{background:var(--panel);border-color:var(--line);color:var(--fg)}
 .cards{overflow-y:auto;flex:1;padding:0 8px 8px}
 .group{margin-top:10px}
 .group h3{margin:0;padding:4px 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3);display:flex;justify-content:space-between}
 .group h3 span{font-family:var(--mono);font-weight:400}
 .group.needs h3{color:var(--accent)}
-.row{width:100%;text-align:left;display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:2px 8px;padding:7px 8px;border-radius:8px;align-items:center;position:relative}
+.row{width:100%;text-align:left;display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:1px 8px;padding:7px 8px;border-radius:8px;align-items:center;position:relative}
 .row:hover{background:var(--sunk)}
 .row.sel{background:var(--band)}
-.row .g{font-size:12px;line-height:1;text-align:center;color:var(--sc,var(--fg3))}
+/* the dot is the card's status and nothing else: its stage is in words beside it */
+.row .dot{width:10px;height:10px;border-radius:50%;justify-self:center;border:1.5px solid var(--fg4)}
+.row .dot.q-needs{background:var(--q-needs);border-color:var(--q-needs)}
+.row .dot.q-failed{background:var(--q-fail);border-color:var(--q-fail)}
+.row .dot.q-ready{background:var(--q-ready);border-color:var(--q-ready)}
+.row .dot.q-running,.row .dot.q-watching{border:2px solid color-mix(in srgb,var(--q-run) 30%,transparent);border-top-color:var(--q-run)}
+.row .dot.q-running{animation:spin 1s linear infinite}
+.row .dot.q-session{width:8px;height:8px;border-radius:2px;transform:rotate(45deg);background:var(--s-open);border-color:var(--s-open)}
+.row .dot.q-paused{border-style:dashed;border-color:var(--warn)}
+.row .dot.q-idle{border-color:var(--fg3)}
+.row .dot.q-done{width:auto;height:auto;border:0;border-radius:0;color:var(--s-done);font-size:11px;line-height:10px}
 .row .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}
 .row .id{font-family:var(--mono);font-size:11.5px;color:var(--fg3)}
-/* the meta line wraps rather than clipping: a card with a stage badge, a
-   stack position and a meter needs more than one line of a narrow rail */
-.row .meta{grid-column:2/4;display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;font-size:11.5px;color:var(--fg3);min-width:0}
-.row .meta > .waits{max-width:100%}
+/* the second line is one line: the status in words and what else the row
+   was asked to show, then what the card has spent. The rest of a card's
+   facts wait in its hover card (.rowcard) and on its own screen */
+.row .meta{grid-column:2/4;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--fg3);min-width:0;white-space:nowrap}
+.row .meta .l{display:flex;align-items:center;gap:5px;flex:1;min-width:0;overflow:hidden}
+.row .meta .l > *{flex-shrink:0}
+.row .meta .l > .waits{flex-shrink:1}
+.row .meta i{font-style:normal;color:var(--fg4)}
+.row .word{font-weight:500}
+.row .word.q-needs{color:var(--warn)}
+.row .word.q-failed{color:var(--err)}
+.row .word.q-ready{color:var(--ok)}
+.row .word.q-paused,.row .stackpos.stale{color:var(--warn)}
+.row .spend{font-family:var(--mono);font-size:11px;flex-shrink:0}
+.row .spend.near{color:var(--err);font-weight:600}
 .row .repo{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;height:17px;line-height:17px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--rc);background:color-mix(in srgb,var(--rc) 14%,transparent)}
-.row .ff{color:color-mix(in srgb,var(--s-open) var(--t-keep),#000)}
 .row .badge{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;height:17px;display:inline-block;line-height:17px;white-space:nowrap}
-.badge.needs{background:color-mix(in srgb,var(--dc) 14%,transparent);color:color-mix(in srgb,var(--dc) var(--t-keep),#000)}
-/* on the selected row's band the tint needs a solid ground to stay legible */
-.row.sel .badge.needs{background:color-mix(in srgb,var(--dc) 14%,var(--panel))}
 .badge.run{color:var(--fg2)}
 .badge.paused{color:var(--warn)}
-.badge.watch{color:var(--fg2)}
 .badge.obj{color:var(--accent)}
 .badge.obj.obj-met{color:var(--ok)}
 .badge.obj.obj-paused{color:var(--fg3)}
 .badge.obj.obj-stuck,.badge.obj.obj-exhausted,.badge.obj.obj-capped,.badge.obj.obj-failed{color:var(--warn)}
 .badge.stack{color:var(--fg3);border:1px solid var(--line2)}
-.row .badge.stack,.row .badge.else{line-height:15px}
 .badge.stack.stale{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 50%,var(--line2))}
-.badge.else{color:var(--fg3);border:1px dashed var(--line2)}
 .subline .badge{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:4px;height:18px;display:inline-flex;align-items:center;white-space:nowrap}
 .subline button.badge:hover{border-color:var(--fg4);color:var(--fg)}
 .waits{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.strip{display:inline-flex;gap:2px;flex-shrink:0}
-.strip i{width:12px;height:4px;border-radius:2px;background:var(--line2)}
-.strip i.now{background:var(--sc)}
-.strip i.past{background:var(--sc);opacity:.45}
-.meter{margin-left:auto;font-family:var(--mono);font-size:11px;white-space:nowrap}
 .more-done{width:100%;text-align:left;padding:4px 8px;font-size:12px;color:var(--fg3)}
 .more-done:hover{color:var(--fg)}
-.rail-foot{border-top:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:2px;position:relative}
-.rail-foot button{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:8px;color:var(--fg2);font-size:13px;text-align:left;white-space:nowrap}
-.rail-foot button:hover{background:var(--sunk);color:var(--fg)}
-.rail-foot .sub{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--fg3)}
-.rail-foot .newcard{justify-content:center;border:1px dashed var(--line2);height:32px}
-.rail-foot .newcard .plus{font-size:15px;line-height:1}
-.rail-foot .newcard:hover{border-color:var(--accent);color:var(--accent);background:none}
+.rail-foot{border-top:1px solid var(--line);padding:8px;display:flex;align-items:center;gap:4px;position:relative}
+/* one button starts a session; its arrow holds what else can be started */
+.split{display:flex;flex:1;min-width:0;height:32px;border:1px solid var(--accent);border-radius:8px;color:var(--accent);font-weight:500;font-size:13px;overflow:hidden}
+.split .newsession{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap}
+.split .split-more{width:28px;display:grid;place-items:center;border-left:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+.split button:hover{background:var(--accent-soft)}
+.split svg.i{width:14px;height:14px}
+.rail-foot .iconbtn{height:32px;min-width:32px;padding:0}
 
-/* compact rail: glyph + id, a dot for what needs you */
+/* compact rail: each card's status dot and id */
 .app.rail-compact{--rail-w:76px}
 .app.rail-compact .rail-head,.app.rail-compact .group h3,.app.rail-compact .row .t,.app.rail-compact .row .meta,
-.app.rail-compact .rail-foot .lbl,.app.rail-compact .rail-foot .sub,.app.rail-compact .more-done .lbl{display:none}
+.app.rail-compact .rail-foot .lbl,.app.rail-compact .more-done .lbl{display:none}
 /* what the compact rail keeps of the full one: the fold of the landed
    cards as "+N", and a mark that a filter still applies */
 .more-done .cmp,.rail-filtered{display:none}
@@ -210,11 +235,18 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .app.rail-compact .group:first-child{border-top:0;margin-top:0}
 .app.rail-compact .row{grid-template-columns:1fr;justify-items:center;padding:7px 2px;gap:3px}
 .app.rail-compact .row .id{font-size:10.5px}
-.app.rail-compact .row.needs::after{content:"";position:absolute;top:5px;right:9px;width:7px;height:7px;border-radius:50%;background:var(--dc)}
-.app.rail-compact .rail-foot button{justify-content:center;padding:8px 0}
+.app.rail-compact .rail-foot{flex-direction:column}
+.app.rail-compact .split{flex:none;width:100%}
+.app.rail-compact .split .split-more{width:24px}
 
 /* ---------- centre ---------- */
-.center{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--panel)}
+.center{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--panel);container-type:inline-size}
+/* beside an open surface the head's second line keeps the stage the card
+   is in: the ones behind it fold to their ticks, the spend to its figure */
+@container (max-width:600px){
+  .stages button.past .sn,.subline .spend .bar,.subline .ctxm .bar{display:none}
+  .stages button.past{padding:2px 3px}
+}
 .head{padding:12px 20px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
 .head-row{display:flex;align-items:center;gap:10px;min-width:0}
 .kind{font-family:var(--mono);font-size:11px;font-weight:500;padding:1px 6px;border-radius:4px;border:1px solid var(--line2);color:var(--fg2)}
@@ -229,13 +261,20 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .btn.danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,var(--line2))}
 .btn.pri.danger{background:var(--err);border-color:var(--err);color:var(--on-err)}
 .btn.on{border-color:var(--warn);color:var(--warn)}
-.subline{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;font-size:12.5px;color:var(--fg3)}
+.subline{display:flex;align-items:center;gap:6px 14px;font-size:12.5px;color:var(--fg3);min-width:0;white-space:nowrap}
+/* nothing spills past the head: what a card waits on or belongs to gives
+   way first, its stage and its spend last */
+.subline > *{flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.subline > .sp{flex:1 1 0}
+.subline > .stages,.subline > .spend{flex-shrink:0}
+.subline{overflow:hidden}
 .subline .mono{color:var(--fg2)}
-.stages{display:flex;align-items:center;flex-wrap:wrap;font-size:12px}
-.stages button{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:5px;color:var(--fg3);cursor:default}
+.stages{display:flex;align-items:center;font-size:12px}
+.stages button,.stages .cur{display:inline-flex;align-items:center;padding:2px 7px;border-radius:5px;cursor:default;white-space:pre}
+.stages button{color:var(--fg3)}
 .stages button.past{color:var(--fg2);cursor:pointer}
 .stages button.past:hover{background:var(--sunk);color:var(--fg)}
-.stages button.cur{background:color-mix(in srgb,var(--sc) 16%,transparent);color:color-mix(in srgb,var(--sc) var(--t-keep),#000);font-weight:600}
+.stages .cur{background:color-mix(in srgb,var(--sc) 16%,transparent);color:color-mix(in srgb,var(--sc) var(--t-keep),#000);font-weight:600}
 .stages em{font-style:normal;color:var(--fg4);font-size:10px}
 .spend{display:inline-flex;align-items:center;gap:8px}
 .spend .bar{width:72px;height:5px;background:var(--line);border-radius:3px;overflow:hidden}
@@ -249,7 +288,9 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .link{color:var(--accent);cursor:pointer;text-decoration:none;border-bottom:1px dotted currentColor;background:none}
 
 .thread{flex:1;overflow-y:auto;padding:20px 20px 12px;min-height:0}
-.thread-inner{width:100%;display:flex;flex-direction:column;gap:14px}
+/* with no surface open the conversation has the width of the window: its
+   lines keep a length that reads */
+.thread-inner{width:100%;max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .thread-items{display:flex;flex-direction:column;gap:14px}
 .sg{display:flex;flex-direction:column}
 .sg > summary{list-style:none;cursor:pointer}
@@ -402,7 +443,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 
 /* dock: decision + composer */
 .dock{padding:0 20px 16px;background:var(--panel)}
-.dock-inner{width:100%;display:flex;flex-direction:column;gap:8px}
+.dock-inner{width:100%;max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
 .decision{border:1px solid color-mix(in srgb,var(--dc) 45%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--dc) 5%,var(--panel));overflow:hidden;
   /* the thread yields first, but never all of it: the decision is capped.
      Past the cap the question yields first, down to a two-line floor and
@@ -414,12 +455,15 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .decision.paused{opacity:.55}
 .decision.paused .opt{pointer-events:none}
 .decision header{display:flex;align-items:center;gap:8px;padding:10px 14px 2px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc) var(--t-keep),#000);flex-wrap:wrap}
-.decision header .more{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg3);display:flex;gap:10px}
-.decision .q{padding:0 14px 2px;font-size:14.5px;font-weight:500;overflow-wrap:anywhere;white-space:pre-line}
+.decision header .more{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg3);display:flex;align-items:baseline;gap:10px;min-width:0}
+.decision .q{padding:0 14px 6px;font-size:14.5px;font-weight:500;overflow-wrap:anywhere;white-space:pre-line}
 /* a question cut off by the cap fades at its foot: there is more to scroll to */
 .decision > .q.clip{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 1.4em),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 1.4em),transparent)}
-.decision .against{padding:0 14px 6px;font-size:11.5px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.decision .against .mono{font-size:11px}
+/* what the answer is given against is one quiet token in the header */
+.decision .against{display:flex;align-items:baseline;font-size:11px;color:var(--fg3);white-space:nowrap;min-width:0}
+.decision .against .mono{font-size:11px;max-width:30ch;overflow:hidden;text-overflow:ellipsis}
+/* while the board is away it is a sentence, read in full */
+.decision .against.off{white-space:normal}
 .opts{display:flex;flex-direction:column;padding:0 6px 6px}
 .opt{display:grid;grid-template-columns:22px auto minmax(0,1fr);gap:8px 12px;align-items:center;text-align:left;padding:7px 8px;border-radius:8px;font-size:13.5px}
 .opt:hover{background:var(--sunk)}
@@ -430,6 +474,13 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .opt .d .carry{color:var(--accent);font-weight:500}
 .opt.chat .l{color:var(--fg2);font-style:italic}
 .opt.danger .l{color:var(--err)}
+/* a decision with one possible move is one button, not a list of one */
+.opts > .opt:only-child:not(.chat):not(.pick){display:flex;justify-content:center;align-self:flex-start;margin:0 8px 4px;padding:6px 14px;background:var(--accent);color:var(--accent-fg);font-weight:500}
+.opts > .opt:only-child:not(.chat):not(.pick) .k{display:none}
+.opts > .opt:only-child:not(.chat):not(.pick) .d{color:inherit;opacity:.85}
+.opts > .opt:only-child:not(.chat):not(.pick) .d:empty{display:none}
+.opts > .opt:only-child:not(.chat):not(.pick).danger{background:var(--err);color:var(--on-err)}
+.opts > .opt:only-child:not(.chat):not(.pick).danger .l{color:inherit}
 .nextup{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);font-size:13px;color:var(--fg2);background:var(--sunk);text-align:left;width:100%}
 .nextup:hover{border-color:var(--accent)}
 .nextup .dotc{width:8px;height:8px;border-radius:50%;background:var(--dc);flex-shrink:0}
@@ -447,6 +498,9 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .composer .enter{display:flex;align-items:center;gap:6px;min-width:0}
 .composer .enter b{color:var(--fg2);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .composer.blocked .enter b{color:var(--warn)}
+/* the Send button names the answer: the line beside it would say it twice */
+.composer.said .enter b{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.send::first-letter{text-transform:uppercase}
 /* a session's composer: the draft's repository, base and budget above the
    line, and the model picker beside Send (session.js) */
 .draftrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px 0}
@@ -527,22 +581,42 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .opt.pick .k{border-style:dashed}
 .opt.picked .k{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .opt.picked .l{font-weight:500}
-.send{margin-left:auto;height:28px;padding:0 12px;border-radius:7px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:12.5px;white-space:nowrap}
+.send{margin-left:auto;height:28px;padding:0 12px;border-radius:7px;background:var(--accent);color:var(--accent-fg);font-weight:600;font-size:12.5px;white-space:nowrap;max-width:26ch;overflow:hidden;text-overflow:ellipsis}
 
-/* ---------- right panel ---------- */
-/* the resizer is the panel's own left edge (inside its landmark), 6px the panel keeps clear */
+/* ---------- beside the thread: the icons and the one surface they open ---------- */
+/* a column of icons, and left of it the one surface an icon opened. The
+   resizer is the surface's own left edge (inside the landmark), 6px it keeps clear */
 .resizer{position:absolute;left:0;top:0;bottom:0;width:6px;z-index:1;cursor:col-resize;background:var(--bg);border-left:1px solid var(--line);touch-action:none}
 .resizer:hover,.resizer.drag{background:var(--accent-soft)}
-.right{position:relative;padding-left:6px;display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--bg)}
-.tabs{display:flex;align-items:center;gap:2px;padding:6px 8px 0;border-bottom:1px solid var(--line);background:var(--rail);min-width:0}
-.tab{height:32px;padding:0 11px;border-radius:7px 7px 0 0;font-size:13px;color:var(--fg2);display:flex;align-items:center;gap:6px;border:1px solid transparent;border-bottom:0;margin-bottom:-1px;white-space:nowrap}
-.tab:hover{color:var(--fg)}
-.tab.dim{color:var(--fg3)}
-.tab.on{background:var(--bg);color:var(--fg);border-color:var(--line);font-weight:500}
-.tab .n{font-family:var(--mono);font-size:10.5px;color:var(--fg3);background:var(--sunk);padding:0 5px;border-radius:4px}
+.right{position:relative;display:flex;min-height:0;min-width:0;background:var(--bg)}
+/* each surface has a width of its own until a person drags it (--right-w) */
+.right{--surface-w:560px}
+.right[data-surface="spec"],.right[data-surface="memory"]{--surface-w:520px}
+.right[data-surface="changes"]{--surface-w:640px}
+.right[data-surface="run"]{--surface-w:480px}
+.right[data-surface="terminal"]{--surface-w:600px}
+.surface{display:flex;flex-direction:column;min-width:0;min-height:0;padding-left:6px;width:var(--right-w,var(--surface-w));max-width:max(260px,calc(100vw - var(--rail-w) - 444px))}
+/* a surface's one header line: its name, its switch, and the way to close it */
+.sh{display:flex;align-items:center;gap:10px;height:44px;padding:0 8px 0 14px;border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap;min-width:0;flex-shrink:0}
+.sh .st{font-size:14px;font-weight:600}
+.sh .seg{margin-left:0;flex-shrink:0}
+.sh .seg button{display:inline-flex;align-items:center;gap:5px}
+
+.sh .seg .n{font-family:var(--mono);font-size:10.5px;color:var(--fg3);background:var(--sunk);padding:0 5px;border-radius:4px}
+.sh .seg .n.hot{background:var(--accent);color:var(--accent-fg)}
+.sh .on{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:var(--fg3)}
+.sh .on .mono{font-size:12px;color:var(--fg2)}
+.sh .close{margin-left:auto;flex-shrink:0}
+.tabs{display:flex;flex-direction:column;align-items:center;width:44px;flex-shrink:0;padding:8px 0;border-left:1px solid var(--line);background:var(--rail);min-width:0}
+.tab{position:relative;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--fg3);white-space:nowrap}
+.tab:hover{background:var(--sunk);color:var(--fg)}
+.tab.dim{color:var(--fg4)}
+.tab.on{background:var(--band);color:var(--accent)}
+.tab .n{position:absolute;top:0;right:-2px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--fg3);color:var(--panel);font:600 9.5px/15px var(--mono);text-align:center}
 .tab .n.hot{background:var(--accent);color:var(--accent-fg)}
-.tablist{display:flex;align-items:flex-end;align-self:flex-end;gap:2px;min-width:0}
-.tabs .sp{margin-left:auto;display:flex;gap:2px;align-items:center}
+.tablist{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+/* an icon's name is its tooltip and what a screen reader hears; a phone's row spells it out */
+@media (min-width:761px){.tab .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}}
 .pane{flex:1;overflow:auto;min-height:0}
 
 /* spec */
@@ -657,6 +731,12 @@ xterm-style{display:none}
 .file .fold:hover{background:var(--sunk)}
 .hunk .hh{color:var(--fg3);background:color-mix(in srgb,var(--accent) 6%,transparent);padding:2px 10px;white-space:pre}
 .ln{display:grid;grid-template-columns:40px 40px 14px minmax(max-content,1fr);white-space:pre}
+/* long lines wrapped (diff.js): no hunk scrolls sideways */
+.pane.wrap .ln{grid-template-columns:40px 40px 14px minmax(0,1fr);white-space:pre-wrap;overflow-wrap:anywhere}
+.pane.wrap .hunk .hh{white-space:pre-wrap;overflow-wrap:anywhere}
+.diffhead .wraptgl{margin-left:auto;height:24px;padding:0 9px;border-radius:7px;border:1px solid var(--line2);font-size:12px;color:var(--fg3)}
+.diffhead .seg + .wraptgl{margin-left:0}
+.diffhead .wraptgl.on{background:var(--band);color:var(--fg);font-weight:500}
 .ln .o,.ln .n{color:var(--fg3);text-align:right;padding-right:8px;user-select:none;cursor:pointer}
 .ln .o:hover,.ln .n:hover{color:var(--accent)}
 .ln .m{color:var(--fg4);user-select:none}
@@ -733,6 +813,11 @@ p.push.none{margin:0}
 .pubfacts dt{color:var(--fg3)} .pubfacts dd{margin:0;color:var(--fg);overflow-wrap:anywhere}
 .pubcmds{margin:0;background:var(--sunk);border-radius:6px;padding:6px 8px;font-family:var(--mono);font-size:12px;color:var(--fg);overflow-x:auto}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+/* a card's run leads with one summary box, not a wall of them */
+.pane .tiles{display:flex;flex-wrap:wrap;gap:8px 24px;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px}
+.pane .tiles .tile{border:0;border-radius:0;background:none;padding:0}
+.pane .tiles .tile .v{font-size:17px}
+.shead .seg button{text-transform:capitalize}
 .tile{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px}
 .tile .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .tile .v small{font-size:12px;color:var(--fg3);font-weight:400}
@@ -847,6 +932,26 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
 .menu button.danger{color:var(--err)}
 .menu button .kh{margin-left:auto}
 .menu .sep{height:1px;background:var(--line);margin:4px 2px}
+.menu .mh{padding:8px 10px 3px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3)}
+.menu .mh:first-child{padding-top:5px}
+.menu .ml{flex:1;min-width:0}
+/* an entry's words are the board's, in its own lower case: a menu leads with a capital */
+.menu .ml::first-letter{text-transform:uppercase}
+.menu .mc{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--fg3)}
+.menu .chk{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--line2);flex-shrink:0;display:grid;place-items:center}
+.menu [role="menuitemradio"] .chk{border-radius:50%}
+.menu [aria-checked="true"] .chk{background:var(--accent);border-color:var(--accent)}
+.menu [aria-checked="true"] .chk::after{content:"";width:6px;height:6px;border-radius:1.5px;background:var(--accent-fg)}
+.menu [role="menuitemradio"][aria-checked="true"] .chk::after{border-radius:50%}
+/* a rail row's facts, beside it while the pointer rests there */
+.rowcard{position:fixed;z-index:40;width:300px;background:var(--panel);border:1px solid var(--line2);border-radius:11px;box-shadow:var(--shadow);padding:12px 14px;pointer-events:none;font-size:12px}
+.rowcard b{display:block;margin-bottom:6px;font-size:13px;overflow-wrap:anywhere}
+.rowcard dl{display:grid;grid-template-columns:84px minmax(0,1fr);gap:3px 8px;margin:0}
+.rowcard dt{color:var(--fg3)}
+.rowcard dd{margin:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.rowcard .bar{display:block;height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:9px}
+.rowcard .bar i{display:block;height:100%;width:var(--pct,0%);background:var(--accent)}
+.rowcard .bar.near i{background:var(--err)}
 
 /* pairing */
 .pairing{height:100%;overflow:auto;display:flex;align-items:center;justify-content:center;padding:24px 16px}
@@ -894,13 +999,14 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .rb-actions{width:100%}
   .rb-actions .btn{flex:1;justify-content:center}
   .app,.app.rail-compact{--rail-w:100%}
-  .main,.app.no-right .main{grid-template-columns:minmax(0,1fr)}
-  .rail,.center,.right,.resizer,.app.no-right .right{display:none}
-  .right{padding-left:0}
+  .main{grid-template-columns:minmax(0,1fr)}
+  .rail,.center,.right,.resizer{display:none}
+  .surface,.app.no-right .surface{display:flex;width:100%;max-width:none;padding-left:0}
   .app[data-view="cards"] .rail{display:flex}
   .app[data-view="thread"] .center{display:flex}
   .app[data-view="panel"] .right,.app.no-right[data-view="panel"] .right{display:flex}
-  .pills .pill:not(#p-conn),.ws,.top .hide-s{display:none}
+  /* what needs you stays one tap away from every screen */
+  .pills .pill:not(#p-conn):not(#p-next),.ws,.top .hide-s{display:none}
   .top{padding:0 12px}
   #btn-palette kbd{display:none}
   /* a card's screen: back to the cards, the card's head, then one row of
@@ -912,15 +1018,32 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .mback .dotn{position:absolute;top:4px;right:0;min-width:16px;height:16px;border-radius:8px;background:var(--accent);color:var(--accent-fg);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 4px}
   .mback .dotn[hidden]{display:none}
   .mcard .head{grid-column:2;padding:10px 12px 8px 0;border-bottom:0;min-width:0}
-  .mcard .tabs{grid-column:1 / -1}
-  .mcard [data-testid="toggle-panel"]{display:none}
+  .mcard .tabs{grid-column:1 / -1;flex-direction:row;width:auto;padding:0;border-left:0;border-top:1px solid var(--line);background:none}
+  .mcard .tablist{flex-direction:row;align-items:stretch;gap:0;flex:1}
+  .mcard .tab{flex:1;width:auto;height:40px;border-radius:0;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 10px;font-size:13.5px;color:var(--fg2);border-bottom:2px solid transparent}
+  .mcard .tab svg.i{display:none}
+  .mcard .tab.dim{color:var(--fg3)}
+  .mcard .tab.on{background:none;color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
+  .mcard .tab .n{position:static;background:var(--sunk);color:var(--fg3)}
+  .mcard .tab .n.hot{background:var(--accent);color:var(--accent-fg)}
+  /* a document's header keeps its switch; its name is the tab above it */
+  .sh{height:auto;min-height:42px;padding:6px 12px;flex-wrap:wrap;gap:4px 10px}
+  .sh .st{display:none}
+  .sh:not(:has(.seg)){display:none}
+  .sh .seg{flex:1}
+  .sh .seg button{flex:1;justify-content:center;height:30px}
+  /* the branch the changes are on, under the switch */
+  .sh .on{flex:1 0 100%}
+  .pane .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 8px}
+  /* a pass's role and its time give way before its cost is clipped */
+  [data-testid="stats-table"] :is(th,td):nth-child(2),[data-testid="stats-table"] :is(th,td):nth-child(6){display:none}
+  .pane.wrap .ln{grid-template-columns:28px 28px 12px minmax(0,1fr)}
   /* the documents want the height: their card is named, its stages wait in the thread */
   .app[data-view="panel"] .mcard .subline{display:none}
-  /* the decision follows you into the cards and document views */
+  /* the decision follows you into the card's documents */
   .mdec{display:block;border-top:1px solid color-mix(in srgb,var(--dc) 45%,var(--line));background:color-mix(in srgb,var(--dc) 6%,var(--panel))}
   .mdec[hidden]{display:none}
   .mdec .sum{width:100%;display:flex;align-items:center;gap:8px;padding:10px 16px;text-align:left;font-size:13px}
-  .mdec .sum .cid{font-family:var(--mono);font-size:12px;color:var(--fg2);white-space:nowrap}
   .mdec .sum .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc) var(--t-keep),#000);white-space:nowrap}
   .mdec .sum .q{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg2)}
   .mdec .sum .chev{color:var(--fg3);transition:transform .15s}
@@ -940,18 +1063,28 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   .head-actions .hide-s{display:none}
   .annot{margin-left:10px}
   .tabs{overflow-x:auto}
-  /* the foot is one row of five on a phone, so the cards keep the height */
-  .rail-foot{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;padding:6px 8px}
-  .rail-foot button,.rail-foot .newcard{flex-direction:column;justify-content:center;gap:2px;padding:6px 2px;height:auto;font-size:11px;white-space:normal;text-align:center}
-  .rail-foot .newcard .plus{font-size:16px;line-height:16px}
-  .rail-foot .sub{display:none}
+  /* the foot is one thumb row on a phone, so the cards keep the height */
+  .rail-foot{padding:8px 12px;gap:8px}
+  .split{height:42px;font-size:14px}
+  .rail-foot .iconbtn{height:42px;min-width:42px}
+  .search{height:40px}
+  .search .fbtn{width:34px;height:32px}
+  .row{padding:10px 8px}
+  .row .meta{font-size:12.5px}
+  /* the card's head is two lines on a phone: its name, then where it stands */
+  .mcard .head{gap:4px}
+  .mcard .subline{gap:6px 10px}
+  .mcard .stages button:not(.cur) .sn,.mcard .stages em{display:none}
+  .mcard .stages button:not(.cur){padding:2px 3px;min-width:0}
+  /* a menu is a sheet from the bottom edge, in a thumb's reach */
+  .menu{left:0 !important;right:0 !important;top:auto !important;bottom:0 !important;max-width:none;max-height:78vh !important;border-radius:16px 16px 0 0;border-width:1px 0 0;padding:10px 10px calc(14px + env(safe-area-inset-bottom,0px))}
+  .menu button{padding:11px 10px;font-size:15px}
   .indent{margin-left:0}
   .scrim{padding:8vh 10px 10px}
   .modal,.modal.wide{max-height:100%}
-  /* a finger needs 24px at the least: the rail's chips, the stage strip,
+  /* a finger needs 24px at the least: the stage strip,
      the thread's fold lines and the inline links (padding widens what an
      inline link takes a tap on without moving the line it sits in) */
-  #kinds .chip,#repos .chip{height:30px;padding:0 10px}
   .stages button{min-height:28px}
   .tools summary,.sg > summary{min-height:32px}
   .center .link,.dock .link,.mdec .link,.mcard .link{border-bottom:0;text-decoration:underline dotted;text-underline-offset:3px;padding:5px 0}
@@ -973,7 +1106,7 @@ table.passes.bars td.pct{color:var(--fg3);font-size:11.5px}
   html.kb .dock-inner{gap:6px}
   html.kb .decision header{padding:6px 12px 0}
   html.kb .decision .q{padding:0 12px 4px;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:0}
-  html.kb .decision .against,html.kb .decision .more{display:none}
+  html.kb .decision .more{display:none}
   html.kb .decision .opts{max-height:88px;overflow-y:auto;padding:0 4px 4px}
   html.kb .decision .opt{padding:5px 8px;font-size:13px}
   html.kb .decision .opt .d{display:none}

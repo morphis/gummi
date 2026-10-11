@@ -280,17 +280,28 @@ export function openMenu (anchor, items, { up = false, testid = 'menu' } = {}) {
   const menu = h('div', { class: ['menu', up ? 'up' : 'down'], role: 'menu', testid },
     items.map(it => it === 'sep'
       ? h('div', { class: 'sep', role: 'separator' })
-      : h('button', {
-        role: 'menuitem',
-        type: 'button',
-        class: it.danger && 'danger',
-        testid: it.testid,
-        title: it.hint || null,
-        // focus goes back to the menu's button first, so a dialog the item
-        // opens returns there when it closes rather than to <body> — the
-        // item that had focus is gone with the menu
-        onclick: () => { closeMenu(); if (document.contains(anchor)) anchor.focus(); it.onClick?.() }
-      }, it.icon ? icon(it.icon) : null, it.label, it.key ? h('kbd', { class: 'kh' }, it.key) : null)))
+      : it.head
+        ? h('div', { class: 'mh', role: 'presentation' }, it.head)
+        : h('button', {
+          // an item that says whether it is on (checked) is a tick or, with
+          // radio, one of a set: pressing it changes the page and leaves
+          // the menu open, every tick in it read again
+          role: it.checked ? (it.radio ? 'menuitemradio' : 'menuitemcheckbox') : 'menuitem',
+          type: 'button',
+          class: [it.danger && 'danger', it.checked && 'tick'],
+          testid: it.testid,
+          title: it.hint || null,
+          'aria-checked': it.checked ? String(!!it.checked()) : null,
+          // focus goes back to the menu's button first, so a dialog the item
+          // opens returns there when it closes rather than to <body> — the
+          // item that had focus is gone with the menu
+          onclick: it.checked
+            ? () => { it.onClick?.(); retick() }
+            : () => { closeMenu(); if (document.contains(anchor)) anchor.focus(); it.onClick?.() }
+        }, it.checked ? h('span', { class: 'chk', 'aria-hidden': 'true' }) : null, it.icon ? icon(it.icon) : null, h('span', { class: 'ml' }, it.label),
+        it.count !== undefined ? h('span', { class: 'mc' }, String(it.count)) : null, it.key ? h('kbd', { class: 'kh' }, it.key) : null)))
+  const ticks = items.filter(it => it !== 'sep' && !it.head)
+  const retick = () => [...menu.querySelectorAll('button')].forEach((b, i) => { if (ticks[i]?.checked) b.setAttribute('aria-checked', String(!!ticks[i].checked())) })
   // on the body, placed against the anchor: the surface that drew the
   // anchor may redraw (the card head does on every change) without taking
   // an open menu with it, and a long menu scrolls inside the window

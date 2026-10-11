@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { pixelPNG } from '../fixtures/paths';
 import { shot } from '../fixtures/shots';
@@ -12,6 +12,7 @@ import { shot } from '../fixtures/shots';
 // a session draft's attach control are never offered at all).
 
 async function openForm(page: Page) {
+  await page.getByTestId('rail-new-menu').click();
   await page.getByTestId('rail-new').click();
   await expect(page.getByTestId('view-newcard')).toBeVisible();
 }
@@ -28,7 +29,7 @@ test('a new card attaches an image and its spec shows it', async ({ pairedPage: 
   await expect(page.getByTestId('view-newcard')).toHaveCount(0);
   await expect(page.getByTestId('card-title')).toHaveText('Fix the broken header layout');
 
-  await page.getByTestId('tab-spec').click();
+  await showTab(page, 'spec');
   const img = page.getByTestId('spec-doc').locator('img');
   await expect(img).toHaveAttribute('alt', 'pixel.png');
   await expect(img).toHaveAttribute('src', /\/api\/attachments\/[0-9a-f]{64}$/);

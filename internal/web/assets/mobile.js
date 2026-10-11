@@ -2,8 +2,9 @@
 // and opening one moves to that card's own screen. The card screen keeps
 // its identity on top — a back to the cards (which counts what needs you),
 // the card's head, and one row of tabs: its Thread beside its documents
-// (Spec, Diff, Log, PR, Stats; panel.js draws the row). The pinned decision
-// follows into the cards and documents as a docked bar (decision.js draws it).
+// (Memory or Spec, Changes, Run, and Terminal where served; panel.js draws
+// the row). The pinned decision
+// follows into the documents as a docked bar (decision.js draws it).
 
 import { $, h, clear, icon, isMobile } from './dom.js?v=__ASSET_V__'
 import { on, set, state } from './store.js?v=__ASSET_V__'

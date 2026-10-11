@@ -47,15 +47,18 @@ function watchErrors(page: Page): string[] {
   return errors;
 }
 
-test('a multi-repo board tags each card with its repo and offers repo chips', async ({ pairedPage: page }, info) => {
+test('a multi-repo board tags each card with its repo and offers them in the filter menu', async ({ pairedPage: page }, info) => {
   const errors = watchErrors(page);
   await page.reload();
   await fullRail(page, info.project.name);
-  await expect(page.getByTestId('rail-repos')).toBeVisible();
-  for (const name of ['all', 'default', 'lxd']) {
-    await expect(page.getByTestId(`rail-repo-${name}`)).toBeVisible();
+  await page.getByTestId('rail-filters').click();
+  for (const name of ['default', 'lxd']) {
+    await expect(page.getByTestId(`rail-repo-${name}`)).toHaveAttribute('aria-checked', 'false');
   }
-  await expect(page.getByTestId('rail-repo-all')).toHaveAttribute('aria-pressed', 'true');
+  // each says how many cards it has
+  await expect(page.getByTestId('rail-repo-lxd')).toContainText('1');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('rail-filter-menu')).toHaveCount(0);
   const lxdChip = page.locator('[data-testid^="rail-row-repo-"]');
   await expect(lxdChip).toHaveCount(1);
   await expect(lxdChip).toHaveText('lxd');
@@ -66,7 +69,7 @@ test('a multi-repo board tags each card with its repo and offers repo chips', as
   expect(errors).toEqual([]);
 });
 
-test('a repo chip narrows the rail to that repo, and all restores it', async ({ pairedPage: page }, info) => {
+test('a repository in the filter menu narrows the rail to it, and its token restores it', async ({ pairedPage: page }, info) => {
   await page.reload();
   await fullRail(page, info.project.name);
   const lxdRow = page.locator('.row', { hasText: 'Rate limit the login' });
@@ -74,16 +77,30 @@ test('a repo chip narrows the rail to that repo, and all restores it', async ({ 
   await expect(lxdRow).toBeVisible();
   await expect(defaultRow).toBeVisible();
 
+  // the menu stays open while its ticks change the rail behind it
+  await page.getByTestId('rail-filters').click();
   await page.getByTestId('rail-repo-lxd').click();
-  await expect(page.getByTestId('rail-repo-lxd')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('rail-repo-lxd')).toHaveAttribute('aria-checked', 'true');
   await expect(lxdRow).toBeVisible();
   await expect(defaultRow).toHaveCount(0);
 
   await page.getByTestId('rail-repo-default').click();
+  await expect(page.getByTestId('rail-repo-lxd')).toHaveAttribute('aria-checked', 'false');
   await expect(defaultRow).toBeVisible();
   await expect(lxdRow).toHaveCount(0);
+  await page.keyboard.press('Escape');
 
-  await page.getByTestId('rail-repo-all').click();
+  // the filter that applies is named under the box, with its own way off
+  await expect(page.getByTestId('rail-filters')).toContainText('1');
+  await page.getByTestId('rail-token-repo-default').getByRole('button').click();
+  await expect(page.getByTestId('rail-tokens')).toBeHidden();
   await expect(lxdRow).toBeVisible();
   await expect(defaultRow).toBeVisible();
+
+  // grouping by repository puts each under its own heading
+  await page.getByTestId('rail-filters').click();
+  await page.getByTestId('rail-group-by-repo').click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('rail-repo-group-lxd')).toContainText('Rate limit the login');
+  await expect(page.getByTestId('rail-repo-group-default')).toContainText('Add a shrug helper');
 });

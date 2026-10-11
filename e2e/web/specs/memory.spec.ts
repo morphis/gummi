@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,7 +21,7 @@ test('a freeform card shows its memory documents', async ({ pairedPage: page, se
 
   await page.goto(`${server.url}/#${id}`);
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  await page.getByTestId('tab-memory').click();
+  await showTab(page, 'memory');
   await expect(page.getByTestId('memory')).toContainText('.gummi/memory', { timeout: 30_000 });
 
   const doc = (which) => page.getByTestId(`memory-${which}`);
@@ -55,7 +55,7 @@ test('a freeform card shows its memory documents', async ({ pairedPage: page, se
   await doc('global').locator('summary').click();
   await page.reload();
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  await page.getByTestId('tab-memory').click();
+  await showTab(page, 'memory');
   await expect(page.getByTestId('memory')).toContainText('.gummi/memory', { timeout: 30_000 });
   await expect(doc('global')).not.toHaveAttribute('open', /.*/);
   await expect(doc('memory')).toHaveAttribute('open', /.*/);
@@ -84,7 +84,7 @@ test('the memory tab sticks across sessions and reloads', async ({ pairedPage: p
   const b = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Second session' })).json?.id);
   await page.goto(`${server.url}/#${a}`);
   await expect(page.getByTestId('card-id')).toHaveText(a);
-  await page.getByTestId('tab-memory').click();
+  await showTab(page, 'memory');
   await expect(page).toHaveURL(new RegExp(`#${a}/memory$`));
   if (info.project.name === 'phone') {
     await page.goto(`${server.url}/#${b}/memory`);

@@ -125,15 +125,33 @@ function moneyBars (m) {
       : null
   ].filter(Boolean)
   if (!groups.length && !notes.length) return null
+  // one breakdown at a time, behind a switch: three tables of the same
+  // money stacked up read as three different facts
+  const shown = groups.some(g => g.dataset.by === moneyBy) ? moneyBy : groups[0]?.dataset.by
+  const pick = (by, asked = true) => {
+    // only a press is a choice: a card with no such breakdown shows what
+    // it has without forgetting the one asked for
+    if (asked) moneyBy = by
+    for (const g of groups) g.hidden = g.dataset.by !== by
+    for (const b of sw?.children || []) { b.classList.toggle('on', b.dataset.by === by); b.setAttribute('aria-pressed', String(b.dataset.by === by)) }
+  }
+  const sw = groups.length > 1
+    ? h('span', { class: 'seg', role: 'group', 'aria-label': 'Break the spend down by', testid: 'stats-by' }, groups.map(g =>
+      h('button', { type: 'button', data: { by: g.dataset.by }, testid: `stats-by-${g.dataset.by}`, onclick: () => pick(g.dataset.by) }, g.dataset.by)))
+    : null
+  pick(shown, false)
   return h('section', { class: 'sblock', testid: 'stats-bars', 'aria-label': 'Where the money went' },
-    h('h3', { class: 'shead' }, 'Where it went'),
+    h('h3', { class: 'shead' }, 'Where it went', sw),
     groups, notes)
 }
+
+// moneyBy is the breakdown last asked for: it holds across cards
+let moneyBy = 'stage'
 
 function bucketBars (list, total, colorOf, testid) {
   if (!list || !list.length) return null
   const max = Math.max(...list.map(b => b.credits || 0), 0.0001)
-  return h('table', { class: 'passes bars', testid },
+  return h('table', { class: 'passes bars', testid, data: { by: testid.split('-').pop() } },
     h('tbody', null, list.map(b => h('tr', { style: { '--sc': colorOf ? colorOf(b.name) : null } },
       h('th', { scope: 'row' }, b.name || '—'),
       h('td', { class: 'num' }, cr(b.credits)),

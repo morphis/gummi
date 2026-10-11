@@ -1,6 +1,7 @@
-// head.js — the open card's head: kind, id and title, its menu, the stage
-// strip (a past stage jumps to that stage in the thread), branch, waits,
-// and the spend bar against its envelope.
+// head.js — the open card's head, in two lines: kind, id, title and its
+// buttons and menu; then the stage strip (a past stage jumps to that stage
+// in the thread), what it waits on or belongs to, and the spend bar
+// against its envelope. Its branch is said where its changes are (panel.js).
 
 import { $, h, icon, clear, append, kindTag, STAGES, cr, ctxMeter, isMobile } from './dom.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
@@ -13,7 +14,7 @@ let ctx = {}
 
 export function initHead (c) {
   ctx = c
-  on(['card', 'sel', 'board', 'cardErr', 'rightHidden', 'view', 'sessionDraft'], render)
+  on(['card', 'sel', 'board', 'cardErr', 'view', 'sessionDraft'], render)
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fit).observe($('#head'))
 }
 
@@ -61,7 +62,6 @@ function render () {
     ? h('button', { class: 'iconbtn', id: 'card-actions', testid: 'card-actions', title: 'Card actions', 'aria-label': 'Card actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'))
     : null
   menuBtn?.addEventListener('click', () => openActions())
-  const panelOpen = !state.rightHidden
   append(el, [
     h('div', { class: 'head-row' },
       h('span', { class: 'kind', testid: 'card-kind' }, kindTag(c)),
@@ -74,15 +74,11 @@ function render () {
         foldAt(0, writeSpecButton(state.card)),
         foldAt(0, delegateButton(state.card)),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, data: { fold: '2' }, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
-        menuBtn,
-        h('button', { class: ['iconbtn', panelOpen && 'on'], testid: 'toggle-panel', title: 'Show or hide the document panel (])', 'aria-label': 'Toggle document panel', 'aria-pressed': String(panelOpen), type: 'button', onclick: ctx.togglePanel }, icon('panel')))),
+        menuBtn)),
     h('div', { class: 'subline' },
       stages(c),
-      c.branch ? h('span', { class: 'mono', testid: 'card-branch' }, c.branch) : null,
-      c.adopted ? h('span', null, 'adopted branch') : null,
+      h('span', { class: 'sp' }),
       c.pr ? h('span', { class: 'mono', testid: 'card-pr' }, c.pr) : null,
-      c.base && c.branch ? h('span', null, 'onto ', h('span', { class: 'mono' }, c.base)) : null,
-      c.scratch ? h('span', { testid: 'card-scratch' }, 'scratch tree · no branch') : null,
       c.elsewhere ? h('span', null, 'driven by another gummi') : null,
       c.waits?.length ? h('span', null, 'waits on ', c.waits.map((w, i) => [i ? ', ' : '', h('button', { class: 'link', type: 'button', onclick: () => ctx.select(w) }, w)])) : null,
       c.kind === 'goal' ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: 'Open the goal page: its budget, done-when, cards and log', onclick: () => openView('goal', { id: c.id }) }, 'goal page') : null,
@@ -158,10 +154,10 @@ export function openActions (line = '') {
 
 function stages (c) {
   // an open session has no stages at all: ticking the workflow's would
-  // claim a plan, an implement and a verify it never had, so it shows no
-  // badge while open. Once closed it still isn't done in the workflow's
-  // sense, but the card needs some word for what happened to it.
-  if (c.stage === 'open') return null
+  // claim a plan, an implement and a verify it never had, so it says only
+  // that it is a session. Once closed it still isn't done in the
+  // workflow's sense, but the card needs some word for what happened to it.
+  if (c.stage === 'open') return h('span', { class: 'stages' }, h('span', { class: 'cur st-open' }, '◆ session'))
   if (c.kind === 'freeform') {
     return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ session · closed'))
   }
@@ -175,7 +171,7 @@ function stages (c) {
       'aria-current': i === idx ? 'step' : null,
       title: i < idx && i > 0 ? `Show the ${s} stage in the thread` : null,
       onclick: i < idx && i > 0 ? () => ctx.jumpToStage(s) : null
-    }, i < idx ? '✓ ' : '', s),
+    }, i < idx ? '✓' : '', h('span', { class: 'sn' }, i < idx ? ' ' + s : s)),
     i < STAGES.length - 1 ? h('em', { 'aria-hidden': 'true' }, '›') : null
   ]))
 }

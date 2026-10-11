@@ -1,4 +1,4 @@
-import { expect, showCard, test } from '../fixtures/test';
+import { expect, showCard, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // The card page against a real `gummi web` and a card the scripted agent
@@ -19,12 +19,12 @@ test('the thread shows the stages the card walked and its verify', async ({ pair
 
 test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage: page }, info) => {
   await showCard(page, id);
-  await page.getByTestId('tab-spec').click();
+  await showTab(page, 'spec');
   await expect(page.getByTestId('spec-toc')).toContainText('Chosen approach');
   await expect(page.getByTestId('spec-checks')).toContainText('go build');
   await shot(page, info, 'real-spec');
 
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('diff-files')).toContainText(`${id.replace('-', '').toLowerCase()}.go`);
   const line = page.locator('[data-testid^="diff-line-"]').nth(3);
   await line.locator('.n').click();
@@ -34,10 +34,10 @@ test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage
   await expect(page.getByTestId('diff-pending')).toContainText('comment');
   await shot(page, info, 'real-diff');
 
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-state')).toContainText('open');
   await expect(page.getByTestId('pr-push-cmd')).toContainText('git push');
-  await page.getByTestId('tab-stats').click();
+  await showTab(page, 'stats');
   await expect(page.getByTestId('stats-table')).toContainText('implement');
   await shot(page, info, 'real-stats');
 });

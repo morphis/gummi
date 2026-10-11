@@ -5,7 +5,7 @@
 // live block. It never decides anything about the card; it only fetches.
 
 import { get, cardPath } from './api.js?v=__ASSET_V__'
-import { on, set, state, rows } from './store.js?v=__ASSET_V__'
+import { on, set, state, rows, shownTab } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
 import { isMobile } from './dom.js?v=__ASSET_V__'
 import { readAt } from './events.js?v=__ASSET_V__'
@@ -58,11 +58,16 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   // on a phone a link that names a tab opens that document, not the
   // thread; a remembered tab only says which document waits behind it
   if (view && isMobile()) set({ view: tab ? 'panel' : 'thread' })
+  // a link that names a tab opens the surface it is on; a remembered tab
+  // only says which one waits behind the icon
+  if (tab && !isMobile() && state.rightHidden) set({ rightHidden: false })
+  const linked = !!tab
   if (!tab && changed && picked.has(id)) tab = picked.get(id)
   if (tab && tab !== state.tab) set({ tab })
   // the address names the tab showing, so a reload opens it again — but
   // not under a phone's thread, where naming one would open the document
-  if (named) writeHash(id, tab || (isMobile() && state.view !== 'panel' ? null : state.tab))
+  // nor with the surface closed, where a reload would open it
+  if (named) writeHash(id, linked ? tab : shownTab())
   const tabBefore = state.tab
   const card = await loadCard(id)
   // the panel follows the decision only when nothing chose a tab while the
@@ -70,7 +75,7 @@ export async function select (id, { tab = null, view = true, named = true } = {}
   // click wins over a guess made from a head that was still in flight
   if (changed && !tab && mine === picks && state.tab === tabBefore && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
     set({ tab: card.decision.anchor })
-    if (named) writeHash(id, card.decision.anchor)
+    if (named) writeHash(id, shownTab())
   }
   if (changed) {
     loadThread(id, true)
@@ -184,6 +189,14 @@ export function refreshAll () {
 export function nextNeeding (toast) {
   const list = rows().filter(r => r.status === 'needs')
   if (!list.length) { toast?.('Nothing needs you'); return }
+  const i = list.findIndex(r => r.id === state.sel)
+  select(list[(i + 1) % list.length].id)
+}
+
+// nextRunning opens the next card an agent is working on, after the open one.
+export function nextRunning (toast) {
+  const list = rows().filter(r => r.status === 'running')
+  if (!list.length) { toast?.('Nothing is running'); return }
   const i = list.findIndex(r => r.id === state.sel)
   select(list[(i + 1) % list.length].id)
 }

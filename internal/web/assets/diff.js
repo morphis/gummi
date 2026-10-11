@@ -7,7 +7,7 @@
 // this browser. When the branch moves while someone reads, the new diff is
 // announced with a banner, never swapped in under the reader.
 
-import { h, plural, storage } from './dom.js?v=__ASSET_V__'
+import { h, plural, storage, isMobile } from './dom.js?v=__ASSET_V__'
 import { get, post, del, patch, cardPath } from './api.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { state } from './store.js?v=__ASSET_V__'
@@ -59,6 +59,10 @@ const unfolded = new Map() // card id -> Set of paths a reader unfolded
 
 function lineCount (f) { return (f.hunks || []).reduce((n, hk) => n + (hk.lines?.length || 0), 0) }
 
+// wrapOn says whether the diff's long lines wrap: what a person last
+// chose, else only where the screen is a phone's.
+const wrapOn = () => storage.get('diffWrap', null) ?? isMobile()
+
 const viewedKey = (id) => `viewed:${id}`
 function viewed (id) { return new Set(storage.get(viewedKey(id), [])) }
 function setViewed (id, set) { storage.set(viewedKey(id), [...set]) }
@@ -79,6 +83,7 @@ let lit = null // the place last shown, marked until a moment has passed
 export function reveal (id, path, line) { want = { id, path, line: line || 0 } }
 
 function render (pane, entry, ctx) {
+  pane.classList.toggle('wrap', wrapOn())
   const d = entry.data
   const anns = d?.annotations || []
   const paths = new Set((d?.files || []).map(f => f.path))
@@ -125,7 +130,10 @@ function render (pane, entry, ctx) {
     since ? h('span', { class: 'seg', role: 'group', 'aria-label': 'Which changes', testid: 'diff-since' },
       h('button', { type: 'button', class: !sinceOn.has(ctx.id) && 'on', testid: 'diff-since-all', 'aria-pressed': String(!sinceOn.has(ctx.id)), onclick: () => { sinceOn.delete(ctx.id); ctx.swap(null) } }, 'All changes'),
       h('button', { type: 'button', class: sinceOn.has(ctx.id) && 'on', testid: 'diff-since-new', 'aria-pressed': String(sinceOn.has(ctx.id)), onclick: () => { sinceOn.add(ctx.id); ctx.swap(null) } }, `Since ${since.slice(0, 7)}`))
-      : null))
+      : null,
+    // long lines wrap instead of scrolling each hunk sideways: a phone's
+    // default, and a person's choice anywhere
+    h('button', { type: 'button', class: ['wraptgl', wrapOn() && 'on'], testid: 'diff-wrap', 'aria-pressed': String(wrapOn()), title: 'Wrap long lines', onclick: () => { storage.set('diffWrap', !wrapOn()); ctx.rerender() } }, 'Wrap')))
 
   if (entry.fresh) {
     top.append(h('div', { class: 'fresh', testid: 'diff-fresh', role: 'status' },

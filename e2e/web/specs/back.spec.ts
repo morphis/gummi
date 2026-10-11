@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 
 // The browser's back button — a phone's back gesture — steps back inside
 // the board before it leaves it: a menu, a dialog or the palette closes
@@ -20,7 +20,7 @@ test.describe('back', () => {
     await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
 
     // the documents are not a step of their own: back from them is the cards
-    await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await page.goBack();
     await expect(page.getByTestId('rail')).toBeVisible();
     expect(page.url()).toContain(server.url);
@@ -134,7 +134,7 @@ test.describe('back', () => {
     // a card's thread follows its tab into the address, so a reload opens
     // what was showing
     await page.getByTestId(`rail-row-${a}`).click();
-    await page.getByTestId('tab-diff').click();
+    await showTab(page, 'diff');
     await expect(page).toHaveURL(new RegExp(`#${a}/diff$`));
     await page.getByTestId('tab-thread').click();
     await expect(page).toHaveURL(new RegExp(`#${a}$`));

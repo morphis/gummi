@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // A linked pull request's checks (DESIGN §22.11) against a real `gummi web`
@@ -42,7 +42,7 @@ test('the PR tab sends a failing check and its log to the session', async ({ pai
   await page.reload();
   await expect(page.getByTestId('card-id')).toHaveText(id);
 
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-state')).toContainText('open');
   await expect(page.getByTestId('pr-checks-summary')).toHaveText('1 failing');
   await expect(page.getByTestId('pr-checks')).toContainText('of 2');
@@ -86,7 +86,7 @@ test('a pull request with nothing failing offers no send', async ({ pairedPage: 
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
   await ws.linkPR(id);
   await page.reload();
-  await page.getByTestId('tab-pr').click();
+  await showTab(page, 'pr');
   await expect(page.getByTestId('pr-checks-summary')).toHaveText('none failing');
   await expect(page.getByTestId('pr-checks-send')).toHaveCount(0);
 });

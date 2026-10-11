@@ -13,6 +13,7 @@ test.use({ seed: { run: async (ws) => { gate = await ws.seedDesignGate('Add a wa
 
 async function openForm(page: Page) {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  await page.getByTestId('rail-new-menu').click();
   await page.getByTestId('rail-new').click();
   await expect(page.getByTestId('view-newcard')).toBeVisible();
   await expect(page.getByTestId('newcard-title')).toBeVisible();
@@ -42,7 +43,7 @@ test('a feature that waits on one card and stacks on another', async ({ pairedPa
   expect(card.stack).toMatchObject({ pos: 1, of: 2 });
   expect(await api('GET', '/api/form').then((r) => r.json.dependable.map((c: any) => c.id))).toContain(id);
   if (phone(info)) await page.getByTestId('card-back').click();
-  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('stack 2 of 2');
+  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('stack 2/2');
   const deps = await server_deps(api, id);
   expect(deps).toEqual(backlog[0]);
 });

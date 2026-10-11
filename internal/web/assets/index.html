@@ -40,7 +40,7 @@
     </div>
     <div class="pills" role="group" aria-label="Board status">
       <button class="pill" id="p-next" data-testid="pill-needs" title="Jump to the next card that needs you (n)"><span class="dot"></span><b id="p-needs">0</b> need you</button>
-      <span class="pill" id="p-running" data-testid="pill-running"><span class="spinner"></span><b id="p-run">0</b> running</span>
+      <button class="pill" id="p-running" data-testid="pill-running" title="Jump to the next running card"><span class="spinner"></span><b id="p-run">0</b> running</button>
       <span class="pill hide-m" data-testid="pill-today">today <b class="mono" id="p-today">$0.00</b></span>
       <span class="pill hide-m" id="p-conn" data-testid="conn" data-state="connecting" role="status"><span class="spinner"></span><span id="p-conn-text">connecting</span></span>
     </div>
@@ -59,9 +59,11 @@
   <div class="main">
     <nav class="rail" aria-label="Cards" data-testid="rail">
       <div class="rail-head">
-        <label class="search"><span id="filter-icon"></span><input id="filter" data-testid="rail-filter" placeholder="Filter cards" aria-label="Filter cards" autocomplete="off"></label>
-        <div class="chips" id="kinds" role="group" aria-label="Card kinds" data-testid="rail-kinds"></div>
-        <div class="chips" id="repos" role="group" aria-label="Repositories" data-testid="rail-repos" hidden></div>
+        <div class="search">
+          <label><span id="filter-icon"></span><input id="filter" data-testid="rail-filter" placeholder="Filter cards" aria-label="Filter cards by title, id, status, branch or repository" autocomplete="off"></label>
+          <button class="fbtn" id="filter-menu" data-testid="rail-filters" type="button" title="Group, filter and choose what a row shows" aria-label="Group, filter and row display" aria-haspopup="menu" aria-expanded="false"></button>
+        </div>
+        <div class="tokens" id="filter-tokens" data-testid="rail-tokens" role="group" aria-label="Filters applied" hidden></div>
       </div>
       <div class="cards" id="cards" data-testid="rail-cards"></div>
       <div class="rail-foot" id="rail-foot" data-testid="rail-foot"></div>
@@ -101,9 +103,13 @@
       <!-- the resizer is the panel's left edge, inside its landmark: a
            control between the landmarks is one a screen reader's landmark
            list never reaches -->
-      <div class="resizer" id="resizer" data-testid="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the document panel" tabindex="0"></div>
+      <div class="resizer" id="resizer" data-testid="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the surface beside the thread" tabindex="0"></div>
+      <!-- one surface at a time, opened from the icons beside it -->
+      <div class="surface" id="surface" data-testid="surface">
+        <div class="sh" id="surface-head" data-testid="surface-head" hidden></div>
+        <div class="pane" id="pane" role="tabpanel" data-testid="panel-pane" tabindex="-1"></div>
+      </div>
       <div class="tabs" id="tabs" data-testid="panel-tabs"></div>
-      <div class="pane" id="pane" role="tabpanel" data-testid="panel-pane" tabindex="-1"></div>
     </aside>
   </div>
 

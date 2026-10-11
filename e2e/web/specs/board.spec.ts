@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { shot } from '../fixtures/shots';
 
@@ -74,35 +74,53 @@ test('the panel tabs switch, and 501 routes read as not available yet', async ({
   // the tabs sit on a card's screen on a phone: enter one first
   if (info.project.name === 'phone') await page.getByTestId(`rail-row-${ids.bug}`).click();
   for (const tab of ['diff', 'pr', 'stats', 'spec']) {
-    await page.getByTestId(`tab-${tab}`).click();
+    await showTab(page, tab);
     await expect(page.getByTestId(`tab-${tab}`)).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('panel-pane')).toHaveAttribute('data-tab', tab);
     await expect(page.getByTestId('panel-pane').locator('.empty, .spec, .sect, .diffhead').first()).toBeVisible();
   }
 });
 
-test('three panes sit side by side and never overlap', async ({ pairedPage: page }, info) => {
+test('the rail, the conversation and one surface sit side by side and never overlap', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name === 'phone', 'the phone shows one view at a time');
+  // no surface is open until one is asked for: only its icons stand there
+  await expect(page.getByTestId('surface')).toBeHidden();
+  const closed = await page.getByTestId('conversation').boundingBox();
+  expect((await page.getByTestId('panel').boundingBox())!.width).toBeLessThan(60);
+  for (const tab of ['spec', 'diff', 'stats']) {
+    await showTab(page, tab);
+    await expect(page.getByTestId('surface')).toBeVisible();
+    // whichever surface is open, the conversation keeps its 400px
+    expect((await page.getByTestId('conversation').boundingBox())!.width).toBeGreaterThanOrEqual(399);
+  }
   const rail = await page.getByTestId('rail').boundingBox();
   const conv = await page.getByTestId('conversation').boundingBox();
   const panel = await page.getByTestId('panel').boundingBox();
   expect(rail && conv && panel).toBeTruthy();
   expect(rail!.x + rail!.width).toBeLessThanOrEqual(conv!.x + 1);
   expect(conv!.x + conv!.width).toBeLessThanOrEqual(panel!.x + 1);
-  expect(conv!.width).toBeGreaterThanOrEqual(359);
+  expect(conv!.width).toBeLessThan(closed!.width);
   expect(panel!.width).toBeGreaterThanOrEqual(319);
   const vw = page.viewportSize()!.width;
   expect(panel!.x + panel!.width).toBeLessThanOrEqual(vw + 1);
   // the rail is compact below 1280px, full above
   if (vw < 1280) expect(rail!.width).toBeLessThan(100);
   else expect(rail!.width).toBeGreaterThan(200);
-  // ] hides the panel and gives the room to the conversation; [ folds the rail
+  // ] closes the surface and gives the room to the conversation, as its
+  // own icon and its close button do; [ folds the rail
   await page.locator('body').press(']');
-  await expect(page.getByTestId('panel')).toBeHidden();
+  await expect(page.getByTestId('surface')).toBeHidden();
   const wide = await page.getByTestId('conversation').boundingBox();
   expect(wide!.width).toBeGreaterThan(conv!.width);
   await page.locator('body').press(']');
-  await expect(page.getByTestId('panel')).toBeVisible();
+  await expect(page.getByTestId('surface')).toBeVisible();
+  await expect(page.getByTestId('tab-stats')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('tab-stats').click();
+  await expect(page.getByTestId('surface')).toBeHidden();
+  await page.getByTestId('tab-stats').click();
+  await page.getByTestId('panel-close').click();
+  await expect(page.getByTestId('surface')).toBeHidden();
+  await expect(page.getByTestId('tab-stats')).toHaveAttribute('aria-selected', 'false');
   const before = (await page.getByTestId('rail').boundingBox())!.width;
   await page.locator('body').press('[');
   await expect.poll(async () => (await page.getByTestId('rail').boundingBox())!.width).not.toBe(before);
@@ -120,7 +138,7 @@ test('the phone opens on the cards, and a card opens from them with its screen n
   await expect(page.getByTestId('rail')).toBeHidden();
   await expect(page.getByTestId('card-id')).toHaveText(ids.bug);
   await expect(page.getByTestId('tab-thread')).toHaveAttribute('aria-selected', 'true');
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await expect(page.getByTestId('panel')).toBeVisible();
   await expect(page.getByTestId('rail')).toBeHidden();
   // the documents say whose they are
@@ -206,4 +224,45 @@ test.describe('the compact rail', () => {
     await expect(page.getByTestId('app')).not.toHaveClass(/rail-compact/);
     await expect(page.getByTestId('rail-filter')).toBeVisible();
   });
+});
+
+test('the rail filters from one menu, names what applies, and matches a status in words', async ({ pairedPage: page }, info) => {
+  const errors = watchErrors(page);
+  // the compact rail has no filter box: open the full one
+  if (info.project.name === 'laptop') await page.getByTestId('rail-toggle').click();
+  const row = (id: string) => page.getByTestId(`rail-row-${id}`);
+  await expect(row(ids.gate)).toBeVisible();
+  // a single-repository board has nothing to group or filter by repository
+  await page.getByTestId('rail-filters').click();
+  await expect(page.getByTestId('rail-group-by-repo')).toHaveCount(0);
+  // a kind says how many cards it has, and ticking it leaves the menu open
+  await expect(page.getByTestId('rail-kind-BG')).toContainText('1');
+  await page.getByTestId('rail-kind-BG').click();
+  await expect(page.getByTestId('rail-kind-BG')).toHaveAttribute('aria-checked', 'true');
+  await expect(row(ids.bug)).toBeVisible();
+  await expect(row(ids.gate)).toHaveCount(0);
+  await page.getByTestId('rail-kind-FD').click();
+  await page.getByTestId('rail-status-needs').click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('rail-filters')).toBeFocused();
+  // bugs and features that need you: the gate and nothing else
+  await expect(row(ids.gate)).toBeVisible();
+  await expect(row(ids.bug)).toHaveCount(0);
+  await expect(row(ids.backlog[0])).toHaveCount(0);
+  await expect(page.getByTestId('rail-filters')).toContainText('3');
+  // each filter is named under the box with its own way off
+  await page.getByTestId('rail-token-status-needs').getByRole('button').click();
+  await expect(row(ids.bug)).toBeVisible();
+  await expect(row(ids.backlog[0])).toBeVisible();
+  await page.getByTestId('rail-tokens-clear').click();
+  await expect(page.getByTestId('rail-tokens')).toBeHidden();
+  // the box matches what a row says, not only its title
+  await page.getByTestId('rail-filter').fill('design gate');
+  await expect(row(ids.gate)).toBeVisible();
+  await expect(row(ids.bug)).toHaveCount(0);
+  await page.getByTestId('rail-filter').fill('no such card');
+  await page.getByTestId('rail-empty-clear').click();
+  await expect(page.getByTestId('rail-filter')).toHaveValue('');
+  await expect(row(ids.bug)).toBeVisible();
+  expect(errors).toEqual([]);
 });

@@ -1,4 +1,4 @@
-import { expect, showCard, test } from '../fixtures/test';
+import { expect, showCard, showTab, test } from '../fixtures/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,7 +35,7 @@ test.use({
 
 test('the log offers to sign unsigned commits, and signs them without changing content', async ({ pairedPage: page, workspace }, info) => {
   await showCard(page, id);
-  await page.getByTestId('tab-log').click();
+  await showTab(page, 'log');
   const rows = page.locator('[data-testid^="log-commit-"]');
   await expect(rows.last()).toContainText('wip: one');
   const n = await rows.count();

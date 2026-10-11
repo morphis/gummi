@@ -1,4 +1,4 @@
-import { expect, test } from '../fixtures/test';
+import { expect, showTab, test } from '../fixtures/test';
 import { shot } from '../fixtures/shots';
 
 // A notice stands just above what is docked at the bottom. The decision
@@ -12,7 +12,7 @@ test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a notice
 test('a notice follows the decision up when it grows', async ({ pairedPage: page }, info) => {
   test.skip(info.project.name === 'phone', 'the phone docks a folded decision bar');
   await expect(page.getByTestId('card-id')).toHaveText(id);
-  await page.getByTestId('tab-diff').click();
+  await showTab(page, 'diff');
   await page.locator('[data-testid^="diff-line-"]').nth(3).locator('.n').click();
   await page.getByTestId('annotation-input').fill('Name it after what it does');
   await page.getByTestId('annotation-save').click();

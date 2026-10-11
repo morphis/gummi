@@ -61,7 +61,7 @@ test('[ask] stops on an open question, and the answer lands in the spec', async 
   // gate --until names, which is a decision of its own, waiting on you
   st = await ws.status(ask.id);
   expect(st.escalation?.kind).toBe('gate');
-  expect(st.escalation?.reason).toContain('--until');
+  expect(st.escalation?.reason).toContain('where the run was asked to stop');
   const spec = await ws.gummiOK(['spec', ask.id]);
   expect(spec.stdout).toContain('Decided with the user: Extend the existing file');
 });
