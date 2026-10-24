@@ -132,11 +132,11 @@ func TestRepoOfURL(t *testing.T) {
 }
 
 // Publishing is reached only from the faces a person uses: the engine,
-// the driver, the agent's MCP shim and every loop that runs without one
+// the agent's MCP shim and every loop that runs without one
 // must not import it (DESIGN §22.7).
 func TestOnlyPersonFacingCodeImportsPublish(t *testing.T) {
 	root := filepath.Join("..", "..")
-	for _, pkg := range []string{"engine", "driver", "mcp", "schedule", "agent", "verify", "spec", "state", "worktree"} {
+	for _, pkg := range []string{"engine", "mcp", "schedule", "agent", "verify", "spec", "state", "worktree"} {
 		p, err := build.ImportDir(filepath.Join(root, "internal", pkg), 0)
 		if err != nil {
 			t.Fatalf("%s: %v", pkg, err)

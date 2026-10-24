@@ -442,7 +442,7 @@ func announce(logf func(string, ...any), url string, open bool, devices *web.Dev
 		logf("web: pairing code %s — enter it in the browser (good for %s)", code, time.Until(expires).Round(time.Second))
 	default:
 		n := devices.Count()
-		logf("web: %d paired device%s; `gummi web pair` prints a code for a new one, which a paired device then lets in", n, cardPlural(n))
+		logf("web: %d paired device%s; `gummi web pair` prints a code for a new one, which a paired device then lets in", n, plural(n))
 	}
 }
 
@@ -645,7 +645,7 @@ func runWebUnpair(fl cliFlags, args []string) error {
 				return err
 			}
 			dropPushSubscriptions(ws, ids...)
-			fmt.Printf("unpaired %d device%s\n", n, cardPlural(n))
+			fmt.Printf("unpaired %d device%s\n", n, plural(n))
 			return nil
 		}
 		dev, err := devices.Forget(args[0])

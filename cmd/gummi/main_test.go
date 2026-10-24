@@ -321,7 +321,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if eng != nil {
 		t.Fatalf("eng = %v, want nil on a guarded/claude mismatch", eng)
 	}
@@ -353,7 +353,7 @@ func TestNewEngineFromEnvBlocksGuardedMismatchNoProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if eng != nil {
 		t.Fatalf("eng = %v, want nil on a guarded/claude mismatch", eng)
 	}
@@ -392,7 +392,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if err != nil {
 		t.Fatalf("err = %v, want nil for a guarded+opencode pairing", err)
 	}
@@ -419,9 +419,9 @@ func TestAnUncoveredRoleNamesNoOtherVendorsModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, _, _, err := newEngineFromEnv(nil, nil, ws)
+	eng, _, _, _, err := engineFromEnv(nil, nil, ws)
 	if err != nil || eng == nil {
-		t.Fatalf("newEngineFromEnv = %v, %v", eng, err)
+		t.Fatalf("engineFromEnv = %v, %v", eng, err)
 	}
 	backend, model := eng.SessionModel(domain.Feature{Kind: domain.KindFreeform})
 	if backend != "claude" || model != "" {

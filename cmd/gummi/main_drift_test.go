@@ -201,7 +201,6 @@ func TestDocsNameNoFlagTheBinaryLacks(t *testing.T) {
 	root := repoRoot(t)
 	for _, doc := range []string{
 		"README.md",
-		filepath.Join("docs", "HEADLESS.md"),
 		filepath.Join("docs", "CONFIGURATION.md"),
 		"AGENTS.md",
 	} {

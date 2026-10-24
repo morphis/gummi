@@ -21,16 +21,14 @@ var rootCmd = &cobra.Command{
 work is a card, and every card is planned, implemented and verified on its
 own git branch before you decide whether to land it.
 
-Run 'gummi' with no arguments to launch the board. The subcommands run the
-same operations headlessly so agents and scripts can drive the workflow
-without the TUI. Use 'gummi <command> --help' for each command's flags.`,
+Run 'gummi' with no arguments to launch the board in the terminal, or
+'gummi web' to serve it to a browser. 'gummi doctor' checks the setup.`,
 	RunE: runBoardCobra,
 }
 
 func init() {
-	// A bespoke completion command (completion.go) is registered in place of
-	// cobra's built-in one, which also emits powershell and is configured out
-	// here so the command list stays exactly the app's surface.
+	// Cobra's built-in completion command is configured out so the command
+	// list stays exactly the app's surface.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	// Errors and usage are handled in main() (the typed exitError path), so
 	// cobra keeps quiet and lets main's single reporting point talk.
@@ -41,27 +39,7 @@ func init() {
 	rootCmd.Flags().BoolP("version", "v", false, "print the version and exit")
 
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(stackCmd)
-	rootCmd.AddCommand(scheduleCmd)
-	rootCmd.AddCommand(curatorCmd)
-	rootCmd.AddCommand(prCmd, pushCmd)
-	rootCmd.AddCommand(runCmd)
-	rootCmd.AddCommand(resumeCmd)
-	rootCmd.AddCommand(mergeCmd)
-	rootCmd.AddCommand(squashCmd)
-	rootCmd.AddCommand(commitCmd)
-	rootCmd.AddCommand(handoffCmd)
-	rootCmd.AddCommand(cleanCmd)
-	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(watchCmd)
-	rootCmd.AddCommand(specCmd)
-	rootCmd.AddCommand(diffCmd)
-	rootCmd.AddCommand(logCmd)
-	rootCmd.AddCommand(rewriteCmd)
 	rootCmd.AddCommand(doctorCmd)
-	rootCmd.AddCommand(initCmd)
-	rootCmd.AddCommand(skillCmd)
-	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(webCmd)
 	rootCmd.AddCommand(mcpCmd)
 }
