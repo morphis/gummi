@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -23,29 +25,6 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	os.Stdout = w
 	defer func() { os.Stdout = old }()
-	fn()
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	b, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
-}
-
-// captureStderr mirrors captureStdout for os.Stderr — used to assert on
-// warnings that deliberately print outside a command's normal stdout
-// output.
-func captureStderr(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stderr = w
-	defer func() { os.Stderr = old }()
 	fn()
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -131,36 +110,6 @@ func TestCobraUnknownCommand(t *testing.T) {
 	}
 }
 
-// BG-003: a flag passed with its default value is still a flag passed —
-// `resume --answer ""` is an (empty) answer, which the driver refuses,
-// not a bare resume that silently carries on.
-//
-// This used to be a hazard worth a dedicated workaround. Cobra parsed the
-// flag, a helper re-serialized the parsed flags into a []string for a
-// second, stdlib parser, and that serializer dropped any flag whose value
-// equalled its default — because a []string cannot carry "the user typed
-// this". There is one parser now, and pflag's Changed carries the fact
-// directly.
-func TestResumeKeepsAnExplicitDefaultFlag(t *testing.T) {
-	resetFlags(rootCmd)
-	t.Cleanup(func() { resetFlags(rootCmd) })
-
-	cmd, _, err := rootCmd.Find([]string{"resume"})
-	if err != nil {
-		t.Fatalf("finding resume: %v", err)
-	}
-	if err := cmd.Flags().Set("answer", ""); err != nil {
-		t.Fatalf("Set(answer, \"\"): %v", err)
-	}
-	if !cmdFlags(cmd).Changed("answer") {
-		t.Fatal("Changed(answer) = false after an explicit --answer \"\"")
-	}
-	in, err := resumeInput(cmdFlags(cmd), nil)
-	if err != nil || in.Answer == nil || *in.Answer != "" {
-		t.Fatalf("resumeInput = %+v, %v; want an empty answer", in, err)
-	}
-}
-
 // Every flag a command advertises must be parsed by that same command.
 //
 // This is now structural — cobra both declares and parses — so the test
@@ -192,24 +141,17 @@ func TestNoCommandParsesItsOwnFlags(t *testing.T) {
 	}
 }
 
-// Every flag bound on the tree must be one the skill's grammar generator
-// can render, and every command the grammar names must be on the tree.
-// mustFindCmd panics on a path that does not resolve, so rendering the
-// grammar at all is the assertion.
-func TestSkillGrammarResolvesAgainstTheTree(t *testing.T) {
-	if got := commandGrammar(); got == "" {
-		t.Fatal("commandGrammar() is empty")
+// The board and the browser are the only ways in: the root launches the
+// TUI, and the only subcommands are the ones that serve, check or identify
+// it (plus the hidden shim an agent backend starts).
+func TestTheCommandSurfaceIsTheBoardAndTheWeb(t *testing.T) {
+	var got []string
+	for _, c := range rootCmd.Commands() {
+		got = append(got, c.Name())
 	}
-}
-
-// TestInitCmdRegistered catches a forgotten rootCmd.AddCommand(initCmd) the
-// way a missed registration would silently drop the verb.
-func TestInitCmdRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"init"})
-	if err != nil {
-		t.Fatalf("rootCmd.Find([\"init\"]): %v", err)
-	}
-	if cmd != initCmd {
-		t.Errorf("rootCmd.Find([\"init\"]) resolved to %v, want initCmd", cmd)
+	sort.Strings(got)
+	want := []string{"__mcp", "doctor", "help", "version", "web"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("root commands = %v, want %v", got, want)
 	}
 }

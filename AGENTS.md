@@ -10,13 +10,11 @@ runs a fleet of coding agent sessions, each on its own git worktree and
 branch, and lets a session run a **workflow** — a recipe of
 fresh-context steps working in its own tree — when the work is worth
 one. It orchestrates other agents — it is
-not itself a coding agent. Two ways drive the same engine: a human at
-the keyboard in the TUI (or its web face, `gummi web`); and an agent,
-script, or CI driving a *fresh* gummi from *outside*, via the headless
-CLI driver (`gummi run`/`resume`). An agent working *inside* a card
-reaches gummi's tools only through that card's own session MCP endpoint
-(§16) — there is no board-level agent. See `internal/driver` and
-`docs/HEADLESS.md` for the outside path.
+not itself a coding agent. A person drives it from the keyboard in the
+TUI or from a browser through its web face, `gummi web`; there is no
+command-line driver. An agent working *inside* a card reaches gummi's
+tools only through that card's own session MCP endpoint (§16) — there is
+no board-level agent.
 
 - **Language:** Go 1.26, single module `github.com/morphis/gummi`.
 - **Binary:** `cmd/gummi` → `bin/gummi`. Run with no args inside a git repo.
@@ -99,11 +97,11 @@ agent/worktree/verify as leaf services.
 | `verify` | Runs check commands in a tree and reports pass/fail: a workflow run's done-when checks, at its end, and a `repeat`'s `until: checks`. A passing `go test -run` that ran no tests says so (`RanNoTests`), and its item is unjudged, never a pass. |
 | `stack` | Pure policy for a **stack** — a chain of cards whose branches fork from one another. Answers what each card forks from, which are sitting on commits that have moved, and whether one may land yet. No git, no store, no clock. Read by `Engine.StackTick`, the worktree base seam and the board alike. |
 | `schedule` | Pure policy for **schedules and heartbeats** — freeform sessions that come back on a clock. Cron parse, compile, `Due`, `Next` and `Advance` (missed fires coalesce). No clock, no IO, no store. Read by the store's write boundary (`Check`), `Engine.ScheduleTick` and the faces. |
-| `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the card's run tab, `status --stats` and the week view. |
-| `branchlog` | Pure read model of a card's own commits (`Manager.Log` → rows: checkpoint, pushed, attribution) and the one rule for whether they may be rewritten (`Refusal`). Its `Env` runs the reads and `Manager.Rewrite`. Read by the TUI's log tab, the web page's, and `gummi log`/`rewrite` (DESIGN §21). |
+| `cardrun` | Pure read model: one card's record → how it ran (its passes, what each cost, how much was rework, how long it waited). Shared by the card's run tab and the week view. |
+| `branchlog` | Pure read model of a card's own commits (`Manager.Log` → rows: checkpoint, pushed, attribution) and the one rule for whether they may be rewritten (`Refusal`). Its `Env` runs the reads and `Manager.Rewrite`. Read by the TUI's log tab and the web page's (DESIGN §21). |
 | `repoview` | Pure read model of one repository's local branches: who holds each (the base, a card, a legacy adopted card or goal, nobody) and the one rule for which may be deleted from the repositories view — only a branch no card holds, nothing has checked out and no card forks from. The git reads and the three writes (fetch, fast-forward the base, delete a branch) are `worktree/repoview.go`, and a repository's remotes and a branch's upstream — git-config writes only — are `worktree/remotes.go`; how a remote closes cards (PR or push of the base, DESIGN §22.12) and that base push are `worktree/closepush.go`; the web face reads all of it through `ui/webrepos.go`. |
 | `fleetrun` | Pure fold at the workspace scale: every card's run → the stats tab's report (window and all-time money, the clock, peak concurrency, and the timeline lanes). Charges a pass to the window it started in; reuses `cardrun` per card, so the tab cannot disagree with the cards it is made of. |
-| `publish` | A **person** publishing a card (DESIGN §22): pure rules (`Refusal`, `Floor`, `PlanFor`) and the `Env` that reads the facts a person confirms (`Resolve`, `Fingerprint`) and runs the push and the `gh` calls (`Do`). Plans and publishes a session's attached repositories too (`span.go`: one push and PR each, bodies naming the others). Imported only by the person-facing faces (`cmd/gummi/publish.go`, `ui/publish.go`); `TestOnlyPersonFacingCodeImportsPublish` fails if the engine, driver, MCP shim or a loop does. Where a branch pushes is `worktree.Manager.PushTarget` (`pushtarget.go`), read by the pushed mark and the printed push line too. |
+| `publish` | A **person** publishing a card (DESIGN §22): pure rules (`Refusal`, `Floor`, `PlanFor`) and the `Env` that reads the facts a person confirms (`Resolve`, `Fingerprint`) and runs the push and the `gh` calls (`Do`). Plans and publishes a session's attached repositories too (`span.go`: one push and PR each, bodies naming the others). Imported only by the person-facing faces (`ui/publish.go`); `TestOnlyPersonFacingCodeImportsPublish` fails if the engine, MCP shim or a loop does. Where a branch pushes is `worktree.Manager.PushTarget` (`pushtarget.go`), read by the pushed mark and the printed push line too. |
 | `credentials` | The GitHub token and SSH key a person may store from the web page's settings (DESIGN §22.2), 0600 under `.gummi/state/credentials/`. `WithToken` sets `GH_TOKEN` on a `gh` command gummi runs; `WithAgent` answers as a sign-only ssh-agent for the life of one git command. Behind a settings switch the key also signs every commit (`sign.go`): gummi names itself git's signing program through `GIT_CONFIG_*` in its own environment, which every child inherits, and `main` answers that call before cobra sees it. Never export either secret to an agent backend. |
 | `skillpack` | The workspace skill pack (DESIGN §23): `.gummi/skills`, its curator's writes, a card's staged changes and their delivery to claude, copilot and opencode. Also gummi's own skills (`builtin/`: `workflows`, `workflow-recipes`), shipped in the binary and delivered beside the pack (`Builtin`); change them with the workflow code they teach, and `TestEveryRecipeTheSkillsShowCanRun` holds their examples to the grammar. |
 | `diffannot` | Anchors line comments to diff content (survives minor rebases). |
@@ -115,8 +113,6 @@ agent/worktree/verify as leaf services.
 | `term` | A person's own shell on a pty in a card's worktree, for the web face's Terminal tab (`gummi web --terminal`): one session per card, bounded scrollback replayed on reattach, a cap and an idle sweep. Not an agent surface and not sandboxed; `web/routes_term.go` decides who may open one (DESIGN §20.5). |
 | `gittest` | Blank-imported by every test package that builds a git repository in a `t.TempDir`: switches off git's detached auto-maintenance, which otherwise outlives the command a test ran and fails the TempDir cleanup. A bare remote a test pushes to sets `maintenance.auto false` itself — git does not pass the switch to the receiving end. |
 | `ui` | The Bubbletea TUI: board, card thread, diff/spec views, inbox, dialogs. `workflowloop.go` ticks every session's live run; `runblock.go` and `runkeys.go` draw a run's block in the thread, its live strip above the composer, and what a person does to it (alt+w jumps to it), `stepview.go` a step opened from it; `webrun.go` and `websessionspec.go` are what the web page's run block, step panel and Specs tab are told. |
-| `cardops` | The card operations every face runs the same way: Merge, HandOff, Squash, Commit, Clean, and a linked PR's open-thread count, with the NDJSON emitter and the typed `Status`/`Outcome` exit table; `MergeRepo` lands one repository of a session that spans several. `cmd/gummi`'s landing verbs call it directly. |
-| `driver` | The headless session loop behind `gummi run`/`resume`: mints a session from a prompt, always allows its workflow runs (the envelope the only cap), ticks its run and waits; stops `done`, or `needs_you` on a question or a run decision. Emits NDJSON + typed exit statuses (`docs/HEADLESS.md`), with the `crew` names beside the `workflow` ones for older readers. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `engine/freeformsession.go` | A session's whole working life — its worktree, its per-card lock and its envelope. It never commits for the agent: every commit on its branch is one the agent made on purpose. Built from `consultsession.go`'s lifecycle; read the two together. `engine/sessionmodel.go` holds the agent and model a session picks for itself, starting a backend the board did not launch, and switching mid-conversation, and `ui/websession.go` holds the picker's catalog (DESIGN §19.8). |
 | `web` | `gummi web`: serves the board to a browser as a page of its own (DESIGN §20). Holds no board: it asks the TUI's model, run headless behind `ui.Bridge`, for every read and write. Pairing and device tokens (`pair.go`), same-origin and auth (`auth.go`), the SSE hub (`hub.go`), one `routes_*.go` per area (a session's runs, steps and specs are `routes_runs.go`), and the page itself under `assets/` (plain ES modules, no build step, strict CSP — no inline script or style; a run's block, its live strip above the composer, the run-above pill and the step panel are `workflow.js`). |
@@ -126,24 +122,17 @@ agent/worktree/verify as leaf services.
 | `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, a run's decision too (`RunOptions`), and what an answer says. Both faces read it. |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to a live session's tools (`--feature <id>`). |
 
-`cmd/gummi` holds `main.go` plus the board's supporting subcommands and the
-headless driver surface — `run`, `resume`, `status` (`--stats` reports where a
-card's money and hours went), `spec`, `diff`,
-`merge`, `clean`, `stack`, `doctor`, `skill`. See `docs/HEADLESS.md`
-for the driver's command grammar and exit-status table.
+`cmd/gummi` holds `main.go` and the few commands there are: the board (no
+arguments), `web` (with `pair`, `devices` and `unpair`), `doctor`, `version`
+and the hidden `__mcp` shim. Everything else a person does is in the TUI or
+on the web page; do not add a command-line verb for it.
 
 **Flags are declared once.** Cobra owns routing, help, completion *and*
-parsing: every flag is declared in `cobra.go`'s `bind*Flags` functions (the
-surface the driving verbs share lives in `flags.go` as `driveFlags`), and a
+parsing: every flag is declared in `cobra.go`'s `bind*Flags` functions, and a
 command body reads what cobra parsed through `cliFlags`. Do not add a
 `flag.NewFlagSet` to a command — `TestNoCommandParsesItsOwnFlags` fails if you
-do. A second parser is what let `stack new --name`, `stack add --pos` and
-`merge --m` each be declared, advertised and then rejected at parse.
-
-`gummi skill` generates its bundle (`SKILL.md` + `references/`) from that same
-cobra tree, so the doc cannot name a flag the binary lacks or miss one it has.
-Tests drive verbs through the real tree via `runCLI` rather than calling
-`runXxx` directly; that is what makes an unreachable flag fail a test.
+do. Tests drive commands through the real tree via `runCLI` rather than
+calling `runXxx` directly.
 
 `internal/deps.go` (build tag `pin`) blank-imports the pinned Charm stack
 — that's why `make build` runs `go build -tags pin ./...` too.
@@ -190,9 +179,6 @@ make demo   # throwaway repo with gummi initialized — safe sandbox to poke the
 make e2e    # scripted TUI drive asserting the full lifecycle (needs tmux)
 ```
 
-To try the headless driver instead of the TUI, `make demo` still gives you
-a throwaway repo — run `bin/gummi run --envelope 5 "<prompt>"` in it.
-
 Running the real TUI (`bin/gummi`) needs a git repo and, for the default
 backend, an authenticated GitHub Copilot CLI. To drive agents without
 Copilot auth, set `GUMMI_AGENT=headless` with `GUMMI_AGENT_CMD` pointed at
@@ -210,7 +196,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   landing of its own, unresolved diff comments hold a landing through
   the open-comment check every landing crosses, an open workflow run
   holds its session's (`Engine.RunHolds`), and a stacked card waits for the cards
-  below it. Read `MayLand` and `cardops` before touching any landing
+  below it. Read `MayLand` and `engine/handoff.go` before touching any landing
   path, and do not add a gate there.
 - **A run answers to three rules, and they do not bend** (decision 28,
   DESIGN §25.12):
@@ -256,13 +242,13 @@ worktrees and specs still work — the board just stays static. Key env vars are
 - **gummi's job ends at a branch a person can land — and a person may publish it.**
   It does not release, merge on GitHub, retarget a PR unasked or resolve
   a thread. Pushing a card's own branch and opening, updating or readying
-  its PR are acts a *person* starts (TUI, web or `gummi push`/`gummi pr`),
+  its PR are acts a *person* starts (TUI or web),
   through `gh` and the credentials already on the machine, or the GitHub
   token and SSH key a person stored in the web page's settings
   (`internal/credentials`: lent to gummi's own `gh` and push commands,
   never put in an agent's environment). It is optional, detected rather
   than switched on, and absent where `gh`/push access is not set up. No
-  session, workflow run, schedule, MCP tool or `run`/`resume` may reach the
+  session, workflow run, schedule, or MCP tool may reach the
   publish code (decision 25, DESIGN §22).
   Stacks (§18) still replay branches locally and print the `git push
   --force-with-lease` they need; publishing a stacked card is refused
@@ -308,8 +294,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   `internal/ui/runblock.go`, `runkeys.go` and `stepview.go` in the
   terminal, `internal/ui/webrun.go`, `internal/web/routes_runs.go` and
   `internal/web/assets/workflow.js` on the page, and
-  `internal/ui/workflowloop.go` ticks it; the headless loop is
-  `internal/driver`.
+  `internal/ui/workflowloop.go` ticks it.
 - "why did this card's branch move" / stacks → `internal/stack` for the
   rules, `internal/engine/stack.go` for the tick, `worktree.Manager.baseRev`
   for what a card forks from (and read its comment before touching any
@@ -323,8 +308,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   is the test that should have caught it. Browser tests live in `e2e/web`
   (`scripts/web-e2e.sh`, Playwright).
 - "what did this card cost / how did it run" → `internal/cardrun`, then its
-  three readers (`internal/ui/statsview.go`, `cmd/gummi/statusstats.go`,
-  `internal/ui/week.go`). The derivation lives in one place on purpose: two
+  readers (`internal/ui/statsview.go`, `internal/ui/week.go`). The derivation lives in one place on purpose: two
   surfaces that disagree about what a card cost are worse than one.
 - "how is the whole board running / the timeline" → `internal/fleetrun`,
   then its one reader (`internal/ui/wsstats.go`). Same seam, one scale up:
@@ -336,7 +320,7 @@ worktrees and specs still work — the board just stays static. Key env vars are
   (`Attach`, `ErrAdoptedBranch`) and `branchmove.go`.
 - "push this card / open its PR" → `internal/publish` for the rules and
   the acts, `internal/worktree/pushtarget.go` for where a branch goes,
-  then the three faces: `cmd/gummi/publish.go`, `internal/ui/publish.go`
+  then the two faces: `internal/ui/publish.go`
   (TUI dialog and what the web page is told) and
   `internal/web/assets/publish.js`. A face never decides: a difference
   between two of them is a bug in the shared code.
@@ -345,8 +329,9 @@ worktrees and specs still work — the board just stays static. Key env vars are
   (DESIGN §22.11). A snapshot a person sends: never stored, never a gate.
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
 - "why may (or may not) this card land" → `domain.Feature.MayLand`, then
-  `internal/cardops/ops.go` for every check a landing crosses (an open
-  workflow run, a stack below it, unresolved diff comments), and
+  `internal/engine/handoff.go` and `internal/ui` for the checks a landing
+  crosses (an open workflow run, a stack below it, unresolved diff
+  comments), and
   `docs/DESIGN.md` §19.1 and §24.8 for why the floor is a person's read
   of the diff.
 - Anything architectural or a "why is it this way" question →

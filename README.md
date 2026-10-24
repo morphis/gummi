@@ -48,8 +48,7 @@ and revert it in one click. Recipes are plain YAML — use the bundled
 - **Across repositories** — a session may attach other repositories of
   the workspace: the same branch in each, landed one repository at a
   time, one pull request each.
-- **Terminal and headless** — the same board as a TUI (`gummi`), or
-  driven from scripts, CI or another agent (`gummi run`).
+- **Terminal** — the same board as a TUI (`gummi`).
 
 ## Get started
 
@@ -71,7 +70,6 @@ Prefer the terminal? Run `gummi` in the repo; `?` shows every key.
 ## Docs
 
 [Configuration](docs/CONFIGURATION.md) ·
-[Headless driver](docs/HEADLESS.md) ·
 [Design](docs/DESIGN.md) ·
 [Contributing](AGENTS.md) ·
 [Security](SECURITY.md) ·

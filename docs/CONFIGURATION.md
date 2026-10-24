@@ -112,7 +112,7 @@ Scaffolded on first run. Every key is optional.
 | `triage` | `on` (default) or `off`: whether a session's first request is read by a cheap one-shot, before its agent hears it, for whether it is work for a workflow recipe, and for a name for the session (its title and branch); the agent is told the recipe it names, and still proposes the run for the person to allow. Runs on the profile's `triage` slot, else `scout`, else `scribe`. See DESIGN §25.5 |
 | `coauthors` | a list of people, each written `Name <email>`, named in a `Co-authored-by:` trailer on every commit made in the workspace: gummi appends them to the commits it makes (checkpoints, `gummi commit`, squashes, landings, a message written in a rewrite), and a `commit-msg` hook adds them to every other commit made under it — a card's agent's, a person's in the web terminal. The hook lives under `.gummi/state/hooks` and is named to git through gummi's own environment (`core.hooksPath`), so nothing is written to the repository or its git configuration and no session is asked to go against the repository's own instructions; it runs the repository's own hooks first, names co-authors only in checkouts under the workspace root, and is skipped by `git commit --no-verify`. Unset means no trailer. A workspace list replaces a user-level one. The settings in the web page and the TUI write the workspace's. A configured co-author is the one `Co-authored-by:` line gummi's attribution checks let through |
 | `repo` | the git repository gummi manages when `.gummi` sits above it, named relative to the workspace root (e.g. `git/lxd`). Empty means the workspace root is the repo |
-| `repos` | a map of selectable names to repository paths under the workspace. Every card names one; `--repo` on the headless verbs and `o` on the board pick it |
+| `repos` | a map of selectable names to repository paths under the workspace. Every card names one; `o` on the board picks it |
 | `checks.default` | a fixed list of checks, each `{name, cmd}`, validated at load |
 | `env` | environment prerequisites, each `{probe, describe}`; `gummi doctor` runs each probe and reports it |
 | `instructions` | extra instruction files (absolute paths) appended to the workspace environment card, user then workspace |
@@ -274,7 +274,7 @@ re-raised decision that deduped to a no-op raises nothing).
 | `GUMMI_CLAUDE_BIN`, `GUMMI_OPENCODE_BIN` | a backend's binary, when it is not the default name on PATH |
 | `GUMMI_HEADLESS_CREDITS_PER_1K` | token→credit rate for a local endpoint; 0 uses the engine default |
 | `GUMMI_MODEL` | fallback model when a role isn't covered by a profile (unset: the backend's own default) |
-| `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20 and headless runs refuse to start. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
+| `GUMMI_ENVELOPE` | default budget for new cards, in dollars (`20`, `$12.50`). Unset, the board prefills $20. The envelope is checked between sessions, so a card stops a little over it — one session's worth |
 | `GUMMI_STAGE_BUDGET` | flat credit cap for a card's agent session when the card has no envelope |
 | `GUMMI_TURN_RESERVE` | one turn's credits: the floor under envelope-derived session budgets, and what a planner or curator run must have left to start |
 | `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (needs an authenticated `gh`) |

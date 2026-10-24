@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,8 +173,10 @@ func TestWebDevicesAndUnpair(t *testing.T) {
 }
 
 func TestWebPairNeedsARunningServer(t *testing.T) {
-	boardRepo(t)
-	mustCLI(t, "init")
+	repo := boardRepo(t)
+	if err := os.MkdirAll(filepath.Join(repo, ".gummi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := runCLI("web", "pair"); err == nil || !strings.Contains(err.Error(), "no `gummi web` is running") {
 		t.Errorf("web pair with no server = %v", err)
 	}

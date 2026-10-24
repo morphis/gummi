@@ -79,12 +79,17 @@ func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code
 // on first run.
 func run(args []string) error {
 	// everything this process starts — an agent backend and its shell
-	// above all — inherits the marker the publish verbs refuse under
+	// above all — inherits the marker
 	_ = os.Setenv(spawnedMarker, "1")
 	resetFlags(rootCmd)
 	rootCmd.SetArgs(args)
 	return rootCmd.Execute()
 }
+
+// spawnedMarker is set in the environment of everything a gummi process
+// starts — agent backends and their shells included — so a session's own
+// tools can tell they run under gummi.
+const spawnedMarker = "GUMMI_SPAWNED"
 
 // wireHooks loads the layered hooks config and installs the dispatcher on
 // the store (committed card events) and the pool (squash-merge landings).
@@ -210,25 +215,15 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 	}, ""
 }
 
-// newEngineFromEnv constructs the orchestrator and its agents from the
-// environment, without restoring prior sessions. buildEngine wraps it for
-// the board (adding Restore + a combined cleanup); one-shot commands use
-// it directly and own the agents' lifetimes. Returns
-// (nil, nil, nil) when no agent can be started.
-// The returned error is non-nil only when permissions: guarded is paired
-// with a backend that can't honor it (agent.GuardedSupport) — every other
-// nil-eng path (buildAgents failure, zero agents configured) keeps
-// returning a nil error, so callers that already have their own generic
-// "no coding agent is configured" message for those cases are unaffected.
-func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string, error) {
-	eng, agents, names, _, err := engineFromEnv(store, pool, ws)
-	return eng, agents, names, err
-}
-
-// engineFromEnv is newEngineFromEnv, plus why: on a nil engine with a
-// nil error, what kept every agent from starting. It is a string rather
-// than a second error because it is not one to its callers — a board
-// with no agent is a static board, which is allowed.
+// engineFromEnv constructs the orchestrator and its agents from the
+// environment, without restoring prior sessions; buildEngine wraps it for
+// the board (adding Restore + a combined cleanup). On a nil engine with a
+// nil error, why says what kept every agent from starting: a string rather
+// than a second error because it is not one to its callers — a board with
+// no agent is a static board, which is allowed.
+// The error is non-nil only when permissions: guarded is paired with a
+// backend that can't honor it (agent.GuardedSupport); every other
+// nil-engine path keeps returning a nil error.
 func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (_ *engine.Engine, _ map[string]agent.Agent, _ []string, why string, _ error) {
 	// per-role model routing from .gummi/profiles.yaml (falls back to
 	// the single env model when absent or a role isn't covered)

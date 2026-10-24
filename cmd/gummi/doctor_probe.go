@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os/exec"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -78,4 +79,16 @@ func probeModel(bi backendInfo, model string, timeout time.Duration) probeResult
 			return reachUnknown
 		}
 	}
+}
+
+func onPath(bin string) bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
