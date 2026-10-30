@@ -7166,9 +7166,13 @@ builds the snapshot, executes the actions, and is called from the faces'
 tick loops (`ui/workflowloop.go`) and the headless driver. In order:
 
 1. Wind down when stopped: interrupt running steps, then end the run.
-2. Pause when the session's pool is spent (§24.7a), and do nothing else
-   — unless nothing is left to start, settle or judge: the end checks
-   and the report spend nothing, so the run ends.
+2. Pause when the session's pool is spent (§24.7a) and a step would
+   start or stays live. What costs no money is never held behind the
+   top-up: interrupts, an `until` to judge and a question to the person
+   still go out, and a run with nothing left to spend on ends — the end
+   checks and the report spend nothing. The step that spends the pool
+   pauses the run at once; once it has settled, a tick lifts that pause
+   if nothing left would spend.
 3. Settle a `parallel` whose join is decided, and a `repeat` whose
    iteration has ended: check `until`, then iterate, end the loop, or
    apply `onMax`.

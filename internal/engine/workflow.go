@@ -1662,6 +1662,22 @@ func (e *Engine) tickSession(ctx context.Context, session domain.FeatureID) ([]s
 	if err != nil {
 		return acts, err
 	}
+	if run.State == domain.RunPaused && !run.Stopping && run.OutOfBudget && nothingToSpendOn(in) &&
+		(run.Pending == nil || run.Pending.Kind == domain.RunDecideBudget) {
+		// out of money, but what is left costs none — the step that spent
+		// the pool has settled, and the run has only to interrupt a branch
+		// its join no longer needs, judge an until, ask the person or end:
+		// the pause is lifted rather than holding that behind a top-up
+		run.Pending, run.OutOfBudget, run.State, run.Reason = nil, false, domain.RunRunning, ""
+		in.State = domain.RunRunning
+		e.clockStart(run)
+		rt.conduct(session, run.N)
+		if err := st.UpdateRun(ctx, run); err != nil {
+			return acts, err
+		}
+		e.runNote(session, fmt.Sprintf("run %d: the session's budget is spent, but nothing left to do spends; the run carries on", run.N))
+		acts = append(acts, "unpause")
+	}
 	if run.State == domain.RunPaused && !run.Stopping {
 		// out of money with another decision in the way: put the top-up to
 		// the person once that one is answered
@@ -2486,6 +2502,25 @@ func (e *Engine) checkRunPool(card domain.FeatureID) {
 		why := fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(workflowpolicy.Spent(in)))
 		_ = e.pauseForBudgetLocked(ctx, run, why)
 	})
+}
+
+// nothingToSpendOn reports whether a run paused on a spent pool has only
+// work left that costs no money: conducted as running, it would neither
+// start a step nor keep one live, so Decide would not pause it. A pool
+// with money left answers no: a run paused out of budget with some left
+// waits on what that money could not cover (a dispatch's envelope), which
+// Decide does not see.
+func nothingToSpendOn(in workflowpolicy.Snapshot) bool {
+	if !in.Bounded || in.Left > 0 {
+		return false
+	}
+	in.State = domain.RunRunning
+	for _, a := range workflowpolicy.Decide(in) {
+		if a.Kind == workflowpolicy.Pause || a.Kind == workflowpolicy.Start {
+			return false
+		}
+	}
+	return true
 }
 
 // pauseForBudgetLocked parks a running run whose session's pool is spent:

@@ -163,7 +163,7 @@ func pushCommand(b worktree.BranchInfo) string {
 		}
 	}
 	if theirs != b.Name {
-		return "git push " + remote + " " + b.Name + ":" + theirs
+		return worktree.ShellCommand("git", "push", remote, b.Name+":"+theirs)
 	}
-	return "git push " + remote + " " + b.Name
+	return worktree.ShellCommand("git", "push", remote, b.Name)
 }

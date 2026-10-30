@@ -61,7 +61,14 @@ type Line struct {
 // a partial drawing beats none. "\ No newline at end of file" markers are
 // dropped; they annotate the line above and are not content.
 func Parse(lines []string) []File {
+	files, _ := parse(lines)
+	return files
+}
+
+// parse is Parse, with the index of each file's diff --git header.
+func parse(lines []string) ([]File, []int) {
 	var (
+		starts   []int
 		files    []File
 		cur      *File
 		hunk     *Hunk
@@ -83,6 +90,7 @@ func Parse(lines []string) []File {
 	for i, l := range lines {
 		if strings.HasPrefix(l, "diff --git ") {
 			flushFile()
+			starts = append(starts, i)
 			a, b := gitHeaderPaths(strings.TrimPrefix(l, "diff --git "))
 			cur = &File{Path: b, Status: StatusModified}
 			if a != b {
@@ -133,15 +141,21 @@ func Parse(lines []string) []File {
 		case strings.HasPrefix(l, "deleted file mode"):
 			cur.Status = StatusDeleted
 		case strings.HasPrefix(l, "rename from "):
-			cur.Status, cur.OldPath = StatusRenamed, strings.TrimPrefix(l, "rename from ")
+			cur.Status, cur.OldPath = StatusRenamed, unquote(strings.TrimPrefix(l, "rename from "))
 		case strings.HasPrefix(l, "rename to "):
-			cur.Path = strings.TrimPrefix(l, "rename to ")
+			cur.Path = unquote(strings.TrimPrefix(l, "rename to "))
 		case strings.HasPrefix(l, "copy from "):
-			cur.Status, cur.OldPath = StatusCopied, strings.TrimPrefix(l, "copy from ")
+			cur.Status, cur.OldPath = StatusCopied, unquote(strings.TrimPrefix(l, "copy from "))
 		case strings.HasPrefix(l, "copy to "):
-			cur.Path = strings.TrimPrefix(l, "copy to ")
+			cur.Path = unquote(strings.TrimPrefix(l, "copy to "))
 		case strings.HasPrefix(l, "Binary files ") || l == "GIT binary patch":
 			cur.Binary = true
+		case strings.HasPrefix(l, "--- ") && cur.Status == StatusDeleted:
+			// a deleted file's +++ is /dev/null: its --- names it, which
+			// the diff --git header cannot when the path holds " b/"
+			if p, ok := sidePath(strings.TrimPrefix(l, "--- "), "a/"); ok {
+				cur.Path = p
+			}
 		case strings.HasPrefix(l, "+++ "):
 			// a deleted file's +++ is /dev/null; its path stays the one
 			// the diff --git header named
@@ -160,12 +174,28 @@ func Parse(lines []string) []File {
 			f.OldPath = ""
 		}
 	}
-	return files
+	return files, starts
 }
 
-// gitHeaderPaths takes "a/x b/y" apart. Paths with spaces are ambiguous
-// in this header; the ---/+++ and rename lines that follow correct them.
+// gitHeaderPaths takes "a/x b/y" apart, either side quoted the way git
+// quotes a path with unusual bytes. Paths with spaces are ambiguous in
+// this header; one path on both sides (a/x b/x, the header of every
+// change but a rename or copy) is read as that path, and the ---/+++ and
+// rename lines that follow correct the rest.
 func gitHeaderPaths(rest string) (a, b string) {
+	if strings.HasPrefix(rest, `"`) {
+		if q, err := strconv.QuotedPrefix(rest); err == nil && strings.HasPrefix(rest[len(q):], " ") {
+			a, b = unquote(q), unquote(rest[len(q)+1:])
+			return strings.TrimPrefix(a, "a/"), strings.TrimPrefix(b, "b/")
+		}
+	}
+	if half := (len(rest) - 1) / 2; len(rest)%2 == 1 && rest[half] == ' ' &&
+		strings.HasPrefix(rest, "a/") && strings.HasPrefix(rest[half+1:], "b/") && rest[2:half] == rest[half+3:] {
+		return rest[2:half], rest[2:half]
+	}
+	if j := strings.LastIndex(rest, ` "b/`); j >= 0 && strings.HasSuffix(rest, `"`) {
+		return strings.TrimPrefix(rest[:j], "a/"), strings.TrimPrefix(unquote(rest[j+1:]), "b/")
+	}
 	if j := strings.LastIndex(rest, " b/"); j >= 0 {
 		a, b = rest[:j], rest[j+3:]
 		a = strings.TrimPrefix(a, "a/")

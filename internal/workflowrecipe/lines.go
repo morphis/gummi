@@ -8,8 +8,11 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// planFenceRe finds a gummi-workflow fenced block.
-var planFenceRe = regexp.MustCompile("(?s)```gummi-workflow[ \\t]*\\n(.*?)```")
+// planFenceRe finds a gummi-workflow fenced block. Its closing fence is a
+// line of its own, up to three spaces in, as Markdown has it: a prompt
+// written as a block scalar holds code fences of its own, indented under
+// its key, and they do not end the block.
+var planFenceRe = regexp.MustCompile("(?s)```gummi-workflow[ \\t]*\\n(.*?)(?m:^)[ ]{0,3}```")
 
 // ErrNoPlanBlock is a planner's output without a gummi-workflow block.
 var ErrNoPlanBlock = errors.New("no gummi-workflow block")

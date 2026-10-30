@@ -36,7 +36,9 @@ func EncodeTrees(primary string, attached map[string]string) string {
 func DecodeTrees(s string) (primary string, attached map[string]string) {
 	first, rest, _ := strings.Cut(s, "\n")
 	for _, line := range strings.Split(rest, "\n") {
-		if repo, hash, ok := strings.Cut(line, "="); ok && repo != "" {
+		// a hash holds no "=", a repository's name may: cut at the last
+		if i := strings.LastIndex(line, "="); i > 0 {
+			repo, hash := line[:i], line[i+1:]
 			if attached == nil {
 				attached = map[string]string{}
 			}

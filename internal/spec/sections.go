@@ -2,6 +2,7 @@ package spec
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -22,6 +23,10 @@ var ErrSectionUnknown = errors.New("unknown section")
 // section list is fixed, so an injected top-level heading is always
 // structural corruption.
 var ErrSectionHeadingInBody = errors.New("body contains a top-level `## ` heading")
+
+// ErrSectionOpenFence rejects a body that opens a ``` fence and does not
+// close it: every heading after the section would read as code.
+var ErrSectionOpenFence = errors.New("body opens a ``` code fence it does not close")
 
 // ViewSection returns the body of the named section verbatim (heading
 // line excluded, surrounding whitespace preserved byte-for-byte), or the
@@ -49,9 +54,9 @@ func HeadingLine(content, name string) (line int, ok bool) {
 		return 0, false
 	}
 	target := strings.ToLower(strings.TrimSpace(name))
-	for i, l := range strings.Split(content, "\n") {
-		if isHeading(l) && strings.ToLower(strings.TrimSpace(l[len("## "):])) == target {
-			return i + 1, true
+	for _, h := range HeadingLines(content) {
+		if strings.ToLower(h.Title) == target {
+			return h.Line, true
 		}
 	}
 	return 0, false
@@ -63,10 +68,8 @@ func HeadingLine(content, name string) (line int, ok bool) {
 // called X" for a caller checking a name it did not choose itself.
 func Headings(content string) []string {
 	var out []string
-	for _, l := range strings.Split(content, "\n") {
-		if isHeading(l) {
-			out = append(out, strings.TrimSpace(l[len("## "):]))
-		}
+	for _, h := range HeadingLines(content) {
+		out = append(out, h.Title)
 	}
 	return out
 }
@@ -81,12 +84,31 @@ type Heading struct {
 // of contents, in document order, by the same `## ` rule.
 func HeadingLines(content string) []Heading {
 	var out []Heading
-	for i, l := range strings.Split(content, "\n") {
-		if isHeading(l) {
-			out = append(out, Heading{Title: strings.TrimSpace(l[len("## "):]), Line: i + 1})
+	lines := strings.Split(content, "\n")
+	for i, h := range headingFlags(lines) {
+		if h {
+			out = append(out, Heading{Title: strings.TrimSpace(lines[i][len("## "):]), Line: i + 1})
 		}
 	}
 	return out
+}
+
+// headingFlags marks the lines that are top-level headings: `## ` at
+// column 0, outside a ``` fence — the rule HealWeldedHeadings reads code
+// by. A `## ` line inside a fenced example is the example's text: read as
+// a heading, it ended the section it sits in, and the rest of that
+// section belonged to a section that is not there.
+func headingFlags(lines []string) []bool {
+	flags := make([]bool, len(lines))
+	inFence := false
+	for i, l := range lines {
+		if strings.HasPrefix(l, "```") {
+			inFence = !inFence
+			continue
+		}
+		flags[i] = !inFence && isHeading(l)
+	}
+	return flags
 }
 
 // SectionLastLine reports the 1-based line number of the last line of the
@@ -105,7 +127,7 @@ func SectionLastLine(content, name string) (line int, ok bool) {
 	if !found {
 		return 0, false
 	}
-	body := strings.TrimRight(content[start:end], "\n \t")
+	body := strings.TrimRight(content[start:end], "\r\n \t")
 	if body == "" {
 		return 0, false
 	}
@@ -128,6 +150,9 @@ func ReplaceSection(content, name, body string) (newContent, matchedTitle string
 	}
 	if hasHeadingAtCol0(body) {
 		return "", "", ErrSectionHeadingInBody
+	}
+	if opensFence(body) {
+		return "", "", ErrSectionOpenFence
 	}
 	body = normalizeSectionBody(body)
 	return content[:start] + body + content[end:], matchedTitle, nil
@@ -359,30 +384,26 @@ func sectionBounds(content, name string) (bodyStart, bodyEnd int, matchedTitle s
 	}
 	target := strings.ToLower(strings.TrimSpace(name))
 	lines := strings.Split(content, "\n")
+	flags := headingFlags(lines)
 	pos := 0
-	for _, line := range lines {
-		if isHeading(line) {
+	for i, line := range lines {
+		if flags[i] {
 			title := strings.TrimSpace(line[len("## "):])
 			if strings.ToLower(title) == target {
 				bodyStart = pos + len(line)
 				if bodyStart < len(content) && content[bodyStart] == '\n' {
 					bodyStart++ // past the heading line's trailing newline
 				}
-				// scan forward for the next top-level heading
+				// the next top-level heading ends the body — the last line
+				// too, newline or not
 				bodyEnd = len(content)
-				j := bodyStart
-				for {
-					nl := strings.IndexByte(content[j:], '\n')
-					if nl < 0 {
+				next := bodyStart
+				for j := i + 1; j < len(lines); j++ {
+					if flags[j] {
+						bodyEnd = next
 						break
 					}
-					lineStart := j
-					lineEnd := j + nl
-					if isHeading(content[lineStart:lineEnd]) {
-						bodyEnd = lineStart
-						break
-					}
-					j = lineEnd + 1
+					next += len(lines[j]) + 1
 				}
 				return bodyStart, bodyEnd, title, true
 			}
@@ -403,8 +424,9 @@ func (d Doc) SectionAt(line int) string {
 	if line < 1 || line > len(d.Lines) {
 		return ""
 	}
+	flags := headingFlags(d.Lines)
 	for i := line - 1; i >= 0; i-- {
-		if isHeading(d.Lines[i]) {
+		if flags[i] {
 			return strings.TrimSpace(d.Lines[i][len("## "):])
 		}
 	}
@@ -419,12 +441,19 @@ func isHeading(line string) bool {
 // column 0. Indented `  ## …` lines (e.g. inside a code block) are not
 // structural headings.
 func hasHeadingAtCol0(body string) bool {
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "## ") {
-			return true
+	return slices.Contains(headingFlags(strings.Split(body, "\n")), true)
+}
+
+// opensFence reports whether body leaves a ``` fence open: spliced into a
+// section, it would turn every heading after it into code.
+func opensFence(body string) bool {
+	open := false
+	for _, l := range strings.Split(body, "\n") {
+		if strings.HasPrefix(l, "```") {
+			open = !open
 		}
 	}
-	return false
+	return open
 }
 
 // UndraftedSections returns the subset of want that names undrafted sections.

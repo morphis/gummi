@@ -58,29 +58,80 @@ func FormatDollars(credits float64) string {
 // envelope is stored in. A credit is a cent, so a figure finer than a cent
 // is refused rather than rounded: whatever was typed is what is stored.
 // Negative figures are refused; "0" is 0, which callers read as uncapped.
+//
+// The figure is read as decimal digits, not as a float: a comma is a
+// thousands separator only between groups of three ("12,50" is refused,
+// never read as $1,250 when $12.50 was meant), and exponents, hex and
+// signs are not dollar figures. Large budgets are exact.
 func ParseDollars(s string) (int, error) {
 	t := strings.TrimSpace(s)
 	t = strings.TrimSpace(strings.TrimPrefix(t, "$"))
-	t = strings.ReplaceAll(t, ",", "")
 	if t == "" {
 		return 0, errors.New("a dollar amount, like 5 or 12.50")
 	}
-	v, err := strconv.ParseFloat(t, 64)
-	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0, fmt.Errorf("%q is not a dollar amount, like 5 or 12.50", s)
+	notAmount := fmt.Errorf("%q is not a dollar amount, like 5 or 12.50", s)
+	if rest, neg := strings.CutPrefix(t, "-"); neg {
+		if _, err := dollarCents(rest); err == nil {
+			return 0, fmt.Errorf("%q is negative; a budget is $0 (uncapped) or more", s)
+		}
+		return 0, notAmount
 	}
-	if v < 0 {
-		return 0, fmt.Errorf("%q is negative; a budget is $0 (uncapped) or more", s)
-	}
-	cents := math.Round(v / CreditsToDollars)
-	if math.Abs(cents*CreditsToDollars-v) > 1e-9 {
+	cents, err := dollarCents(t)
+	switch {
+	case errors.Is(err, errSubCent):
 		return 0, fmt.Errorf("%q is finer than a cent", s)
-	}
-	if cents > math.MaxInt32 {
+	case errors.Is(err, errTooLarge):
 		return 0, fmt.Errorf("%q is too large a budget", s)
+	case err != nil:
+		return 0, notAmount
+	}
+	return cents, nil
+}
+
+var (
+	errSubCent  = errors.New("finer than a cent")
+	errTooLarge = errors.New("too large")
+)
+
+// dollarCents reads "1,234.50" as 123450: digits, commas only between
+// groups of three, and a fraction whose digits past the cents are zeros.
+func dollarCents(t string) (int, error) {
+	whole, frac, dotted := strings.Cut(t, ".")
+	if whole == "" && (!dotted || frac == "") {
+		return 0, errors.New("no digits")
+	}
+	if groups := strings.Split(whole, ","); len(groups) > 1 {
+		for i, g := range groups {
+			if !allDigits(g) || len(g) > 3 || (i > 0 && len(g) != 3) || g == "" {
+				return 0, errors.New("misplaced comma")
+			}
+		}
+		whole = strings.Join(groups, "")
+	}
+	if !allDigits(whole) || !allDigits(frac) {
+		return 0, errors.New("not digits")
+	}
+	if len(frac) > 2 {
+		if strings.Trim(frac[2:], "0") != "" {
+			return 0, errSubCent
+		}
+		frac = frac[:2]
+	}
+	frac += strings.Repeat("0", 2-len(frac))
+	whole = strings.TrimLeft(whole, "0")
+	if len(whole) > 10 {
+		return 0, errTooLarge
+	}
+	w, _ := strconv.ParseInt("0"+whole, 10, 64)
+	f, _ := strconv.ParseInt(frac, 10, 64)
+	cents := w*100 + f
+	if cents > math.MaxInt32 {
+		return 0, errTooLarge
 	}
 	return int(cents), nil
 }
+
+func allDigits(s string) bool { return strings.Trim(s, "0123456789") == "" }
 
 // DollarsInput renders a credit figure the way an input field holds it,
 // for ParseDollars to read back: 500 → "5", 550 → "5.5".

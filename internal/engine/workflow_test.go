@@ -570,6 +570,46 @@ func TestASpentPoolPausesTheRunAndATopUpCarriesItOn(t *testing.T) {
 	}
 }
 
+// TestASpentPoolHoldsBackNothingFree: the step that spends the last of
+// the pool pauses the run at once, but once it has settled, what is left
+// may cost nothing: a loop's until to judge, a question, the run's end.
+// The pause is lifted for it rather than putting a top-up first — the
+// loop whose until is met ends done, and the one whose until is not met
+// asks the person about its max, with no top-up asked of them.
+func TestASpentPoolHoldsBackNothingFree(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply string
+		want        func(r *domain.Run) bool
+	}{
+		{"met", "ALL GOOD", ended},
+		{"not met", "not yet", func(r *domain.Run) bool {
+			return r.Pending != nil && r.Pending.Kind == domain.RunDecideMax
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf := newWFFake()
+			wf.on("work", func(dir, _ string, _ int) wfReply {
+				_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o600)
+				return wfReply{text: tc.reply, credits: 200}
+			})
+			e, _, f, _ := wfEngine(t, wf)
+			ctx := context.Background()
+			if err := e.RaiseEnvelope(ctx, f.ID, 150); err != nil {
+				t.Fatal(err)
+			}
+			run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: loop\nsteps:\n  - id: fix\n    repeat:\n      max: 1\n" +
+				"      until: { contains: ALL GOOD }\n      steps:\n        - { id: work, role: implementer, prompt: write }\n"})
+			r := tickRuns(t, e, f.ID, run.N, tc.name, tc.want)
+			if r.OutOfBudget || (r.Pending != nil && r.Pending.Kind == domain.RunDecideBudget) {
+				t.Fatalf("the run still waits on a top-up: %+v, deciding %+v", r, r.Pending)
+			}
+			if tc.name == "met" && r.State != domain.RunDone {
+				t.Fatalf("ended %s: %s", r.State, r.Reason)
+			}
+		})
+	}
+}
+
 // TestStoppingARunRevertsNothing: a stop interrupts the running step and
 // ends the run stopped, its changes left in the tree; Revert is refused
 // while the step runs.

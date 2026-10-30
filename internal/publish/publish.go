@@ -166,7 +166,9 @@ func Refusal(c Card) *Error {
 	case c.Landed:
 		return fail(CodeLanded, "this card has landed: its commits are already on its base", "")
 	case f.ContinuedAs != "":
-		return fail(CodeContinued, fmt.Sprintf("this session continued as %s, which publishes the work", f.ContinuedAs), "")
+		// the spec it continued as is named on the board, by its title; an
+		// id in a sentence is no name a person reads
+		return fail(CodeContinued, "this session was continued as a spec, and that card publishes the work", "")
 	case c.Busy:
 		return fail(CodeBusy, "an agent is working on this card", "wait for its turn to end")
 	case c.Rebasing:

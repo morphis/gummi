@@ -2,6 +2,7 @@ package spec
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -99,5 +100,22 @@ func TestRenderFilesRoundTrips(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+// TestAFileListedTwiceIsOneEntry: "a/b" and "./a/b" name one file; "."
+// is the tree, and a drive letter names a machine's location, not a file
+// in the tree. A colon elsewhere is a file name's own.
+func TestAFileListedTwiceIsOneEntry(t *testing.T) {
+	got, _, err := ParseFiles("```gummi-files\n- path: a/b\n- path: ./a/b\n- path: .\n- path: C:/x\n- path: z:w\n```\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, f := range got {
+		paths = append(paths, f.Path)
+	}
+	if strings.Join(paths, "|") != "a/b|z:w" {
+		t.Fatalf("paths = %q", paths)
 	}
 }

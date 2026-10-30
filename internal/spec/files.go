@@ -29,7 +29,7 @@ import (
 
 // filesFenceRe matches one ```gummi-files … ``` block (the first wins),
 // mirroring checksFenceRe.
-var filesFenceRe = regexp.MustCompile("(?s)```gummi-files\\s*\\n(.*?)```")
+var filesFenceRe = regexp.MustCompile("(?s)```gummi-files\\s*\\n(.*?)(?m:^)[ ]{0,3}```")
 
 // ParseFiles extracts the artifact's gummi-files block. found reports
 // whether a block exists at all — even one that yields no usable entries
@@ -54,10 +54,11 @@ func ParseFiles(content string) (files []domain.PlannedFile, found bool, err err
 	seen := map[string]bool{}
 	for _, f := range raw {
 		p := strings.TrimSpace(f.Path)
-		if p == "" || !repoRelative(p) || seen[p] {
+		// one file listed twice ("a/b", "./a/b") is one entry
+		if p == "" || !repoRelative(p) || seen[path.Clean(p)] {
 			continue
 		}
-		seen[p] = true
+		seen[path.Clean(p)] = true
 		f.Path = p
 		f.Role = strings.TrimSpace(f.Role)
 		files = append(files, f)
@@ -71,14 +72,19 @@ func repoRelative(p string) bool {
 	if strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
 		return false
 	}
+	// a drive letter (C:/x) names a location on a machine, not in a tree
+	if len(p) >= 2 && p[1] == ':' && ('a' <= p[0]|0x20 && p[0]|0x20 <= 'z') && (len(p) == 2 || p[2] == '/') {
+		return false
+	}
 	clean := path.Clean(p)
-	return clean != ".." && !strings.HasPrefix(clean, "../")
+	// "." is the whole tree, not a file in it
+	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
 // RenderFiles renders the canonical fenced block for a manifest, so a
 // writer and a reader agree on one shape.
 func RenderFiles(files []domain.PlannedFile) string {
-	body, err := yaml.Marshal(files)
+	body, err := marshalBlock(files)
 	if err != nil { // a []PlannedFile of plain scalars cannot fail to marshal
 		body = nil
 	}

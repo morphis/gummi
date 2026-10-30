@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -943,24 +942,36 @@ func parseAsk(callID string, args json.RawMessage) (*Ask, error) {
 	return &a, nil
 }
 
-// askFenceRe matches a ```gummi-ask … ``` block (the convention-path
-// carrier for backends without client tools).
-var askFenceRe = regexp.MustCompile("(?s)```gummi-ask\\s*(.*?)```")
+// askFenceOpen opens a gummi-ask block (the convention-path carrier for
+// backends without client tools).
+const askFenceOpen = "```gummi-ask"
 
 // parseAskConvention extracts a gummi-ask block from an assistant
 // message, returning the parsed ask and the message with the block
-// stripped. ok is false when there is no well-formed block.
+// stripped. ok is false when there is no well-formed block. The block's
+// body is one JSON value, read as JSON rather than up to the first ```,
+// so a question or an option holding a code fence does not end it.
 func parseAskConvention(text string) (ask *Ask, stripped string, ok bool) {
-	m := askFenceRe.FindStringSubmatchIndex(text)
-	if m == nil {
+	open := strings.Index(text, askFenceOpen)
+	if open < 0 {
 		return nil, text, false
 	}
-	body := text[m[2]:m[3]]
-	a, err := parseAsk("", json.RawMessage(strings.TrimSpace(body)))
-	if err != nil {
+	rest := text[open+len(askFenceOpen):]
+	dec := json.NewDecoder(strings.NewReader(rest))
+	var body json.RawMessage
+	if err := dec.Decode(&body); err != nil {
 		return nil, text, false // malformed block: leave it as prose
 	}
-	stripped = strings.TrimSpace(text[:m[0]] + text[m[1]:])
+	after := rest[dec.InputOffset():]
+	if !strings.HasPrefix(strings.TrimLeft(after, " \t\r\n"), "```") {
+		return nil, text, false
+	}
+	end := open + len(askFenceOpen) + int(dec.InputOffset()) + len(after) - len(strings.TrimLeft(after, " \t\r\n")) + 3
+	a, err := parseAsk("", body)
+	if err != nil {
+		return nil, text, false
+	}
+	stripped = strings.TrimSpace(text[:open] + text[end:])
 	return a, stripped, true
 }
 

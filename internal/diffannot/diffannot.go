@@ -93,27 +93,20 @@ func LocateAll(lines []string, wants []string) []int {
 	return out
 }
 
-// FileAt returns the new-side file path (from the nearest preceding
-// `+++ b/<path>` header, falling back to the `diff --git` header) that the
-// line at idx belongs to, or "" before the first header.
-//
-// A deleted file's `+++` side is /dev/null, which names no file: the path
-// stays the one its `diff --git` header gave — the reading Parse makes —
-// so a comment on a removed line anchors to the file it was written on,
-// where the diff surface draws it, rather than to "/dev/null".
+// FileAt returns the path of the file the line at idx belongs to, as
+// Parse reads it — the new side's, or a deleted file's own — or "" before
+// the first file. It reads the diff as Parse does, so a line inside a
+// hunk is never taken for a header: a file whose content holds "++ b/x"
+// adds the diff line "+++ b/x", which is the file's text, not another
+// file's.
 func FileAt(lines []string, idx int) string {
+	files, starts := parse(lines)
 	file := ""
-	for i := 0; i <= idx && i < len(lines); i++ {
-		l := lines[i]
-		switch {
-		case strings.HasPrefix(l, "+++ "):
-			if p, ok := sidePath(strings.TrimPrefix(l, "+++ "), "b/"); ok {
-				file = p
-			}
-		case strings.HasPrefix(l, "diff --git "):
-			// diff --git a/x b/x — take the b/ side as a provisional name
-			_, file = gitHeaderPaths(strings.TrimPrefix(l, "diff --git "))
+	for i, at := range starts {
+		if at > idx {
+			break
 		}
+		file = files[i].Path
 	}
 	return file
 }

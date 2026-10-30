@@ -107,3 +107,47 @@ func TestLinesMatchesTheAnchorSplit(t *testing.T) {
 		t.Errorf("Lines = %q", got)
 	}
 }
+
+// TestParseReadsTheAwkwardPathsGitWrites: a deleted file whose path holds
+// " b/", one git quotes, a rename to a quoted path, and a file whose
+// content holds "++ b/evil" are each read with the path git means, by
+// Parse and by FileAt alike.
+func TestParseReadsTheAwkwardPathsGitWrites(t *testing.T) {
+	diff := "diff --git a/d b/x.txt b/d b/x.txt\n" +
+		"deleted file mode 100644\n" +
+		"index 975fbec..0000000\n" +
+		"--- a/d b/x.txt\t\n" +
+		"+++ /dev/null\n" +
+		"@@ -1 +0,0 @@\n" +
+		"-y\n" +
+		"diff --git a/q.txt b/q.txt\n" +
+		"index 243154c..20afd38 100644\n" +
+		"--- a/q.txt\n" +
+		"+++ b/q.txt\n" +
+		"@@ -1,2 +1,3 @@\n" +
+		" keep\n" +
+		"+++ b/evil\n" +
+		" me\n" +
+		"diff --git \"a/\\303\\251.txt\" \"b/\\303\\251.txt\"\n" +
+		"deleted file mode 100644\n" +
+		"index 587be6b..0000000\n" +
+		"--- \"a/\\303\\251.txt\"\n" +
+		"+++ /dev/null\n" +
+		"@@ -1 +0,0 @@\n" +
+		"-x\n" +
+		"diff --git a/a.txt \"b/\\303\\274.txt\"\n" +
+		"similarity index 100%\n" +
+		"rename from a.txt\n" +
+		"rename to \"\\303\\274.txt\"\n"
+	lines := Lines(diff)
+	var got []string
+	for _, f := range Parse(lines) {
+		got = append(got, f.OldPath+">"+f.Path)
+	}
+	if want := []string{">d b/x.txt", ">q.txt", ">é.txt", "a.txt>ü.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("paths = %q, want %q", got, want)
+	}
+	if f := FileAt(lines, 14); f != "q.txt" {
+		t.Errorf("FileAt the line after \"+++ b/evil\" = %q, want q.txt", f)
+	}
+}

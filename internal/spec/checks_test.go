@@ -331,3 +331,36 @@ func TestParseChecksReadsTheNameCommandShorthand(t *testing.T) {
 		t.Fatalf("shorthand read as %+v", checks)
 	}
 }
+
+// TestABlockReadsBackWhatGummiWroteIntoIt: values that once came back
+// changed or not at all — one holding ```, one opening with a newline, a
+// multi-line one with a line opening %% — read back as rendered, and a
+// skip tag whose stripping leaves YAML structure is still stripped.
+func TestABlockReadsBackWhatGummiWroteIntoIt(t *testing.T) {
+	checks := []domain.Check{
+		{Name: "fence", Cmd: "echo ```"},
+		{Name: "newline", Cmd: "\ngo test ./..."},
+		{Name: "marker", Cmd: "go test ./...\n%% not a marker"},
+	}
+	got, _, err := ParseChecks("## Verification\n\n" + RenderChecks(checks) + "\n")
+	if err != nil || len(got) != len(checks) {
+		t.Fatalf("read back %#v, %v", got, err)
+	}
+	for i := range checks {
+		if got[i] != checks[i] {
+			t.Errorf("check %d read back %#v, want %#v", i, got[i], checks[i])
+		}
+	}
+	items := []domain.DoneWhen{{ID: "DW-1", Says: "first\n%% second", Judge: true}}
+	doc, err := SetDoneWhen(SessionTemplate("t"), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dw, _, err := ParseDoneWhen(doc); err != nil || len(dw) != 1 || dw[0] != items[0] {
+		t.Errorf("done-when read back %#v, %v", dw, err)
+	}
+	tagged, _, err := ParseChecks("```gummi-checks\n- name: t\n  cmd: -[ci-only]\n```\n")
+	if err != nil || len(tagged) != 1 || tagged[0].Cmd != "-" {
+		t.Errorf("a tag glued to a dash read back %#v, %v", tagged, err)
+	}
+}

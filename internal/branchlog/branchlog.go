@@ -106,24 +106,26 @@ type State struct {
 // driver returns it as its error, and Manager.Rewrite still checks the
 // worktree's own preconditions (clean, no rebase in flight) underneath.
 func Refusal(f domain.Feature, s State) string {
+	// a sentence names a card by its title, never its id (AGENTS.md)
+	name := f.Name()
 	switch {
 	case f.Kind == domain.KindResearch:
 		// not "yet": a research card never gets one
-		return string(f.ID) + " is a research card: it works in a scratch tree and never gets a branch"
+		return name + " is a research card: it works in a scratch tree and never gets a branch"
 	case f.Stage == domain.StageTodo:
-		return string(f.ID) + " has no branch yet"
+		return name + " has no branch yet"
 	case f.MainCheckout:
-		return string(f.ID) + " runs in " + f.CheckoutName() + ": it holds no branch, so it has no commits of its own"
+		return name + " runs in " + f.CheckoutName() + ": it holds no branch, so it has no commits of its own"
 	case f.Kind == domain.KindGoal:
-		return string(f.ID) + " is a goal: its branch is built from its cards' landings, not from commits to rewrite"
+		return name + " is a goal: its branch is built from its cards' landings, not from commits to rewrite"
 	case f.Adopted():
 		// held, never owned (DESIGN §10 D22): gummi does not record where
 		// its own commits on an adopted branch begin, so none are offered
-		return string(f.ID) + " is on a branch gummi did not cut — its history is not gummi's to rewrite"
+		return name + " is on a branch gummi did not cut — its history is not gummi's to rewrite"
 	case s.Landed:
-		return string(f.ID) + " has already landed — its commits are on the base"
+		return name + " has already landed — its commits are on the base"
 	case s.Busy:
-		return string(f.ID) + " has an agent working — rewrite once it has stopped"
+		return name + " has an agent working — rewrite once it has stopped"
 	}
 	return ""
 }

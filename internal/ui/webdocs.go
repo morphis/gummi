@@ -917,11 +917,11 @@ func (d *WebDocs) pushCommand(ctx context.Context, f domain.Feature) string {
 			return engine.PushCommandTo(remote, branch, rb)
 		}
 		if rb == branch {
-			return "git push " + remote + " " + branch
+			return worktree.ShellCommand("git", "push", remote, branch)
 		}
-		return "git push " + remote + " " + branch + ":" + rb
+		return worktree.ShellCommand("git", "push", remote, branch+":"+rb)
 	}
-	return "git push -u origin " + branch
+	return worktree.ShellCommand("git", "push", "-u", "origin", branch)
 }
 
 // hunkTailLine is the new-side line a review thread's diff hunk ends on:

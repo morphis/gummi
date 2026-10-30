@@ -357,6 +357,10 @@ func FindAnchor(content, snippet string) (line int, ok bool) {
 		// disambiguate it, so stay closed.
 		return 0, false
 	}
+	anchorOf := map[int]int{}
+	for _, m := range Parse(content).Markers {
+		anchorOf[m.Line] = m.Anchor
+	}
 	markers, anchored := 0, false
 	for i, raw := range lines {
 		if !IsMarkerLine(raw) || !strings.Contains(raw, snippet) {
@@ -364,26 +368,12 @@ func FindAnchor(content, snippet string) (line int, ok bool) {
 		}
 		markers++
 		line = i + 1
-		anchored = markerAnchorLine(lines, i) != 0
+		anchored = anchorOf[line] != 0
 	}
 	if markers != 1 || !anchored {
 		return 0, false
 	}
 	return line, true
-}
-
-// markerAnchorLine returns the 1-based line a marker at index i attaches
-// to: the nearest preceding non-marker, non-blank line, matching Parse's
-// own anchoring rule. Zero means the marker has no anchor above it, so
-// nothing threads there.
-func markerAnchorLine(lines []string, i int) int {
-	for j := i - 1; j >= 0; j-- {
-		if IsMarkerLine(lines[j]) || strings.TrimSpace(lines[j]) == "" {
-			continue
-		}
-		return j + 1
-	}
-	return 0
 }
 
 // AddComment inserts `%% @author(date): text` into content after the
@@ -398,10 +388,26 @@ func AddComment(content string, line int, author, date, text string) (string, er
 	if line < 1 || line > len(lines) {
 		return "", fmt.Errorf("line %d out of range (1..%d)", line, len(lines))
 	}
-	// skip past the existing thread under this line
-	insert := line
-	for insert < len(lines) && IsMarkerLine(lines[insert]) {
-		insert++
+	// skip past the existing thread under this line, as Parse reads it:
+	// its markers and the indented continuations an agent appends under
+	// them. Stopping at the first continuation put a new comment above
+	// the thread's resolution, and it opened already closed.
+	// A blank line does not end a thread there either: what follows it
+	// is still the thread's when it is a marker or a continuation.
+	insert, inRun := line, false
+	for j := line; j < len(lines); j++ {
+		l := lines[j]
+		switch {
+		case IsMarkerLine(l):
+			inRun = true
+		case strings.TrimSpace(l) == "":
+			continue
+		case inRun && isIndented(l):
+		default:
+			j = len(lines)
+			continue
+		}
+		insert = j + 1
 	}
 	marker := fmt.Sprintf("%%%% @%s(%s): %s", author, date, text)
 	out := make([]string, 0, len(lines)+1)

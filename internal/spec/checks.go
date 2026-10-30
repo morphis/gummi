@@ -2,6 +2,7 @@ package spec
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,7 +37,10 @@ const maxCheckTimeout = 30 * time.Minute
 // marshals, so anything gummi writes itself is correct by construction.
 
 // checksFenceRe matches one ```gummi-checks … ``` block (the first wins).
-var checksFenceRe = regexp.MustCompile("(?s)```gummi-checks\\s*\\n(.*?)```")
+// The closing fence is a line of its own, as Markdown has it — up to
+// three spaces in, never mid-line — so a value holding ``` (quoted by the
+// YAML, after its key) does not end the block.
+var checksFenceRe = regexp.MustCompile("(?s)```gummi-checks\\s*\\n(.*?)(?m:^)[ ]{0,3}```")
 
 // ParseChecks extracts the artifact's gummi-checks block. found reports
 // whether a block exists at all — even one that yields no usable checks —
@@ -157,7 +161,8 @@ var checkKeyRe = regexp.MustCompile(`^(\s*)(-\s+)?(name|cmd|timeout|baseline):[ 
 // artifact — and leaves everything else to fail loudly:
 //
 //	%% markers inside the fence      dropped (they are section prose)
-//	[env: …] / [CI-only] in a value  stripped (tags are not commands)
+//	[env: …] / [CI-only] in a value  stripped (tags are not commands),
+//	                                 when the value is plain, not quoted
 //	an unquoted value holding ": "   single-quoted
 //	a tab-indented continuation      re-indented with spaces
 //
@@ -211,12 +216,21 @@ func repairChecksBlock(body string) (string, bool) {
 			indent = "  "
 			changed = true
 		}
-		if stripped := strings.TrimSpace(skipTagRe.ReplaceAllString(val, "")); stripped != val {
+		// a quoted value was written as it stands — the form gummi renders a
+		// command holding a literal tag in — so only a plain one is stripped
+		quoted := strings.HasPrefix(val, "'") || strings.HasPrefix(val, `"`)
+		if stripped := strings.TrimSpace(skipTagRe.ReplaceAllString(val, "")); !quoted && stripped != val {
 			if stripped == "" { // the value was nothing but a tag
 				changed = true
 				continue
 			}
 			val, changed = stripped, true
+			if !readsAsItself(val) {
+				// what the tag leaves ("-", "#x", "a: b") would read as
+				// structure, the repair would fail, and the block as written
+				// — tag and all — would run
+				val = "'" + strings.ReplaceAll(val, "'", "''") + "'"
+			}
 		}
 		if strings.HasPrefix(val, "|") || strings.HasPrefix(val, ">") {
 			blockScalar = len(indent) + len(dash)
@@ -340,11 +354,86 @@ func validateCheckTimeout(c domain.Check) error {
 
 // RenderChecks renders the canonical fenced block for a check list.
 func RenderChecks(checks []domain.Check) string {
-	body, err := yaml.Marshal(checks)
+	body, err := marshalBlock(checks)
 	if err != nil { // a []Check of plain strings cannot fail to marshal
 		body = nil
 	}
 	return "```gummi-checks\n" + string(body) + "```"
+}
+
+// marshalBlock renders v — a slice of the plain structs a block holds —
+// as the YAML body of one of the spec's fenced blocks, written so that it
+// reads back as written: a value holding a newline, a tab or a carriage
+// return is double-quoted, its escapes on one line. As a literal block
+// its lines would stand alone in the fence, where the reader drops a line
+// opening with %% as gummi's own marker and turns a tab into spaces, and
+// yaml.v3 writes a literal block for a value opening with a newline that
+// it cannot read back at all. The node tree is built here rather than by
+// yaml.Node.Encode, which goes through that same literal text.
+func marshalBlock(v any) ([]byte, error) {
+	n, err := blockNode(reflect.ValueOf(v))
+	if err != nil {
+		return nil, err
+	}
+	return yaml.Marshal(n)
+}
+
+func blockNode(v reflect.Value) (*yaml.Node, error) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		return blockNode(v.Elem())
+	case reflect.Slice:
+		n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for i := range v.Len() {
+			c, err := blockNode(v.Index(i))
+			if err != nil {
+				return nil, err
+			}
+			n.Content = append(n.Content, c)
+		}
+		return n, nil
+	case reflect.Struct:
+		n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		for i := range v.NumField() {
+			name, opts, _ := strings.Cut(v.Type().Field(i).Tag.Get("yaml"), ",")
+			f := v.Field(i)
+			if name == "" || name == "-" || (opts == "omitempty" && f.IsZero()) {
+				continue
+			}
+			c, err := blockNode(f)
+			if err != nil {
+				return nil, err
+			}
+			n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, c)
+		}
+		return n, nil
+	case reflect.String:
+		n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v.String()}
+		// a [ci-only] or [env: …] in a value gummi writes is the value's own
+		// text: quoted, the repair that strips a tag glued to a hand-written
+		// command leaves it be
+		if strings.ContainsAny(n.Value, "\n\t\r") || skipTagRe.MatchString(n.Value) {
+			n.Style = yaml.DoubleQuotedStyle
+		}
+		return n, nil
+	case reflect.Bool:
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strconv.FormatBool(v.Bool())}, nil
+	}
+	return nil, fmt.Errorf("a block holds no %s", v.Kind())
+}
+
+// readsAsItself reports whether a value written after a key reads back as
+// one scalar of that same text, or is quoted already.
+func readsAsItself(val string) bool {
+	if strings.HasPrefix(val, "'") || strings.HasPrefix(val, `"`) {
+		return true
+	}
+	var n yaml.Node
+	if err := yaml.Unmarshal([]byte("v: "+val), &n); err != nil || len(n.Content) != 1 || len(n.Content[0].Content) != 2 {
+		return false
+	}
+	v := n.Content[0].Content[1]
+	return v.Kind == yaml.ScalarNode && v.Value == val
 }
 
 // ChecksDiscoveryNote marks a gummi-checks block that check discovery

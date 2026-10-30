@@ -89,9 +89,9 @@ func PushCommand(branch string) string {
 // one git's own branch config says it tracks, and the name it has there.
 func PushCommandTo(remote, branch, remoteBranch string) string {
 	if remoteBranch == "" || remoteBranch == branch {
-		return "git push --force-with-lease " + remote + " " + branch
+		return worktree.ShellCommand("git", "push", "--force-with-lease", remote, branch)
 	}
-	return "git push --force-with-lease " + remote + " " + branch + ":" + remoteBranch
+	return worktree.ShellCommand("git", "push", "--force-with-lease", remote, branch+":"+remoteBranch)
 }
 
 // replayPushCommand is the push a replayed card's branch needs

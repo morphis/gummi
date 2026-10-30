@@ -464,3 +464,18 @@ func TestAMarkerAddressingAnotherAuthorKeepsItsText(t *testing.T) {
 		t.Errorf("text = %q, want %q", got, want)
 	}
 }
+
+// TestACommentLandsBelowAThreadsContinuations: an agent's indented
+// evidence under a marker is part of its thread; a comment added there
+// goes below it and the thread's resolution, not between them, where the
+// resolution would close it as it was written.
+func TestACommentLandsBelowAThreadsContinuations(t *testing.T) {
+	doc := "X\n%% @user: q\n  note\n%% @user: resolved\nY"
+	out, err := AddComment(doc, 1, "user", "d", "new q")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "X\n%% @user: q\n  note\n%% @user: resolved\n%% @user(d): new q\nY"; out != want {
+		t.Fatalf("got\n%s\nwant\n%s", out, want)
+	}
+}

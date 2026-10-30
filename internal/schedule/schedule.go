@@ -106,12 +106,12 @@ func parseField(s string, b fieldBounds, sundaySeven bool) (cronField, error) {
 	}
 	var f cronField
 	for _, part := range strings.Split(s, ",") {
-		body, step, err := cutStep(part)
+		body, step, stepped, err := cutStep(part)
 		if err != nil {
 			return f, err
 		}
 		lo, hi := b.min, max
-		if body != "*" {
+		if body != "*" && (body != "" || !stepped) {
 			var ranged bool
 			lo, hi, ranged, err = parseRange(body, b.min, max)
 			if err != nil {
@@ -119,7 +119,7 @@ func parseField(s string, b fieldBounds, sundaySeven bool) (cronField, error) {
 			}
 			// `a/step` walks from a to the top of the field, cronie-style;
 			// a real range steps within itself.
-			if step > 1 && !ranged {
+			if stepped && !ranged {
 				hi = max
 			}
 		}
@@ -134,18 +134,29 @@ func parseField(s string, b fieldBounds, sundaySeven bool) (cronField, error) {
 	return f, nil
 }
 
-// cutStep splits a trailing /step off one field part. A bare `/n` is a
-// step over the whole field; a step of 1 parses and changes nothing.
-func cutStep(part string) (body string, step int, err error) {
+// cutStep splits a trailing /step off one field part; stepped reports
+// that one was written. A bare `/n` is a step over the whole field; a
+// step of 1 steps through every value, so `5/1` is 5 to the top of the
+// field, as `5/2` walks there two at a time.
+func cutStep(part string) (body string, step int, stepped bool, err error) {
 	i := strings.IndexByte(part, '/')
 	if i < 0 {
-		return part, 1, nil
+		return part, 1, false, nil
 	}
-	step, err = strconv.Atoi(part[i+1:])
+	step, err = atoi(part[i+1:])
 	if err != nil || step < 1 {
-		return "", 0, fmt.Errorf("bad step %q", part[i+1:])
+		return "", 0, false, fmt.Errorf("bad step %q", part[i+1:])
 	}
-	return part[:i], step, nil
+	return part[:i], step, true, nil
+}
+
+// atoi reads a field's number: digits only, so a sign (`+5`) is refused
+// with the names and extensions Parse does not take.
+func atoi(s string) (int, error) {
+	if s == "" || strings.Trim(s, "0123456789") != "" {
+		return 0, fmt.Errorf("not a number: %q", s)
+	}
+	return strconv.Atoi(s)
 }
 
 // parseRange parses `a` or `a-b`. ranged reports whether the body was a
@@ -158,11 +169,11 @@ func parseRange(body string, min, max int) (lo, hi int, ranged bool, err error) 
 		loStr, hiStr = body[:i], body[i+1:]
 		ranged = true
 	}
-	lo, err = strconv.Atoi(loStr)
+	lo, err = atoi(loStr)
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("bad value %q", loStr)
 	}
-	hi, err = strconv.Atoi(hiStr)
+	hi, err = atoi(hiStr)
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("bad value %q", hiStr)
 	}
@@ -263,15 +274,15 @@ func (c Cron) Next(after time.Time, loc *time.Location) time.Time {
 	limit := wall.AddDate(10, 0, 0)
 	for t.Before(limit) {
 		if !c.month.has(int(t.Month())) {
-			t = jump(firstOfNextMonth(t, loc), t, 24*time.Hour)
+			t = jump(firstOfNextMonth(t, loc), t)
 			continue
 		}
 		if !c.dayMatches(t) {
-			t = jump(time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, loc), t, 24*time.Hour)
+			t = jump(time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, loc), t)
 			continue
 		}
 		if !c.hour.has(t.Hour()) {
-			t = jump(time.Date(t.Year(), t.Month(), t.Day(), t.Hour()+1, 0, 0, 0, loc), t, time.Hour)
+			t = jump(time.Date(t.Year(), t.Month(), t.Day(), t.Hour()+1, 0, 0, 0, loc), t)
 			continue
 		}
 		if !c.minute.has(t.Minute()) {
@@ -300,17 +311,21 @@ func (c Cron) Next(after time.Time, loc *time.Location) time.Time {
 }
 
 // jump returns target when it strictly moves past from, else from plus
-// one absolute step. It exists for the DST gap: time.Date normalizes a
+// one minute. It exists for the DST gap: time.Date normalizes a
 // nonexistent wall time to the instant BEFORE the gap (02:00 on a
 // spring-forward morning reads back as 01:00), so a jump that asks for
 // the skipped hour would return from unchanged and the walk would spin
-// on the same minute forever. The absolute step cannot fail to move,
-// and wherever it lands, the loop's own checks take it from there.
-func jump(target, from time.Time, step time.Duration) time.Time {
+// on the same minute forever. The fallback is one minute, not the jump's
+// own stride: an hour or a day taken from a minute inside the hour
+// overshoots the first minute past the gap (03:00, when the walk stood at
+// 01:01), and a day taken where midnight does not exist skips the whole
+// of that day. A minute cannot overshoot, and wherever it lands, the
+// loop's own checks take it from there.
+func jump(target, from time.Time) time.Time {
 	if target.After(from) {
 		return target
 	}
-	return from.Add(step)
+	return from.Add(time.Minute)
 }
 
 // sameWallMinute reports whether a and b read as the same minute on the

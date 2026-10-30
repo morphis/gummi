@@ -139,9 +139,15 @@ const (
 
 // Wrap puts a step's output between delimiters naming the step. A
 // delimiter-like run of "<<<" inside the output is broken up, so an output
-// cannot close its own wrapping and speak as gummi.
+// cannot close its own wrapping and speak as gummi. One pass is not
+// enough: it breaks a run of five into "<< <<<", whose second half still
+// opens a delimiter, so the break repeats until no "<<<" is left.
 func Wrap(step, output string) string {
-	body := strings.TrimSpace(strings.ReplaceAll(output, "<<<", "<< <"))
+	body := output
+	for strings.Contains(body, "<<<") {
+		body = strings.ReplaceAll(body, "<<<", "<< <")
+	}
+	body = strings.TrimSpace(body)
 	if body == "" {
 		body = fmt.Sprintf("(step %s left no output)", step)
 	}

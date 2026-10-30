@@ -100,12 +100,16 @@ func TestFormatDollars(t *testing.T) {
 func TestParseDollars(t *testing.T) {
 	for in, want := range map[string]int{
 		"5": 500, "$5": 500, " $ 5.50 ": 550, "0": 0, "1,200": 120000, "0.01": 1, "12.3": 1230,
+		// exact at the largest envelope, where a float lost the cent
+		"21,474,836.47": 2147483647, "9336891.04": 933689104, "5.500": 550, ".5": 50,
 	} {
 		if got, err := ParseDollars(in); err != nil || got != want {
 			t.Errorf("ParseDollars(%q) = %d, %v; want %d", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"", "$", "five", "-1", "0.005", "NaN", "Inf"} {
+	// a decimal comma is refused, never read as a hundred times the figure;
+	// exponents, hex and signs are not dollar figures
+	for _, in := range []string{"", "$", "five", "-1", "0.005", "NaN", "Inf", "12,50", "1,2", "1e3", "0x10", "+5", "21474836.48"} {
 		if got, err := ParseDollars(in); err == nil {
 			t.Errorf("ParseDollars(%q) = %d, want an error", in, got)
 		}

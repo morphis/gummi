@@ -77,7 +77,6 @@ func (d *decider) watch(prefix string, s domain.Step) (outcome, string) {
 		return pending, ""
 	}
 	if f == nil {
-		d.waiting = true
 		return pending, ""
 	}
 	if f.ReadError != "" {
@@ -88,7 +87,6 @@ func (d *decider) watch(prefix string, s domain.Step) (outcome, string) {
 		ask(AskQuiet, "quiet@"+strconv.FormatInt(w.LastChange.Unix(), 10), fmt.Sprintf("nothing has happened to the PR for %s", spec.Quiet))
 		return pending, ""
 	}
-	d.waiting = true
 	// feedback is withheld while the filter cannot be read, so the person is
 	// asked at once, whether or not an event stands or a check is pending:
 	// nothing is acted on meanwhile
@@ -137,7 +135,6 @@ func (d *decider) watch(prefix string, s domain.Step) (outcome, string) {
 			return pending, ""
 		}
 	}
-	d.waiting = false
 	if w.Held {
 		d.starts = append(d.starts, Action{Kind: ParkWatch, Path: path, Event: ev.event, Reason: fmt.Sprintf("the board restarted while the run waited on its PR; resume to act on %s", ev.event)})
 		return pending, ""

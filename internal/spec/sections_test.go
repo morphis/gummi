@@ -558,3 +558,20 @@ func TestSectionLastLine(t *testing.T) {
 		t.Error("an absent section reported a line")
 	}
 }
+
+// TestALastHeadingWithNoNewlineEndsTheSectionAbove: the next heading ends
+// a section on the file's last line too, newline or not; and a `## `
+// inside a code fence ends nothing.
+func TestALastHeadingWithNoNewlineEndsTheSectionAbove(t *testing.T) {
+	doc := "## A\nbody\n```\n## not one\n```\n## B"
+	body, ok := ViewSection(doc, "A")
+	if !ok || body != "body\n```\n## not one\n```\n" {
+		t.Fatalf("A = %q, %v", body, ok)
+	}
+	if got := Headings(doc); strings.Join(got, "|") != "A|B" {
+		t.Fatalf("headings %q", got)
+	}
+	if _, _, err := ReplaceSection(doc, "A", "```\nopen\n"); err != ErrSectionOpenFence {
+		t.Fatalf("a body leaving a fence open: %v", err)
+	}
+}

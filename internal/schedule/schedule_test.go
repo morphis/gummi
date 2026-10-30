@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -445,5 +446,54 @@ func TestAdvanceMatchesNextRun(t *testing.T) {
 	}
 	if got := Advance(s, now); !got.Equal(want) {
 		t.Errorf("Advance = %s, want NextRun = %s", got, want)
+	}
+}
+
+// TestAStepFromAValueWalksToTheTop: `a/step` walks from a to the top of
+// the field at every step, 1 included, and a bare `/n` steps over the
+// whole field.
+func TestAStepFromAValueWalksToTheTop(t *testing.T) {
+	for expr, want := range map[string][]int{"57/1 * * * *": {57, 58, 59}, "/20 * * * *": {0, 20, 40}} {
+		c, err := Parse(expr)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", expr, err)
+		}
+		var got []int
+		for v := 0; v < 60; v++ {
+			if c.minute.has(v) {
+				got = append(got, v)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%q minutes = %v, want %v", expr, got, want)
+		}
+	}
+}
+
+// TestParseRefusesASignedNumber: the stored form is digits; a sign in a
+// value or a step is refused.
+func TestParseRefusesASignedNumber(t *testing.T) {
+	for _, expr := range []string{"+5 * * * *", "*/+5 * * * *", "1-+5 * * * *"} {
+		if _, err := Parse(expr); err == nil {
+			t.Errorf("Parse(%q) accepted", expr)
+		}
+	}
+}
+
+// TestNextDoesNotOvershootTheSpringForwardGap: walking out of an hour the
+// expression does not match into one the gap swallowed, Next lands on the
+// first minute after the gap, not an hour's stride past where it stood.
+func TestNextDoesNotOvershootTheSpringForwardGap(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip(err)
+	}
+	c, err := Parse("* */3 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Date(2000, 4, 2, 1, 0, 0, 0, ny) // clocks go 02:00 → 03:00
+	if got, want := c.Next(after, ny), time.Date(2000, 4, 2, 3, 0, 0, 0, ny); !got.Equal(want) {
+		t.Fatalf("Next = %s, want %s", got, want)
 	}
 }

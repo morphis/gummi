@@ -51,7 +51,14 @@ func ParseUsageLimit(text string, now time.Time) (reset time.Time, ok bool) {
 			return time.Time{}, false
 		}
 		reset = time.Date(at.Year(), month, day, hour, min, 0, 0, loc)
-		if !reset.After(now) && reset.Before(now.Add(-24*time.Hour)) {
+		// the year that puts the day nearest: last year's when it passed
+		// within the day (a reset read just after the year turned, which
+		// this year's date would put a year away), next year's when this
+		// year's passed longer ago
+		grace := now.Add(-24 * time.Hour)
+		if prev := reset.AddDate(-1, 0, 0); !prev.Before(grace) {
+			reset = prev
+		} else if reset.Before(grace) {
 			reset = reset.AddDate(1, 0, 0)
 		}
 		return reset, true

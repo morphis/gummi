@@ -22,7 +22,7 @@ const doneWhenScaffold = "```gummi-done-when\n" +
 	"  check: \"\"\n" +
 	"```"
 
-var doneWhenFenceRe = regexp.MustCompile("(?s)```gummi-done-when[ \\t]*\\n(.*?)```")
+var doneWhenFenceRe = regexp.MustCompile("(?s)```gummi-done-when[ \\t]*\\r?\\n(.*?)(?m:^)[ ]{0,3}```")
 
 // fenceBody finds the first block matching re in the named section,
 // falling back to anywhere in the document so a block that drifted out of
@@ -91,7 +91,7 @@ func SetDoneWhen(content string, items []domain.DoneWhen) (string, error) {
 // anywhere) with v rendered as YAML; when the doc has no such block it is
 // appended to the section.
 func rewriteFence(content, sectionName string, re *regexp.Regexp, lang string, v any) (string, error) {
-	out, err := yaml.Marshal(v)
+	out, err := marshalBlock(v)
 	if err != nil {
 		return "", err
 	}

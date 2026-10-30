@@ -370,6 +370,61 @@ func TestASpentPoolEndsARunWithNothingLeft(t *testing.T) {
 	}
 }
 
+// TestASpentPoolHoldsBackNothingFree: a spent pool pauses what would
+// spend, never what costs nothing. An `any` join that has its success
+// interrupts the branch it no longer needs rather than leaving it to spend
+// the top-up, and a loop's until is judged rather than the person being
+// asked for money to learn whether the run is done.
+func TestASpentPoolHoldsBackNothingFree(t *testing.T) {
+	anyJoin := parse(t, `name: any
+steps:
+  - id: race
+    parallel:
+      join: any
+      steps:
+        - {id: a, role: implementer, prompt: x}
+        - {id: b, role: implementer, prompt: x}
+  - {id: after, role: reviewer, prompt: x}
+`)
+	got := Decide(Snapshot{State: domain.RunRunning, Recipe: anyJoin, Bounded: true, Left: 0, Steps: steps("race/a=done", "race/b=running")})
+	if !reflect.DeepEqual(render(got), []string{"interrupt race/b"}) {
+		t.Fatalf("a settled any join on a spent pool = %v", render(got))
+	}
+	// with the losing branch stopped, the next step would spend: pause
+	got = Decide(Snapshot{State: domain.RunRunning, Recipe: anyJoin, Bounded: true, Left: 0, Steps: steps("race/a=done", "race/b=stopped")})
+	if !reflect.DeepEqual(render(got), []string{"pause"}) {
+		t.Fatalf("a step left to start on a spent pool = %v", render(got))
+	}
+
+	loop := parse(t, `name: loop
+steps:
+  - id: fix
+    repeat:
+      max: 1
+      until: checks
+      steps:
+        - {id: work, role: implementer, prompt: x}
+`)
+	got = Decide(Snapshot{State: domain.RunRunning, Recipe: loop, Bounded: true, Left: 0, Steps: steps("fix/1/work=done")})
+	if !reflect.DeepEqual(render(got), []string{"need-until fix/1"}) {
+		t.Fatalf("an iteration ended on a spent pool = %v", render(got))
+	}
+	met := Decide(Snapshot{
+		State: domain.RunRunning, Recipe: loop, Bounded: true, Left: 0, Steps: steps("fix/1/work=done"),
+		Until: map[string]UntilResult{"fix/1": {Met: true}},
+	})
+	if !reflect.DeepEqual(render(met), []string{"end done"}) {
+		t.Fatalf("a met loop on a spent pool = %v", render(met))
+	}
+	unmet := Decide(Snapshot{
+		State: domain.RunRunning, Recipe: loop, Bounded: true, Left: 0, Steps: steps("fix/1/work=done"),
+		Until: map[string]UntilResult{"fix/1": {}},
+	})
+	if !reflect.DeepEqual(render(unmet), []string{"ask-on-max fix/1"}) {
+		t.Fatalf("a loop at its max on a spent pool = %v", render(unmet))
+	}
+}
+
 // TestARunEstimatesNothing: a run binds to the session's budget alone. A
 // step that has spent any amount, however far past what anyone would have
 // guessed, is neither flagged nor warned about while the pool has money

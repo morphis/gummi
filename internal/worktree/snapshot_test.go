@@ -401,3 +401,48 @@ func TestAnIgnoredFileStaysOutOfTheRunsSnapshotsAndIsNeverReverted(t *testing.T)
 		t.Errorf(".gitignore was not put back: %q", raw)
 	}
 }
+
+// TestAFileWrittenBesideOnlyIgnoredFilesIsTheRuns: git lists an untracked
+// directory holding only ignored files as a directory, though nothing
+// ignores it. Kept out whole, a file a run wrote there was in no
+// snapshot — not in its diff, nor reverted. Only its ignored files are
+// kept out.
+func TestAFileWrittenBesideOnlyIgnoredFilesIsTheRuns(t *testing.T) {
+	root := newRepo(t)
+	writeFile(t, root, ".gitignore", "*.log\n")
+	mustGit(t, root, "add", ".gitignore")
+	mustGit(t, root, "commit", "-q", "-m", "ignore")
+	writeFile(t, root, "logs/x.log", "log\n")
+	keep, err := Ignored(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(keep, []string{"logs/x.log"}) {
+		t.Fatalf("ignored = %q", keep)
+	}
+	start, err := Snapshot(ctx, root, keep...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "logs/notes.md", "the run's\n")
+	end, err := Snapshot(ctx, root, keep...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, paths, err := DiffTrees(ctx, root, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(paths, []string{"logs/notes.md"}) {
+		t.Fatalf("the run's diff names %q", paths)
+	}
+	if err := RevertTo(ctx, root, start, paths, keep...); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "logs", "notes.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the run's file outlived its revert: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "logs", "x.log")); err != nil {
+		t.Errorf("the ignored file went with it: %v", err)
+	}
+}

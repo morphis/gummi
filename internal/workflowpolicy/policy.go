@@ -15,14 +15,18 @@
 //
 // Money (§24.7a): one pool, the session's envelope. A run estimates
 // nothing and binds to that budget alone: it goes on until the pool is
-// spent, then pauses for a top-up and never drops work.
+// spent, then pauses for a top-up and never drops work — and never holds
+// back, behind the top-up, what costs nothing.
 //
 // The rules, in the order Decide applies them:
 //
 //  1. Only a running run is conducted, but a stop winds down a paused one
 //     too: interrupt the live steps, then end the run stopped.
-//  2. A spent pool pauses the run for a top-up; nothing else happens —
-//     unless nothing is left to start, settle or judge, when the run ends.
+//  2. A spent pool pauses the run for a top-up when a step would start or
+//     a step stays live; what costs no money — interrupts, an until to
+//     judge, a question to the person — still goes out first. With nothing
+//     left to spend on, the run goes on settling, judging and asking, and
+//     ends.
 //  3. A parallel whose join is decided settles, stopping branches it no
 //     longer needs; a repeat whose iteration has ended has its until
 //     judged, then iterates, ends, or applies onMax. An until that could
@@ -221,9 +225,8 @@ type decider struct {
 	settle []Action // rule 3
 	starts []Action // rule 4
 	// acts are a watch's own actions, which cost nothing and so never pause
-	// a spent pool; waiting marks a watch that is only waiting.
-	acts    []Action
-	waiting bool
+	// a spent pool.
+	acts []Action
 }
 
 func newDecider(in Snapshot) *decider {
@@ -255,17 +258,25 @@ func Decide(in Snapshot) []Action {
 
 	res, why := d.seq("", in.Recipe.Steps)
 	if in.Bounded && in.Left <= 0 {
-		// a spent pool pauses whatever would spend more; a run with nothing
-		// left to start or settle ends, its checks and report costing nothing.
-		// A watch only waiting spends nothing (DESIGN §28.2).
-		working := 0
-		for _, s := range live {
-			if s.State != domain.StepWatching {
-				working++
+		// a spent pool pauses whatever would spend more — a step to start,
+		// or one that stays live — and holds back nothing that costs no
+		// money: interrupts, untils to judge, questions and a watch's own
+		// actions still go out, so a discarded branch does not spend the
+		// top-up and the person is not asked for money to learn whether the
+		// run is done. A watch only waiting spends nothing (DESIGN §28.2).
+		interrupted := map[string]bool{}
+		for _, a := range d.settle {
+			if a.Kind == Interrupt {
+				interrupted[a.Path] = true
 			}
 		}
-		if (res == pending && !d.waiting) || working > 0 || len(d.starts) > 0 || len(d.settle) > 0 {
-			return []Action{{Kind: Pause, Reason: fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(Spent(in)))}}
+		spends := len(d.starts) > 0
+		for _, s := range live {
+			spends = spends || (s.State != domain.StepWatching && !interrupted[s.Path])
+		}
+		if spends {
+			out := append(append(d.settle, d.acts...), Action{Kind: Pause, Reason: fmt.Sprintf("the session's budget is spent (the run has spent %s)", domain.FormatDollars(Spent(in)))})
+			return out
 		}
 	}
 	var out []Action

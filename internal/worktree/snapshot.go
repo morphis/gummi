@@ -91,6 +91,20 @@ func Ignored(ctx context.Context, dir string) ([]string, error) {
 	}
 	var out []string
 	for _, p := range strings.Split(raw, "\x00") {
+		if strings.HasSuffix(p, "/") {
+			// git lists an untracked directory holding only ignored files
+			// as a directory too, though nothing ignores the directory
+			// itself: its files are listed one by one beside it. Kept out
+			// whole, a file a run writes there would be in no snapshot —
+			// not in its diff, its report or its revert.
+			ignored, err := gitOK(ctx, dir, "check-ignore", "-q", "--", p)
+			if err != nil {
+				return nil, err
+			}
+			if !ignored {
+				continue
+			}
+		}
 		if p = strings.TrimSuffix(p, "/"); p != "" {
 			out = append(out, p)
 		}

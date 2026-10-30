@@ -21,3 +21,12 @@ func TestTreeSetsRoundTrip(t *testing.T) {
 		t.Error("PrimaryTree")
 	}
 }
+
+// TestATreeSetKeepsARepositoryNamedWithAnEquals: a hash holds no "=", so
+// a repository's name may.
+func TestATreeSetKeepsARepositoryNamedWithAnEquals(t *testing.T) {
+	primary, attached := DecodeTrees(EncodeTrees("p", map[string]string{"a=b": "h"}))
+	if primary != "p" || len(attached) != 1 || attached["a=b"] != "h" {
+		t.Fatalf("read back %q, %q", primary, attached)
+	}
+}
