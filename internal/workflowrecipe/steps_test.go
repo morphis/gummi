@@ -29,11 +29,11 @@ func TestCommandAndDispatchSteps(t *testing.T) {
 	for _, tc := range []struct {
 		name, yaml, want string
 	}{
-		{"run with a role", "name: w\nsteps:\n  - {id: a, run: x, role: scout}\n", "no role, slot, prompt or artifacts"},
-		{"run with a slot", "name: w\nsteps:\n  - {id: a, run: x, slot: reviewer-alt}\n", "no role, slot, prompt or artifacts"},
-		{"run with a prompt", "name: w\nsteps:\n  - {id: a, run: x, prompt: hi}\n", "no role, slot, prompt or artifacts"},
-		{"run with artifacts", "name: w\nsteps:\n  - {id: a, run: x, artifacts: {n: n.md}}\n", "no role, slot, prompt or artifacts"},
-		{"dispatch with a role", dispatchWith("      {repo: r, title: t, envelope: 1, prompt: p}\n    role: scout\n"), "no role, slot, prompt or artifacts"},
+		{"run with a role", "name: w\nsteps:\n  - {id: a, run: x, role: scout}\n", "no role, slot, agent, model, prompt or artifacts"},
+		{"run with a slot", "name: w\nsteps:\n  - {id: a, run: x, slot: reviewer-alt}\n", "no role, slot, agent, model, prompt or artifacts"},
+		{"run with a prompt", "name: w\nsteps:\n  - {id: a, run: x, prompt: hi}\n", "no role, slot, agent, model, prompt or artifacts"},
+		{"run with artifacts", "name: w\nsteps:\n  - {id: a, run: x, artifacts: {n: n.md}}\n", "no role, slot, agent, model, prompt or artifacts"},
+		{"dispatch with a role", dispatchWith("      {repo: r, title: t, envelope: 1, prompt: p}\n    role: scout\n"), "no role, slot, agent, model, prompt or artifacts"},
 		{"run with an envelope", "name: w\nsteps:\n  - {id: a, run: x, envelope: 3}\n", "no envelope of its own"},
 		{"quietExit 0", "name: w\nsteps:\n  - {id: a, run: x, quietExit: 0}\n", "from 1 to 255"},
 		{"quietExit 256", "name: w\nsteps:\n  - {id: a, run: x, quietExit: 256}\n", "from 1 to 255"},

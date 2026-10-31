@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -79,6 +80,48 @@ func (e *Engine) stepRole(profile string, role domain.WorkflowRole, slot string)
 	return e.resolveRoleWithFallback(profile, stepSlots(role, slot)...)
 }
 
+// stepRoleFor is stepRole for a step as its recipe wrote it: an agent or
+// model the step names directly wins over its slot. An agent alone runs
+// that backend's default model; a model alone runs on the backend the
+// profile gives the step.
+func (e *Engine) stepRoleFor(profile string, step domain.Step) (config.RoleConfig, string) {
+	rc, backend := e.stepRole(profile, step.Role, step.Slot)
+	if step.Agent == "" && step.Model == "" {
+		return rc, backend
+	}
+	if step.Agent != "" {
+		backend = step.Agent
+		rc = config.RoleConfig{Backend: backend}
+	}
+	if step.Model != "" {
+		rc.Model = step.Model
+	}
+	return rc, backend
+}
+
+// stepModelProblem refuses a step whose model its backend cannot run —
+// a model alone runs on the backend the profile gives the step — with the
+// refusal a session's picker gives. A backend gummi has no adapter for in
+// SessionBackends (a test's fake) is not judged.
+func (e *Engine) stepModelProblem(profile string, step domain.Step) error {
+	if step.Model == "" {
+		return nil
+	}
+	_, backend := e.stepRoleFor(profile, step)
+	if backend == "" {
+		if a := e.agentFor(""); a != nil {
+			backend = a.Name()
+		}
+	}
+	if !slices.Contains(SessionBackends, backend) {
+		return nil
+	}
+	if err := CheckSessionModel(backend, step.Model); err != nil {
+		return fmt.Errorf("step %s: %w", step.ID, err)
+	}
+	return nil
+}
+
 // sessionProfile is a session's profile, "" when the card cannot be read
 // (the default profile, then).
 func (e *Engine) sessionProfile(id domain.FeatureID) string {
@@ -90,8 +133,8 @@ func (e *Engine) sessionProfile(id domain.FeatureID) string {
 }
 
 // stepModelWords is what a step runs on, as a proposal says it.
-func (e *Engine) stepModelWords(profile string, role domain.WorkflowRole, slot string) string {
-	rc, backend := e.stepRole(profile, role, slot)
+func (e *Engine) stepModelWords(profile string, step domain.Step) string {
+	rc, backend := e.stepRoleFor(profile, step)
 	if backend == "" {
 		if a := e.agentFor(""); a != nil {
 			backend = a.Name()
@@ -187,7 +230,10 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 			return err
 		}
 	} else {
-		rc, backend := e.stepRole(sess.Profile, step.Role, step.Slot)
+		rc, backend := e.stepRoleFor(sess.Profile, step)
+		if err := e.stepModelProblem(sess.Profile, step); err != nil {
+			return err
+		}
 		card, err = e.mintStepCard(ctx, sess, domain.StepLink{Session: session, Run: n, Path: path},
 			fmt.Sprintf("%s · run %d · %s", sess.Title, n, path), backend, rc.Model)
 		if err != nil {
@@ -487,6 +533,7 @@ func (e *Engine) plannerEnded(ctx context.Context, run *domain.Run, inst *domain
 	} else if len(problems) == 0 {
 		steps, _ := e.cfg.Store.RunSteps(ctx, run.Session, run.N)
 		_, problems, _ = safeCheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
+		problems = append(problems, e.modelProblems(e.sessionProfile(run.Session), entries)...)
 		if len(problems) == 0 {
 			if _, ferr := e.freezePlan(run, entries); ferr != nil {
 				problems = []string{ferr.Error()}

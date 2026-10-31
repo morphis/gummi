@@ -550,6 +550,7 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		text = string(b)
 	}
 	problems, warnings := safeCheck(recipe)
+	problems = append(problems, e.modelProblems(sess.Profile, recipe.Steps)...)
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("the recipe cannot run:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -776,7 +777,7 @@ func (e *Engine) writeRecipeTree(b *strings.Builder, profile string, es []domain
 			fmt.Fprintf(b, "%s- %s%s · watch the PR until %s\n", indent, mark, s.ID, s.Watch.UntilOr())
 			return
 		}
-		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, e.stepModelWords(profile, s.Role, s.Slot))
+		fmt.Fprintf(b, "%s- %s%s · %s · %s\n", indent, mark, s.ID, s.Role, e.stepModelWords(profile, s))
 	}
 	for _, en := range es {
 		switch {
@@ -1237,6 +1238,7 @@ func (e *Engine) spliceLocked(ctx context.Context, run *domain.Run, d domain.Run
 		return errors.New("a recipe the revised plan names changed since you read it: ask for the plan again")
 	}
 	r, problems, _ := safeCheckReplacement(run.Recipe, startedEntries(run.Recipe, steps), entries)
+	problems = append(problems, e.modelProblems(e.sessionProfile(run.Session), entries)...)
 	if len(problems) > 0 {
 		return fmt.Errorf("the revised plan no longer passes the check:\n- %s", strings.Join(problems, "\n- "))
 	}
@@ -2013,7 +2015,7 @@ func (e *Engine) newStepLocked(ctx context.Context, run *domain.Run, a workflowp
 		return fmt.Errorf("the recipe has no step %s", a.Step)
 	}
 	inst := domain.RunStep{
-		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: domain.WorkflowRole(def.Kind()), Slot: def.Slot,
+		Session: run.Session, Run: run.N, Path: a.Path, StepID: a.Step, Role: domain.WorkflowRole(def.Kind()), Slot: def.RunsOnSlot(),
 		State: domain.StepRunning, StartedAt: e.now(),
 	}
 	if _, exists := have[a.Path]; exists {

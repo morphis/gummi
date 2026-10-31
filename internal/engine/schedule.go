@@ -267,6 +267,9 @@ func (e *Engine) fireRun(ctx context.Context, s domain.Schedule) domain.Schedule
 	if problems, _ := safeCheck(recipe); len(problems) > 0 {
 		return failed(fmt.Errorf("its recipe cannot run: %s", strings.Join(problems, "; ")))
 	}
+	if problems := e.modelProblems(target.Profile, recipe.Steps); len(problems) > 0 {
+		return failed(fmt.Errorf("its recipe cannot run: %s", strings.Join(problems, "; ")))
+	}
 	if _, ok, err := e.cfg.Store.SessionSpec(ctx, target.ID, s.Spec); err != nil || !ok {
 		return failed(fmt.Errorf("%s has no spec %d", target.ID, s.Spec))
 	}

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/morphis/gummi/internal/domain"
 )
@@ -16,6 +17,10 @@ var templateRe = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // slotName is what a step's slot may be: a profile role name, the rule
 // config.SaveProfile holds a profile's roles to.
 var slotName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
+
+// AgentName reports whether a step's agent is spelled as a backend name
+// may be: the slot rule. Whether gummi has that backend is the engine's.
+func AgentName(s string) bool { return slotName.MatchString(s) }
 
 // idRe is what an entry's id may hold.
 var idRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -227,6 +232,15 @@ func (c *checker) step(s domain.Step, previous string) {
 	if s.Slot != "" && !slotName.MatchString(s.Slot) {
 		c.problem("step %s: slot %q is not a profile slot name (lower case letters, digits and -)", name, s.Slot)
 	}
+	if s.Agent != "" && !AgentName(s.Agent) {
+		c.problem("step %s: agent %q is not a backend name (lower case letters, digits and -)", name, s.Agent)
+	}
+	if strings.ContainsFunc(s.Model, unicode.IsSpace) {
+		c.problem("step %s: model %q must be one model id with no spaces", name, s.Model)
+	}
+	if (s.Agent != "" || s.Model != "") && s.Slot != "" {
+		c.warnings = append(c.warnings, fmt.Sprintf("step %s: its slot %q is ignored — the agent or model it names wins", name, s.Slot))
+	}
 	if s.StaleTier {
 		c.warnings = append(c.warnings, fmt.Sprintf("step %s: its tier is ignored — its model comes from its role's profile slot, or the slot it names", name))
 	}
@@ -265,8 +279,8 @@ func (c *checker) agentless(s domain.Step, name, previous string) {
 		c.problem("step %s: a step is exactly one of a command (run), a dispatch, a pr act or a watch", name)
 		return
 	}
-	if s.Role != "" || s.Slot != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
-		c.problem("step %s: a %s step has no role, slot, prompt or artifacts of its own", name, s.Kind())
+	if s.Role != "" || s.Slot != "" || s.Agent != "" || s.Model != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
+		c.problem("step %s: a %s step has no role, slot, agent, model, prompt or artifacts of its own", name, s.Kind())
 	}
 	if s.StaleEnvelope {
 		c.problem("step %s: a %s step has no envelope of its own; a dispatch names its session's under dispatch", name, s.Kind())
@@ -427,8 +441,8 @@ func templateQuoted(command string) bool {
 
 // prOrWatch checks a pr step (§28.1) or a watch step (§28.2).
 func (c *checker) prOrWatch(s domain.Step, name string) {
-	if s.Role != "" || s.Slot != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
-		c.problem("step %s: a %s step has no role, slot, prompt or artifacts of its own", name, s.Kind())
+	if s.Role != "" || s.Slot != "" || s.Agent != "" || s.Model != "" || strings.TrimSpace(s.Prompt) != "" || len(s.Artifacts) > 0 {
+		c.problem("step %s: a %s step has no role, slot, agent, model, prompt or artifacts of its own", name, s.Kind())
 	}
 	if s.StaleEnvelope {
 		c.problem("step %s: a %s step has no envelope of its own", name, s.Kind())

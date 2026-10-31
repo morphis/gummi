@@ -53,9 +53,10 @@ steps:
 
 `steps` run in order. Each entry is exactly one of:
 
-- **a step**: `id`, `role`, `prompt`; optional `slot`, `artifacts`
-  (name → plain file name in the run's directory) and `captureOutput`
-  (false keeps its final message from later steps).
+- **a step**: `id`, `role`, `prompt`; optional `slot`, `agent`/`model`
+  (pin, beats `slot`; opencode: `provider/model`), `artifacts`
+  (name → plain file name in the run's dir) and `captureOutput`
+  (false hides its message from later steps).
 - **`parallel`**: `id`, `join`, and `steps` of plain steps side by side
   in the same tree.
 - **`repeat`**: `id`, `max`, one `until`, `onMax`, and `steps` (which may
@@ -75,17 +76,17 @@ steps:
 
 Every step has a full shell; a reader is told to change nothing, and
 one that did is flagged. gummi gives each step its role's preamble: do
-not repeat it. A step's model is the person's profile choice per role;
-`slot: <name>` puts one on another profile slot (a second reviewer on
-`reviewer-alt`). Do not name a slot to ask for a bigger or cheaper model.
+not repeat it. A step's model is the profile's choice per role;
+`slot: <name>` picks another profile slot (a second reviewer on
+`reviewer-alt`). Never use a slot for a bigger or cheaper model.
 
 ## Templates
 
 | template | is |
 |---|---|
-| `{{spec}}` | the frozen spec's text — put it in every prompt that needs the goal |
+| `{{spec}}` | the frozen spec's text; put it in every prompt needing the goal |
 | `{{inputs.<name>}}` | an input, wrapped as data |
-| `{{artifacts.<name>}}` | an artifact's absolute path in the run's directory |
+| `{{artifacts.<name>}}` | an artifact's absolute path in the run's dir |
 | `{{previous.output}}` | the step before's final message |
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
 | `{{run.diff}}` | a file: the diff from the run's start to now |
@@ -135,19 +136,19 @@ gummi warns; make them steps in order instead.
 
 A light review loop: a `repeat` of an implementer and one reviewer with
 `until: { contains: "VERDICT: PASS" }`, then a validating reviewer.
-`contains` matches anywhere in the output: pick a marker the step writes
-only when it means it, and ask for it on the last line.
+`contains` matches anywhere in the output: pick a marker written
+only when meant, and ask for it on the last line.
 
 A planner who decides the steps: a `planner` step that ends its output
-with a fenced `gummi-workflow` block of entries (a YAML list of steps,
-as under `steps:`) replaces the run's remaining steps, once they pass
-the same checks and the person allows the revised plan. 
+with a fenced `gummi-workflow` block (a YAML list of entries, as
+under `steps:`) replaces the run's remaining steps, once they pass
+the same checks and the person allows the revised plan.
 
 ## Command and dispatch steps
 
 A step may be gummi's own act, not a model: `run:` a command or
-`dispatch:` a session (an agent's only). Neither has a role, slot or
-prompt.
+`dispatch:` a session (an agent's only). Neither has a role, slot,
+agent, model or prompt.
 
 ```yaml
 name: watch-foo

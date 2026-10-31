@@ -151,4 +151,33 @@ func TestAStepRunsOnItsRolesSlot(t *testing.T) {
 			t.Errorf("%s with slot %q runs %q, want %q", c.role, c.slot, rc.Model, c.want)
 		}
 	}
+	// A named agent and model win over the slot; each stands alone.
+	for _, c := range []struct {
+		step         domain.Step
+		model, agent string
+	}{
+		{domain.Step{Role: domain.RoleReviewer, Slot: "reviewer-alt", Model: "m1"}, "m1", ""},
+		{domain.Step{Role: domain.RoleReviewer, Agent: "claude"}, "", "claude"},
+		{domain.Step{Role: domain.RoleReviewer, Agent: "claude", Model: "m2"}, "m2", "claude"},
+		{domain.Step{Role: domain.RoleReviewer}, "rev", ""},
+	} {
+		rc, backend := e.stepRoleFor("p", c.step)
+		if rc.Model != c.model || backend != c.agent {
+			t.Errorf("%+v runs %q on %q, want %q on %q", c.step, rc.Model, backend, c.model, c.agent)
+		}
+	}
+}
+
+// A step naming an agent gummi has no adapter for is refused with the list
+// of those it has, the way a session's picker refuses it.
+func TestAStepNamingAnUnknownAgentIsRefused(t *testing.T) {
+	es := []domain.Entry{{Step: &domain.Step{ID: "a", Role: domain.RoleReviewer, Agent: "claud"}}}
+	p := agentProblems(es)
+	if len(p) != 1 || !strings.Contains(p[0], "unknown agent") || !strings.Contains(p[0], "claude") {
+		t.Fatalf("problems = %v", p)
+	}
+	es[0].Step.Agent = "claude"
+	if p := agentProblems(es); len(p) != 0 {
+		t.Fatalf("problems = %v", p)
+	}
 }

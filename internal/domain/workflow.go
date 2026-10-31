@@ -110,6 +110,12 @@ type Step struct {
 	// one to run two steps of a role on different models — a second
 	// reviewer on `reviewer-alt`, say.
 	Slot string
+	// Agent and Model name the backend and the model the step runs on
+	// directly, instead of a profile slot. Either may stand alone: an Agent
+	// with no Model runs that backend's default model; a Model with no Agent
+	// runs on the backend the profile gives the step. Both win over Slot.
+	Agent string
+	Model string
 	// StaleTier marks a step whose YAML still names a tier, ignored like
 	// the recipe's.
 	StaleTier bool
@@ -138,6 +144,15 @@ type Step struct {
 	// Watch makes the step wait on the session's pull request without a
 	// model, and run its handlers on what happens to it (DESIGN §28.2).
 	Watch *Watch
+}
+
+// RunsOnSlot is the slot the step's model comes from: its Slot, or none
+// when an Agent or Model it names wins over it.
+func (s Step) RunsOnSlot() string {
+	if s.Agent != "" || s.Model != "" {
+		return ""
+	}
+	return s.Slot
 }
 
 // Captures reports whether the step's output is kept for later steps.

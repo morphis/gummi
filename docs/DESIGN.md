@@ -6879,9 +6879,27 @@ steps:
   (`slot:`), then its role's, then — for a `planner` or `contractor` —
   `architect`, then `implementer` (`Engine.stepRole`). A recipe names a
   slot only to run two steps of one role on different models, as
-  `deliver`'s second reviewer does; it never picks a model's size, which
-  is the profile's to decide. A stored step from before carries a tier,
-  read as no slot.
+  `deliver`'s second reviewer does; by default it never picks a model's
+  size, which is the profile's to decide. A stored step from before
+  carries a tier, read as no slot.
+- **A step may pin its agent and model** (`agent:`, `model:`; amends the
+  rule above). Either wins over the slot and the role: an `agent` alone
+  runs that backend's default model (`opencode` has none: it needs a
+  `provider/model`), a `model` alone runs on the backend the profile
+  gives the step (`Engine.stepRoleFor`). A step card takes only the
+  backend and model from its slot, pinned or not: a slot's
+  `output_token_max` does not reach a workflow step. An agent gummi has
+  no adapter for, or a model that agent refuses, is refused when the run
+  is proposed, a schedule fires or a revised plan is checked, at any
+  depth, a dispatched recipe included (`agentProblems`,
+  `CheckSessionModel`, the refusal a session's own picker gives); a model
+  alone is checked then against the backend the session's profile gives
+  the step (`modelProblems`), and again when the step starts — the only
+  check a dispatched recipe's model-alone step gets, its profile being
+  its own session's. A pinned step records no slot, and the faces show
+  no slot for it. It is for a recipe a person
+  writes for their own setup — a recipe that pins a model only runs where
+  that backend has it — so the bundled recipes stay on roles.
 - `scout` and `reviewer` are **reading roles**: their preamble tells them
   to change no files. They have the full shell any step has — a reviewer
   runs the tests — so nothing enforces it; a reading step whose end

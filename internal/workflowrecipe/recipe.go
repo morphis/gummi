@@ -100,6 +100,8 @@ type rawEntry struct {
 	ID            string            `yaml:"id"`
 	Role          string            `yaml:"role,omitempty"`
 	Slot          string            `yaml:"slot,omitempty"`
+	Agent         string            `yaml:"agent,omitempty"`
+	Model         string            `yaml:"model,omitempty"`
 	Tier          any               `yaml:"tier,omitempty"`
 	Envelope      any               `yaml:"envelope,omitempty"`
 	Artifacts     map[string]string `yaml:"artifacts,omitempty"`
@@ -402,7 +404,7 @@ func entries(raw []rawEntry) ([]domain.Entry, error) {
 }
 
 func (re rawEntry) hasStepFields() bool {
-	return re.Role != "" || re.Prompt != "" || re.Slot != "" || re.Tier != nil || re.Envelope != nil ||
+	return re.Role != "" || re.Prompt != "" || re.Slot != "" || re.Agent != "" || re.Model != "" || re.Tier != nil || re.Envelope != nil ||
 		len(re.Artifacts) > 0 || re.CaptureOutput != nil ||
 		re.Run != "" || re.QuietExit != nil || re.Dispatch != nil || re.PR != nil || re.Watch != nil
 }
@@ -491,6 +493,8 @@ func entry(re rawEntry) (domain.Entry, error) {
 		Role:          domain.WorkflowRole(strings.ToLower(strings.TrimSpace(re.Role))),
 		Prompt:        re.Prompt,
 		Slot:          strings.TrimSpace(re.Slot),
+		Agent:         strings.ToLower(strings.TrimSpace(re.Agent)),
+		Model:         strings.TrimSpace(re.Model),
 		StaleTier:     re.Tier != nil,
 		StaleEnvelope: re.Envelope != nil,
 		Artifacts:     arts,
@@ -639,7 +643,7 @@ func rawEntries(es []domain.Entry) []rawEntry {
 
 func rawStep(s domain.Step) rawEntry {
 	re := rawEntry{
-		ID: s.ID, Role: string(s.Role), Prompt: s.Prompt, Slot: s.Slot,
+		ID: s.ID, Role: string(s.Role), Prompt: s.Prompt, Slot: s.Slot, Agent: s.Agent, Model: s.Model,
 		Artifacts: s.Artifacts, CaptureOutput: s.CaptureOutput,
 		Run: s.Run, QuietExit: s.QuietExit,
 	}

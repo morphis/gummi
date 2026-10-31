@@ -211,6 +211,18 @@ slot to your profile. A slot the profile does not have falls back to the
 role's own. Do not use slots to ask for a bigger or cheaper model;
 that is what the profile decides.
 
+To pin a step to one agent and model whatever the profile says, give it
+`agent:` (a backend such as `claude`, `copilot` or `opencode`), `model:`
+(a model id), or both. They win over `slot:` and the role. `agent:` alone
+runs that backend's default model — except `opencode`, which has none and
+needs `model: provider/model`; `model:` alone runs on the backend the
+profile gives the step. A recipe that pins a model only works where that
+backend has it, so prefer roles and slots for recipes you share. An
+unknown `agent:`, or a model its backend refuses, is refused when the run
+is proposed. A step takes only the backend and model from its slot,
+pinned or not: a slot's other settings, such as `output_token_max`, do
+not reach a workflow step.
+
 ### Loops
 
 A `repeat` runs its steps again until its `until` holds, at most `max`
@@ -336,6 +348,8 @@ hold only letters, digits, `-` and `_`, and are never digits alone.
 | `role` | yes | one of the roles below |
 | `prompt` | yes | the step's brief; may hold [templates](#templates) |
 | `slot` | no | the profile slot whose model runs it, instead of the role's: lower-case letters, digits and `-`, starting with a letter |
+| `agent` | no | the backend the step runs on, instead of the profile's: lower-case letters, digits and `-`; wins over `slot` |
+| `model` | no | the model id the step runs on, instead of the profile's; no spaces; wins over `slot` |
 | `artifacts` | no | name → plain file name in the run's directory (no path) |
 | `captureOutput` | no | `false` keeps the step's final message from later steps; default `true` |
 
@@ -428,7 +442,7 @@ or timed out, a verdict artifact never written) asks you, whatever
 ```
 
 Runs a command through `sh -c` in the run's tree, with no model and no
-cost. It has no role, slot, prompt or artifacts.
+cost. It has no role, slot, agent, model, prompt or artifacts.
 
 - **Exit 0** passes; the command's standard output is the step's output.
 - **`quietExit`** (1–255) ends the run quietly, leaving no trace — for a
@@ -607,6 +621,13 @@ A recipe is refused, with every problem listed, when it has:
   (an inline watch handler's steps included);
 - an id missing, used twice, or not made of letters, digits, `-` and `_`;
 - an unknown role, a malformed slot, or an agent step without a prompt;
+- a malformed `agent`, a `model` with spaces, or either on a `run:`,
+  `dispatch`, `pr:` or `watch:` step; an `agent` gummi has no adapter
+  for, or a `model` that agent cannot run — `opencode` without a
+  `provider/model`, a claude model misspelt or from another provider —
+  wherever the step sits, a dispatched recipe included; a `model` alone
+  the backend the profile gives the step cannot run (a dispatched
+  recipe's is checked when its step starts);
 - an artifact file name that is not a plain file name;
 - a template naming no input, no declared artifact or no earlier step;
 - a `repeat` without `max` or without exactly one `until`, an unknown
@@ -627,7 +648,8 @@ A recipe is refused, with every problem listed, when it has:
   step, or a handler recipe whose step id repeats one of the recipe's own.
 
 It is warned about, but may run, when a `parallel` holds more than one
-writing role, or a recipe or step still names `tier` or `envelope`.
+writing role, a step names a `slot` beside an `agent` or `model` (the
+slot is ignored), or a recipe or step still names `tier` or `envelope`.
 
 ## Common mistakes
 

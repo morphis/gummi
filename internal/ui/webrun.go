@@ -381,6 +381,9 @@ func (d *WebDocs) Step(ctx context.Context, card string) (webapi.StepFace, error
 	}
 	out.Crumb = stepCrumb(block.Recipe, run.N, st)
 	out.Model = f.SessionModel
+	if out.Model == "" && f.SessionBackend != "" {
+		out.Model = f.SessionBackend + "'s default model"
+	}
 	if d.eng != nil {
 		if now, ok := d.eng.StepNow(st.Card); ok {
 			if now.Model != "" {

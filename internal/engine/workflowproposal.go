@@ -237,8 +237,8 @@ func (e *Engine) frozenSpecItems(ctx context.Context, sess domain.Feature, run *
 func (e *Engine) proposalSteps(profile string, es []domain.Entry, depth int) []ProposalStep {
 	step := func(s domain.Step, depth int) ProposalStep {
 		return ProposalStep{
-			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Slot: s.Slot,
-			Model: e.stepModelWords(profile, s.Role, s.Slot), Prompt: promptGist(s.Prompt),
+			ID: s.ID, Depth: depth, Kind: "step", Role: s.Role, Slot: s.RunsOnSlot(),
+			Model: e.stepModelWords(profile, s), Prompt: promptGist(s.Prompt),
 		}
 	}
 	var out []ProposalStep
