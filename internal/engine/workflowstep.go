@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -222,7 +223,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	if err != nil {
 		return err
 	}
-	brief := stepBrief(run, step, path, filled)
+	brief := stepBrief(run, step, path, filled) + e.loopNotes(ctx, run, step, path, steps)
 	card := domain.Feature{}
 	minted := false
 	if inst.Card != "" {
@@ -416,6 +417,82 @@ func stepBrief(run *domain.Run, step domain.Step, path, filled string) string {
 	}
 	b.WriteString("\nYour task:\n\n" + strings.TrimSpace(filled) + "\n")
 	return b.String()
+}
+
+// loopNoteMax bounds how much of a verdict artifact a later round's brief
+// carries; the step may read the rest from the file.
+const loopNoteMax = 16 << 10
+
+// loopNotes is what a step starting in a later round of a repeat is told
+// of the round before it: why that round did not end the loop, and what
+// it left to act on — the verdict artifact as it stands, the failing
+// checks, or the round's last output. Without it every round's brief reads
+// the same, and a step would start over from it rather than address what
+// the round before found. Empty for a step in no repeat or in its first
+// round.
+func (e *Engine) loopNotes(ctx context.Context, run *domain.Run, step domain.Step, path string, steps []domain.RunStep) string {
+	segs := strings.Split(path, "/")
+	var b strings.Builder
+	for i := 0; i+1 < len(segs); i++ {
+		k, err := strconv.Atoi(segs[i+1])
+		if err != nil || k < 2 {
+			continue
+		}
+		id := segs[i]
+		r, ok := findRepeat(e.entriesFor(ctx, run, path), id)
+		if !ok {
+			continue
+		}
+		prev := domain.IterationPath(strings.Join(segs[:i], "/"), id, k-1)
+		why := "its condition did not hold"
+		if j, judged := run.Until[prev]; judged && j.Detail != "" {
+			why = j.Detail
+		}
+		fmt.Fprintf(&b, "\nThis is round %d of the loop %s: round %d did not end it (%s).", k, id, k-1, why)
+		if step.Role.Reads() {
+			b.WriteString(" Check whether what it found has been addressed.\n")
+		} else {
+			b.WriteString(" Address what it found first: this round exists to fix it, not to start the task over.\n")
+		}
+		switch r.Until.Kind() {
+		case domain.UntilVerdict:
+			file := e.runArtifacts(run)[r.Until.In]
+			raw, err := os.ReadFile(file) // #nosec G304 -- an artifact in the run's own directory
+			if err != nil {
+				continue
+			}
+			body := string(raw)
+			if len(body) > loopNoteMax {
+				body = body[:loopNoteMax] + "\n… (cut short: read the rest in the file)"
+			}
+			fmt.Fprintf(&b, "\nThe %s artifact (%s) as round %d left it:\n\n%s\n", r.Until.In, file, k-1,
+				workflowrecipe.Wrap(artifactWriter(r, r.Until.In), body))
+		case domain.UntilChecks:
+			b.WriteString("Run the spec's done-when checks named above to see them fail.\n")
+		case domain.UntilContains:
+			var last *domain.RunStep
+			for i := range steps {
+				if strings.HasPrefix(steps[i].Path, prev+"/") && steps[i].State.Settled() {
+					last = &steps[i]
+				}
+			}
+			if last != nil {
+				fmt.Fprintf(&b, "\nRound %d ended with:\n\n%s\n", k-1, workflowrecipe.Wrap(last.StepID, last.Output))
+			}
+		}
+	}
+	return b.String()
+}
+
+// artifactWriter is the id of the step in repeat r that declares the
+// artifact name, or the name itself when none does.
+func artifactWriter(r domain.Repeat, name string) string {
+	for _, s := range workflowrecipe.Steps(domain.Recipe{Steps: r.Steps}) {
+		if _, ok := s.Artifacts[name]; ok {
+			return s.ID
+		}
+	}
+	return name
 }
 
 // sendStepTurn sends a step's card a turn under the workflow's actor.

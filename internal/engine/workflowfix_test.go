@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -479,6 +480,47 @@ func TestALeftoverVerdictIsNotReadAsTheNewOne(t *testing.T) {
 	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
 	if !r.Until["build/2"].Met || wf.count("implement") != 2 {
 		t.Fatalf("until %+v after %d iterations (%s)", r.Until, wf.count("implement"), r.State)
+	}
+}
+
+// TestALaterRoundIsToldWhatTheLastOneFound: the implementer of a loop's
+// second round is briefed with why the first did not end it and the
+// review it left, inline; the first round's brief carries neither.
+func TestALaterRoundIsToldWhatTheLastOneFound(t *testing.T) {
+	wf := newWFFake()
+	var mu sync.Mutex
+	var briefs []string
+	wf.on("implement", func(dir, msg string, n int) wfReply {
+		mu.Lock()
+		briefs = append(briefs, msg)
+		mu.Unlock()
+		return writesOut(dir, msg, n)
+	})
+	var review string
+	wf.on("verdict", func(_, _ string, n int) wfReply {
+		v := `{"verdict": "CHANGES", "findings": ["the empty case panics"]}`
+		if n > 1 {
+			v = `{"verdict": "APPROVED", "findings": []}`
+		}
+		_ = os.WriteFile(review, []byte(v), 0o600)
+		return wfReply{text: "judged", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	review = filepath.Join(e.RunDir(f.ID, 1), "review.json")
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: verdictLoop})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(briefs) != 2 {
+		t.Fatalf("%d implement briefs", len(briefs))
+	}
+	if strings.Contains(briefs[0], "did not end it") {
+		t.Fatalf("the first round was told of a round before it:\n%s", briefs[0])
+	}
+	for _, want := range []string{"round 2 of the loop build", `verdict "CHANGES"`, "Address what it found first", "the empty case panics"} {
+		if !strings.Contains(briefs[1], want) {
+			t.Fatalf("the second round's brief lacks %q:\n%s", want, briefs[1])
+		}
 	}
 }
 
