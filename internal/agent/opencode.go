@@ -1278,15 +1278,30 @@ func (s *opencodeSession) relayEvents(t *ocTurn, evs []Event) {
 
 // textEvents is the event one slice of streamed text or reasoning maps
 // to; text also accumulates into msg for the turn's final message.
+// Reasoning closes the prose before it, as a tool call does: the engine
+// starts a new bubble after a thought, so text left in msg would be
+// written into that next bubble again.
 func textEvents(kind, delta string, msg ocMsgText) []Event {
 	if delta == "" {
 		return nil
 	}
 	if kind == "reasoning" {
-		return []Event{{Kind: EventReasoningDelta, Text: delta}}
+		return append(flushText(msg), Event{Kind: EventReasoningDelta, Text: delta})
 	}
 	_, _ = msg.WriteString(delta)
 	return []Event{{Kind: EventTextDelta, Text: delta}}
+}
+
+// flushText finalizes the prose accumulated in msg as its own message and
+// resets it, so each stretch of text between a turn's tool calls and
+// thoughts maps to one bubble.
+func flushText(msg ocMsgText) []Event {
+	text := strings.TrimSpace(msg.String())
+	msg.Reset()
+	if text == "" {
+		return nil
+	}
+	return []Event{{Kind: EventMessage, Text: text}}
 }
 
 // ocPart is one message part, as the event bus and the CLI's JSON lines
@@ -1445,17 +1460,13 @@ func (s *opencodeSession) mapOcEvent(e *ocEvent, msg ocMsgText) []Event {
 }
 
 // toolCallEvents announces a tool call. The prose accumulated so far is
-// flushed as a finalized message BEFORE the tool line, then reset.
+// flushed as a finalized message BEFORE the tool line (flushText).
 // Otherwise the whole turn's text (across every tool call) would be
 // emitted as one final EventMessage and the engine would write it into
 // the last streamed bubble, duplicating every pre-tool segment. Each
 // segment maps to its own bubble.
 func (s *opencodeSession) toolCallEvents(e *ocEvent, msg ocMsgText) []Event {
-	var out []Event
-	if text := strings.TrimSpace(msg.String()); text != "" {
-		out = append(out, Event{Kind: EventMessage, Text: text})
-	}
-	msg.Reset()
+	out := flushText(msg)
 	// the salient argument from the part's input, falling back to
 	// opencode's own rendered title when the args carry nothing.
 	detail := toolDetail(s.workdir, e.Part.State.Input)

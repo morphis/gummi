@@ -952,6 +952,47 @@ func TestOpencodeServerStreamsPartDeltas(t *testing.T) {
 	}
 }
 
+// TestOpencodeServerThoughtClosesTheTextBeforeIt: prose, a thought, then
+// more prose and a tool call is two messages, each its own text once. The
+// engine opens a new bubble after a thought, so a message still carrying
+// the first stretch would show it twice.
+func TestOpencodeServerThoughtClosesTheTextBeforeIt(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	sid := f.lastSession()
+	open := func(id, typ string) string {
+		return fmt.Sprintf(`{"type":"message.part.updated","properties":{"sessionID":%q,"part":{"id":%q,"sessionID":%q,"messageID":"msg_x","type":%q,"text":"","time":{"start":1}}}}`, sid, id, sid, typ)
+	}
+	delta := func(id, d string) string {
+		return fmt.Sprintf(`{"type":"message.part.delta","properties":{"sessionID":%q,"messageID":"msg_x","partID":%q,"field":"text","delta":%q}}`, sid, id, d)
+	}
+	f.push(open("p1", "text"))
+	f.push(delta("p1", "The remove completed."))
+	f.push(f.partEvent("text", "p1", "The remove completed."))
+	f.push(open("r1", "reasoning"))
+	f.push(delta("r1", "check the state"))
+	f.push(f.partEvent("reasoning", "r1", "check the state"))
+	f.push(open("p2", "text"))
+	f.push(delta("p2", "Cleanup is done."))
+	f.push(f.partEvent("text", "p2", "Cleanup is done."))
+	f.push(f.partEvent("tool", "t1", `{"status":"running","input":{"command":"make test"}}`))
+	f.releaseTurn()
+	var messages []string
+	for _, e := range waitTurnEnd(t, sess) {
+		if e.Kind == EventMessage {
+			messages = append(messages, e.Text)
+		}
+	}
+	if strings.Join(messages, "|") != "The remove completed.|Cleanup is done." {
+		t.Errorf("messages = %q, want each stretch of prose once, split at the thought", messages)
+	}
+}
+
 // TestOpencodeServerAnnouncesARunningToolCall: a tool call shows as
 // activity once it is running — opencode repeats the running state as
 // the call's metadata moves, and it is announced once — and its finished
