@@ -1087,8 +1087,8 @@ func TestAProposalReadsAsItsCard(t *testing.T) {
 	// each step names what it runs on, and its prompt's first paragraph
 	// whole, not its first wrapped line
 	if im := kinds["implement"]; !strings.Contains(im.Model, "m on ") ||
-		im.Prompt != "Implement {{artifacts.design}} for the spec below. If {{artifacts.review}} exists, address its findings first. "+
-			"Run the whole test suite of every package you changed, and keep it passing." {
+		im.Prompt != "Implement {{artifacts.design}} for the spec below. Run the whole test suite of every package you changed, "+
+			"and keep it passing." {
 		t.Fatalf("implement %+v", im)
 	}
 	always := run.Pending.Options[1]

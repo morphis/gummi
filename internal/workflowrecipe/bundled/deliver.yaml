@@ -38,10 +38,9 @@ steps:
         - id: implement
           role: implementer
           prompt: |
-            Implement {{artifacts.design}} for the spec below. If
-            {{artifacts.review}} exists, address its findings first. Run
-            the whole test suite of every package you changed, and keep
-            it passing.
+            Implement {{artifacts.design}} for the spec below. Run the
+            whole test suite of every package you changed, and keep it
+            passing.
 
             {{spec}}
         - id: reviews
