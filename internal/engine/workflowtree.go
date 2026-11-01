@@ -407,14 +407,18 @@ func (e *Engine) RunDiff(ctx context.Context, session domain.FeatureID, n int) (
 
 // --- the done-when checks -------------------------------------------------
 
-// frozenSpec is the spec revision a run froze, and its done-when items.
+// frozenSpec is the spec revision a run froze, less any earlier run's
+// Report section, and its done-when items.
 func (e *Engine) frozenSpec(ctx context.Context, run *domain.Run) (string, []domain.DoneWhen) {
 	rev, ok, err := e.cfg.Store.SpecRevision(ctx, run.Session, run.Spec, run.SpecRev)
 	if err != nil || !ok {
 		return "", nil
 	}
 	items, _, _ := spec.ParseDoneWhen(rev.Content)
-	return rev.Content, items
+	// an earlier run's report stays in the stored spec for the person, but
+	// never reaches a step: its decisions, notes and verdicts are that
+	// run's, and the spec is all a step is told of the work
+	return spec.DropSection(rev.Content, specSectionReport), items
 }
 
 // doneWhenCheckTimeout bounds each done-when check: one that hangs (a test

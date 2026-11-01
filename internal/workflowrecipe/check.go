@@ -25,6 +25,22 @@ func AgentName(s string) bool { return slotName.MatchString(s) }
 // idRe is what an entry's id may hold.
 var idRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+// RunReportFile is the file in a run's directory gummi writes the run's
+// report into at its end.
+const RunReportFile = "run-report.md"
+
+// ReservedRunFile reports whether file is a name gummi writes in a run's
+// directory itself — the run's recipe, its report, a spec edit's copy,
+// the steps' outputs and diffs — which an artifact declared under it
+// would be overwritten by, or overwrite.
+func ReservedRunFile(file string) bool {
+	switch file {
+	case "recipe.yaml", "proposed.yaml", RunReportFile, "outputs", "diffs", "ignored":
+		return true
+	}
+	return strings.HasPrefix(file, "spec-revision-") || strings.HasPrefix(file, "ignored@")
+}
+
 func allDigits(s string) bool {
 	return strings.Trim(s, "0123456789") == ""
 }
@@ -34,7 +50,7 @@ func allDigits(s string) bool {
 // a {{…}} naming no input, artifact or earlier step, a repeat without a
 // max or a single until, a parallel without a valid join, an until naming
 // an artifact its body does not declare, and an artifact whose file would
-// sit outside the run's directory. Warnings do not: a parallel holding more
+// sit outside the run's directory or is one gummi writes there itself. Warnings do not: a parallel holding more
 // than one writing role, whose steps can overwrite each other's work, and
 // a step that still names an envelope or a tier, which are ignored.
 // Whether a recipe reviews, tests or designs is its own choice; Check sets
@@ -253,6 +269,8 @@ func (c *checker) step(s domain.Step, previous string) {
 	for art, file := range s.Artifacts {
 		if art == "" || file == "" || file != filepath.Base(file) || file == "." || file == ".." {
 			c.problem("step %s: artifact %q must be a plain file name in the run's directory, not %q", name, art, file)
+		} else if ReservedRunFile(file) {
+			c.problem("step %s: artifact %q names %q, a file gummi writes in the run's directory itself", name, art, file)
 		}
 	}
 	for _, m := range templateRe.FindAllStringSubmatch(s.Prompt, -1) {

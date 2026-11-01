@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 // TestStopCancelsRunningCommandStep: stopping a run kills the command a
@@ -116,7 +117,7 @@ func TestEndedRunReportRedeliveredAfterRestart(t *testing.T) {
 	if err := store.UpdateRun(ctx, r); err != nil {
 		t.Fatal(err)
 	}
-	reportFile := filepath.Join(e.RunDir(f.ID, run.N), "report.md")
+	reportFile := filepath.Join(e.RunDir(f.ID, run.N), workflowrecipe.RunReportFile)
 	if err := os.Remove(reportFile); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestEndedRunReportRedeliveredAfterRestart(t *testing.T) {
 		return r != nil && !r.ReportPending && reported() == 2
 	})
 	if _, err := os.Stat(reportFile); err != nil {
-		t.Fatalf("report.md not written again: %v", err)
+		t.Fatalf("the run report not written again: %v", err)
 	}
 	for range 3 {
 		_, _ = e.WorkflowTick(ctx)

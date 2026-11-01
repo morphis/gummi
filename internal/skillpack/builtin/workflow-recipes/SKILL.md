@@ -84,7 +84,7 @@ not repeat it. A step's model is the profile's choice per role;
 
 | template | is |
 |---|---|
-| `{{spec}}` | the frozen spec's text; put it in every prompt needing the goal |
+| `{{spec}}` | the frozen spec, minus Report; put it in each prompt needing the goal |
 | `{{inputs.<name>}}` | an input, wrapped as data |
 | `{{artifacts.<name>}}` | an artifact's absolute path in the run's dir |
 | `{{previous.output}}` | the step before's final message |

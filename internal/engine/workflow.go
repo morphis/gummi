@@ -2362,7 +2362,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 func (e *Engine) deliverReport(ctx context.Context, run *domain.Run, turnOnly bool) (turnFailed bool) {
 	session, n := run.Session, run.N
 	if !turnOnly {
-		_, _ = e.writeRunFile(session, n, "report.md", run.Report)
+		_, _ = e.writeRunFile(session, n, workflowrecipe.RunReportFile, run.Report)
 		e.writeRunReport(ctx, run)
 		e.noteDispatcher(ctx, session, n, run.State, run.Report)
 	}

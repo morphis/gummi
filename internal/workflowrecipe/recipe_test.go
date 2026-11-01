@@ -207,6 +207,8 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"parallel bad join", "  - id: p\n    parallel: {join: race, steps: [{id: a, role: scout, prompt: p}]}\n", `join "race"`},
 		{"parallel empty", "  - id: p\n    parallel: {join: all, steps: []}\n", "parallel p has no steps"},
 		{"artifact escapes", "  - {id: a, role: scribe, prompt: p, artifacts: {x: ../x.md}}\n", "plain file name"},
+		{"artifact is the run's report", "  - {id: a, role: scribe, prompt: p, artifacts: {x: run-report.md}}\n", "gummi writes"},
+		{"artifact is a step's outputs", "  - {id: a, role: scribe, prompt: p, artifacts: {x: outputs}}\n", "gummi writes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := Parse([]byte(head + tc.steps))

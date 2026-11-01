@@ -54,7 +54,10 @@ session ──writes──▶ spec ──proposes──▶ run ──you allow�
 - **Questions come to you.** A step's `ask_user`, a loop at its `max`,
   and a loop that cannot judge its own condition all wait on you.
 - **gummi never commits.** At the end it runs the done-when checks,
-  writes the report into the spec and sends it to the session. A report
+  writes the report into the spec's Report section and the run's
+  `run-report.md`, and sends it to the session. A later run's steps do
+  not see that Report section in `{{spec}}`: each run starts from the
+  spec, not from the last run's findings. A report
   lost to a crash between the run's end and its delivery is delivered
   again when gummi next starts. **Retry** runs a failed or stopped step
   again and keeps the earlier attempt beside it; an earlier attempt is
@@ -583,7 +586,7 @@ exists at that point, or the recipe is refused.
 
 | template | is | where |
 |---|---|---|
-| `{{spec}}` | the frozen spec revision's text | anywhere |
+| `{{spec}}` | the frozen spec revision's text, less any earlier run's Report section | anywhere |
 | `{{inputs.<name>}}` | a declared input, wrapped as data | anywhere |
 | `{{artifacts.<name>}}` | the absolute path of an artifact some step declares | anywhere |
 | `{{previous.output}}` | the final message of the step just before | not the first step |
@@ -615,6 +618,8 @@ A step also fails when its agent errors.
 
 An artifact is a file in the run's directory
 (`.gummi/runs/<session>/<run>/`), named by the step that declares it.
+gummi keeps its own files there too — the run's report is
+`run-report.md` — and refuses an artifact that names one of them.
 If a step ends without writing an artifact it declared, gummi captures
 it from the step's output — the last non-empty JSON object for a `.json` file,
 otherwise the last fenced block — and notes that it did. Artifacts are
@@ -635,7 +640,10 @@ A recipe is refused, with every problem listed, when it has:
   wherever the step sits, a dispatched recipe included; a `model` alone
   the backend the profile gives the step cannot run (a dispatched
   recipe's is checked when its step starts);
-- an artifact file name that is not a plain file name;
+- an artifact file name that is not a plain file name, or one gummi
+  writes in the run's directory itself: `recipe.yaml`, `proposed.yaml`,
+  `run-report.md`, `outputs`, `diffs`, `ignored` and `ignored@…`, and
+  `spec-revision-…`;
 - a template naming no input, no declared artifact or no earlier step;
 - a `repeat` without `max` or without exactly one `until`, an unknown
   `onMax`, or a verdict `until` whose artifact no step in the loop
