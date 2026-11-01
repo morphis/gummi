@@ -118,8 +118,8 @@ artifact, a check ran no tests) always asks.
 
 Give a verdict step an artifact and the exact JSON to write: a missing
 file is captured from the output's last JSON object, but only if there
-is one. Tell the implementer to read the last review first:
-`If {{artifacts.review}} exists, address its findings first.`
+is one. From round 2 gummi briefs each step with the last round's
+verdict artifact inline, so prompts need not point at it.
 
 ## Joins: `parallel`
 

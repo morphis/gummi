@@ -232,12 +232,19 @@ times:
   simplest loop, for a spec with good checks.
 - `until: { verdict: APPROVED, in: review }` — a step in the loop writes
   the artifact `review` as JSON with a `verdict` field, and the loop
-  ends when it is the word. Tell that step the exact JSON to write, and
-  tell the implementer to read the last review first: `If
-  {{artifacts.review}} exists, address its findings first.`
+  ends when it is the word. Tell that step the exact JSON to write.
 - `until: { contains: "VERDICT: PASS" }` — the loop's last step's output
   contains the text. Ask for it on the last line, and pick a marker the
   step writes only when it means it.
+
+From the second round on, gummi tells each step of the loop why the
+round before did not end it, after its own prompt: the condition as
+judged (`verdict "CHANGES"`, `failing: DW-2`), and what that round left
+to act on — the verdict artifact's contents as they stand, or for
+`contains` the round's last output; for `checks`, the failing items to
+run. A writing step is told to address it first rather than start the
+task over, and a reading step to check that it was. Your prompts need
+not repeat it, and every round's prompt may read the same.
 
 When `max` is reached without the condition, `onMax` decides: `pause`
 asks you, `continue` moves on, `abort` ends the run partial. A loop

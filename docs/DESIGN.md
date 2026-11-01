@@ -6824,8 +6824,7 @@ steps:
         - id: implement
           role: implementer
           prompt: |
-            Implement {{artifacts.design}} for the spec below. If
-            {{artifacts.review}} exists, address its findings first.
+            Implement {{artifacts.design}} for the spec below.
 
             {{spec}}
         - id: reviews
