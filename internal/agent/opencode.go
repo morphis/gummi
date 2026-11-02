@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -333,6 +334,7 @@ type opencodeSession struct {
 	// conversation.
 	resumed     bool
 	interrupted bool // the current turn was stopped by Interrupt (not a failure)
+	disposed    bool // 1.x: the bus reported its instance disposed, which ends the stream
 	closed      bool
 	closeOnce   sync.Once
 	// hadIdle marks that some prior turn on this session reached a clean
@@ -971,32 +973,34 @@ func (s *opencodeSession) Close() error {
 // the transport. A stream that ends with a turn in flight — and without
 // an abort or a session close — ends that turn as a failure, like today's
 // truncated stream, so the orchestrator never advances on partial output.
+// While the server process lives the bus is opened again, so a later turn
+// still has one; once it has exited there is nothing to reconnect to, and
+// the next turn's request fails on it.
 func (s *opencodeSession) readBus() {
 	for {
 		if s.stopped() {
 			return
 		}
+		s.mu.Lock()
+		s.disposed = false
+		s.mu.Unlock()
 		body, err := s.srv.events(s.sctx)
-		if err != nil {
-			if s.stopped() {
-				return
-			}
-			s.serverDied()
-			return
+		if err == nil {
+			err = scanSSELines(body, func(data []byte) error {
+				s.dispatch(data)
+				return nil
+			})
+			_ = body.Close()
 		}
-		_ = scanSSELines(body, func(data []byte) error {
-			s.dispatch(data)
-			return nil
-		})
-		_ = body.Close()
 		if s.stopped() {
 			return
 		}
 		if s.turnInFlight() {
-			s.serverDied()
+			s.serverDied(err)
+		}
+		if _, exited := s.procExit(0); exited {
 			return
 		}
-		// no turn in flight: the server is still there; wait and reconnect
 		select {
 		case <-s.stop:
 			return
@@ -1029,18 +1033,84 @@ func (s *opencodeSession) turnInFlight() bool {
 // serverDied ends a turn in flight as a failure. The server's event
 // stream (or the server itself) is gone: nothing more will be relayed,
 // and ending the turn idle would let the orchestrator advance on partial
-// output.
-func (s *opencodeSession) serverDied() {
+// output. readErr is what reading the stream ended on (nil for a clean
+// close); the failure names why the stream was lost.
+func (s *opencodeSession) serverDied(readErr error) {
 	s.mu.Lock()
 	t := s.turn
 	s.mu.Unlock()
 	if t != nil {
-		s.failTurn(t, &RunFailure{
-			Backend:   "opencode",
-			FirstTurn: !s.hadIdleValue(),
-			Err:       errors.New("the opencode server closed its event stream mid-turn"),
-		})
+		s.failTurn(t, s.streamLost(readErr))
 	}
+}
+
+// ocExitGrace is how long a lost stream waits to learn whether the server
+// process exited: its socket closes a moment before it is reaped.
+const ocExitGrace = 2 * time.Second
+
+// streamLost is the failure of a turn whose event stream ended under it,
+// naming the cause: the server exited (with its status and the tail of its
+// stderr), sent an event too large to read, reset its instance (1.x ends
+// the stream on that), or failed or closed the stream while running.
+func (s *opencodeSession) streamLost(readErr error) *RunFailure {
+	rf := &RunFailure{Backend: "opencode", FirstTurn: !s.hadIdleValue()}
+	if status, exited := s.procExit(ocExitGrace); exited {
+		rf.Err = fmt.Errorf("the opencode server exited mid-turn (%s)", status)
+		if tail := stderrTail(s.procStderr(), 5); tail != "" {
+			rf.Diagnostic = rf.Err.Error() + "; its last output: " + tail
+		}
+		return rf
+	}
+	s.mu.Lock()
+	disposed := s.disposed
+	s.mu.Unlock()
+	switch {
+	case errors.Is(readErr, bufio.ErrTooLong):
+		rf.Err = fmt.Errorf("the opencode server sent an event over %d MB, larger than gummi reads, so its event stream was lost mid-turn", ocMaxSSEEvent>>20)
+	case disposed:
+		rf.Err = errors.New("opencode reset its instance for this worktree mid-turn, which ends its event stream (the server is still running)")
+	case readErr != nil:
+		rf.Err = fmt.Errorf("reading the opencode server's event stream failed mid-turn (the server is still running): %w", readErr)
+	default:
+		rf.Err = errors.New("the opencode server closed its event stream mid-turn (the server is still running)")
+	}
+	return rf
+}
+
+// procExit reports whether the server process has exited, waiting up to
+// grace for it to, and its exit status when it has. A stand-in with no
+// process behind it never exits.
+func (s *opencodeSession) procExit(grace time.Duration) (string, bool) {
+	s.mu.Lock()
+	p := s.proc
+	s.mu.Unlock()
+	if p == nil || p.exited == nil {
+		return "", false
+	}
+	select {
+	case <-p.exited:
+	case <-time.After(grace):
+		return "", false
+	}
+	if p.cmd != nil && p.cmd.ProcessState != nil {
+		return p.cmd.ProcessState.String(), true
+	}
+	return "status unknown", true
+}
+
+// stderrTail is the last n non-blank lines of a process's stderr, joined
+// on " | " so they read on one line.
+func stderrTail(stderr string, n int) string {
+	var lines []string
+	for l := range strings.SplitSeq(stderr, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " | ")
 }
 
 // dispatch maps one event-bus payload into gummi Events.
@@ -1056,6 +1126,12 @@ func (s *opencodeSession) dispatch(data []byte) {
 	switch ev.Type {
 	case "session.created":
 		s.adoptChild(ev.Properties.Info.ID, ev.Properties.Info.ParentID)
+	case "server.instance.disposed":
+		// the instance this stream is scoped to was torn down, and 1.x
+		// ends the stream with it: what a turn's failure then names
+		s.mu.Lock()
+		s.disposed = true
+		s.mu.Unlock()
 	case "message.part.updated":
 		s.relayPart(ev.Properties.Part)
 	case "message.part.delta":

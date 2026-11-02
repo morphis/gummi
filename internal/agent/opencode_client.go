@@ -456,13 +456,17 @@ func envWithout(names ...string) []string {
 	return out
 }
 
+// ocMaxSSEEvent is the largest event line scanSSELines reads; a longer
+// one ends the scan with bufio.ErrTooLong.
+const ocMaxSSEEvent = 8 << 20
+
 // scanSSELines reads a text/event-stream body, handing each event's data
 // payload to fn. opencode's bus frames every event as a `data: {json}`
 // line followed by a blank line; other lines (comments, heartbeats'
 // keep-alives) are ignored.
 func scanSSELines(r io.Reader, fn func(data []byte) error) error {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), ocMaxSSEEvent)
 	for sc.Scan() {
 		line := sc.Bytes()
 		if !bytes.HasPrefix(line, []byte("data: ")) {
