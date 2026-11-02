@@ -970,13 +970,17 @@ func (s *opencodeSession) Close() error {
 // readBus reads the server's event bus for as long as the session lives,
 // mapping each event through the same grammar the per-turn CLI lines went
 // through (mapOcEvent), so the events a caller sees do not change with
-// the transport. A stream that ends with a turn in flight — and without
-// an abort or a session close — ends that turn as a failure, like today's
-// truncated stream, so the orchestrator never advances on partial output.
-// While the server process lives the bus is opened again, so a later turn
-// still has one; once it has exited there is nothing to reconnect to, and
-// the next turn's request fails on it.
+// the transport. A 1.x stream the still-running server dropped under a
+// turn is opened again at once and the turn carries on (busResumable):
+// its message POST, not the bus, says when it ends. Any other stream that
+// ends with a turn in flight — and without an abort or a session close —
+// ends that turn as a failure, like today's truncated stream, so the
+// orchestrator never advances on partial output. While the server process
+// lives the bus is opened again, so a later turn still has one; once it
+// has exited there is nothing to reconnect to, and the next turn's
+// request fails on it.
 func (s *opencodeSession) readBus() {
+	quick := 0 // streams in a row lost under a turn within ocBusMinLife of opening
 	for {
 		if s.stopped() {
 			return
@@ -984,8 +988,10 @@ func (s *opencodeSession) readBus() {
 		s.mu.Lock()
 		s.disposed = false
 		s.mu.Unlock()
+		opened := time.Now()
 		body, err := s.srv.events(s.sctx)
-		if err == nil {
+		connected := err == nil
+		if connected {
 			err = scanSSELines(body, func(data []byte) error {
 				s.dispatch(data)
 				return nil
@@ -996,8 +1002,17 @@ func (s *opencodeSession) readBus() {
 			return
 		}
 		if s.turnInFlight() {
+			if time.Since(opened) < ocBusMinLife {
+				quick++
+			} else {
+				quick = 0
+			}
+			if connected && quick <= ocBusQuickDrops && s.busResumable(err) {
+				continue
+			}
 			s.serverDied(err)
 		}
+		quick = 0
 		if _, exited := s.procExit(0); exited {
 			return
 		}
@@ -1009,6 +1024,36 @@ func (s *opencodeSession) readBus() {
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// ocBusMinLife and ocBusQuickDrops bound how often a turn's dropped event
+// stream is reopened: a stream lost within ocBusMinLife of opening counts
+// as a quick drop, and more than ocBusQuickDrops of them in a row fail the
+// turn rather than spin on a server that will not hold one open.
+const (
+	ocBusMinLife    = time.Second
+	ocBusQuickDrops = 3
+)
+
+// busResumable reports whether a turn may carry on over a reopened event
+// stream after this one ended on readErr. opencode 1.x drops the stream
+// now and then while it keeps running (an unexpected EOF mid-turn), and
+// the turn's message POST is what ends the turn, so nothing is lost but
+// the events the gap swallowed: a part that finishes after it carries its
+// whole text, and relays what its deltas did not. Not so when the server has exited, an event
+// was too large to read (it is gone), the instance was reset under the
+// turn, or the server speaks 2.x, whose turn ends on a bus event the gap
+// could swallow.
+func (s *opencodeSession) busResumable(readErr error) bool {
+	if s.srv.v2 || errors.Is(readErr, bufio.ErrTooLong) {
+		return false
+	}
+	if _, exited := s.procExit(0); exited {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.disposed
 }
 
 // stopped reports whether the session has closed, or is closing.
@@ -1089,8 +1134,17 @@ func (s *opencodeSession) procExit(grace time.Duration) (string, bool) {
 	}
 	select {
 	case <-p.exited:
-	case <-time.After(grace):
-		return "", false
+	default:
+		// not yet: wait out the grace (a zero grace is a plain look —
+		// selecting on time.After(0) beside exited could miss an exit)
+		if grace <= 0 {
+			return "", false
+		}
+		select {
+		case <-p.exited:
+		case <-time.After(grace):
+			return "", false
+		}
 	}
 	if p.cmd != nil && p.cmd.ProcessState != nil {
 		return p.cmd.ProcessState.String(), true

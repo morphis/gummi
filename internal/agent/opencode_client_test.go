@@ -1362,7 +1362,45 @@ func waitRunFailure(t *testing.T, sess Session) *RunFailure {
 	}
 }
 
-// TestOpencodeStreamLostNamesItsCause: a turn whose event stream ends
+// TestOpencodeStreamDroppedMidTurnCarriesOn: a 1.x server that drops its
+// event stream mid-turn while it keeps running does not fail the turn.
+// The bus is opened again, the turn ends when its POST does, and a part
+// that was streaming across the gap relays the text its lost deltas held.
+func TestOpencodeStreamDroppedMidTurnCarriesOn(t *testing.T) {
+	f, _ := stubServeOpencode(t)
+	sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	f.holdTurns()
+	if err := sess.Send(context.Background(), "go"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPosted(t)
+	sid := f.lastSession()
+	f.push(fmt.Sprintf(`{"type":"message.part.updated","properties":{"sessionID":%q,"part":{"id":"p1","sessionID":%q,"messageID":"msg_x","type":"text","text":"","time":{"start":1}}}}`, sid, sid))
+	f.push(fmt.Sprintf(`{"type":"message.part.delta","properties":{"sessionID":%q,"messageID":"msg_x","partID":"p1","field":"text","delta":"Half "}}`, sid))
+	f.dropStream()
+	f.push(f.partEvent("text", "p1", "Half and the rest."))
+	f.releaseTurn()
+	var text []string
+	var final string
+	for _, e := range waitTurnEnd(t, sess) {
+		switch e.Kind {
+		case EventTextDelta:
+			text = append(text, e.Text)
+		case EventMessage:
+			final = e.Text
+		case EventError:
+			t.Errorf("unexpected error event: %v", e.Err)
+		}
+	}
+	if got := strings.Join(text, ""); got != "Half and the rest." {
+		t.Errorf("streamed text = %q, want the whole part once", got)
+	}
+	if final != "Half and the rest." {
+		t.Errorf("final message = %q", final)
+	}
+}
+
+// TestOpencodeStreamLostNamesItsCause:a turn whose event stream ends
 // under it fails naming why — the server still running, the server gone
 // with its status and last output, a 1.x instance reset, an event too
 // large to read — rather than one sentence for all of them.
@@ -1378,9 +1416,11 @@ func TestOpencodeStreamLostNamesItsCause(t *testing.T) {
 		return f, sess
 	}
 
-	t.Run("closed while running", func(t *testing.T) {
+	t.Run("closed while running, again and again", func(t *testing.T) {
 		f, sess := start(t)
-		f.dropStream()
+		for range ocBusQuickDrops + 1 {
+			f.dropStream()
+		}
 		rf := waitRunFailure(t, sess)
 		if !strings.Contains(rf.Error(), "closed its event stream mid-turn (the server is still running)") {
 			t.Errorf("failure = %q", rf.Error())
