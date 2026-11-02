@@ -75,6 +75,11 @@ type Recipe struct {
 	// text it fills as when it is not given ("" for none). An input not
 	// in it is required.
 	InputDefaults map[string]string
+	// Preflight is a shell command run in the session's tree when the run
+	// is proposed, before anyone is asked to allow it: a non-zero exit
+	// refuses the proposal with its output, and a zero exit's output is
+	// {{preflight.output}}. Empty for none.
+	Preflight string
 	// Steps run in order.
 	Steps []Entry
 }
@@ -392,6 +397,10 @@ type ItemResult struct {
 	Checked bool
 	Verdict ItemVerdict
 	Detail  string
+	// CannotRun marks a checked item left unjudged because its check could
+	// not run in the tree: its shell exited 126 or 127, a command missing
+	// or not executable. No change to the code makes it pass.
+	CannotRun bool `json:"CannotRun,omitempty"`
 	// Before is how the item's check found the tree before the run's first
 	// step (the run's baseline, RunBaseline), set on a checked item at the
 	// run's end; empty when there was no baseline for it.

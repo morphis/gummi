@@ -280,5 +280,17 @@ func proposalLines(s *theme.Styles, p engine.WorkflowProposal, w int) []string {
 			}
 		}
 	}
+	if p.Preflight != "" {
+		out = append(out, fit(s.Subtle.Render("preflight ")+s.Base.Render(sanitize(p.Preflight))+s.Success.Render(" ✓ passed")))
+		lines := strings.Split(p.PreflightOutput, "\n")
+		if len(lines) > 4 {
+			lines = append([]string{"…"}, lines[len(lines)-4:]...)
+		}
+		for _, l := range lines {
+			if strings.TrimSpace(l) != "" {
+				out = append(out, fit("  "+s.Faint.Render(sanitize(l))))
+			}
+		}
+	}
 	return out
 }

@@ -51,8 +51,11 @@ run only as a note. Before `workflow_run`:
    only exception is a guard that must keep passing; say so in its
    `says`.
 3. gummi runs the checks again as the run's baseline, before its first
-   step, and tells you an item that already passes or ran no tests. Fix
-   that item's check and propose again, or say why it is a guard.
+   step, and tells you an item that already passes, ran no tests or
+   cannot run (a command not found). Fix that item's check and propose
+   again, or say why it is a guard. When the tree may lack what the
+   checks need, give the recipe a `preflight:` command that checks for
+   it: a failing one refuses the proposal before anything is spent.
 
 ## Done-when checks that can fail
 

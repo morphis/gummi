@@ -638,7 +638,8 @@ func (m *Shell) webProposal(ctx context.Context, f domain.Feature) *webapi.RunPr
 		Run: p.Run, Kind: string(p.Kind), Recipe: threadfold.Sanitize(p.Recipe), Description: threadfold.Sanitize(p.Description),
 		Spec: p.Spec, SpecTitle: threadfold.Sanitize(p.SpecTitle), SpecRev: p.SpecRev, Steps: []webapi.ProposalStep{},
 		Warnings: p.Warnings, PoolLeft: p.PoolLeft, Bounded: p.Bounded, Dirty: p.Dirty, Branch: p.Branch,
-		Baseline: webBaseline(p.Baseline),
+		Baseline:  webBaseline(p.Baseline),
+		Preflight: threadfold.Sanitize(p.Preflight), PreflightOutput: threadfold.Sanitize(p.PreflightOutput),
 	}
 	for _, s := range p.Steps {
 		out.Steps = append(out.Steps, webProposalStep(s))

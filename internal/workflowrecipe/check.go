@@ -29,13 +29,17 @@ var idRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // report into at its end.
 const RunReportFile = "run-report.md"
 
+// PreflightFile is the file in a run's directory holding what the
+// recipe's preflight printed when the run was proposed.
+const PreflightFile = "preflight.txt"
+
 // ReservedRunFile reports whether file is a name gummi writes in a run's
 // directory itself — the run's recipe, its report, a spec edit's copy,
 // the steps' outputs and diffs — which an artifact declared under it
 // would be overwritten by, or overwrite.
 func ReservedRunFile(file string) bool {
 	switch file {
-	case "recipe.yaml", "proposed.yaml", RunReportFile, "outputs", "diffs", "ignored":
+	case "recipe.yaml", "proposed.yaml", RunReportFile, PreflightFile, "outputs", "diffs", "ignored":
 		return true
 	}
 	return strings.HasPrefix(file, "spec-revision-") || strings.HasPrefix(file, "ignored@")
@@ -50,9 +54,11 @@ func allDigits(s string) bool {
 // a {{…}} naming no input, artifact or earlier step, a repeat without a
 // max or a single until, a parallel without a valid join, an until naming
 // an artifact its body does not declare, and an artifact whose file would
-// sit outside the run's directory or is one gummi writes there itself. Warnings do not: a parallel holding more
-// than one writing role, whose steps can overwrite each other's work, and
-// a step that still names an envelope or a tier, which are ignored.
+// sit outside the run's directory or is one gummi writes there itself, a
+// preflight holding a template, and a step named preflight beside one.
+// Warnings do not: a parallel holding more than one writing role, whose
+// steps can overwrite each other's work, and a step that still names an
+// envelope or a tier, which are ignored.
 // Whether a recipe reviews, tests or designs is its own choice; Check sets
 // no floor.
 func Check(r domain.Recipe) (problems, warnings []string) {
@@ -87,6 +93,9 @@ func check(r domain.Recipe, frozen bool) (problems, warnings []string) {
 	}
 	if len(r.Steps) == 0 {
 		c.problem("the recipe has no steps")
+	}
+	if strings.Contains(r.Preflight, "{{") {
+		c.problem("the recipe's preflight runs before any step or input is filled in: it takes no {{…}}")
 	}
 	Walk(r.Steps, func(s domain.Step, _ []domain.Entry) {
 		for name := range s.Artifacts {
@@ -143,6 +152,9 @@ func (c *checker) id(id, kind string) string {
 		// a path joins ids with "/" and numbers a repeat's iterations, and a
 		// template names an id before ".output": an id holds none of them
 		c.problem("the id %q may hold only letters, digits, - and _, and not digits alone", id)
+	}
+	if id == "preflight" && c.r.Preflight != "" {
+		c.problem("the id %q names the recipe's preflight: {{preflight.output}} is its output, so no %s may take it", id, kind)
 	}
 	if prev, dup := c.ids[id]; dup {
 		c.problem("the id %q is used twice (a %s and a %s)", id, prev, kind)
@@ -391,6 +403,11 @@ func (c *checker) template(ref, self, previous string) string {
 	switch ref {
 	case "spec", "run.diff":
 		return ""
+	case "preflight.output":
+		if c.r.Preflight != "" {
+			return ""
+		}
+		return "names no preflight: the recipe has none"
 	case "event":
 		if !c.inHandler {
 			return "belongs to a watch handler's steps"

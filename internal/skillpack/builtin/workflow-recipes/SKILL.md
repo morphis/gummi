@@ -57,10 +57,9 @@ steps:
   (pin, beats `slot`; opencode: `provider/model`), `artifacts`
   (name → plain file name in the run's dir) and `captureOutput`
   (false hides its message from later steps).
-- **`parallel`**: `id`, `join`, and `steps` of plain steps side by side
-  in the same tree.
-- **`repeat`**: `id`, `max`, one `until`, `onMax`, and `steps` (which may
-  hold a `parallel`).
+- **`parallel`**: `id`, `join`, `steps` side by side in one tree.
+- **`repeat`**: `id`, `max`, one `until`, `onMax`, `steps` (may hold a
+  `parallel`).
 
 ## Roles
 
@@ -90,6 +89,7 @@ not repeat it. A step's model is the profile's choice per role;
 | `{{previous.output}}` | the step before's final message |
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
 | `{{run.diff}}` | a file: the diff from the run's start to now |
+| `{{preflight.output}}` | what top-level `preflight: <cmd>` printed; non-zero refuses the run |
 
 A step sees only its filled prompt: name every output and artifact.
 
@@ -226,4 +226,3 @@ steps:
 - Each loop has a `max` and one `until` (`checks: true` may join a
   verdict or contains); a verdict's artifact is declared inside the loop.
 - The last step judges the `judge: true` items.
-- If it worked, offer **Save as recipe…** on the run's block.

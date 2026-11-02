@@ -52,6 +52,11 @@ type WorkflowProposal struct {
 	// Baseline is the proposal's done-when checks run in the tree as it is
 	// (§25.5), nil for a revised plan or a spec with no checks.
 	Baseline *ProposalBaseline
+	// Preflight is the recipe's preflight command, which passed when the
+	// run was proposed, and PreflightOutput what it printed; empty for a
+	// recipe with none.
+	Preflight       string
+	PreflightOutput string
 }
 
 // ProposalBaseline is a proposal's baseline: still running, or each
@@ -209,6 +214,9 @@ func (e *Engine) buildProposal(ctx context.Context, sess domain.Feature, run *do
 	}
 	if d.Kind == domain.RunDecideProposal {
 		p.Baseline = ProposalBaselineOf(run.Baseline)
+		if out, ok := e.preflightOutput(run); ok {
+			p.Preflight, p.PreflightOutput = run.Recipe.Preflight, strings.TrimSpace(out)
+		}
 	}
 	p.PoolLeft, p.Bounded = e.sessionPoolLeft(ctx, sess)
 	if mgr, err := e.mgr(ctx, &sess); err == nil {

@@ -309,7 +309,12 @@ problem listed, and nothing starts. Warnings (two writers side by side,
 an ignored field) are shown on the proposal. Read the proposal before
 you allow it: it shows each step, the model it runs on, every check
 command, and which checks already pass before the run (a check that
-already passes proves nothing about the run).
+already passes proves nothing about the run). A check whose command is
+not found or not executable (its shell exits 127 or 126) reads **cannot
+run in this tree**: it fails whatever the run does, so it judges
+nothing — at the run's end it is unjudged, and a `repeat` with
+`until: checks` on it asks you after one round rather than going round
+to its `max`. Install what it needs, or rewrite the check.
 
 ## Reference
 
@@ -322,6 +327,7 @@ inputs:                  # optional
   report: "the bug report as filed"            # required input: name: hint
   area:   { hint: "where to look", default: "" }
   extra:  { hint: "anything else", required: false }
+preflight: command -v xdelta3 && make test-baseline   # optional
 steps:                   # required, at least one entry; they run in order
   - …
 ```
@@ -331,6 +337,7 @@ steps:                   # required, at least one entry; they run in order
 | `name` | yes | the recipe's name |
 | `description` | no | one line saying what it is for |
 | `inputs` | no | named values a run is given, read as `{{inputs.<name>}}` |
+| `preflight` | no | a shell command run in the tree when the run is proposed, below |
 | `steps` | yes | the entries, run in order |
 
 **Inputs.** Each input is either a hint alone (`name: "hint"`), which
@@ -340,6 +347,18 @@ filled empty). An input with a default cannot also be `required: true`.
 A run given an input the recipe does not declare, or missing a required
 one, is refused. An input reaches a step wrapped in delimiters naming
 it, as data, never as instructions.
+
+**Preflight.** A command (through `sh -c`, in the session's tree, for at
+most five minutes) that says whether the tree can carry the run at all —
+a tool the tests need, a service they reach — before anyone is asked to
+allow it and before a step spends anything. A non-zero exit refuses the
+proposal, with the end of what it printed as the reason, and no run is
+created. A zero exit shows on the proposal, and what it printed (stdout
+and stderr) is `{{preflight.output}}`, so a step can know the baseline
+it starts from — which tests already fail, and why. It runs again for
+every proposal, and for a scheduled fire or a dispatched session's run
+before the run is created. It takes no `{{…}}`, and no step may have
+the id `preflight` beside it.
 
 ### Entries
 
@@ -602,6 +621,7 @@ exists at that point, or the recipe is refused.
 | `{{previous.output}}` | the final message of the step just before | not the first step |
 | `{{<id>.output}}` | an earlier step's final message; in a `repeat`, its latest iteration | after that step |
 | `{{run.diff}}` | the path of a file holding the diff from the run's start to now | anywhere but a `run:` command |
+| `{{preflight.output}}` | what the recipe's `preflight` printed when the run was proposed, wrapped as a step's output | a recipe with a `preflight` |
 | `{{event}}` | the event that started this pass, as data | a watch handler's steps |
 | `{{watch.event}}` | the event that sent a `goto` pass back; empty on the first pass | top-level steps before the watch |
 
@@ -652,8 +672,10 @@ A recipe is refused, with every problem listed, when it has:
   recipe's is checked when its step starts);
 - an artifact file name that is not a plain file name, or one gummi
   writes in the run's directory itself: `recipe.yaml`, `proposed.yaml`,
-  `run-report.md`, `outputs`, `diffs`, `ignored` and `ignored@…`, and
-  `spec-revision-…`;
+  `run-report.md`, `preflight.txt`, `outputs`, `diffs`, `ignored` and
+  `ignored@…`, and `spec-revision-…`;
+- a `preflight` holding a `{{…}}`, a step with the id `preflight` beside
+  one, or `{{preflight.output}}` in a recipe without one;
 - a template naming no input, no declared artifact or no earlier step;
 - a `repeat` without `max` or without exactly one `until` (a verdict or
   `contains` with `checks: true` beside it counts as one), an unknown
@@ -684,6 +706,9 @@ slot is ignored), or a recipe or step still names `tier` or `envelope`.
   guard that must keep passing.
 - **`go test -run Name` with no matching test passes.** Grep the
   output for the test's own `--- PASS:` line.
+- **A check the tree cannot run.** A missing tool fails every round the
+  same way. Give the recipe a `preflight` that checks for it, so the
+  proposal is refused before anything is spent.
 - **A prompt without `{{spec}}`.** The step does not know the goal.
 - **A reviewer that cannot see the work.** Give it `{{run.diff}}`.
 - **Two writers in a `parallel`.** They share one tree; put them in

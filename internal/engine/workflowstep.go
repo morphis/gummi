@@ -209,6 +209,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	}
 	text, _ := e.runItems(ctx, run)
 	vars := workflowrecipe.Vars{Spec: text, Inputs: run.Inputs, Artifacts: e.runArtifacts(run)}
+	vars.Preflight, vars.HasPreflight = e.preflightOutput(run)
 	vars.Outputs, vars.Previous, vars.PreviousOutput = stepOutputs(run.Recipe, steps, path)
 	e.passVars(ctx, run, path, &vars)
 	if strings.Contains(step.Prompt, "run.diff") {

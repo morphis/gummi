@@ -30,6 +30,10 @@ type Vars struct {
 	// recipe's own steps (DESIGN §28.5).
 	Event      string
 	WatchEvent string
+	// Preflight is what the recipe's preflight printed when the run was
+	// proposed, read where HasPreflight says the recipe has one.
+	Preflight    string
+	HasPreflight bool
 }
 
 // Fill fills a prompt's templates. A step's output is wrapped in
@@ -103,6 +107,11 @@ func (v Vars) resolve(name string) (ref, error) {
 		return ref{input: "event", text: v.Event}, nil
 	case "watch.event":
 		return ref{input: "watch.event", text: v.WatchEvent}, nil
+	case "preflight.output":
+		if v.HasPreflight {
+			return ref{step: "preflight", text: v.Preflight}, nil
+		}
+		return ref{}, fmt.Errorf("{{preflight.output}}: the recipe has no preflight")
 	case "previous.output":
 		if v.Previous == "" {
 			return ref{}, fmt.Errorf("{{previous.output}}: no step ran before this one")

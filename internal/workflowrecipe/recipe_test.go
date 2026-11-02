@@ -116,7 +116,7 @@ func TestParseReadsEveryUntil(t *testing.T) {
 func TestMarshalRoundTrips(t *testing.T) {
 	no := false
 	extra := domain.Recipe{
-		Name: "x", Inputs: map[string]string{"area": "where"},
+		Name: "x", Inputs: map[string]string{"area": "where"}, Preflight: "command -v xdelta3",
 		Steps: []domain.Entry{
 			{Step: &domain.Step{ID: "a", Role: domain.RoleScout, Slot: "scout-wide", Prompt: "look at {{inputs.area}}", CaptureOutput: &no}},
 			{Repeat: &domain.Repeat{ID: "r", Max: 2, Until: domain.Until{Contains: "DONE"}, OnMax: domain.OnMaxAbort, Steps: []domain.Entry{
@@ -387,6 +387,39 @@ func TestFillFillsEveryTemplate(t *testing.T) {
 	}
 	if _, err := Fill("{{run.diff}}", Vars{}); err == nil {
 		t.Error("run.diff with no diff file filled")
+	}
+	if _, err := Fill("{{preflight.output}}", Vars{}); err == nil {
+		t.Error("preflight.output with no preflight filled")
+	}
+	if got, err := Fill("{{preflight.output}}", Vars{Preflight: "3 tests fail", HasPreflight: true}); err != nil ||
+		got != "<<<gummi-output step=\"preflight\">>>\n3 tests fail\n<<<end gummi-output step=\"preflight\">>>" {
+		t.Errorf("preflight.output filled as %q, %v", got, err)
+	}
+}
+
+func TestCheckReadsAPreflight(t *testing.T) {
+	ok, err := Parse([]byte("preflight: command -v xdelta3\nsteps:\n  - {id: a, role: implementer, prompt: \"{{preflight.output}} {{spec}}\"}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok.Preflight != "command -v xdelta3" {
+		t.Fatalf("preflight %q", ok.Preflight)
+	}
+	if problems, _ := Check(ok); len(problems) > 0 {
+		t.Fatalf("problems %q", problems)
+	}
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"no preflight", "steps:\n  - {id: a, role: implementer, prompt: \"{{preflight.output}}\"}\n", "names no preflight"},
+		{"templated", "preflight: \"test -f {{inputs.x}}\"\ninputs: {x: a file}\nsteps:\n  - {id: a, role: implementer, prompt: p}\n", "takes no {{…}}"},
+		{"its id taken", "preflight: \"true\"\nsteps:\n  - {id: preflight, role: implementer, prompt: p}\n", "names the recipe's preflight"},
+	} {
+		r, err := Parse([]byte(tc.yaml))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if problems, _ := Check(r); !strings.Contains(strings.Join(problems, "\n"), tc.want) {
+			t.Errorf("%s: problems %q, want %q", tc.name, problems, tc.want)
+		}
 	}
 }
 

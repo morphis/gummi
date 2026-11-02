@@ -584,6 +584,11 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 			return nil, fmt.Errorf("spec %d cannot be run: %s", n, why)
 		}
 	}
+	// the recipe's own preflight, before the run lock: it may take minutes
+	preflight, hasPreflight, err := e.preflightFor(ctx, session, recipe)
+	if err != nil {
+		return nil, err
+	}
 
 	unlock := e.lockRuns(session)
 	defer unlock()
@@ -619,6 +624,9 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, err
 	}
 	_, _ = e.writeRunFile(session, run.N, "recipe.yaml", text)
+	if hasPreflight {
+		e.keepPreflight(session, run.N, preflight)
+	}
 	if name == "" {
 		// an inline recipe as the session gave it, which a person may save
 		// (WorkflowSaveRecipe); recipe.yaml follows a revised plan
@@ -788,6 +796,12 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 		"a later edit reaches the run as a note.\n\nSteps:\n", recipeLabel(run), run.Spec, title, run.SpecRev)
 	e.writeRecipeTree(&b, sess.Profile, run.Recipe.Steps, "")
 	writeAllowance(&b, run.Recipe)
+	if out, ok := e.preflightOutput(run); ok {
+		fmt.Fprintf(&b, "\nIts preflight passed in the tree: %s\n", run.Recipe.Preflight)
+		if out = strings.TrimSpace(out); out != "" {
+			b.WriteString(tail(out, 1000) + "\n")
+		}
+	}
 	e.writePRAllowance(ctx, &b, run)
 	if len(warnings) > 0 {
 		b.WriteString("\nWarnings:\n- " + strings.Join(warnings, "\n- ") + "\n")
@@ -2227,11 +2241,13 @@ func (e *Engine) judgeUntilKind(ctx context.Context, run *domain.Run, iter strin
 			// nothing to judge by is not done: the person decides
 			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the spec has no done-when checks"}
 		}
-		var failed, empty, undecided []string
+		var failed, empty, undecided, broken []string
 		for id, c := range checks {
 			switch {
 			case c.Status == verify.StatusTimeout || c.Status == verify.StatusNotRun:
 				undecided = append(undecided, id)
+			case cannotRun(c):
+				broken = append(broken, id)
 			case !c.OK:
 				failed = append(failed, id)
 			case c.RanNoTests:
@@ -2241,7 +2257,13 @@ func (e *Engine) judgeUntilKind(ctx context.Context, run *domain.Run, iter strin
 		sort.Strings(failed)
 		sort.Strings(empty)
 		sort.Strings(undecided)
+		sort.Strings(broken)
 		switch {
+		case len(broken) > 0:
+			// no round of work can make a check pass that cannot run: the
+			// person decides, rather than the loop spinning to its max
+			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the check of " + strings.Join(broken, ", ") +
+				" cannot run in this tree (a command it runs is missing or not executable)"}
 		case len(failed) > 0:
 			return domain.UntilJudgement{Detail: "failing: " + strings.Join(failed, ", ")}
 		case len(undecided) > 0:

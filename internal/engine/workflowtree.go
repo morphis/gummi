@@ -466,6 +466,9 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 				r.Verdict, r.Detail = domain.ItemUnjudged, ranNoTests
 			case c.OK:
 				r.Verdict = domain.ItemMet
+			case cannotRun(c):
+				r.Verdict, r.CannotRun = domain.ItemUnjudged, true
+				r.Detail = cannotRunDetail(c)
 			default:
 				r.Detail = strings.TrimSpace(tail(c.Output, 600))
 			}
@@ -482,6 +485,27 @@ func itemResults(items []domain.DoneWhen, checks map[string]verify.Result, lastO
 
 // ranNoTests is a vacuous check's detail.
 const ranNoTests = "the check ran no tests"
+
+// cannotRun reports whether a check could not run at all: its shell
+// exited 126 (a command not executable) or 127 (a command not found).
+// Such a check fails whatever the code does, so it judges nothing.
+func cannotRun(c verify.Result) bool {
+	return c.Status == verify.StatusFail && (c.ExitCode == 126 || c.ExitCode == 127)
+}
+
+// cannotRunDetail is a check that could not run, in words, with the end
+// of what it printed.
+func cannotRunDetail(c verify.Result) string {
+	why := "a command it runs is not found"
+	if c.ExitCode == 126 {
+		why = "a command it runs is not executable"
+	}
+	d := fmt.Sprintf("the check cannot run in this tree (exit %d: %s)", c.ExitCode, why)
+	if out := strings.TrimSpace(tail(c.Output, 300)); out != "" {
+		d += ": " + out
+	}
+	return d
+}
 
 // checkedPass reports whether every checked result passed. A checked item
 // left unjudged — its check ran no tests — did not pass.

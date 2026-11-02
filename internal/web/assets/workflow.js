@@ -798,6 +798,9 @@ export function proposalEl (p) {
     p.checks?.length ? h('div', { class: 'wfp-checks', testid: 'proposal-checks' }, h('span', { class: 'k' }, 'runs in the tree when it ends'),
       p.checks.map(c => h('div', null, h('b', { class: 'mono' }, c.item), ' ', h('span', { class: 'mono' }, c.cmd)))) : null,
     baselineEl(p.baseline, 'proposal-baseline'),
+    p.preflight ? h('div', { class: 'wfp-checks', testid: 'proposal-preflight' }, h('span', { class: 'k' }, 'preflight passed'), ' ',
+      h('span', { class: 'mono' }, p.preflight),
+      p.preflightOutput ? h('pre', { class: 'hint mono' }, p.preflightOutput) : null) : null,
     h('div', { class: 'wfp-ticks' },
       p.warnings?.length
         ? h('div', { class: 'warnc', testid: 'proposal-warnings' }, p.warnings.map(w => h('div', null, `! ${w}`)))

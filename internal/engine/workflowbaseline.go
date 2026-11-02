@@ -235,6 +235,10 @@ func baselineMessage(run *domain.Run, items []domain.DoneWhen, problems []domain
 		"%s nothing about the run:\n", run.N, run.Spec, which)
 	for _, p := range problems {
 		fmt.Fprintf(&b, "- %s (`%s`): ", p.Item, cmd[p.Item])
+		if p.CannotRun {
+			b.WriteString(p.Detail + " — it fails whatever the run does. Install what it needs, or rewrite the check.\n")
+			continue
+		}
 		if p.Verdict == domain.ItemUnjudged {
 			b.WriteString("ran no tests — its go test -run matches no test, so it passes whatever the code does.\n")
 			continue
@@ -254,8 +258,12 @@ func baselineMessage(run *domain.Run, items []domain.DoneWhen, problems []domain
 
 // BaselineLine is one checked item's baseline in the words the proposal
 // and the run's block say it: "DW-2 already passes before the run",
-// "DW-3 ran no tests", or "DW-1 fails before the run".
+// "DW-3 ran no tests", "DW-4 cannot run in this tree", or "DW-1 fails
+// before the run".
 func BaselineLine(r domain.ItemResult) string {
+	if r.CannotRun {
+		return r.Item + " cannot run in this tree"
+	}
 	switch r.Verdict {
 	case domain.ItemMet:
 		return r.Item + " already passes before the run"
