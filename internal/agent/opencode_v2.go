@@ -246,6 +246,16 @@ type ocV2Event struct {
 	} `json:"data"`
 }
 
+// partKey names one streamed text or reasoning part of a 2.x message.
+// An ordinal counts a message's parts of one kind, so a step's thought and
+// its prose are both ordinal 0: keyed without the kind, they shared one
+// streamed length, and the thought's end dropped the prose's — whose own
+// end, arriving after the tool call that closed it, then wrote it all
+// into the next bubble again.
+func (ev *ocV2Event) partKey(kind string) string {
+	return kind + ":" + ev.Data.AssistantMessageID + ":" + strconv.Itoa(ev.Data.Ordinal)
+}
+
 // stepPart is a 2.x step's end as the part the 1.x grammar reads.
 func (ev *ocV2Event) stepPart() ocPart {
 	p := ocPart{SessionID: ev.Data.SessionID, Type: "step-finish", Cost: ev.Data.Cost, Reason: ev.Data.Finish}
@@ -313,7 +323,7 @@ func (s *opencodeSession) dispatchV2(data []byte) {
 			return
 		}
 		kind := strings.TrimSuffix(strings.TrimPrefix(ev.Type, "session."), ".delta")
-		key := d.AssistantMessageID + ":" + strconv.Itoa(d.Ordinal)
+		key := ev.partKey(kind)
 		s.mu.Lock()
 		t := s.turn
 		open := t != nil && !t.finishing
@@ -331,7 +341,7 @@ func (s *opencodeSession) dispatchV2(data []byte) {
 		// the part's whole text: whatever no delta carried (deltas are
 		// not durable on the bus, the ended event is)
 		kind := strings.TrimSuffix(strings.TrimPrefix(ev.Type, "session."), ".ended")
-		key := d.AssistantMessageID + ":" + strconv.Itoa(d.Ordinal)
+		key := ev.partKey(kind)
 		s.mu.Lock()
 		t := s.turn
 		open := t != nil && !t.finishing
