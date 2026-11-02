@@ -32,6 +32,7 @@ type ocFake struct {
 
 	evch chan string   // serialized bus event payloads, handed to the stream
 	dead chan struct{} // closed at Close: parked handlers abort
+	drop chan struct{} // a send ends the open event stream cleanly, the server still up
 
 	mu        sync.Mutex
 	msgGate   chan struct{} // released to let a blocked message POST return
@@ -67,7 +68,7 @@ type ocFakeReply struct {
 
 func newOcFake(t *testing.T) *ocFake {
 	t.Helper()
-	f := &ocFake{t: t, evch: make(chan string, 128), dead: make(chan struct{})}
+	f := &ocFake{t: t, evch: make(chan string, 128), dead: make(chan struct{}), drop: make(chan struct{})}
 	closed := make(chan struct{})
 	close(closed)
 	f.msgGate = closed
@@ -121,11 +122,17 @@ func (f *ocFake) eventStream(w http.ResponseWriter, r *http.Request) {
 			w.(http.Flusher).Flush()
 		case <-r.Context().Done():
 			return
+		case <-f.drop:
+			return
 		case <-f.dead:
 			panic(http.ErrAbortHandler)
 		}
 	}
 }
+
+// dropStream ends the event stream the adapter holds, as a server that
+// closes it while still running does.
+func (f *ocFake) dropStream() { f.drop <- struct{}{} }
 
 func (f *ocFake) create(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
@@ -1332,4 +1339,105 @@ func TestOpencodeForgetsClosedSessions(t *testing.T) {
 	if len(o.sessions) != 0 {
 		t.Errorf("sessions after the agent closed = %d, want none", len(o.sessions))
 	}
+}
+
+// waitRunFailure reads the session's events until its turn fails, and
+// returns that failure.
+func waitRunFailure(t *testing.T, sess Session) *RunFailure {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-sess.Events():
+			var rf *RunFailure
+			if e.Kind == EventError && errors.As(e.Err, &rf) {
+				return rf
+			}
+			if e.Kind == EventIdle {
+				t.Fatal("the turn ended idle, want a failure")
+			}
+		case <-deadline:
+			t.Fatal("no failure")
+		}
+	}
+}
+
+// TestOpencodeStreamLostNamesItsCause: a turn whose event stream ends
+// under it fails naming why — the server still running, the server gone
+// with its status and last output, a 1.x instance reset, an event too
+// large to read — rather than one sentence for all of them.
+func TestOpencodeStreamLostNamesItsCause(t *testing.T) {
+	start := func(t *testing.T) (*ocFake, *opencodeSession) {
+		f, _ := stubServeOpencode(t)
+		sess := ocSession(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+		f.holdTurns()
+		if err := sess.Send(context.Background(), "go"); err != nil {
+			t.Fatal(err)
+		}
+		f.waitPosted(t)
+		return f, sess
+	}
+
+	t.Run("closed while running", func(t *testing.T) {
+		f, sess := start(t)
+		f.dropStream()
+		rf := waitRunFailure(t, sess)
+		if !strings.Contains(rf.Error(), "closed its event stream mid-turn (the server is still running)") {
+			t.Errorf("failure = %q", rf.Error())
+		}
+		// the bus is opened again, so the next turn's text still arrives
+		f.releaseTurn()
+		f.holdTurns()
+		if err := sess.Send(context.Background(), "again"); err != nil {
+			t.Fatal(err)
+		}
+		f.waitPostedN(t, 2)
+		f.push(f.partEvent("text", "p2", "back"))
+		deadline := time.After(10 * time.Second)
+		for relayed := false; !relayed; {
+			select {
+			case e := <-sess.Events():
+				relayed = e.Kind == EventTextDelta && e.Text == "back"
+			case <-deadline:
+				t.Fatal("the next turn's text never arrived: the bus was not opened again")
+			}
+		}
+		f.releaseTurn()
+		waitTurnEnd(t, sess)
+	})
+
+	t.Run("server exited", func(t *testing.T) {
+		f, sess := start(t)
+		cmd := exec.Command("sh", "-c", "exit 3")
+		_ = cmd.Run()
+		exited := make(chan struct{})
+		close(exited)
+		stderr := &strings.Builder{}
+		stderr.WriteString("starting\n\nfatal: out of memory\n")
+		sess.mu.Lock()
+		sess.proc.cmd, sess.proc.exited, sess.proc.stderr = cmd, exited, stderr
+		sess.mu.Unlock()
+		f.dropStream()
+		got := waitRunFailure(t, sess).Error()
+		if want := "the opencode server exited mid-turn (exit status 3); its last output: starting | fatal: out of memory"; !strings.Contains(got, want) {
+			t.Errorf("failure = %q, want it to hold %q", got, want)
+		}
+	})
+
+	t.Run("instance reset", func(t *testing.T) {
+		f, sess := start(t)
+		f.push(`{"type":"server.instance.disposed","properties":{"directory":"/w"}}`)
+		f.dropStream()
+		if got := waitRunFailure(t, sess).Error(); !strings.Contains(got, "reset its instance for this worktree mid-turn") {
+			t.Errorf("failure = %q", got)
+		}
+	})
+
+	t.Run("event too large", func(t *testing.T) {
+		f, sess := start(t)
+		f.push(`{"type":"message.part.updated","properties":{"part":{"text":"` + strings.Repeat("x", ocMaxSSEEvent) + `"}}}`)
+		if got := waitRunFailure(t, sess).Error(); !strings.Contains(got, "an event over 8 MB") {
+			t.Errorf("failure = %q", got)
+		}
+	})
 }

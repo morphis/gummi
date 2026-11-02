@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -306,6 +307,49 @@ func TestOpencodeV2TurnRoundTrip(t *testing.T) {
 	_ = sess.Close()
 	if _, err := os.Stat(hints); !os.IsNotExist(err) {
 		t.Errorf("hints file still present after Close (stat=%v)", err)
+	}
+}
+
+// TestOpencodeV2ThoughtAndProseDoNotShareALength: a step's thought and
+// its prose are both ordinal 0, and 2.x ends both after the tool call that
+// closed the prose. The prose is one message, before the call, and the
+// message after the call carries only what followed it.
+func TestOpencodeV2ThoughtAndProseDoNotShareALength(t *testing.T) {
+	f, _ := stubServeOpencodeV2(t)
+	sess := ocSessionV2(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x"})
+	if err := sess.Send(context.Background(), "read a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	f.waitPrompts(t, 1)
+	f.pushOurs("session.execution.started", "")
+	f.pushOurs("session.reasoning.delta", `"assistantMessageID":"m1","ordinal":0,"delta":"Plan."`)
+	f.pushOurs("session.text.delta", `"assistantMessageID":"m1","ordinal":0,"delta":"I'll read it."`)
+	f.pushOurs("session.tool.input.started", `"id":"c1","name":"read"`)
+	f.pushOurs("session.reasoning.ended", `"assistantMessageID":"m1","ordinal":0,"text":"Plan."`)
+	f.pushOurs("session.tool.called", `"id":"c1","input":{"path":"a.txt"}`)
+	f.pushOurs("session.text.ended", `"assistantMessageID":"m1","ordinal":0,"text":"I'll read it."`)
+	f.pushOurs("session.tool.success", `"id":"c1","content":[{"type":"text","text":"alpha"}]`)
+	f.pushOurs("session.step.ended", `"finish":"tool-calls","cost":0.01,"tokens":{"input":10,"output":2,"cache":{"read":0,"write":0}}`)
+	f.pushOurs("session.text.delta", `"assistantMessageID":"m2","ordinal":0,"delta":"It says alpha."`)
+	f.pushOurs("session.text.ended", `"assistantMessageID":"m2","ordinal":0,"text":"It says alpha."`)
+	f.pushOurs("session.step.ended", `"finish":"stop","cost":0.01,"tokens":{"input":10,"output":2,"cache":{"read":0,"write":0}}`)
+	f.pushOurs("session.execution.succeeded", "")
+
+	var msgs []string
+	var text strings.Builder
+	for _, e := range waitTurnEnd(t, sess) {
+		switch e.Kind {
+		case EventMessage:
+			msgs = append(msgs, e.Text)
+		case EventTextDelta:
+			text.WriteString(e.Text)
+		}
+	}
+	if want := []string{"I'll read it.", "It says alpha."}; !slices.Equal(msgs, want) {
+		t.Errorf("messages = %q, want %q", msgs, want)
+	}
+	if text.String() != "I'll read it.It says alpha." {
+		t.Errorf("streamed text = %q, want each stretch once", text.String())
 	}
 }
 
