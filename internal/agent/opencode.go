@@ -2,11 +2,13 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -970,17 +972,17 @@ func (s *opencodeSession) Close() error {
 // readBus reads the server's event bus for as long as the session lives,
 // mapping each event through the same grammar the per-turn CLI lines went
 // through (mapOcEvent), so the events a caller sees do not change with
-// the transport. A 1.x stream the still-running server dropped under a
-// turn is opened again at once and the turn carries on (busResumable):
-// its message POST, not the bus, says when it ends. Any other stream that
-// ends with a turn in flight — and without an abort or a session close —
-// ends that turn as a failure, like today's truncated stream, so the
+// the transport. A stream the still-running server dropped under a turn
+// is opened again at once and the turn carries on (busResumable). Any
+// other stream that ends with a turn in flight — and without an abort or
+// a session close — ends that turn as a failure, like today's truncated stream, so the
 // orchestrator never advances on partial output. While the server process
 // lives the bus is opened again, so a later turn still has one; once it
 // has exited there is nothing to reconnect to, and the next turn's
 // request fails on it.
 func (s *opencodeSession) readBus() {
-	quick := 0 // streams in a row lost under a turn within ocBusMinLife of opening
+	quick := 0        // streams in a row lost under a turn within ocBusMinLife of opening
+	reopened := false // this stream replaces one dropped under a turn
 	for {
 		if s.stopped() {
 			return
@@ -992,12 +994,13 @@ func (s *opencodeSession) readBus() {
 		body, err := s.srv.events(s.sctx)
 		connected := err == nil
 		if connected {
-			err = scanSSELines(body, func(data []byte) error {
-				s.dispatch(data)
-				return nil
-			})
+			if reopened && s.srv.v2 {
+				go s.settleExecV2()
+			}
+			err = s.readStream(body)
 			_ = body.Close()
 		}
+		reopened = false
 		if s.stopped() {
 			return
 		}
@@ -1008,6 +1011,7 @@ func (s *opencodeSession) readBus() {
 				quick = 0
 			}
 			if connected && quick <= ocBusQuickDrops && s.busResumable(err) {
+				reopened = true
 				continue
 			}
 			s.serverDied(err)
@@ -1036,16 +1040,17 @@ const (
 )
 
 // busResumable reports whether a turn may carry on over a reopened event
-// stream after this one ended on readErr. opencode 1.x drops the stream
-// now and then while it keeps running (an unexpected EOF mid-turn), and
-// the turn's message POST is what ends the turn, so nothing is lost but
-// the events the gap swallowed: a part that finishes after it carries its
-// whole text, and relays what its deltas did not. Not so when the server has exited, an event
-// was too large to read (it is gone), the instance was reset under the
-// turn, or the server speaks 2.x, whose turn ends on a bus event the gap
-// could swallow.
+// stream after this one ended on readErr. opencode drops the stream now
+// and then while it keeps running (an unexpected EOF mid-turn), and
+// nothing is lost but the events the gap swallowed: a part that finishes
+// after it carries its whole text, and relays what its deltas did not. A
+// 1.x turn ends when its message POST does; a 2.x turn ends on a bus
+// event the gap could swallow, which settleExecV2 asks the server about
+// once the stream is open again. Not so when the server has exited, an
+// event was too large to read (it is gone), or the instance was reset
+// under the turn.
 func (s *opencodeSession) busResumable(readErr error) bool {
-	if s.srv.v2 || errors.Is(readErr, bufio.ErrTooLong) {
+	if errors.Is(readErr, bufio.ErrTooLong) {
 		return false
 	}
 	if _, exited := s.procExit(0); exited {
@@ -1054,6 +1059,74 @@ func (s *opencodeSession) busResumable(readErr error) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return !s.disposed
+}
+
+// readStream reads one open event stream to its end, dispatching each
+// event in order on a goroutine of its own. The socket is drained however
+// slowly the caller takes events: a 2.x server fails the stream of a
+// consumer that falls behind, and a stalled read was one. It returns once
+// every event read has been dispatched, with what the read ended on.
+func (s *opencodeSession) readStream(body io.Reader) error {
+	q := &ocBusQueue{}
+	q.cond = sync.NewCond(&q.mu)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for {
+			data, ok := q.pop()
+			if !ok {
+				return
+			}
+			s.dispatch(data)
+		}
+	}()
+	err := scanSSELines(body, func(data []byte) error {
+		q.push(bytes.Clone(data)) // the scanner reuses its buffer
+		return nil
+	})
+	q.close()
+	<-drained
+	return err
+}
+
+// ocBusQueue holds the events read off the stream until they are
+// dispatched: unbounded, so the read never waits on the caller.
+type ocBusQueue struct {
+	mu     sync.Mutex
+	cond   *sync.Cond
+	items  [][]byte
+	closed bool
+}
+
+func (q *ocBusQueue) push(data []byte) {
+	q.mu.Lock()
+	q.items = append(q.items, data)
+	q.mu.Unlock()
+	q.cond.Signal()
+}
+
+func (q *ocBusQueue) close() {
+	q.mu.Lock()
+	q.closed = true
+	q.mu.Unlock()
+	q.cond.Signal()
+}
+
+// pop returns the next event, waiting for one; false once the queue is
+// closed and empty.
+func (q *ocBusQueue) pop() ([]byte, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for len(q.items) == 0 && !q.closed {
+		q.cond.Wait()
+	}
+	if len(q.items) == 0 {
+		return nil, false
+	}
+	data := q.items[0]
+	q.items[0] = nil
+	q.items = q.items[1:]
+	return data, true
 }
 
 // stopped reports whether the session has closed, or is closing.

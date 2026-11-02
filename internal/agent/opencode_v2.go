@@ -88,7 +88,66 @@ type ocExec struct {
 	started bool   // under the session's mutex
 	ended   bool   // under the session's mutex
 	err     string // the failure the loop reported, if any
+	// admitted: the server took the prompt or compaction, so its loop
+	// is running or has run (under the session's mutex)
+	admitted bool
 }
+
+// admit records that the server took ex's prompt or compaction.
+func (s *opencodeSession) admit(ex *ocExec) {
+	s.mu.Lock()
+	ex.admitted = true
+	s.mu.Unlock()
+}
+
+// ocLostEnd is the failure of an execution whose end fell in the gap a
+// dropped event stream left: what the turn did last was not relayed.
+const ocLostEnd = "the opencode server's event stream dropped as the turn ended, so its last events were lost (the server is still running)"
+
+// settleExecV2 runs once a 2.x stream dropped under an execution is open
+// again: the execution's end may have fallen in the gap, and would then
+// be waited on for good. The server lists the sessions whose loop is
+// running; when this one's is not — asked twice, a moment apart, so a loop
+// that had only just been admitted has started — the execution ends as
+// failed (ocLostEnd). One whose end the new stream carries ends as it
+// says; whichever comes first wins.
+func (s *opencodeSession) settleExecV2() {
+	s.mu.Lock()
+	ex, id := s.exec, s.sessionID
+	s.mu.Unlock()
+	for range 2 {
+		s.mu.Lock()
+		open := ex != nil && s.exec == ex && ex.admitted && !ex.ended
+		s.mu.Unlock()
+		if !open || id == "" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(s.sctx, 10*time.Second)
+		running, err := s.srv.activeV2(ctx, id)
+		cancel()
+		if err != nil || running {
+			return
+		}
+		select {
+		case <-ex.done:
+			return
+		case <-s.stop:
+			return
+		case <-time.After(ocSettleRecheck):
+		}
+	}
+	s.mu.Lock()
+	open := s.exec == ex
+	ex.started = true // its started event may have been lost too
+	s.mu.Unlock()
+	if open {
+		s.endExecution(ocLostEnd)
+	}
+}
+
+// ocSettleRecheck is how long settleExecV2 waits before asking again
+// whether a session's loop is running. A variable, so tests run quick.
+var ocSettleRecheck = time.Second
 
 // beginExec opens the execution the next prompt or compaction starts.
 func (s *opencodeSession) beginExec() *ocExec {
@@ -145,6 +204,7 @@ func (s *opencodeSession) postTurnV2(t *ocTurn, msg string, imgs []Image) error 
 	if err := srv.promptV2(t.ctx, id, promptBodyV2(msg, imgs)); err != nil {
 		return err
 	}
+	s.admit(ex)
 	return awaitExec(t.ctx, ex)
 }
 
@@ -185,6 +245,7 @@ func (s *opencodeSession) runCompactV2(ctx context.Context, srv opencodeServer, 
 	if err := srv.compactV2(ctx, id); err != nil {
 		return err
 	}
+	s.admit(ex)
 	if err := awaitExec(ctx, ex); err != nil {
 		return err
 	}
@@ -588,6 +649,27 @@ func (o opencodeServer) promptV2(ctx context.Context, id string, body any) error
 	}
 	_, err = readV2(resp, "sending the message", id, http.StatusOK)
 	return err
+}
+
+// activeV2 reports whether session id's loop is running: the server
+// lists every session whose loop is, and none other.
+func (o opencodeServer) activeV2(ctx context.Context, id string) (bool, error) {
+	resp, err := o.do(ctx, http.MethodGet, "/api/session/active", nil)
+	if err != nil {
+		return false, err
+	}
+	body, err := readV2(resp, "listing the running sessions", "", http.StatusOK)
+	if err != nil {
+		return false, err
+	}
+	var out struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return false, fmt.Errorf("listing the running sessions: %w", err)
+	}
+	_, running := out.Data[id]
+	return running, nil
 }
 
 // compactV2 admits a compaction to a 2.x session.
