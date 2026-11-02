@@ -364,6 +364,7 @@ func workflowTools() []agent.ToolDef {
 			map[string]any{
 				"recipe":      str("A recipe's name, as workflow_recipes lists them."),
 				"recipe_yaml": str("A recipe written out in full, drafted for the work in hand, instead of a name."),
+				"recipe_path": str("A recipe file in this session's tree, relative to its root, instead of a name or recipe_yaml: read and copied into the run when proposed."),
 				"spec":        specArg,
 				"inputs":      map[string]any{"type": "object", "description": "The recipe's inputs, by name.", "additionalProperties": map[string]any{"type": "string"}},
 			}),
@@ -379,6 +380,7 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 	var a struct {
 		Recipe     string            `json:"recipe"`
 		RecipeYAML string            `json:"recipe_yaml"`
+		RecipePath string            `json:"recipe_path"`
 		Spec       json.RawMessage   `json:"spec"`
 		Inputs     map[string]string `json:"inputs"`
 		Note       string            `json:"note"`
@@ -401,7 +403,7 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 		var n int
 		if n, _, err = parseSpecArg(a.Spec); err == nil {
 			var run *domain.Run
-			run, err = e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: a.Recipe, RecipeYAML: a.RecipeYAML, Spec: n, Inputs: a.Inputs})
+			run, err = e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: a.Recipe, RecipeYAML: a.RecipeYAML, RecipePath: a.RecipePath, Spec: n, Inputs: a.Inputs})
 			if err == nil {
 				out = proposedText(run)
 			}
@@ -494,11 +496,13 @@ const sessionWorkflowHint = `A session may also run a workflow (gummi's DESIGN Â
 
 // --- proposing a run --------------------------------------------------------
 
-// WorkflowRequest is a proposal: a recipe by name or written out, the spec
-// it runs against (0: the session's only spec) and its inputs.
+// WorkflowRequest is a proposal: a recipe by name, written out or kept in
+// a file in the session's tree, the spec it runs against (0: the
+// session's only spec) and its inputs.
 type WorkflowRequest struct {
 	Recipe     string
 	RecipeYAML string
+	RecipePath string // relative to the session's tree; read into RecipeYAML when proposed
 	Spec       int
 	Inputs     map[string]string
 }
@@ -525,6 +529,14 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, fmt.Errorf("%s cannot run a workflow: only a session can", session)
 	case sess.Stage == domain.StageDone:
 		return nil, fmt.Errorf("%s is closed", session)
+	}
+	if strings.TrimSpace(req.RecipePath) != "" {
+		if strings.TrimSpace(req.Recipe) != "" || strings.TrimSpace(req.RecipeYAML) != "" {
+			return nil, errors.New("give one of recipe, recipe_yaml and recipe_path")
+		}
+		if req.RecipeYAML, err = e.treeRecipe(ctx, sess, req.RecipePath); err != nil {
+			return nil, err
+		}
 	}
 	recipe, name, text, err := e.loadRecipe(req)
 	if err != nil {
@@ -690,6 +702,52 @@ func (e *Engine) loadRecipe(req WorkflowRequest) (domain.Recipe, string, string,
 		return f.Recipe, f.Name, string(f.YAML), nil
 	}
 	return domain.Recipe{}, "", "", errors.New("name a recipe (workflow_recipes lists them) or write one out as recipe_yaml")
+}
+
+// maxTreeRecipe bounds a recipe read from a session's tree.
+const maxTreeRecipe = 1 << 20
+
+// treeRecipe reads a recipe file the session keeps in its own tree: rel
+// is relative to the tree's root and must stay inside it, links
+// included. What it returns is proposed as if written out in full, so the
+// run freezes the file as it reads now.
+func (e *Engine) treeRecipe(ctx context.Context, sess domain.Feature, rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	tree := e.treeOf(ctx, sess)
+	if tree == "" {
+		return "", fmt.Errorf("%s has no tree to read %s from", sess.ID, rel)
+	}
+	if filepath.IsAbs(rel) || !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return "", fmt.Errorf("recipe_path %q must be a path inside the session's tree, relative to its root", rel)
+	}
+	root, err := filepath.EvalSymlinks(tree)
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		return "", fmt.Errorf("recipe_path %q: %w", rel, err)
+	}
+	if inside, err := filepath.Rel(root, path); err != nil || !filepath.IsLocal(inside) {
+		return "", fmt.Errorf("recipe_path %q leads outside the session's tree", rel)
+	}
+	fi, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return "", err
+	case !fi.Mode().IsRegular():
+		return "", fmt.Errorf("recipe_path %q is not a file", rel)
+	case fi.Size() > maxTreeRecipe:
+		return "", fmt.Errorf("recipe_path %q is over %d bytes", rel, maxTreeRecipe)
+	}
+	raw, err := os.ReadFile(path) // #nosec G304 -- confined to the session's own tree above
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", fmt.Errorf("recipe_path %q is empty", rel)
+	}
+	return string(raw), nil
 }
 
 // runSpec resolves the spec a run is proposed against: the one named, or

@@ -108,7 +108,10 @@ gummi looks for a recipe by name in this order:
 2. the recipes bundled with gummi.
 
 A workspace recipe with a bundled recipe's name overrides it. A session
-can also hand over a recipe it wrote inline for one piece of work; if
+can also hand over a recipe it wrote inline for one piece of work —
+written out in full (`recipe_yaml`), or as a file in its own tree
+(`recipe_path`, relative to the tree's root), which saves pasting a
+recipe it is still tuning into every proposal; if
 that run went well, the run's block offers **Save as recipe…**, which
 writes it to `.gummi/workflows/` for every session to use. A recipe's
 file name is its name: letters, digits, `-` and `_`, starting with a

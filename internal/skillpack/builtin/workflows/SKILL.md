@@ -105,7 +105,9 @@ one's YAML.
 | `investigate` | a question, no change: a scout maps, a scribe writes `report.md` |
 
 If none fits — no design needed, a tester before the implementer, a
-different reviewer — write one inline as `recipe_yaml`; the
+different reviewer — write one inline as `recipe_yaml`, or keep it
+in a file in your tree and pass `recipe_path` (each proposal re-reads
+it, so tune it between runs without pasting it again); the
 `workflow-recipes` skill has the grammar. Adapt a bundled one rather
 than starting blank.
 

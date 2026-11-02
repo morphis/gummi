@@ -11,8 +11,8 @@ Start from a bundled recipe, not a blank page: `references/` holds
 `deliver.yaml`, `fix-until-green.yaml` and `investigate.yaml` as gummi
 ships them, and `workflow_recipes` with a `name` shows any recipe,
 the workspace's own included. Pass yours to `workflow_run` as
-`recipe_yaml`. A recipe that cannot run comes back as problems, with nothing
-proposed: fix them and call again.
+`recipe_yaml`, or `recipe_path` (a file in your tree). A recipe that
+cannot run comes back as problems: fix them and call again.
 
 ## The shape
 
@@ -74,8 +74,8 @@ steps:
 | `scribe` | docs and reports | writes |
 | `reviewer` | reads the work against the spec | reads |
 
-Every step has a full shell; a reader is told to change nothing, and
-one that did is flagged. gummi gives each step its role's preamble: do
+Every step has a full shell; a reader is told to change nothing; one
+that did is flagged. gummi gives each step its role's preamble: do
 not repeat it. A step's model is the profile's choice per role;
 `slot: <name>` picks another profile slot (a second reviewer on
 `reviewer-alt`). Never use a slot for a bigger or cheaper model.
@@ -91,8 +91,7 @@ not repeat it. A step's model is the profile's choice per role;
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
 | `{{run.diff}}` | a file: the diff from the run's start to now |
 
-A step sees only its filled prompt: name every output and artifact it
-needs.
+A step sees only its filled prompt: name every output and artifact.
 
 ## Lines a step's output may carry
 
@@ -129,20 +128,20 @@ verdict artifact inline, so prompts need not point at it.
 | `allSettled` | waits for all; fails only if all fail |
 | `any` | settles on the first success, stopping the rest |
 
-Put readers side by side. Two writers in one tree overwrite each other:
-gummi warns; make them steps in order instead.
+Put readers side by side; two writers in one tree overwrite each other
+(gummi warns): run them in order.
 
 ## Other shapes
 
 A light review loop: a `repeat` of an implementer and one reviewer with
 `until: { contains: "VERDICT: PASS" }`, then a validating reviewer.
-`contains` matches anywhere in the output: pick a marker written
-only when meant, and ask for it on the last line.
+`contains` matches anywhere: ask for a marker on the last line, written
+only when meant.
 
 A planner who decides the steps: a `planner` step that ends its output
 with a fenced `gummi-workflow` block (a YAML list of entries, as
-under `steps:`) replaces the run's remaining steps, once they pass
-the same checks and the person allows the revised plan.
+under `steps:`) replaces the run's remaining steps once checked and
+allowed by the person.
 
 ## Command and dispatch steps
 
