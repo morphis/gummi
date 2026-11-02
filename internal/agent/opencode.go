@@ -380,6 +380,14 @@ type ocTurn struct {
 	// there — "Model not found: …" — and answers the message POST with an
 	// opaque 500, so the turn's one failure carries this, not the POST's.
 	errDetail string
+	// dropped: an event stream was lost under the turn and opened again,
+	// so some of what it did may not have been relayed (under the
+	// session's mutex).
+	dropped bool
+	// v2Text is how much of each 2.x text or reasoning part, by partKey,
+	// the turn relayed (under the session's mutex): what reconcileTextV2
+	// reads to relay only what a dropped stream lost.
+	v2Text map[string]int
 }
 
 // ocMsg is the per-turn text accumulator: the event relay writes into it
@@ -1011,6 +1019,11 @@ func (s *opencodeSession) readBus() {
 				quick = 0
 			}
 			if connected && quick <= ocBusQuickDrops && s.busResumable(err) {
+				s.mu.Lock()
+				if s.turn != nil {
+					s.turn.dropped = true
+				}
+				s.mu.Unlock()
 				reopened = true
 				continue
 			}

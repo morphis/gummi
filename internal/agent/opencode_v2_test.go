@@ -37,6 +37,7 @@ type ocFakeV2 struct {
 	replies    []ocFakeReply   // RequestID is "<session>/<request>"
 	cancelled  []string        // "<session>/<form>"
 	running    map[string]bool // what /api/session/active lists
+	history    string          // what /api/session/{id}/message answers, newest first
 }
 
 func newOcFakeV2(t *testing.T) *ocFakeV2 {
@@ -72,6 +73,15 @@ func newOcFakeV2(t *testing.T) *ocFakeV2 {
 		}
 		f.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+	})
+	mux.HandleFunc("GET /api/session/{id}/message", func(w http.ResponseWriter, _ *http.Request) {
+		f.mu.Lock()
+		h := f.history
+		f.mu.Unlock()
+		if h == "" {
+			h = `[]`
+		}
+		_, _ = w.Write([]byte(`{"data":` + h + `,"cursor":{}}`))
 	})
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -403,7 +413,8 @@ func TestOpencodeV2ExecutionFailureIsTheTurnsFailure(t *testing.T) {
 // stream is opened again; while the session's loop still runs the turn
 // ends on the new stream's end event, and a part streaming across the gap
 // relays the text its lost deltas held. A loop that is no longer running
-// ended in the gap: the turn fails saying so rather than waiting for good.
+// ended in the gap: the turn ends as the session's history records, and
+// fails saying so when it records no end, rather than waiting for good.
 func TestOpencodeV2StreamDroppedMidTurn(t *testing.T) {
 	old := ocSettleRecheck
 	ocSettleRecheck = 10 * time.Millisecond
@@ -437,10 +448,56 @@ func TestOpencodeV2StreamDroppedMidTurn(t *testing.T) {
 		}
 	})
 
-	t.Run("ended in the gap", func(t *testing.T) {
+	gap := func(t *testing.T, history string) Session {
 		f, sess := start(t)
+		f.mu.Lock()
+		f.history = history
+		f.mu.Unlock()
 		f.setRunning(false)
 		f.drop <- struct{}{}
+		return sess
+	}
+	const prompt = `{"id":"msg_1","type":"user","text":"go"}`
+
+	t.Run("ended in the gap", func(t *testing.T) {
+		sess := gap(t, `[{"id":"msg_3","type":"idle","outcome":"succeeded"},{"id":"msg_2","type":"assistant"},`+prompt+`]`)
+		waitTurnEnd(t, sess)
+	})
+
+	t.Run("text lost in the gap", func(t *testing.T) {
+		// the part's end and the reasoning before it never reach the
+		// stream: the history has them whole, and the turn relays the rest
+		f, sess := start(t)
+		f.mu.Lock()
+		f.history = `[{"id":"msg_3","type":"idle","outcome":"succeeded"},` +
+			`{"id":"m1","type":"assistant","content":[{"type":"reasoning","text":"Think."},{"type":"text","text":"Half and the rest."}]},` + prompt + `]`
+		f.mu.Unlock()
+		f.drop <- struct{}{}
+		f.pushOurs("session.execution.succeeded", "")
+		var text, reasoning strings.Builder
+		for _, e := range waitTurnEnd(t, sess) {
+			switch e.Kind {
+			case EventTextDelta:
+				text.WriteString(e.Text)
+			case EventReasoningDelta:
+				reasoning.WriteString(e.Text)
+			}
+		}
+		if text.String() != "Half and the rest." || reasoning.String() != "Think." {
+			t.Errorf("text = %q, reasoning = %q, want each whole once", text.String(), reasoning.String())
+		}
+	})
+
+	t.Run("failed in the gap", func(t *testing.T) {
+		sess := gap(t, `[{"id":"msg_3","type":"idle","outcome":"failed","error":{"type":"provider","message":"rate limited"}},`+prompt+`]`)
+		if got := waitTurnFailure(t, sess).Error(); !strings.Contains(got, "rate limited") {
+			t.Errorf("failure = %q", got)
+		}
+	})
+
+	t.Run("no end recorded", func(t *testing.T) {
+		// the newest idle is a previous turn's: behind this turn's prompt
+		sess := gap(t, `[`+prompt+`,{"id":"msg_0","type":"idle","outcome":"succeeded"}]`)
 		if got := waitTurnFailure(t, sess).Error(); !strings.Contains(got, "dropped as the turn ended") {
 			t.Errorf("failure = %q", got)
 		}
