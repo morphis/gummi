@@ -214,7 +214,7 @@ func (c *checker) repeat(rp domain.Repeat) {
 	}
 	switch rp.Until.Kind() {
 	case "":
-		c.problem("repeat %s needs exactly one until: checks, {verdict, in} or {contains}", name)
+		c.problem("repeat %s needs exactly one until: checks, {verdict, in} or {contains}, either of the last two with checks: true beside it", name)
 	case domain.UntilVerdict:
 		if rp.Until.Verdict == "" || rp.Until.In == "" {
 			c.problem("repeat %s: an until verdict names both the word and the artifact it is in", name)

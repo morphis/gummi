@@ -418,6 +418,52 @@ func TestARunsReportLeavesStepsAlone(t *testing.T) {
 	}
 }
 
+// TestALoopOnAVerdictAndTheChecksNeedsBoth: an until naming a verdict
+// with checks: true beside it does not end the loop on an APPROVED
+// verdict while a done-when check fails, and briefs the next round with
+// what failed.
+func TestALoopOnAVerdictAndTheChecksNeedsBoth(t *testing.T) {
+	wf := newWFFake()
+	wf.on("fix", func(dir, _ string, n int) wfReply {
+		if n > 1 {
+			_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("x\n"), 0o600)
+		}
+		return wfReply{text: "fixed", credits: 1}
+	})
+	reviewRe := regexp.MustCompile(`(/\S+/review\.json)`)
+	wf.on("review", func(_, msg string, _ int) wfReply {
+		if m := reviewRe.FindStringSubmatch(msg); m != nil {
+			_ = os.WriteFile(m[1], []byte(`{"verdict": "APPROVED"}`), 0o600)
+		}
+		return wfReply{text: "approved\nMET: DW-2", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	recipe := "name: both\nsteps:\n  - id: build\n    repeat:\n      max: 3\n" +
+		"      until: { verdict: APPROVED, in: review, checks: true }\n      steps:\n" +
+		"        - {id: fix, role: implementer, prompt: \"Fix it.\\n\\n{{spec}}\"}\n" +
+		"        - {id: review, role: reviewer, artifacts: {review: review.json}, prompt: \"Write {{artifacts.review}}.\\n\\n{{spec}}\"}\n"
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe, Spec: 1})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone {
+		t.Fatalf("run ended %s (%s):\n%s", r.State, r.Reason, r.Report)
+	}
+	if j := r.Until["build/1"]; j.Met || !strings.Contains(j.Detail, "verdict APPROVED, but failing: DW-1") {
+		t.Errorf("round 1's until: %+v", j)
+	}
+	if j := r.Until["build/2"]; !j.Met {
+		t.Errorf("round 2's until: %+v", j)
+	}
+	if wf.count("fix") != 2 {
+		t.Errorf("fix ran %d times", wf.count("fix"))
+	}
+	wf.mu.Lock()
+	briefs := append([]string(nil), wf.stepT["fix"]...)
+	wf.mu.Unlock()
+	if len(briefs) < 2 || !strings.Contains(briefs[1], "failing: DW-1") || !strings.Contains(briefs[1], "every done-when check passes as well") {
+		t.Errorf("round 2's brief:\n%s", briefs)
+	}
+}
+
 // TestAParallelSettlesUnderItsJoin: all fails on one failed branch and the
 // run ends partial; allSettled carries on past one; any settles on the
 // first success and stops the branch still running.

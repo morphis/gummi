@@ -98,7 +98,8 @@ func TestParseReadsEveryUntil(t *testing.T) {
 		{"{checks: true}", domain.Until{Checks: true}, domain.UntilChecks},
 		{"{verdict: OK, in: r}", domain.Until{Verdict: "OK", In: "r"}, domain.UntilVerdict},
 		{"{contains: ALL GREEN}", domain.Until{Contains: "ALL GREEN"}, domain.UntilContains},
-		{"{contains: x, checks: true}", domain.Until{Contains: "x", Checks: true}, ""},
+		{"{contains: x, checks: true}", domain.Until{Contains: "x", Checks: true}, domain.UntilContains},
+		{"{verdict: OK, in: r, checks: true}", domain.Until{Verdict: "OK", In: "r", Checks: true}, domain.UntilVerdict},
 		{"{}", domain.Until{}, ""},
 	} {
 		r, err := Parse([]byte("steps:\n  - id: l\n    repeat:\n      max: 2\n      until: " + tc.until + "\n      steps:\n        - {id: a, role: tester, prompt: p}\n"))
@@ -197,7 +198,7 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"bad template", "  - {id: a, role: scout, prompt: '{{whatever}}'}\n", "is not a template"},
 		{"repeat no max", "  - id: r\n    repeat: {until: checks, steps: [{id: a, role: tester, prompt: p}]}\n", "has no max"},
 		{"repeat no until", "  - id: r\n    repeat: {max: 2, steps: [{id: a, role: tester, prompt: p}]}\n", "exactly one until"},
-		{"repeat two untils", "  - id: r\n    repeat: {max: 2, until: {checks: true, contains: x}, steps: [{id: a, role: tester, prompt: p}]}\n", "exactly one until"},
+		{"repeat two untils", "  - id: r\n    repeat: {max: 2, until: {verdict: OK, in: v, contains: x}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", "exactly one until"},
 		{"repeat bad onMax", "  - id: r\n    repeat: {max: 2, until: checks, onMax: retry, steps: [{id: a, role: tester, prompt: p}]}\n", `onMax "retry"`},
 		{"repeat empty", "  - id: r\n    repeat: {max: 2, until: checks, steps: []}\n", "repeat r has no steps"},
 		{"verdict without word", "  - id: r\n    repeat: {max: 2, until: {in: v}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", "names both"},
@@ -250,7 +251,7 @@ steps:
   - id: r
     repeat:
       max: 2
-      until: {verdict: OK, in: out}
+      until: {verdict: OK, in: out, checks: true}
       onMax: continue
       steps:
         - {id: d, role: implementer, prompt: "{{b.output}} {{c.output}} {{previous.output}}"}

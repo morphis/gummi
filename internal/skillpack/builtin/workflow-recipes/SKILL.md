@@ -110,15 +110,15 @@ A step sees only its filled prompt: name every output and artifact.
 | `checks` | every done-when check passes in the tree |
 | `{verdict: APPROVED, in: review}` | the artifact `review`'s JSON `verdict` is the word; a step in the loop must declare it |
 | `{contains: LGTM}` | the loop's last step's output contains the text |
+| `{verdict: APPROVED, in: review, checks: true}` | the verdict holds and the checks pass |
 
 `onMax`: `pause` (the default) asks the person; `continue` goes on;
 `abort` ends the run partial. A loop gummi cannot judge (no verdict
 artifact, a check ran no tests) always asks.
 
-Give a verdict step an artifact and the exact JSON to write: a missing
-file is captured from the output's last JSON object, but only if there
-is one. From round 2 gummi briefs each step with the last round's
-verdict artifact inline, so prompts need not point at it.
+Give a verdict step an artifact and the exact JSON to write; a missing
+one is captured from the output's last JSON object, if any. From round
+2 each step is briefed with the last round's verdict inline.
 
 ## Joins: `parallel`
 
@@ -223,7 +223,7 @@ steps:
   included, of letters, digits, `-`, `_` — never digits alone.
 - Every `{{…}}` names an input, an artifact some step declares, or an
   earlier step.
-- Each loop has a `max` and one `until`; an `until` verdict's artifact is
-  declared inside the loop.
+- Each loop has a `max` and one `until` (`checks: true` may join a
+  verdict or contains); a verdict's artifact is declared inside the loop.
 - The last step judges the `judge: true` items.
 - If it worked, offer **Save as recipe…** on the run's block.

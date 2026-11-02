@@ -454,6 +454,9 @@ func (e *Engine) loopNotes(ctx context.Context, run *domain.Run, step domain.Ste
 		} else {
 			b.WriteString(" Address what it found first: this round exists to fix it, not to start the task over.\n")
 		}
+		if r.Until.AndChecks() {
+			b.WriteString("The loop ends only when every done-when check passes as well: run the spec's done-when checks named above.\n")
+		}
 		switch r.Until.Kind() {
 		case domain.UntilVerdict:
 			file := e.runArtifacts(run)[r.Until.In]

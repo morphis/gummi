@@ -242,10 +242,16 @@ times:
 - `until: { contains: "VERDICT: PASS" }` — the loop's last step's output
   contains the text. Ask for it on the last line, and pick a marker the
   step writes only when it means it.
+- `until: { verdict: APPROVED, in: review, checks: true }` — a verdict
+  or a `contains` with `checks: true` beside it ends the loop only when
+  both hold: the reviewer approved *and* every done-when check passes.
+  Use it for a fix loop that must not end green over a reviewer's
+  blocker, nor approved over a failing check.
 
 From the second round on, gummi tells each step of the loop why the
 round before did not end it, after its own prompt: the condition as
-judged (`verdict "CHANGES"`, `failing: DW-2`), and what that round left
+judged (`verdict "CHANGES"`, `failing: DW-2`, `verdict APPROVED, but
+failing: DW-2`), and what that round left
 to act on — the verdict artifact's contents as they stand, or for
 `contains` the round's last output; for `checks`, the failing items to
 run. A writing step is told to address it first rather than start the
@@ -434,6 +440,7 @@ More than one writing role in one `parallel` is a warning.
 | `checks` | every done-when check of the frozen spec passes in the tree |
 | `{ verdict: <word>, in: <artifact> }` | the artifact's JSON field `verdict` equals the word; a step inside the loop must declare the artifact |
 | `{ contains: <text> }` | the loop's last step's output contains the text |
+| either of the two above with `checks: true` | that condition holds and every done-when check passes |
 
 | `onMax` | at `max` without the condition |
 |---|---|
@@ -648,7 +655,8 @@ A recipe is refused, with every problem listed, when it has:
   `run-report.md`, `outputs`, `diffs`, `ignored` and `ignored@…`, and
   `spec-revision-…`;
 - a template naming no input, no declared artifact or no earlier step;
-- a `repeat` without `max` or without exactly one `until`, an unknown
+- a `repeat` without `max` or without exactly one `until` (a verdict or
+  `contains` with `checks: true` beside it counts as one), an unknown
   `onMax`, or a verdict `until` whose artifact no step in the loop
   declares;
 - a `parallel` without a valid `join`, or holding anything but plain

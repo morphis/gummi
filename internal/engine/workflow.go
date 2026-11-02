@@ -856,13 +856,17 @@ func (e *Engine) writeRecipeTree(b *strings.Builder, profile string, es []domain
 }
 
 func untilText(u domain.Until) string {
+	and := ""
+	if u.AndChecks() {
+		and = " and the done-when checks pass"
+	}
 	switch u.Kind() {
 	case domain.UntilChecks:
 		return "the done-when checks pass"
 	case domain.UntilVerdict:
-		return fmt.Sprintf("verdict %s in %s", u.Verdict, u.In)
+		return fmt.Sprintf("verdict %s in %s", u.Verdict, u.In) + and
 	case domain.UntilContains:
-		return fmt.Sprintf("the output contains %q", u.Contains)
+		return fmt.Sprintf("the output contains %q", u.Contains) + and
 	}
 	return "?"
 }
@@ -916,7 +920,7 @@ func proposalWarnings(recipe domain.Recipe, items []domain.DoneWhen) []string {
 	var loops func(es []domain.Entry) bool
 	loops = func(es []domain.Entry) bool {
 		for _, en := range es {
-			if en.Repeat != nil && (en.Repeat.Until.Kind() == domain.UntilChecks || loops(en.Repeat.Steps)) {
+			if en.Repeat != nil && (en.Repeat.Until.Checks || loops(en.Repeat.Steps)) {
 				return true
 			}
 		}
@@ -2190,12 +2194,27 @@ func (e *Engine) judgeUntilAsync(run *domain.Run, iter, repeatID string) {
 
 // judgeUntil judges a repeat's until after the iteration at iter (§25.4):
 // the done-when checks in the tree, an artifact's verdict, or the last
-// step's output.
+// step's output — and, for a verdict or output that also needs the
+// checks, the checks once it holds.
 func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID string) domain.UntilJudgement {
 	r, ok := findRepeat(e.entriesFor(ctx, run, iter), repeatID)
 	if !ok {
 		return domain.UntilJudgement{Detail: "the recipe has no repeat " + repeatID}
 	}
+	j := e.judgeUntilKind(ctx, run, iter, r)
+	if !r.Until.AndChecks() || !j.Met {
+		return j
+	}
+	c := e.judgeUntilKind(ctx, run, iter, domain.Repeat{Until: domain.Until{Checks: true}})
+	c.Detail = j.Detail + ", but " + c.Detail
+	if c.Met {
+		c.Detail = j.Detail + " and every done-when check passes"
+	}
+	return c
+}
+
+// judgeUntilKind judges r's until by its kind alone.
+func (e *Engine) judgeUntilKind(ctx context.Context, run *domain.Run, iter string, r domain.Repeat) domain.UntilJudgement {
 	switch r.Until.Kind() {
 	case domain.UntilChecks:
 		dir, err := e.sessionTree(ctx, run.Session)
