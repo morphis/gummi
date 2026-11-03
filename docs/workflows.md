@@ -645,7 +645,12 @@ gummi reads these lines in a step's final message:
 | a fenced `gummi-done-when` block | adds its checks to the run, after the spec's items; a step that maps a bug's reach uses it to make the run prove each place it found |
 | a fenced `gummi-workflow` block | from a `planner`, replaces the remaining steps once you allow it |
 
-A step also fails when its agent errors.
+When a step's turn stops short on a backend error or a safety stop (the
+model or its provider refusing on a usage policy), gummi sends it back
+once, in its own conversation, to pick up where it left off, and the
+run's notes say so. Stopping a second time fails the step, its reason
+naming the outcome: `not completed: safety stop: …` or `not completed:
+backend error: …`.
 
 ### Artifacts
 

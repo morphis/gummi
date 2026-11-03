@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -536,7 +537,16 @@ func (ff *FreeformSession) workflowStepTurnEnded(sess *Session) bool {
 	return true
 }
 
-// workflowStepErrored is a step's backend erroring: the step fails.
+// stepErrorTriesCap is how many times a step whose turn stopped on a
+// backend error or a safety stop goes back to finish before it fails.
+const stepErrorTriesCap = 1
+
+// workflowStepErrored is a step's backend erroring, or the model stopping
+// on a safety refusal. In a running run the step is sent back once, in its
+// own conversation, to pick up where it left off; a second stop fails it,
+// its reason naming the outcome ("not completed: safety stop: …"), so the
+// run's report says why rather than showing a failed step with nothing
+// behind it. The run's notes say so either way.
 func (ff *FreeformSession) workflowStepErrored(sess *Session, err error) {
 	f := sess.Feature
 	if !f.IsChild() || err == nil {
@@ -549,9 +559,36 @@ func (ff *FreeformSession) workflowStepErrored(sess *Session, err error) {
 		if inst == nil {
 			return
 		}
-		e.settleStep(ctx, inst.Session, inst.Run, inst.Path, domain.StepFailed, "its backend errored: "+err.Error())
-		e.workflowEvent(inst.Session)
+		defer e.workflowEvent(inst.Session)
+		what := stepStopKind(err)
+		run, rerr := e.cfg.Store.Run(ctx, inst.Session, inst.Run)
+		if rerr == nil && run != nil && run.State == domain.RunRunning && !run.Stopping && inst.State.Live() && inst.Card != "" &&
+			e.wfRT().planTry("errored/"+stepKey(inst.Session, inst.Run, inst.Path)) <= stepErrorTriesCap {
+			e.runNote(inst.Session, fmt.Sprintf("run %d: %s stopped on a %s (%s); gummi sent it back once to finish", inst.Run, inst.Path, what, err))
+			e.sendStepTurn(inst.Card, "Your last turn stopped on a "+what+" before you finished ("+err.Error()+"). "+
+				"The tree holds your work so far: pick up where you left off, finish your task and end as it says.")
+			return
+		}
+		e.settleStep(ctx, inst.Session, inst.Run, inst.Path, domain.StepFailed, "not completed: "+what+": "+err.Error())
 	})
+}
+
+// safetyStopRe matches a backend's words for a turn the model or its
+// provider stopped on a usage-policy or safety refusal.
+var safetyStopRe = regexp.MustCompile(`(?i)usage polic|safety|refus(al|ed to)|content[ _-]?filter|content polic|violat`)
+
+// stepStopKind names how a step's turn stopped short: a safety stop, or a
+// backend error.
+func stepStopKind(err error) string {
+	msg := err.Error()
+	var rf *agent.RunFailure
+	if errors.As(err, &rf) {
+		msg += " " + rf.Diagnostic
+	}
+	if safetyStopRe.MatchString(msg) {
+		return "safety stop"
+	}
+	return "backend error"
 }
 
 func (e *Engine) afterStepTurn(ctx context.Context, card domain.Feature, reply string) {

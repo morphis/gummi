@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,8 @@ var wfStepRe = regexp.MustCompile(`You are step (\S+) of workflow run`)
 type wfReply struct {
 	text    string
 	credits float64
+	// err ends the turn on a backend error instead of a reply.
+	err error
 }
 
 // wfFake answers a workflow's steps by their id: each step's handler is
@@ -79,6 +82,12 @@ func newWFFake() *wfFake {
 		r := wfReply{text: "done", credits: 2}
 		if fn != nil {
 			r = fn(opts.WorkDir, msg, n)
+		}
+		if r.err != nil {
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: r.credits, Model: "m"}},
+				{Kind: agent.EventError, Err: r.err},
+			}
 		}
 		return []agent.Event{
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: r.credits, Model: "m"}},
@@ -1893,6 +1902,47 @@ func TestAStepThatEndsWithoutItsVerdictIsSentBackOnce(t *testing.T) {
 	if !said {
 		t.Errorf("the run's notes do not say the step was sent back: %q", ff.Snapshot().Activity)
 	}
+}
+
+// TestAStepThatStopsShortIsSentBackOnce: a step whose turn stops on a
+// backend error or a safety stop is sent back once, in its own
+// conversation, to finish; the run goes on when it does. Stopping twice
+// fails it with a reason naming the outcome.
+func TestAStepThatStopsShortIsSentBackOnce(t *testing.T) {
+	recipe := "name: two\nsteps:\n  - { id: one, role: implementer, prompt: build }\n  - { id: two, role: scribe, prompt: wrap up }\n"
+	t.Run("finishes", func(t *testing.T) {
+		wf := newWFFake()
+		wf.on("one", func(string, string, int) wfReply { return wfReply{err: errors.New("overloaded"), credits: 1} })
+		wf.on("one#", func(string, string, int) wfReply { return wfReply{text: "finished", credits: 1} })
+		e, _, f, ff := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+		tickRuns(t, e, f.ID, run.N, "ended", ended)
+		steps := stepPaths(t, e, f.ID, run.N)
+		if steps["one"].State != domain.StepDone || steps["one"].Output != "finished" || wf.count("one#") != 1 || wf.count("two") != 1 {
+			t.Fatalf("one %s (%q), sent back %d, two ran %d", steps["one"].State, steps["one"].Output, wf.count("one#"), wf.count("two"))
+		}
+		var said bool
+		for _, l := range ff.Snapshot().Activity {
+			said = said || strings.Contains(l, "one stopped on a backend error (overloaded); gummi sent it back once")
+		}
+		if !said {
+			t.Errorf("the run's notes do not say the step was sent back: %q", ff.Snapshot().Activity)
+		}
+	})
+	t.Run("stops twice", func(t *testing.T) {
+		wf := newWFFake()
+		refused := errors.New("API Error: this request appears to violate our Usage Policy")
+		wf.on("one", func(string, string, int) wfReply { return wfReply{err: refused, credits: 1} })
+		wf.on("one#", func(string, string, int) wfReply { return wfReply{err: refused, credits: 1} })
+		e, _, f, _ := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+		r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+		one := stepPaths(t, e, f.ID, run.N)["one"]
+		if r.State != domain.RunPartial || one.State != domain.StepFailed || wf.count("one#") != 1 ||
+			!strings.HasPrefix(one.Reason, "not completed: safety stop: ") {
+			t.Fatalf("run %s, one %s (%q), sent back %d", r.State, one.State, one.Reason, wf.count("one#"))
+		}
+	})
 }
 
 // emptyCheckSpec is the test spec with a done-when check that passes and
