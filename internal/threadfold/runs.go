@@ -400,25 +400,23 @@ func ConversationStart(tr []engine.Message) time.Time {
 	return time.Time{}
 }
 
-// CurrentRuns are the runs a session's thread still draws once its
-// conversation began at start (ConversationStart): every one but a run
-// that ended before then, which a /clear or /handoff left behind with the
-// conversation it belonged to. An open run is always drawn.
-func CurrentRuns(ins []RunInput, start time.Time) []RunInput {
-	if start.IsZero() {
-		return ins
+// FoldSince is the moment a session's runs that ended before it stop
+// being the latest news (FoldRuns' said): the later of when a person last
+// said something (PersonSaid) and when its conversation as it stands began
+// (ConversationStart). A run a /clear or /handoff left behind with the
+// conversation it belonged to is still drawn, folded to its line, so its
+// steps and artifacts stay a click away.
+func FoldSince(tr []engine.Message) time.Time {
+	said, start := PersonSaid(tr), ConversationStart(tr)
+	if start.After(said) {
+		return start
 	}
-	out := ins[:0:0]
-	for _, in := range ins {
-		if !RunLeftBehind(in.Run.State, in.Run.EndedAt, start) {
-			out = append(out, in)
-		}
-	}
-	return out
+	return said
 }
 
 // RunLeftBehind says whether a run in state that ended at ended belongs to
-// a conversation before the one that began at start (CurrentRuns).
+// a conversation before the one that began at start: one FoldRuns folds
+// once its said is FoldSince.
 func RunLeftBehind(state domain.RunState, ended, start time.Time) bool {
 	return !start.IsZero() && state.Ended() && ended.Before(start)
 }

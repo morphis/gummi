@@ -209,9 +209,10 @@ func (m *Shell) openRuns() []foldedRun {
 	return m.currentRuns(m.selectedID())
 }
 
-// currentRuns is a session's runs as last read, less any that ended before
-// its conversation as it stands began (threadfold.CurrentRuns): a /clear
-// on a session at rest moves no event the runs are read again on.
+// currentRuns is a session's runs as last read, any that ended before its
+// conversation as it stands began folded to its line
+// (threadfold.FoldSince): a /clear on a session at rest moves no event the
+// runs are read again on.
 func (m *Shell) currentRuns(id domain.FeatureID) []foldedRun {
 	runs := m.wf.byCard[id]
 	if len(runs) == 0 || m.engine == nil {
@@ -227,9 +228,10 @@ func (m *Shell) currentRuns(id domain.FeatureID) []foldedRun {
 	}
 	out := make([]foldedRun, 0, len(runs))
 	for _, run := range runs {
-		if !threadfold.RunLeftBehind(domain.RunState(run.State), run.Ended, start) {
-			out = append(out, run)
+		if threadfold.RunLeftBehind(domain.RunState(run.State), run.Ended, start) {
+			run.Folded = true
 		}
+		out = append(out, run)
 	}
 	return out
 }
