@@ -46,11 +46,13 @@ session ──writes──▶ spec ──proposes──▶ run ──you allow�
   prompt names.
 - **Money is the session's budget.** Nothing is estimated. A run spends
   from the session's envelope until it is spent, then pauses until you
-  top it up. Steps at work side by side share what the pool has left,
-  so their caps at the time each starts stay within it. While the pool
-  is far from spent, gummi trusts a step's own headroom for a few
-  seconds between looks, so side-by-side steps can overshoot it by that
-  much spend before the pause.
+  top it up. The budget is not split among the steps: each one may
+  spend whatever the session has left, and a step is told no dollar
+  figure, only that money is not its to manage. When the session's
+  budget is spent the whole run pauses, and after the top-up every step
+  carries on where it was. While the pool is far from spent, gummi
+  checks it again only every few seconds, so steps running side by side
+  can overshoot it by that much spend before the pause.
 - **Questions come to you.** A step's `ask_user`, a loop at its `max`,
   and a loop that cannot judge its own condition all wait on you.
 - **gummi never commits.** At the end it runs the done-when checks,

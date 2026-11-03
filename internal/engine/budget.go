@@ -134,6 +134,29 @@ func CompileDiffComments(anns []domain.DiffAnnotation, resolveTool bool) string 
 	return turn
 }
 
+// backendCap is the credit cap a freeform card's backend enforces itself:
+// a stop the backend makes ends the turn where it stands. A step's card
+// gets none — its session's pool is held across the run's steps by
+// checkRunPool, which pauses the run and carries the step on after a
+// top-up, where a backend's stop would end the step on a cut-off reply.
+func backendCap(f domain.Feature, budget float64) float64 {
+	if f.IsChild() {
+		return 0
+	}
+	return budget * capHeadroom
+}
+
+// budgetHintStep is the budget instruction for a workflow step. It names
+// no figure: a step cannot top its pool up or spend it any better for
+// knowing it, and a figure shown is one a model rations against and
+// argues about instead of working.
+const budgetHintStep = `Money is not yours to manage in this step. gummi holds the session's
+budget across the whole run: if it runs out, the run pauses for the person
+to top it up and you carry on where you were. Do not estimate your spend,
+ration your work, cut the task short or report on budget: do the whole
+task your brief sets. Work efficiently: prefer targeted reads over broad
+exploration, batch related edits, and avoid speculative refactors.`
+
 // budgetHintFreeform is the budget instruction for a freeform card's
 // session. It is a third variant beside budgetHint and
 // budgetHintReadMostly for one concrete reason: both of those tell the
