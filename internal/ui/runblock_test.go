@@ -284,7 +284,8 @@ func terminalRun(t *testing.T, reply func(msg string) string) (*Bridge, *engine.
 		r, _ := eng.RunSteps(ctx, f.ID, run.N)
 		var got *domain.Run
 		_ = b.Do(ctx, func(m *Shell) tea.Cmd { got, _ = m.store.Run(ctx, f.ID, run.N); return nil })
-		return len(r) == 1 && got != nil && got.State.Ended()
+		// past the run's end phase too: nothing is reverted while it is ending
+		return len(r) == 1 && got != nil && got.State.Ended() && eng.RunPhase(f.ID, run.N) == ""
 	})
 	reloadRows(t, b)
 	return b, eng, f, ff
