@@ -56,7 +56,10 @@ session ──writes──▶ spec ──proposes──▶ run ──you allow�
 - **Questions come to you.** A step's `ask_user`, a loop at its `max`,
   and a loop that cannot judge its own condition all wait on you.
 - **gummi never commits.** At the end it runs the done-when checks,
-  writes the report into the spec and sends it to the session. A report
+  writes the report into the spec's Report section and the run's
+  `run-report.md`, and sends it to the session. A later run's steps do
+  not see that Report section in `{{spec}}`: each run starts from the
+  spec, not from the last run's findings. A report
   lost to a crash between the run's end and its delivery is delivered
   again when gummi next starts. **Retry** runs a failed or stopped step
   again and keeps the earlier attempt beside it; an earlier attempt is
@@ -107,7 +110,10 @@ gummi looks for a recipe by name in this order:
 2. the recipes bundled with gummi.
 
 A workspace recipe with a bundled recipe's name overrides it. A session
-can also hand over a recipe it wrote inline for one piece of work; if
+can also hand over a recipe it wrote inline for one piece of work —
+written out in full (`recipe_yaml`), or as a file in its own tree
+(`recipe_path`, relative to the tree's root), which saves pasting a
+recipe it is still tuning into every proposal; if
 that run went well, the run's block offers **Save as recipe…**, which
 writes it to `.gummi/workflows/` for every session to use. A recipe's
 file name is its name: letters, digits, `-` and `_`, starting with a
@@ -238,10 +244,16 @@ times:
 - `until: { contains: "VERDICT: PASS" }` — the loop's last step's output
   contains the text. Ask for it on the last line, and pick a marker the
   step writes only when it means it.
+- `until: { verdict: APPROVED, in: review, checks: true }` — a verdict
+  or a `contains` with `checks: true` beside it ends the loop only when
+  both hold: the reviewer approved *and* every done-when check passes.
+  Use it for a fix loop that must not end green over a reviewer's
+  blocker, nor approved over a failing check.
 
 From the second round on, gummi tells each step of the loop why the
 round before did not end it, after its own prompt: the condition as
-judged (`verdict "CHANGES"`, `failing: DW-2`), and what that round left
+judged (`verdict "CHANGES"`, `failing: DW-2`, `verdict APPROVED, but
+failing: DW-2`), and what that round left
 to act on — the verdict artifact's contents as they stand, or for
 `contains` the round's last output; for `checks`, the failing items to
 run. A writing step is told to address it first rather than start the
@@ -299,7 +311,12 @@ problem listed, and nothing starts. Warnings (two writers side by side,
 an ignored field) are shown on the proposal. Read the proposal before
 you allow it: it shows each step, the model it runs on, every check
 command, and which checks already pass before the run (a check that
-already passes proves nothing about the run).
+already passes proves nothing about the run). A check whose command is
+not found or not executable (its shell exits 127 or 126) reads **cannot
+run in this tree**: it fails whatever the run does, so it judges
+nothing — at the run's end it is unjudged, and a `repeat` with
+`until: checks` on it asks you after one round rather than going round
+to its `max`. Install what it needs, or rewrite the check.
 
 ## Reference
 
@@ -312,6 +329,7 @@ inputs:                  # optional
   report: "the bug report as filed"            # required input: name: hint
   area:   { hint: "where to look", default: "" }
   extra:  { hint: "anything else", required: false }
+preflight: command -v xdelta3 && make test-baseline   # optional
 steps:                   # required, at least one entry; they run in order
   - …
 ```
@@ -321,6 +339,7 @@ steps:                   # required, at least one entry; they run in order
 | `name` | yes | the recipe's name |
 | `description` | no | one line saying what it is for |
 | `inputs` | no | named values a run is given, read as `{{inputs.<name>}}` |
+| `preflight` | no | a shell command run in the tree when the run is proposed, below |
 | `steps` | yes | the entries, run in order |
 
 **Inputs.** Each input is either a hint alone (`name: "hint"`), which
@@ -330,6 +349,18 @@ filled empty). An input with a default cannot also be `required: true`.
 A run given an input the recipe does not declare, or missing a required
 one, is refused. An input reaches a step wrapped in delimiters naming
 it, as data, never as instructions.
+
+**Preflight.** A command (through `sh -c`, in the session's tree, for at
+most five minutes) that says whether the tree can carry the run at all —
+a tool the tests need, a service they reach — before anyone is asked to
+allow it and before a step spends anything. A non-zero exit refuses the
+proposal, with the end of what it printed as the reason, and no run is
+created. A zero exit shows on the proposal, and what it printed (stdout
+and stderr) is `{{preflight.output}}`, so a step can know the baseline
+it starts from — which tests already fail, and why. It runs again for
+every proposal, and for a scheduled fire or a dispatched session's run
+before the run is created. It takes no `{{…}}`, and no step may have
+the id `preflight` beside it.
 
 ### Entries
 
@@ -430,6 +461,7 @@ More than one writing role in one `parallel` is a warning.
 | `checks` | every done-when check of the frozen spec passes in the tree |
 | `{ verdict: <word>, in: <artifact> }` | the artifact's JSON field `verdict` equals the word; a step inside the loop must declare the artifact |
 | `{ contains: <text> }` | the loop's last step's output contains the text |
+| either of the two above with `checks: true` | that condition holds and every done-when check passes |
 
 | `onMax` | at `max` without the condition |
 |---|---|
@@ -585,12 +617,13 @@ exists at that point, or the recipe is refused.
 
 | template | is | where |
 |---|---|---|
-| `{{spec}}` | the frozen spec revision's text | anywhere |
+| `{{spec}}` | the frozen spec revision's text, less any earlier run's Report section | anywhere |
 | `{{inputs.<name>}}` | a declared input, wrapped as data | anywhere |
 | `{{artifacts.<name>}}` | the absolute path of an artifact some step declares | anywhere |
 | `{{previous.output}}` | the final message of the step just before | not the first step |
 | `{{<id>.output}}` | an earlier step's final message; in a `repeat`, its latest iteration | after that step |
 | `{{run.diff}}` | the path of a file holding the diff from the run's start to now | anywhere but a `run:` command |
+| `{{preflight.output}}` | what the recipe's `preflight` printed when the run was proposed, wrapped as a step's output | a recipe with a `preflight` |
 | `{{event}}` | the event that started this pass, as data | a watch handler's steps |
 | `{{watch.event}}` | the event that sent a `goto` pass back; empty on the first pass | top-level steps before the watch |
 
@@ -617,6 +650,8 @@ A step also fails when its agent errors.
 
 An artifact is a file in the run's directory
 (`.gummi/runs/<session>/<run>/`), named by the step that declares it.
+gummi keeps its own files there too — the run's report is
+`run-report.md` — and refuses an artifact that names one of them.
 If a step ends without writing an artifact it declared, gummi captures
 it from the step's output — the last non-empty JSON object for a `.json` file,
 otherwise the last fenced block — and notes that it did. Artifacts are
@@ -637,9 +672,15 @@ A recipe is refused, with every problem listed, when it has:
   wherever the step sits, a dispatched recipe included; a `model` alone
   the backend the profile gives the step cannot run (a dispatched
   recipe's is checked when its step starts);
-- an artifact file name that is not a plain file name;
+- an artifact file name that is not a plain file name, or one gummi
+  writes in the run's directory itself: `recipe.yaml`, `proposed.yaml`,
+  `run-report.md`, `preflight.txt`, `outputs`, `diffs`, `ignored` and
+  `ignored@…`, and `spec-revision-…`;
+- a `preflight` holding a `{{…}}`, a step with the id `preflight` beside
+  one, or `{{preflight.output}}` in a recipe without one;
 - a template naming no input, no declared artifact or no earlier step;
-- a `repeat` without `max` or without exactly one `until`, an unknown
+- a `repeat` without `max` or without exactly one `until` (a verdict or
+  `contains` with `checks: true` beside it counts as one), an unknown
   `onMax`, or a verdict `until` whose artifact no step in the loop
   declares;
 - a `parallel` without a valid `join`, or holding anything but plain
@@ -667,6 +708,9 @@ slot is ignored), or a recipe or step still names `tier` or `envelope`.
   guard that must keep passing.
 - **`go test -run Name` with no matching test passes.** Grep the
   output for the test's own `--- PASS:` line.
+- **A check the tree cannot run.** A missing tool fails every round the
+  same way. Give the recipe a `preflight` that checks for it, so the
+  proposal is refused before anything is spent.
 - **A prompt without `{{spec}}`.** The step does not know the goal.
 - **A reviewer that cannot see the work.** Give it `{{run.diff}}`.
 - **Two writers in a `parallel`.** They share one tree; put them in

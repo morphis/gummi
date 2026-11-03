@@ -364,6 +364,7 @@ func workflowTools() []agent.ToolDef {
 			map[string]any{
 				"recipe":      str("A recipe's name, as workflow_recipes lists them."),
 				"recipe_yaml": str("A recipe written out in full, drafted for the work in hand, instead of a name."),
+				"recipe_path": str("A recipe file in this session's tree, relative to its root, instead of a name or recipe_yaml: read and copied into the run when proposed."),
 				"spec":        specArg,
 				"inputs":      map[string]any{"type": "object", "description": "The recipe's inputs, by name.", "additionalProperties": map[string]any{"type": "string"}},
 			}),
@@ -379,6 +380,7 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 	var a struct {
 		Recipe     string            `json:"recipe"`
 		RecipeYAML string            `json:"recipe_yaml"`
+		RecipePath string            `json:"recipe_path"`
 		Spec       json.RawMessage   `json:"spec"`
 		Inputs     map[string]string `json:"inputs"`
 		Note       string            `json:"note"`
@@ -401,7 +403,7 @@ func (e *Engine) handleWorkflowTool(s *Session, tc *agent.ToolCall) {
 		var n int
 		if n, _, err = parseSpecArg(a.Spec); err == nil {
 			var run *domain.Run
-			run, err = e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: a.Recipe, RecipeYAML: a.RecipeYAML, Spec: n, Inputs: a.Inputs})
+			run, err = e.WorkflowPropose(ctx, f.ID, WorkflowRequest{Recipe: a.Recipe, RecipeYAML: a.RecipeYAML, RecipePath: a.RecipePath, Spec: n, Inputs: a.Inputs})
 			if err == nil {
 				out = proposedText(run)
 			}
@@ -494,11 +496,13 @@ const sessionWorkflowHint = `A session may also run a workflow (gummi's DESIGN �
 
 // --- proposing a run --------------------------------------------------------
 
-// WorkflowRequest is a proposal: a recipe by name or written out, the spec
-// it runs against (0: the session's only spec) and its inputs.
+// WorkflowRequest is a proposal: a recipe by name, written out or kept in
+// a file in the session's tree, the spec it runs against (0: the
+// session's only spec) and its inputs.
 type WorkflowRequest struct {
 	Recipe     string
 	RecipeYAML string
+	RecipePath string // relative to the session's tree; read into RecipeYAML when proposed
 	Spec       int
 	Inputs     map[string]string
 }
@@ -525,6 +529,14 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, fmt.Errorf("%s cannot run a workflow: only a session can", session)
 	case sess.Stage == domain.StageDone:
 		return nil, fmt.Errorf("%s is closed", session)
+	}
+	if strings.TrimSpace(req.RecipePath) != "" {
+		if strings.TrimSpace(req.Recipe) != "" || strings.TrimSpace(req.RecipeYAML) != "" {
+			return nil, errors.New("give one of recipe, recipe_yaml and recipe_path")
+		}
+		if req.RecipeYAML, err = e.treeRecipe(ctx, sess, req.RecipePath); err != nil {
+			return nil, err
+		}
 	}
 	recipe, name, text, err := e.loadRecipe(req)
 	if err != nil {
@@ -572,6 +584,11 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 			return nil, fmt.Errorf("spec %d cannot be run: %s", n, why)
 		}
 	}
+	// the recipe's own preflight, before the run lock: it may take minutes
+	preflight, hasPreflight, err := e.preflightFor(ctx, session, recipe)
+	if err != nil {
+		return nil, err
+	}
 
 	unlock := e.lockRuns(session)
 	defer unlock()
@@ -607,6 +624,9 @@ func (e *Engine) WorkflowPropose(ctx context.Context, session domain.FeatureID, 
 		return nil, err
 	}
 	_, _ = e.writeRunFile(session, run.N, "recipe.yaml", text)
+	if hasPreflight {
+		e.keepPreflight(session, run.N, preflight)
+	}
 	if name == "" {
 		// an inline recipe as the session gave it, which a person may save
 		// (WorkflowSaveRecipe); recipe.yaml follows a revised plan
@@ -692,6 +712,52 @@ func (e *Engine) loadRecipe(req WorkflowRequest) (domain.Recipe, string, string,
 	return domain.Recipe{}, "", "", errors.New("name a recipe (workflow_recipes lists them) or write one out as recipe_yaml")
 }
 
+// maxTreeRecipe bounds a recipe read from a session's tree.
+const maxTreeRecipe = 1 << 20
+
+// treeRecipe reads a recipe file the session keeps in its own tree: rel
+// is relative to the tree's root and must stay inside it, links
+// included. What it returns is proposed as if written out in full, so the
+// run freezes the file as it reads now.
+func (e *Engine) treeRecipe(ctx context.Context, sess domain.Feature, rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	tree := e.treeOf(ctx, sess)
+	if tree == "" {
+		return "", fmt.Errorf("%s has no tree to read %s from", sess.ID, rel)
+	}
+	if filepath.IsAbs(rel) || !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return "", fmt.Errorf("recipe_path %q must be a path inside the session's tree, relative to its root", rel)
+	}
+	root, err := filepath.EvalSymlinks(tree)
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		return "", fmt.Errorf("recipe_path %q: %w", rel, err)
+	}
+	if inside, err := filepath.Rel(root, path); err != nil || !filepath.IsLocal(inside) {
+		return "", fmt.Errorf("recipe_path %q leads outside the session's tree", rel)
+	}
+	fi, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return "", err
+	case !fi.Mode().IsRegular():
+		return "", fmt.Errorf("recipe_path %q is not a file", rel)
+	case fi.Size() > maxTreeRecipe:
+		return "", fmt.Errorf("recipe_path %q is over %d bytes", rel, maxTreeRecipe)
+	}
+	raw, err := os.ReadFile(path) // #nosec G304 -- confined to the session's own tree above
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", fmt.Errorf("recipe_path %q is empty", rel)
+	}
+	return string(raw), nil
+}
+
 // runSpec resolves the spec a run is proposed against: the one named, or
 // the session's only spec.
 func (e *Engine) runSpec(ctx context.Context, sess domain.Feature, n int) (int, error) {
@@ -730,6 +796,12 @@ func (e *Engine) proposalQuestion(ctx context.Context, sess domain.Feature, run 
 		"a later edit reaches the run as a note.\n\nSteps:\n", recipeLabel(run), run.Spec, title, run.SpecRev)
 	e.writeRecipeTree(&b, sess.Profile, run.Recipe.Steps, "")
 	writeAllowance(&b, run.Recipe)
+	if out, ok := e.preflightOutput(run); ok {
+		fmt.Fprintf(&b, "\nIts preflight passed in the tree: %s\n", run.Recipe.Preflight)
+		if out = strings.TrimSpace(out); out != "" {
+			b.WriteString(tail(out, 1000) + "\n")
+		}
+	}
 	e.writePRAllowance(ctx, &b, run)
 	if len(warnings) > 0 {
 		b.WriteString("\nWarnings:\n- " + strings.Join(warnings, "\n- ") + "\n")
@@ -798,13 +870,17 @@ func (e *Engine) writeRecipeTree(b *strings.Builder, profile string, es []domain
 }
 
 func untilText(u domain.Until) string {
+	and := ""
+	if u.AndChecks() {
+		and = " and the done-when checks pass"
+	}
 	switch u.Kind() {
 	case domain.UntilChecks:
 		return "the done-when checks pass"
 	case domain.UntilVerdict:
-		return fmt.Sprintf("verdict %s in %s", u.Verdict, u.In)
+		return fmt.Sprintf("verdict %s in %s", u.Verdict, u.In) + and
 	case domain.UntilContains:
-		return fmt.Sprintf("the output contains %q", u.Contains)
+		return fmt.Sprintf("the output contains %q", u.Contains) + and
 	}
 	return "?"
 }
@@ -858,7 +934,7 @@ func proposalWarnings(recipe domain.Recipe, items []domain.DoneWhen) []string {
 	var loops func(es []domain.Entry) bool
 	loops = func(es []domain.Entry) bool {
 		for _, en := range es {
-			if en.Repeat != nil && (en.Repeat.Until.Kind() == domain.UntilChecks || loops(en.Repeat.Steps)) {
+			if en.Repeat != nil && (en.Repeat.Until.Checks || loops(en.Repeat.Steps)) {
 				return true
 			}
 		}
@@ -2132,12 +2208,27 @@ func (e *Engine) judgeUntilAsync(run *domain.Run, iter, repeatID string) {
 
 // judgeUntil judges a repeat's until after the iteration at iter (§25.4):
 // the done-when checks in the tree, an artifact's verdict, or the last
-// step's output.
+// step's output — and, for a verdict or output that also needs the
+// checks, the checks once it holds.
 func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID string) domain.UntilJudgement {
 	r, ok := findRepeat(e.entriesFor(ctx, run, iter), repeatID)
 	if !ok {
 		return domain.UntilJudgement{Detail: "the recipe has no repeat " + repeatID}
 	}
+	j := e.judgeUntilKind(ctx, run, iter, r)
+	if !r.Until.AndChecks() || !j.Met {
+		return j
+	}
+	c := e.judgeUntilKind(ctx, run, iter, domain.Repeat{Until: domain.Until{Checks: true}})
+	c.Detail = j.Detail + ", but " + c.Detail
+	if c.Met {
+		c.Detail = j.Detail + " and every done-when check passes"
+	}
+	return c
+}
+
+// judgeUntilKind judges r's until by its kind alone.
+func (e *Engine) judgeUntilKind(ctx context.Context, run *domain.Run, iter string, r domain.Repeat) domain.UntilJudgement {
 	switch r.Until.Kind() {
 	case domain.UntilChecks:
 		dir, err := e.sessionTree(ctx, run.Session)
@@ -2150,11 +2241,13 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 			// nothing to judge by is not done: the person decides
 			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the spec has no done-when checks"}
 		}
-		var failed, empty, undecided []string
+		var failed, empty, undecided, broken []string
 		for id, c := range checks {
 			switch {
 			case c.Status == verify.StatusTimeout || c.Status == verify.StatusNotRun:
 				undecided = append(undecided, id)
+			case cannotRun(c):
+				broken = append(broken, id)
 			case !c.OK:
 				failed = append(failed, id)
 			case c.RanNoTests:
@@ -2164,7 +2257,13 @@ func (e *Engine) judgeUntil(ctx context.Context, run *domain.Run, iter, repeatID
 		sort.Strings(failed)
 		sort.Strings(empty)
 		sort.Strings(undecided)
+		sort.Strings(broken)
 		switch {
+		case len(broken) > 0:
+			// no round of work can make a check pass that cannot run: the
+			// person decides, rather than the loop spinning to its max
+			return domain.UntilJudgement{Unjudged: true, Detail: "the loop can't judge: the check of " + strings.Join(broken, ", ") +
+				" cannot run in this tree (a command it runs is missing or not executable)"}
 		case len(failed) > 0:
 			return domain.UntilJudgement{Detail: "failing: " + strings.Join(failed, ", ")}
 		case len(undecided) > 0:
@@ -2362,7 +2461,7 @@ func (e *Engine) endRun(ctx context.Context, session domain.FeatureID, n int, en
 func (e *Engine) deliverReport(ctx context.Context, run *domain.Run, turnOnly bool) (turnFailed bool) {
 	session, n := run.Session, run.N
 	if !turnOnly {
-		_, _ = e.writeRunFile(session, n, "report.md", run.Report)
+		_, _ = e.writeRunFile(session, n, workflowrecipe.RunReportFile, run.Report)
 		e.writeRunReport(ctx, run)
 		e.noteDispatcher(ctx, session, n, run.State, run.Report)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/workflowrecipe"
 )
 
 const wfTestSpec = "# Workflow test\n\n## Problem\n\nA file is missing.\n\n## Approach\n\nWrite it.\n\n" +
@@ -334,7 +335,7 @@ func TestADeliverRunIteratesUntilApproved(t *testing.T) {
 	if text, _ := e.SessionSpec(f, 1); !strings.Contains(text, "## Report") || !strings.Contains(text, "✓ DW-1") {
 		t.Errorf("the spec has no report:\n%s", text)
 	}
-	if _, err := os.Stat(filepath.Join(e.RunDir(f.ID, 1), "report.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.RunDir(f.ID, 1), workflowrecipe.RunReportFile)); err != nil {
 		t.Error(err)
 	}
 	if _, err := os.Stat(filepath.Join(e.RunDir(f.ID, 1), "outputs", "build", "2", "verdict.md")); err != nil {
@@ -374,6 +375,96 @@ steps:
     role: scribe
     prompt: "sum up {{a.output}}"
 `
+}
+
+// TestARunsReportLeavesStepsAlone: a step's artifact named report.md is
+// not overwritten by the run's own report, and the report the run writes
+// into the spec does not reach the next run's steps in {{spec}}.
+func TestARunsReportLeavesStepsAlone(t *testing.T) {
+	wf := newWFFake()
+	reportRe := regexp.MustCompile(`(/\S+/report\.md)`)
+	wf.on("write", func(dir, msg string, _ int) wfReply {
+		_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("x\n"), 0o600)
+		if m := reportRe.FindStringSubmatch(msg); m != nil {
+			_ = os.WriteFile(m[1], []byte("the step's own report\n"), 0o600)
+		}
+		return wfReply{text: "wrote it\nDECISION: the first run's secret\nMET: DW-2", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	recipe := "name: rep\nsteps:\n  - id: write\n    role: scribe\n    artifacts: { report: report.md }\n" +
+		"    prompt: \"Write {{artifacts.report}}.\\n\\n{{spec}}\"\n"
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe, Spec: 1})
+	if r := tickRuns(t, e, f.ID, run.N, "ended", ended); r.State != domain.RunDone {
+		t.Fatalf("run ended %s (%s):\n%s", r.State, r.Reason, r.Report)
+	}
+	dir := e.RunDir(f.ID, run.N)
+	if raw, _ := os.ReadFile(filepath.Join(dir, "report.md")); string(raw) != "the step's own report\n" {
+		t.Errorf("the step's report.md reads %q", raw)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, workflowrecipe.RunReportFile)); !strings.Contains(string(raw), "the first run's secret") {
+		t.Errorf("the run's report reads %q", raw)
+	}
+	if text, _ := e.SessionSpec(f, 1); !strings.Contains(text, "## Report") {
+		t.Fatalf("the spec has no report:\n%s", text)
+	}
+
+	again := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe, Spec: 1})
+	tickRuns(t, e, f.ID, again.N, "ended", ended)
+	wf.mu.Lock()
+	briefs := append([]string(nil), wf.stepT["write"]...)
+	wf.mu.Unlock()
+	if len(briefs) != 2 {
+		t.Fatalf("write was briefed %d times", len(briefs))
+	}
+	if b := briefs[1]; strings.Contains(b, "## Report") || strings.Contains(b, "the first run's secret") || !strings.Contains(b, "## Done when") {
+		t.Errorf("the second run's step was briefed with the first run's report:\n%s", b)
+	}
+}
+
+// TestALoopOnAVerdictAndTheChecksNeedsBoth: an until naming a verdict
+// with checks: true beside it does not end the loop on an APPROVED
+// verdict while a done-when check fails, and briefs the next round with
+// what failed.
+func TestALoopOnAVerdictAndTheChecksNeedsBoth(t *testing.T) {
+	wf := newWFFake()
+	wf.on("fix", func(dir, _ string, n int) wfReply {
+		if n > 1 {
+			_ = os.WriteFile(filepath.Join(dir, "out.txt"), []byte("x\n"), 0o600)
+		}
+		return wfReply{text: "fixed", credits: 1}
+	})
+	reviewRe := regexp.MustCompile(`(/\S+/review\.json)`)
+	wf.on("review", func(_, msg string, _ int) wfReply {
+		if m := reviewRe.FindStringSubmatch(msg); m != nil {
+			_ = os.WriteFile(m[1], []byte(`{"verdict": "APPROVED"}`), 0o600)
+		}
+		return wfReply{text: "approved\nMET: DW-2", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	recipe := "name: both\nsteps:\n  - id: build\n    repeat:\n      max: 3\n" +
+		"      until: { verdict: APPROVED, in: review, checks: true }\n      steps:\n" +
+		"        - {id: fix, role: implementer, prompt: \"Fix it.\\n\\n{{spec}}\"}\n" +
+		"        - {id: review, role: reviewer, artifacts: {review: review.json}, prompt: \"Write {{artifacts.review}}.\\n\\n{{spec}}\"}\n"
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe, Spec: 1})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone {
+		t.Fatalf("run ended %s (%s):\n%s", r.State, r.Reason, r.Report)
+	}
+	if j := r.Until["build/1"]; j.Met || !strings.Contains(j.Detail, "verdict APPROVED, but failing: DW-1") {
+		t.Errorf("round 1's until: %+v", j)
+	}
+	if j := r.Until["build/2"]; !j.Met {
+		t.Errorf("round 2's until: %+v", j)
+	}
+	if wf.count("fix") != 2 {
+		t.Errorf("fix ran %d times", wf.count("fix"))
+	}
+	wf.mu.Lock()
+	briefs := append([]string(nil), wf.stepT["fix"]...)
+	wf.mu.Unlock()
+	if len(briefs) < 2 || !strings.Contains(briefs[1], "failing: DW-1") || !strings.Contains(briefs[1], "every done-when check passes as well") {
+		t.Errorf("round 2's brief:\n%s", briefs)
+	}
 }
 
 // TestAParallelSettlesUnderItsJoin: all fails on one failed branch and the

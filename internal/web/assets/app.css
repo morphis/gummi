@@ -1510,6 +1510,7 @@ button.tr-path:disabled{opacity:1;cursor:default}
 .wfp-step .ti{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg2)}
 .wfp-step.k-repeat,.wfp-step.k-parallel{background:var(--sunk)}
 .wfp-checks{display:flex;flex-direction:column;gap:2px;font-size:12px}
+.wfp-checks pre{margin:0;white-space:pre-wrap;max-height:8em;overflow:auto}
 .wfp-replaces{display:flex;flex-direction:column;gap:4px}
 .wfp-replaces .wfp-steps{opacity:.75;text-decoration:line-through;text-decoration-color:var(--fg4)}
 .wfp-ticks{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px}

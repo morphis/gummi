@@ -31,6 +31,7 @@ type rawRecipe struct {
 	Description string              `yaml:"description,omitempty"`
 	Tier        any                 `yaml:"tier,omitempty"`
 	Inputs      map[string]rawInput `yaml:"inputs,omitempty"`
+	Preflight   string              `yaml:"preflight,omitempty"`
 	Steps       []rawEntry          `yaml:"steps"`
 }
 
@@ -351,6 +352,7 @@ func Parse(data []byte) (domain.Recipe, error) {
 		Name:        strings.TrimSpace(raw.Name),
 		Description: strings.TrimSpace(raw.Description),
 		StaleTier:   raw.Tier != nil,
+		Preflight:   strings.TrimSpace(raw.Preflight),
 	}
 	for name, in := range raw.Inputs {
 		if r.Inputs == nil {
@@ -550,6 +552,7 @@ func Marshal(r domain.Recipe) ([]byte, error) {
 		Name:        r.Name,
 		Description: r.Description,
 		Inputs:      rawInputs(r),
+		Preflight:   r.Preflight,
 		Steps:       rawEntries(r.Steps),
 	}
 	return yaml.Marshal(raw)

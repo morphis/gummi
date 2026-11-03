@@ -185,6 +185,10 @@ func (e *Engine) startDispatchedRun(ctx context.Context, agent, child domain.Fea
 	if err != nil {
 		return fmt.Errorf("its frozen recipe: %w", err)
 	}
+	preflight, hasPreflight, err := e.preflightFor(ctx, child.ID, recipe)
+	if err != nil {
+		return err
+	}
 	run := &domain.Run{
 		Session: child.ID, RecipeName: d.Recipe, Recipe: recipe, RecipeYAML: d.RecipeYAML,
 		Spec: 1, State: domain.RunProposed, CreatedAt: e.now(),
@@ -193,6 +197,9 @@ func (e *Engine) startDispatchedRun(ctx context.Context, agent, child domain.Fea
 		return err
 	}
 	_, _ = e.writeRunFile(child.ID, run.N, "recipe.yaml", d.RecipeYAML)
+	if hasPreflight {
+		e.keepPreflight(child.ID, run.N, preflight)
+	}
 	unlock := e.lockRuns(child.ID)
 	defer unlock()
 	if err := e.allowRunLocked(ctx, run, "allowed with "+agent.Name()+"'s schedule"); err != nil {

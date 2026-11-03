@@ -11,8 +11,8 @@ Start from a bundled recipe, not a blank page: `references/` holds
 `deliver.yaml`, `fix-until-green.yaml` and `investigate.yaml` as gummi
 ships them, and `workflow_recipes` with a `name` shows any recipe,
 the workspace's own included. Pass yours to `workflow_run` as
-`recipe_yaml`. A recipe that cannot run comes back as problems, with nothing
-proposed: fix them and call again.
+`recipe_yaml`, or `recipe_path` (a file in your tree). A recipe that
+cannot run comes back as problems: fix them and call again.
 
 ## The shape
 
@@ -57,10 +57,9 @@ steps:
   (pin, beats `slot`; opencode: `provider/model`), `artifacts`
   (name → plain file name in the run's dir) and `captureOutput`
   (false hides its message from later steps).
-- **`parallel`**: `id`, `join`, and `steps` of plain steps side by side
-  in the same tree.
-- **`repeat`**: `id`, `max`, one `until`, `onMax`, and `steps` (which may
-  hold a `parallel`).
+- **`parallel`**: `id`, `join`, `steps` side by side in one tree.
+- **`repeat`**: `id`, `max`, one `until`, `onMax`, `steps` (may hold a
+  `parallel`).
 
 ## Roles
 
@@ -74,8 +73,8 @@ steps:
 | `scribe` | docs and reports | writes |
 | `reviewer` | reads the work against the spec | reads |
 
-Every step has a full shell; a reader is told to change nothing, and
-one that did is flagged. gummi gives each step its role's preamble: do
+Every step has a full shell; a reader is told to change nothing; one
+that did is flagged. gummi gives each step its role's preamble: do
 not repeat it. A step's model is the profile's choice per role;
 `slot: <name>` picks another profile slot (a second reviewer on
 `reviewer-alt`). Never use a slot for a bigger or cheaper model.
@@ -84,15 +83,15 @@ not repeat it. A step's model is the profile's choice per role;
 
 | template | is |
 |---|---|
-| `{{spec}}` | the frozen spec's text; put it in every prompt needing the goal |
+| `{{spec}}` | the frozen spec, minus Report; put it in each prompt needing the goal |
 | `{{inputs.<name>}}` | an input, wrapped as data |
 | `{{artifacts.<name>}}` | an artifact's absolute path in the run's dir |
 | `{{previous.output}}` | the step before's final message |
 | `{{<id>.output}}` | an earlier step's; in a `repeat`, its latest round |
 | `{{run.diff}}` | a file: the diff from the run's start to now |
+| `{{preflight.output}}` | what top-level `preflight: <cmd>` printed; non-zero refuses the run |
 
-A step sees only its filled prompt: name every output and artifact it
-needs.
+A step sees only its filled prompt: name every output and artifact.
 
 ## Lines a step's output may carry
 
@@ -111,15 +110,15 @@ needs.
 | `checks` | every done-when check passes in the tree |
 | `{verdict: APPROVED, in: review}` | the artifact `review`'s JSON `verdict` is the word; a step in the loop must declare it |
 | `{contains: LGTM}` | the loop's last step's output contains the text |
+| `{verdict: APPROVED, in: review, checks: true}` | the verdict holds and the checks pass |
 
 `onMax`: `pause` (the default) asks the person; `continue` goes on;
 `abort` ends the run partial. A loop gummi cannot judge (no verdict
 artifact, a check ran no tests) always asks.
 
-Give a verdict step an artifact and the exact JSON to write: a missing
-file is captured from the output's last JSON object, but only if there
-is one. From round 2 gummi briefs each step with the last round's
-verdict artifact inline, so prompts need not point at it.
+Give a verdict step an artifact and the exact JSON to write; a missing
+one is captured from the output's last JSON object, if any. From round
+2 each step is briefed with the last round's verdict inline.
 
 ## Joins: `parallel`
 
@@ -129,20 +128,20 @@ verdict artifact inline, so prompts need not point at it.
 | `allSettled` | waits for all; fails only if all fail |
 | `any` | settles on the first success, stopping the rest |
 
-Put readers side by side. Two writers in one tree overwrite each other:
-gummi warns; make them steps in order instead.
+Put readers side by side; two writers in one tree overwrite each other
+(gummi warns): run them in order.
 
 ## Other shapes
 
 A light review loop: a `repeat` of an implementer and one reviewer with
 `until: { contains: "VERDICT: PASS" }`, then a validating reviewer.
-`contains` matches anywhere in the output: pick a marker written
-only when meant, and ask for it on the last line.
+`contains` matches anywhere: ask for a marker on the last line, written
+only when meant.
 
 A planner who decides the steps: a `planner` step that ends its output
 with a fenced `gummi-workflow` block (a YAML list of entries, as
-under `steps:`) replaces the run's remaining steps, once they pass
-the same checks and the person allows the revised plan.
+under `steps:`) replaces the run's remaining steps once checked and
+allowed by the person.
 
 ## Command and dispatch steps
 
@@ -224,7 +223,6 @@ steps:
   included, of letters, digits, `-`, `_` — never digits alone.
 - Every `{{…}}` names an input, an artifact some step declares, or an
   earlier step.
-- Each loop has a `max` and one `until`; an `until` verdict's artifact is
-  declared inside the loop.
+- Each loop has a `max` and one `until` (`checks: true` may join a
+  verdict or contains); a verdict's artifact is declared inside the loop.
 - The last step judges the `judge: true` items.
-- If it worked, offer **Save as recipe…** on the run's block.

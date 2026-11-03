@@ -273,6 +273,10 @@ func (e *Engine) fireRun(ctx context.Context, s domain.Schedule) domain.Schedule
 	if _, ok, err := e.cfg.Store.SessionSpec(ctx, target.ID, s.Spec); err != nil || !ok {
 		return failed(fmt.Errorf("%s has no spec %d", target.ID, s.Spec))
 	}
+	preflight, hasPreflight, err := e.preflightFor(ctx, target.ID, recipe)
+	if err != nil {
+		return failed(err)
+	}
 	unlock := e.lockRuns(target.ID)
 	defer unlock()
 	runs, err := e.cfg.Store.SessionRuns(ctx, target.ID)
@@ -292,6 +296,9 @@ func (e *Engine) fireRun(ctx context.Context, s domain.Schedule) domain.Schedule
 		return failed(err)
 	}
 	_, _ = e.writeRunFile(target.ID, run.N, "recipe.yaml", s.Prompt)
+	if hasPreflight {
+		e.keepPreflight(target.ID, run.N, preflight)
+	}
 	if err := e.startRunLocked(ctx, run); err != nil {
 		_ = e.cfg.Store.DeleteRun(ctx, target.ID, run.N)
 		_ = rmtree.RemoveAll(e.RunDir(target.ID, run.N))

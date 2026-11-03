@@ -209,6 +209,7 @@ func (e *Engine) startStep(ctx context.Context, session domain.FeatureID, n int,
 	}
 	text, _ := e.runItems(ctx, run)
 	vars := workflowrecipe.Vars{Spec: text, Inputs: run.Inputs, Artifacts: e.runArtifacts(run)}
+	vars.Preflight, vars.HasPreflight = e.preflightOutput(run)
 	vars.Outputs, vars.Previous, vars.PreviousOutput = stepOutputs(run.Recipe, steps, path)
 	e.passVars(ctx, run, path, &vars)
 	if strings.Contains(step.Prompt, "run.diff") {
@@ -453,6 +454,9 @@ func (e *Engine) loopNotes(ctx context.Context, run *domain.Run, step domain.Ste
 			b.WriteString(" Check whether what it found has been addressed.\n")
 		} else {
 			b.WriteString(" Address what it found first: this round exists to fix it, not to start the task over.\n")
+		}
+		if r.Until.AndChecks() {
+			b.WriteString("The loop ends only when every done-when check passes as well: run the spec's done-when checks named above.\n")
 		}
 		switch r.Until.Kind() {
 		case domain.UntilVerdict:

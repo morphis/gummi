@@ -43,10 +43,16 @@ func TestUntilKind(t *testing.T) {
 		{Until{In: "r"}, UntilVerdict},
 		{Until{Contains: "x"}, UntilContains},
 		{Until{}, ""},
-		{Until{Checks: true, Contains: "x"}, ""},
+		{Until{Checks: true, Contains: "x"}, UntilContains},
+		{Until{Checks: true, Verdict: "OK", In: "r"}, UntilVerdict},
+		{Until{Verdict: "OK", In: "r", Contains: "x"}, ""},
+		{Until{Checks: true, Verdict: "OK", In: "r", Contains: "x"}, ""},
 	} {
 		if got := tc.u.Kind(); got != tc.want {
 			t.Errorf("%+v: kind %q, want %q", tc.u, got, tc.want)
+		}
+		if and := tc.u.AndChecks(); and != (tc.u.Checks && tc.want != "" && tc.want != UntilChecks) {
+			t.Errorf("%+v: AndChecks %v", tc.u, and)
 		}
 	}
 }

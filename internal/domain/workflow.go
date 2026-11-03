@@ -75,6 +75,11 @@ type Recipe struct {
 	// text it fills as when it is not given ("" for none). An input not
 	// in it is required.
 	InputDefaults map[string]string
+	// Preflight is a shell command run in the session's tree when the run
+	// is proposed, before anyone is asked to allow it: a non-zero exit
+	// refuses the proposal with its output, and a zero exit's output is
+	// {{preflight.output}}. Empty for none.
+	Preflight string
 	// Steps run in order.
 	Steps []Entry
 }
@@ -267,6 +272,8 @@ type Repeat struct {
 // In) or Contains.
 type Until struct {
 	// Checks: every done-when check of the frozen spec passes in the tree.
+	// Beside a Verdict or a Contains it is a second condition: the loop
+	// ends only when both hold.
 	Checks bool
 	// Verdict and In: the artifact In's JSON field "verdict" equals Verdict.
 	Verdict string
@@ -282,22 +289,31 @@ const (
 	UntilContains = "contains"
 )
 
-// Kind names the condition, or "" when none or more than one is set.
+// Kind names the condition, or "" when none is set or both a verdict and
+// a contains are. A verdict or contains that also needs the checks is
+// still its own kind: AndChecks says so.
 func (u Until) Kind() string {
 	var kinds []string
-	if u.Checks {
-		kinds = append(kinds, UntilChecks)
-	}
 	if u.Verdict != "" || u.In != "" {
 		kinds = append(kinds, UntilVerdict)
 	}
 	if u.Contains != "" {
 		kinds = append(kinds, UntilContains)
 	}
-	if len(kinds) != 1 {
-		return ""
+	switch {
+	case len(kinds) == 1:
+		return kinds[0]
+	case len(kinds) == 0 && u.Checks:
+		return UntilChecks
 	}
-	return kinds[0]
+	return ""
+}
+
+// AndChecks reports whether a verdict or contains condition also needs
+// every done-when check to pass.
+func (u Until) AndChecks() bool {
+	k := u.Kind()
+	return u.Checks && k != "" && k != UntilChecks
 }
 
 // RunState is where a run is in its life (§25.5).
@@ -381,6 +397,10 @@ type ItemResult struct {
 	Checked bool
 	Verdict ItemVerdict
 	Detail  string
+	// CannotRun marks a checked item left unjudged because its check could
+	// not run in the tree: its shell exited 126 or 127, a command missing
+	// or not executable. No change to the code makes it pass.
+	CannotRun bool `json:"CannotRun,omitempty"`
 	// Before is how the item's check found the tree before the run's first
 	// step (the run's baseline, RunBaseline), set on a checked item at the
 	// run's end; empty when there was no baseline for it.

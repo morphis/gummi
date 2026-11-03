@@ -98,7 +98,8 @@ func TestParseReadsEveryUntil(t *testing.T) {
 		{"{checks: true}", domain.Until{Checks: true}, domain.UntilChecks},
 		{"{verdict: OK, in: r}", domain.Until{Verdict: "OK", In: "r"}, domain.UntilVerdict},
 		{"{contains: ALL GREEN}", domain.Until{Contains: "ALL GREEN"}, domain.UntilContains},
-		{"{contains: x, checks: true}", domain.Until{Contains: "x", Checks: true}, ""},
+		{"{contains: x, checks: true}", domain.Until{Contains: "x", Checks: true}, domain.UntilContains},
+		{"{verdict: OK, in: r, checks: true}", domain.Until{Verdict: "OK", In: "r", Checks: true}, domain.UntilVerdict},
 		{"{}", domain.Until{}, ""},
 	} {
 		r, err := Parse([]byte("steps:\n  - id: l\n    repeat:\n      max: 2\n      until: " + tc.until + "\n      steps:\n        - {id: a, role: tester, prompt: p}\n"))
@@ -115,7 +116,7 @@ func TestParseReadsEveryUntil(t *testing.T) {
 func TestMarshalRoundTrips(t *testing.T) {
 	no := false
 	extra := domain.Recipe{
-		Name: "x", Inputs: map[string]string{"area": "where"},
+		Name: "x", Inputs: map[string]string{"area": "where"}, Preflight: "command -v xdelta3",
 		Steps: []domain.Entry{
 			{Step: &domain.Step{ID: "a", Role: domain.RoleScout, Slot: "scout-wide", Prompt: "look at {{inputs.area}}", CaptureOutput: &no}},
 			{Repeat: &domain.Repeat{ID: "r", Max: 2, Until: domain.Until{Contains: "DONE"}, OnMax: domain.OnMaxAbort, Steps: []domain.Entry{
@@ -197,7 +198,7 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"bad template", "  - {id: a, role: scout, prompt: '{{whatever}}'}\n", "is not a template"},
 		{"repeat no max", "  - id: r\n    repeat: {until: checks, steps: [{id: a, role: tester, prompt: p}]}\n", "has no max"},
 		{"repeat no until", "  - id: r\n    repeat: {max: 2, steps: [{id: a, role: tester, prompt: p}]}\n", "exactly one until"},
-		{"repeat two untils", "  - id: r\n    repeat: {max: 2, until: {checks: true, contains: x}, steps: [{id: a, role: tester, prompt: p}]}\n", "exactly one until"},
+		{"repeat two untils", "  - id: r\n    repeat: {max: 2, until: {verdict: OK, in: v, contains: x}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", "exactly one until"},
 		{"repeat bad onMax", "  - id: r\n    repeat: {max: 2, until: checks, onMax: retry, steps: [{id: a, role: tester, prompt: p}]}\n", `onMax "retry"`},
 		{"repeat empty", "  - id: r\n    repeat: {max: 2, until: checks, steps: []}\n", "repeat r has no steps"},
 		{"verdict without word", "  - id: r\n    repeat: {max: 2, until: {in: v}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", "names both"},
@@ -207,6 +208,8 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"parallel bad join", "  - id: p\n    parallel: {join: race, steps: [{id: a, role: scout, prompt: p}]}\n", `join "race"`},
 		{"parallel empty", "  - id: p\n    parallel: {join: all, steps: []}\n", "parallel p has no steps"},
 		{"artifact escapes", "  - {id: a, role: scribe, prompt: p, artifacts: {x: ../x.md}}\n", "plain file name"},
+		{"artifact is the run's report", "  - {id: a, role: scribe, prompt: p, artifacts: {x: run-report.md}}\n", "gummi writes"},
+		{"artifact is a step's outputs", "  - {id: a, role: scribe, prompt: p, artifacts: {x: outputs}}\n", "gummi writes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := Parse([]byte(head + tc.steps))
@@ -248,7 +251,7 @@ steps:
   - id: r
     repeat:
       max: 2
-      until: {verdict: OK, in: out}
+      until: {verdict: OK, in: out, checks: true}
       onMax: continue
       steps:
         - {id: d, role: implementer, prompt: "{{b.output}} {{c.output}} {{previous.output}}"}
@@ -384,6 +387,39 @@ func TestFillFillsEveryTemplate(t *testing.T) {
 	}
 	if _, err := Fill("{{run.diff}}", Vars{}); err == nil {
 		t.Error("run.diff with no diff file filled")
+	}
+	if _, err := Fill("{{preflight.output}}", Vars{}); err == nil {
+		t.Error("preflight.output with no preflight filled")
+	}
+	if got, err := Fill("{{preflight.output}}", Vars{Preflight: "3 tests fail", HasPreflight: true}); err != nil ||
+		got != "<<<gummi-output step=\"preflight\">>>\n3 tests fail\n<<<end gummi-output step=\"preflight\">>>" {
+		t.Errorf("preflight.output filled as %q, %v", got, err)
+	}
+}
+
+func TestCheckReadsAPreflight(t *testing.T) {
+	ok, err := Parse([]byte("preflight: command -v xdelta3\nsteps:\n  - {id: a, role: implementer, prompt: \"{{preflight.output}} {{spec}}\"}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok.Preflight != "command -v xdelta3" {
+		t.Fatalf("preflight %q", ok.Preflight)
+	}
+	if problems, _ := Check(ok); len(problems) > 0 {
+		t.Fatalf("problems %q", problems)
+	}
+	for _, tc := range []struct{ name, yaml, want string }{
+		{"no preflight", "steps:\n  - {id: a, role: implementer, prompt: \"{{preflight.output}}\"}\n", "names no preflight"},
+		{"templated", "preflight: \"test -f {{inputs.x}}\"\ninputs: {x: a file}\nsteps:\n  - {id: a, role: implementer, prompt: p}\n", "takes no {{…}}"},
+		{"its id taken", "preflight: \"true\"\nsteps:\n  - {id: preflight, role: implementer, prompt: p}\n", "names the recipe's preflight"},
+	} {
+		r, err := Parse([]byte(tc.yaml))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if problems, _ := Check(r); !strings.Contains(strings.Join(problems, "\n"), tc.want) {
+			t.Errorf("%s: problems %q, want %q", tc.name, problems, tc.want)
+		}
 	}
 }
 

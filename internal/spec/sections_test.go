@@ -558,3 +558,17 @@ func TestSectionLastLine(t *testing.T) {
 		t.Error("an absent section reported a line")
 	}
 }
+
+func TestDropSection(t *testing.T) {
+	doc := "# T\n\n## Problem\n\np\n\n## Report\n\nr\n\n## Notes\n\nn\n"
+	if got, want := DropSection(doc, "report"), "# T\n\n## Problem\n\np\n\n## Notes\n\nn\n"; got != want {
+		t.Errorf("middle:\n%q\nwant\n%q", got, want)
+	}
+	last := "# T\n\n## Problem\n\np\n\n## Report\n\nr\n"
+	if got, want := DropSection(last, "Report"), "# T\n\n## Problem\n\np\n"; got != want {
+		t.Errorf("last:\n%q\nwant\n%q", got, want)
+	}
+	if got := DropSection(doc, "Limits"); got != doc {
+		t.Errorf("no such section changed the doc:\n%q", got)
+	}
+}

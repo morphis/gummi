@@ -133,6 +133,25 @@ func ReplaceSection(content, name, body string) (newContent, matchedTitle string
 	return content[:start] + body + content[end:], matchedTitle, nil
 }
 
+// DropSection returns content without the named top-level section — its
+// `## ` heading and its body — or content unchanged when no section
+// matches.
+func DropSection(content, name string) string {
+	start, end, _, ok := sectionBounds(content, name)
+	if !ok {
+		return content
+	}
+	head := start
+	if head > 0 && content[head-1] == '\n' {
+		head--
+	}
+	head = strings.LastIndexByte(content[:head], '\n') + 1
+	if end == len(content) {
+		return strings.TrimRight(content[:head], "\n") + "\n"
+	}
+	return content[:head] + content[end:]
+}
+
 // normalizeSectionBody guarantees the spliced body is newline-terminated so
 // the following `## ` heading (or the EOF boundary) stays at column 0. A body
 // without a trailing newline would otherwise weld the next heading onto its

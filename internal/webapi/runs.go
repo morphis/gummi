@@ -464,6 +464,10 @@ type RunProposal struct {
 	Checks []ProposalCheck `json:"checks,omitempty"`
 	// Baseline is those checks run in the tree as it is, before the run.
 	Baseline *RunBaseline `json:"baseline,omitempty"`
+	// Preflight is the recipe's preflight command, which passed in the
+	// tree when the run was proposed, and PreflightOutput what it printed.
+	Preflight       string `json:"preflight,omitempty"`
+	PreflightOutput string `json:"preflightOutput,omitempty"`
 	// PoolLeft is what the session has left, when Bounded by an envelope:
 	// the run spends from it, and estimates nothing.
 	PoolLeft float64 `json:"poolLeft,omitempty"`
