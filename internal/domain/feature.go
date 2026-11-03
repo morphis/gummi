@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 // Gate approval modes: who crossed a workflow card's gates — a person at
@@ -894,7 +895,7 @@ func (f *Feature) ArtifactFile(root string) (string, bool) {
 	if p == "" {
 		return "", false
 	}
-	return filepath.Join(root, p), true
+	return gummidir.FromRel(root, p), true
 }
 
 // Validate checks the invariants every stored feature must satisfy.

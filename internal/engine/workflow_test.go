@@ -163,7 +163,10 @@ func tickRuns(t *testing.T, e *Engine, session domain.FeatureID, n int, what str
 		if _, err := e.WorkflowTick(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if r, _ := e.cfg.Store.Run(ctx, session, n); r != nil && cond(r) {
+		// the store marks a run ended before gummi lets go of the run's
+		// end phase; a caller that goes on to revert it would be refused
+		// for the sliver between the two
+		if r, _ := e.cfg.Store.Run(ctx, session, n); r != nil && cond(r) && (!r.State.Ended() || e.RunPhase(session, n) == "") {
 			return r
 		}
 		time.Sleep(10 * time.Millisecond)

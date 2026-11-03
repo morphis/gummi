@@ -19,6 +19,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/envprobe"
+	"github.com/morphis/gummi/internal/gummidir"
 	"github.com/morphis/gummi/internal/sandbox"
 	"github.com/morphis/gummi/internal/skillpack"
 	"github.com/morphis/gummi/internal/state"
@@ -1316,7 +1317,7 @@ func configLoadErr(cwd string) error {
 	if err != nil {
 		userPath = ""
 	}
-	_, _, err = config.LoadLayered(userPath, filepath.Join(ws, ".gummi", "config.yaml"))
+	_, _, err = config.LoadLayered(userPath, filepath.Join(gummidir.Resolve(ws), "config.yaml"))
 	return err
 }
 

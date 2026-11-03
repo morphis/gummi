@@ -7,9 +7,9 @@ package engine
 import (
 	"context"
 	"os"
-	"path/filepath"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 	"github.com/morphis/gummi/internal/rmtree"
 )
 
@@ -24,7 +24,7 @@ func (e *Engine) ForgetRuns(ctx context.Context, session domain.FeatureID) {
 		e.dropStepCard(ctx, id)
 	}
 	if e.pool != nil {
-		_ = rmtree.RemoveAll(filepath.Join(e.pool.Root(), ".gummi", "runs", string(session)))
+		_ = rmtree.RemoveAll(gummidir.Path(e.pool.Root(), "runs", string(session)))
 	}
 }
 

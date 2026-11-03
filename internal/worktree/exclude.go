@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 // gummiExcludeLine is the ignore rule keeping the runtime workspace out
@@ -35,8 +37,29 @@ const gummiExcludeLine = "/.gummi/"
 // .gummi must be kept out of git tracking; in the nested layout .gummi
 // sits above the repo and there is nothing to exclude.
 func gummiInsideRepo(wsRoot, repo string) bool {
-	rel, err := filepath.Rel(repo, wsRoot)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	_, ok := gummiRepoRel(wsRoot, repo)
+	return ok
+}
+
+// gummiRepoRel is the gummi directory's slash path relative to the repo,
+// and whether it is inside the repo at all. A directory GUMMI_DIR names may
+// sit anywhere: outside the repo there is nothing to exclude.
+func gummiRepoRel(wsRoot, repo string) (string, bool) {
+	inside := func(p string) (string, bool) {
+		rel, err := filepath.Rel(repo, p)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+		return filepath.ToSlash(rel), true
+	}
+	if _, custom := gummidir.Custom(); custom {
+		rel, ok := inside(gummidir.Resolve(wsRoot))
+		return rel, ok && rel != "."
+	}
+	if _, ok := inside(wsRoot); !ok {
+		return "", false
+	}
+	return gummidir.Name, true
 }
 
 func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err error) {
@@ -53,10 +76,11 @@ func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err 
 	if !filepath.IsAbs(common) {
 		common = filepath.Join(m.repo, common)
 	}
-	if err := ensureExcludeLine(filepath.Join(common, "info", "exclude")); err != nil {
+	rel, _ := gummiRepoRel(m.wsRoot, m.repo)
+	if err := ensureExcludeLine(filepath.Join(common, "info", "exclude"), "/"+rel+"/"); err != nil {
 		return false, err
 	}
-	tracked, err := runGit(ctx, m.repo, "ls-files", "--", ".gummi")
+	tracked, err := runGit(ctx, m.repo, "ls-files", "--", rel)
 	if err != nil {
 		return false, err
 	}
@@ -64,7 +88,7 @@ func (m *Manager) EnsureGummiExcluded(ctx context.Context) (untracked bool, err 
 		return false, nil
 	}
 	// --cached only: drops the paths from the index, never from disk.
-	if _, err := runGit(ctx, m.repo, "rm", "-r", "-q", "--cached", "--", ".gummi"); err != nil {
+	if _, err := runGit(ctx, m.repo, "rm", "-r", "-q", "--cached", "--", rel); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -87,17 +111,18 @@ func untrackGummiInWorktree(ctx context.Context, wsRoot, repo, wt string) error 
 	// layout guard: a nested-layout worktree never owns .gummi, so there
 	// is nothing to untrack; skip rather than query a repo that does not
 	// track it.
-	if !gummiInsideRepo(wsRoot, repo) {
+	rel, ok := gummiRepoRel(wsRoot, repo)
+	if !ok {
 		return nil
 	}
-	tracked, err := runGit(ctx, wt, "ls-files", "--", ".gummi")
+	tracked, err := runGit(ctx, wt, "ls-files", "--", rel)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(tracked) == "" {
 		return nil
 	}
-	if _, err := runGit(ctx, wt, "rm", "-r", "-q", "--cached", "--", ".gummi"); err != nil {
+	if _, err := runGit(ctx, wt, "rm", "-r", "-q", "--cached", "--", rel); err != nil {
 		return err
 	}
 	// No pathspec: `git commit -- <path>` records the path's working-tree
@@ -109,13 +134,13 @@ func untrackGummiInWorktree(ctx context.Context, wsRoot, repo, wt string) error 
 
 // ensureExcludeLine appends the .gummi rule to an exclude file unless a
 // line already carries it.
-func ensureExcludeLine(path string) error {
+func ensureExcludeLine(path, line string) error {
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	for line := range strings.Lines(string(existing)) {
-		if strings.TrimSpace(line) == gummiExcludeLine {
+	for l := range strings.Lines(string(existing)) {
+		if strings.TrimSpace(l) == line {
 			return nil
 		}
 	}
@@ -127,7 +152,7 @@ func ensureExcludeLine(path string) error {
 		return err
 	}
 	defer f.Close()
-	content := gummiExcludeLine + "\n"
+	content := line + "\n"
 	if n := len(existing); n > 0 && existing[n-1] != '\n' {
 		content = "\n" + content
 	}

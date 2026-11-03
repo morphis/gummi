@@ -304,6 +304,7 @@ re-raised decision that deduped to a no-op raises nothing).
 | `TS_AUTHKEY` | a Tailscale auth key for `gummi web --tailscale` when `--ts-authkey` is not given; skips the browser login on the node's first run |
 | `GUMMI_MOTION` | `off` freezes every activity glyph and stops the clock tick |
 | `GUMMI_ATTACH_CMD` | command for the board's raw-attach (`a`) |
+| `GUMMI_DIR` | the gummi directory itself — state, worktrees, specs, runs, `config.yaml`, `profiles.yaml`, workflows — at any path, inside the repository or not and under any name (`GUMMI_DIR=/data/gummi-custom`). Unset, it is `.gummi` in the workspace root. With it set, the workspace root is the nearest enclosing git checkout of the directory you run in. Set it for every gummi command that should share the workspace |
 | `GUMMI_EVENT`, `GUMMI_CARD`, `GUMMI_WORKSPACE` | exported to `hooks:` scripts: the event name, the card id, the workspace root |
 
 ## The web host on a tailnet

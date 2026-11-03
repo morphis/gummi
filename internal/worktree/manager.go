@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -270,7 +271,7 @@ func (m *Manager) BaseBranch(ctx context.Context) string {
 
 // worktreesDir is the directory all feature worktrees must live in.
 func (m *Manager) worktreesDir() string {
-	return filepath.Join(m.wsRoot, ".gummi", "worktrees")
+	return gummidir.Path(m.wsRoot, "worktrees")
 }
 
 // cardTreePathNamed validates the feature and derives its absolute checkout
@@ -297,7 +298,7 @@ func (m *Manager) cardTreePathNamed(base string, f *domain.Feature, name string)
 	// A hostile repo can commit .gummi or the tree's parent as a symlink
 	// pointing outside the checkout; writing through it would escape
 	// the repo, which the lexical check above cannot see.
-	for _, dir := range []string{filepath.Join(m.wsRoot, ".gummi"), base} {
+	for _, dir := range []string{gummidir.Resolve(m.wsRoot), base} {
 		fi, err := os.Lstat(dir)
 		if err != nil {
 			if os.IsNotExist(err) {

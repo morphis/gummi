@@ -23,6 +23,7 @@ import (
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/credentials"
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/gummidir"
 	"github.com/morphis/gummi/internal/hooks"
 	"github.com/morphis/gummi/internal/notify"
 	"github.com/morphis/gummi/internal/state"
@@ -513,7 +514,7 @@ func loadRepoSet(ws string) (config.RepoSet, error) {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
 		userPath = ""
 	}
-	cfg, _, err := config.LoadLayered(userPath, filepath.Join(ws, ".gummi", "config.yaml"))
+	cfg, _, err := config.LoadLayered(userPath, filepath.Join(gummidir.Resolve(ws), "config.yaml"))
 	if err != nil {
 		return config.RepoSet{}, err
 	}
@@ -590,8 +591,11 @@ func useCoAuthors(w state.Workspace) {
 // filesystem root has one.
 func findGummiRoot(dir string) (root string, ok bool) {
 	dir = filepath.Clean(dir)
+	if _, ok := gummidir.Custom(); ok {
+		return customGummiRoot(dir)
+	}
 	for {
-		fi, err := os.Lstat(filepath.Join(dir, ".gummi"))
+		fi, err := os.Lstat(filepath.Join(dir, gummidir.Name))
 		if err == nil && fi.IsDir() && fi.Mode()&os.ModeSymlink == 0 {
 			return dir, true
 		}
@@ -600,6 +604,24 @@ func findGummiRoot(dir string) (root string, ok bool) {
 			return "", false
 		}
 		dir = parent
+	}
+}
+
+// customGummiRoot is the workspace root when $GUMMI_DIR names the gummi
+// directory: no ancestor can be recognised by holding one, so the root is
+// the nearest enclosing git checkout, else dir itself. ok is false when
+// $GUMMI_DIR does not exist yet (a first run); the caller falls back to dir.
+func customGummiRoot(dir string) (string, bool) {
+	if fi, err := os.Lstat(gummidir.Resolve(dir)); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		return "", false
+	}
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d, true
+		}
+		if filepath.Dir(d) == d {
+			return dir, true
+		}
 	}
 }
 

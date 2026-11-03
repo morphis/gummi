@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 // A session's specs (DESIGN §25.3): a list, one per piece of work, each a
@@ -108,7 +108,7 @@ func (s *Store) SessionSpecFile(ctx context.Context, root string, id domain.Feat
 	if err != nil {
 		return "", false
 	}
-	return filepath.Join(root, filepath.FromSlash(rel)), true
+	return gummidir.FromRel(root, rel), true
 }
 
 // AddSpecRevision saves content as spec n's next revision and returns its
