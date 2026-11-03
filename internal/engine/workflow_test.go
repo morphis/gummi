@@ -1904,6 +1904,34 @@ func TestAStepThatEndsWithoutItsVerdictIsSentBackOnce(t *testing.T) {
 	}
 }
 
+// TestAVerdictOfAnotherShapeIsAReject: a loop whose until declares its
+// verdict's schema counts an APPROVED artifact of another shape as a
+// reject: the loop goes round, its next round told why, and ends on the
+// round whose artifact fits.
+func TestAVerdictOfAnotherShapeIsAReject(t *testing.T) {
+	recipe := strings.Replace(verdictLoop, "until: { verdict: APPROVED, in: review }",
+		"until: { verdict: APPROVED, in: review, schema: { findings: array } }", 1)
+	wf := newWFFake()
+	wf.on("implement", writesOut)
+	var dir string
+	wf.on("verdict", func(_, _ string, n int) wfReply {
+		body := `{"verdict":"APPROVED"}`
+		if n == 2 {
+			body = `{"verdict":"APPROVED","findings":[]}`
+		}
+		_ = os.WriteFile(filepath.Join(dir, "review.json"), []byte(body), 0o600)
+		return wfReply{text: "approved", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+	dir = e.RunDir(f.ID, run.N)
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || wf.count("implement") != 2 || !r.Until["build/2"].Met ||
+		r.Until["build/1"].Detail != "rejected: review (review.json) does not match its schema: findings is missing" {
+		t.Fatalf("ended %s after %d rounds, until %+v", r.State, wf.count("implement"), r.Until)
+	}
+}
+
 // TestAStepThatStopsShortIsSentBackOnce: a step whose turn stops on a
 // backend error or a safety stop is sent back once, in its own
 // conversation, to finish; the run goes on when it does. Stopping twice

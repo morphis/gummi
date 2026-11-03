@@ -249,6 +249,13 @@ times:
   both hold: the reviewer approved *and* every done-when check passes.
   Use it for a fix loop that must not end green over a reviewer's
   blocker, nor approved over a failing check.
+- `until: { verdict: APPROVED, in: review, schema: { findings: array } }`
+  — a verdict with its artifact's shape declared: each field the JSON
+  object must hold, by type (`string`, `number`, `boolean`, `array`,
+  `object`; `verdict` is always required, a string). An artifact that
+  is missing, not JSON or of another shape is then a reject: the loop
+  goes round, its next round told what was wrong, rather than asking
+  you. Use it when a malformed review must never end the loop.
 
 From the second round on, gummi tells each step of the loop why the
 round before did not end it, after its own prompt: the condition as
@@ -463,6 +470,7 @@ More than one writing role in one `parallel` is a warning.
 | `{ verdict: <word>, in: <artifact> }` | the artifact's JSON field `verdict` equals the word; a step inside the loop must declare the artifact |
 | `{ contains: <text> }` | the loop's last step's output contains the text |
 | either of the two above with `checks: true` | that condition holds and every done-when check passes |
+| a verdict with `schema: { <field>: <type> }` | the verdict holds in an artifact of that shape; one missing, not JSON or of another shape is a reject |
 
 | `onMax` | at `max` without the condition |
 |---|---|
@@ -471,7 +479,7 @@ More than one writing role in one `parallel` is a warning.
 | `abort` | ends the run partial |
 
 A condition that cannot be judged (no checks, a check that ran no tests
-or timed out, a verdict artifact never written) asks you, whatever
+or timed out, a verdict artifact never written and no `schema`) asks you, whatever
 `onMax` says. One more iteration given there does not count against
 `max`.
 
@@ -692,8 +700,10 @@ A recipe is refused, with every problem listed, when it has:
 - a template naming no input, no declared artifact or no earlier step;
 - a `repeat` without `max` or without exactly one `until` (a verdict or
   `contains` with `checks: true` beside it counts as one), an unknown
-  `onMax`, or a verdict `until` whose artifact no step in the loop
-  declares;
+  `onMax`, a verdict `until` whose artifact no step in the loop
+  declares, or a `schema` beside no verdict, naming a type other than
+  `string`, `number`, `boolean`, `array` or `object`, or making
+  `verdict` anything but a string;
 - a `parallel` without a valid `join`, or holding anything but plain
   steps;
 - a `run:` with `quietExit` that is not the first step, a template

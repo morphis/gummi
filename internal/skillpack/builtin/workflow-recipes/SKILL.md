@@ -11,8 +11,8 @@ Start from a bundled recipe, not a blank page: `references/` holds
 `deliver.yaml`, `fix-until-green.yaml` and `investigate.yaml` as gummi
 ships them, and `workflow_recipes` with a `name` shows any recipe,
 the workspace's own included. Pass yours to `workflow_run` as
-`recipe_yaml`, or `recipe_path` (a file in your tree). A recipe that
-cannot run comes back as problems: fix them and call again.
+`recipe_yaml`, or `recipe_path` (a file in your tree). A refused recipe
+comes back as problems to fix.
 
 ## The shape
 
@@ -73,11 +73,10 @@ steps:
 | `scribe` | docs and reports | writes |
 | `reviewer` | reads the work against the spec | reads |
 
-Every step has a full shell; a reader is told to change nothing; one
-that did is flagged. gummi gives each step its role's preamble: do
-not repeat it. A step's model is the profile's choice per role;
+Every step has a full shell; a reader that changed files is flagged.
+gummi gives each step its role's preamble: do not repeat it. A step's model is the profile's choice per role;
 `slot: <name>` picks another profile slot (a second reviewer on
-`reviewer-alt`). Never use a slot for a bigger or cheaper model.
+`reviewer-alt`), never a bigger or cheaper model.
 
 ## Templates
 
@@ -99,8 +98,7 @@ A step sees only its filled prompt: name every output and artifact.
   `parallel`, that ends the run partial.
 - `DECISION: …` and `OPEN: …` go into the run's report.
 - `MET: DW-n` / `UNMET: DW-n <why>`, in the **run's last step**, judge
-  the items without a check. End with a reviewer that writes them, or
-  every `judge: true` item stays unjudged.
+  items without a check; without them `judge: true` items stay unjudged.
 - A `gummi-done-when` block adds checks to the run.
 
 ## Loops: `until` and `onMax`
@@ -111,6 +109,7 @@ A step sees only its filled prompt: name every output and artifact.
 | `{verdict: APPROVED, in: review}` | the artifact `review`'s JSON `verdict` is the word; a step in the loop must declare it |
 | `{contains: LGTM}` | the loop's last step's output contains the text |
 | `{verdict: APPROVED, in: review, checks: true}` | the verdict holds and the checks pass |
+| verdict + `schema: {findings: array}` | it holds in JSON of that shape, else a reject |
 
 `onMax`: `pause` (the default) asks the person; `continue` goes on;
 `abort` ends the run partial. A loop gummi cannot judge (no verdict

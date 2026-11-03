@@ -304,10 +304,11 @@ type rawRepeat struct {
 // rawUntil is a stop condition: the scalar `checks`, or a mapping of
 // checks, verdict and in, or contains.
 type rawUntil struct {
-	Checks   bool   `yaml:"checks,omitempty"`
-	Verdict  string `yaml:"verdict,omitempty"`
-	In       string `yaml:"in,omitempty"`
-	Contains string `yaml:"contains,omitempty"`
+	Checks   bool              `yaml:"checks,omitempty"`
+	Verdict  string            `yaml:"verdict,omitempty"`
+	In       string            `yaml:"in,omitempty"`
+	Contains string            `yaml:"contains,omitempty"`
+	Schema   map[string]string `yaml:"schema,omitempty"`
 }
 
 func (u *rawUntil) UnmarshalYAML(n *yaml.Node) error {
@@ -328,7 +329,7 @@ func (u *rawUntil) UnmarshalYAML(n *yaml.Node) error {
 }
 
 func (u rawUntil) MarshalYAML() (any, error) {
-	if u.Checks && u.Verdict == "" && u.In == "" && u.Contains == "" {
+	if u.Checks && u.Verdict == "" && u.In == "" && u.Contains == "" && len(u.Schema) == 0 {
 		return domain.UntilChecks, nil
 	}
 	type plain rawUntil
@@ -450,6 +451,7 @@ func entry(re rawEntry) (domain.Entry, error) {
 				Verdict:  strings.TrimSpace(u.Verdict),
 				In:       strings.TrimSpace(u.In),
 				Contains: u.Contains,
+				Schema:   u.Schema,
 			},
 			OnMax: domain.OnMax(strings.TrimSpace(re.Repeat.OnMax)),
 		}
@@ -688,7 +690,7 @@ func toRaw(e domain.Entry) rawEntry {
 		u := e.Repeat.Until
 		return rawEntry{ID: e.Repeat.ID, Repeat: &rawRepeat{
 			Max:   e.Repeat.Max,
-			Until: rawUntil{Checks: u.Checks, Verdict: u.Verdict, In: u.In, Contains: u.Contains},
+			Until: rawUntil{Checks: u.Checks, Verdict: u.Verdict, In: u.In, Contains: u.Contains, Schema: u.Schema},
 			OnMax: string(e.Repeat.OnMax),
 			Steps: rawEntries(e.Repeat.Steps),
 		}}

@@ -2,8 +2,10 @@ package workflowrecipe
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -241,6 +243,17 @@ func (c *checker) repeat(rp domain.Repeat) {
 		if !declared {
 			c.problem("repeat %s: until reads artifact %q, which no step in its body declares", name, rp.Until.In)
 		}
+	}
+	if len(rp.Until.Schema) > 0 && rp.Until.Kind() != domain.UntilVerdict {
+		c.problem("repeat %s: an until schema shapes a verdict's artifact, and this until reads none", name)
+	}
+	for _, field := range slices.Sorted(maps.Keys(rp.Until.Schema)) {
+		if typ := rp.Until.Schema[field]; !slices.Contains(domain.SchemaTypes, typ) {
+			c.problem("repeat %s: until schema field %s is %q, not one of %s", name, field, typ, strings.Join(domain.SchemaTypes, ", "))
+		}
+	}
+	if typ, has := rp.Until.Schema["verdict"]; has && typ != "string" {
+		c.problem("repeat %s: until schema field verdict is %q; the verdict is a string", name, typ)
 	}
 	outer := c.inRepeat
 	c.inRepeat = true

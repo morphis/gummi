@@ -2277,6 +2277,20 @@ func (e *Engine) judgeUntilKind(ctx context.Context, run *domain.Run, iter strin
 	case domain.UntilVerdict:
 		path := e.runArtifacts(run)[r.Until.In]
 		raw, err := os.ReadFile(path) // #nosec G304 -- an artifact in the run's own directory
+		if len(r.Until.Schema) > 0 {
+			// a recipe that declared its verdict's shape counts an artifact
+			// missing, not JSON or of another shape as a reject
+			name := fmt.Sprintf("%s (%s)", r.Until.In, filepath.Base(path))
+			switch {
+			case errors.Is(err, os.ErrNotExist):
+				return domain.UntilJudgement{Detail: "rejected: " + name + " was never written"}
+			case err != nil:
+				return domain.UntilJudgement{Detail: "rejected: reading " + name + ": " + err.Error()}
+			}
+			if problems := workflowrecipe.VerdictShape(raw, r.Until.Schema); len(problems) > 0 {
+				return domain.UntilJudgement{Detail: "rejected: " + name + " does not match its schema: " + strings.Join(problems, "; ")}
+			}
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			// never written, nor captured from the step's output: the loop
 			// cannot judge, which is not the same as not met

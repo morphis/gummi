@@ -31,7 +31,7 @@ func TestParseReadsDeliver(t *testing.T) {
 	}
 	build := r.Steps[1].Repeat
 	if build == nil || build.ID != "build" || build.Max != 3 || build.OnMax != domain.OnMaxPause ||
-		build.Until != (domain.Until{Verdict: "APPROVED", In: "review"}) || len(build.Steps) != 3 {
+		!reflect.DeepEqual(build.Until, domain.Until{Verdict: "APPROVED", In: "review"}) || len(build.Steps) != 3 {
 		t.Fatalf("build = %+v", r.Steps[1])
 	}
 	reviews := build.Steps[1].Parallel
@@ -100,6 +100,7 @@ func TestParseReadsEveryUntil(t *testing.T) {
 		{"{contains: ALL GREEN}", domain.Until{Contains: "ALL GREEN"}, domain.UntilContains},
 		{"{contains: x, checks: true}", domain.Until{Contains: "x", Checks: true}, domain.UntilContains},
 		{"{verdict: OK, in: r, checks: true}", domain.Until{Verdict: "OK", In: "r", Checks: true}, domain.UntilVerdict},
+		{"{verdict: OK, in: r, schema: {findings: array}}", domain.Until{Verdict: "OK", In: "r", Schema: map[string]string{"findings": "array"}}, domain.UntilVerdict},
 		{"{}", domain.Until{}, ""},
 	} {
 		r, err := Parse([]byte("steps:\n  - id: l\n    repeat:\n      max: 2\n      until: " + tc.until + "\n      steps:\n        - {id: a, role: tester, prompt: p}\n"))
@@ -107,7 +108,7 @@ func TestParseReadsEveryUntil(t *testing.T) {
 			t.Fatalf("%s: %v", tc.until, err)
 		}
 		u := r.Steps[0].Repeat.Until
-		if u != tc.want || u.Kind() != tc.kind {
+		if !reflect.DeepEqual(u, tc.want) || u.Kind() != tc.kind {
 			t.Errorf("%s: until = %+v (%q), want %+v (%q)", tc.until, u, u.Kind(), tc.want, tc.kind)
 		}
 	}
@@ -204,6 +205,9 @@ func TestCheckRefusesARecipeThatCannotRun(t *testing.T) {
 		{"verdict without word", "  - id: r\n    repeat: {max: 2, until: {in: v}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", "names both"},
 		{"until undeclared artifact", "  - id: r\n    repeat: {max: 2, until: {verdict: OK, in: v}, steps: [{id: a, role: tester, prompt: p}]}\n", `artifact "v", which no step in its body declares`},
 		{"until artifact declared outside", "  - {id: o, role: scribe, prompt: p, artifacts: {v: v.json}}\n  - id: r\n    repeat: {max: 2, until: {verdict: OK, in: v}, steps: [{id: a, role: tester, prompt: p}]}\n", "which no step in its body declares"},
+		{"schema bad type", "  - id: r\n    repeat: {max: 2, until: {verdict: OK, in: v, schema: {findings: list}}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", `field findings is "list"`},
+		{"schema verdict not a string", "  - id: r\n    repeat: {max: 2, until: {verdict: OK, in: v, schema: {verdict: number}}, steps: [{id: a, role: tester, prompt: p, artifacts: {v: v.json}}]}\n", "the verdict is a string"},
+		{"schema without verdict", "  - id: r\n    repeat: {max: 2, until: {checks: true, schema: {x: string}}, steps: [{id: a, role: tester, prompt: p}]}\n", "reads none"},
 		{"parallel no join", "  - id: p\n    parallel: {steps: [{id: a, role: scout, prompt: p}]}\n", `join ""`},
 		{"parallel bad join", "  - id: p\n    parallel: {join: race, steps: [{id: a, role: scout, prompt: p}]}\n", `join "race"`},
 		{"parallel empty", "  - id: p\n    parallel: {join: all, steps: []}\n", "parallel p has no steps"},
