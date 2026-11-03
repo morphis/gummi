@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 //go:embed bundled/*.yaml
@@ -46,7 +47,7 @@ var ErrNoRecipe = errors.New("no such workflow recipe")
 
 // WorkflowsDir is where a workspace keeps its own recipes.
 func WorkflowsDir(workspaceDir string) string {
-	return filepath.Join(workspaceDir, ".gummi", "workflows")
+	return gummidir.Path(workspaceDir, "workflows")
 }
 
 // CheckName refuses, with a sentence, a name no recipe file may have.

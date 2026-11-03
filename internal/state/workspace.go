@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 // Workspace locates gummi's on-disk layout inside one repository.
@@ -25,7 +26,9 @@ type Workspace struct {
 }
 
 // GummiDir is the repo-committed gummi directory.
-func (w Workspace) GummiDir() string { return filepath.Join(w.Root, ".gummi") }
+//
+// It is $GUMMI_DIR when that is set, else Root/.gummi.
+func (w Workspace) GummiDir() string { return gummidir.Resolve(w.Root) }
 
 // StateDir holds machinery (SQLite DB, drafts). Never committed; mode 0700.
 func (w Workspace) StateDir() string { return filepath.Join(w.GummiDir(), "state") }
@@ -209,7 +212,7 @@ func Open(ws, repo string) (Workspace, error) {
 	w := Workspace{Root: ws, RepoRoot: repo}
 	fi, err := os.Lstat(w.GummiDir())
 	if err != nil {
-		return Workspace{}, fmt.Errorf("no .gummi directory in %s (run `gummi` there first): %w", ws, err)
+		return Workspace{}, fmt.Errorf("no gummi directory %s (run `gummi` there first): %w", ws, err)
 	}
 	if fi.Mode()&os.ModeSymlink != 0 {
 		return Workspace{}, fmt.Errorf("%s is a symlink; refusing to use a redirected gummi directory", w.GummiDir())
@@ -237,14 +240,14 @@ var managedTreeDirs = []string{"worktrees", "scratch"}
 // symlink), matching the anti-symlink-smuggle convention of MkdirChecked.
 func enclosingWorkspace(root string) (parent, worktreeID string, ok bool) {
 	for p := filepath.Dir(root); ; p = filepath.Dir(p) {
-		if fi, err := os.Lstat(filepath.Join(p, ".gummi")); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		if fi, err := os.Lstat(gummidir.Resolve(p)); err != nil || fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
 			if p == filepath.VolumeName(p) || filepath.Dir(p) == p {
 				return "", "", false
 			}
 			continue
 		}
 		for _, sub := range managedTreeDirs {
-			base := filepath.Join(p, ".gummi", sub)
+			base := gummidir.Path(p, sub)
 			// An absent one is normal — a workspace whose cards have never
 			// reached a worktree has no worktrees/ — so skip it and keep
 			// checking the others rather than abandoning the walk.

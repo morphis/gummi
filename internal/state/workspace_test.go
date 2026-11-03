@@ -89,3 +89,27 @@ func TestInitNestedInsideScratchTreeRefuses(t *testing.T) {
 		t.Fatalf("Init inside a scratch tree = %v, want ErrNestedInit", err)
 	}
 }
+
+func TestInitHonoursGummiDir(t *testing.T) {
+	ws, repo := nestedWorkspace(t)
+	custom := filepath.Join(t.TempDir(), "elsewhere")
+	t.Setenv("GUMMI_DIR", custom)
+	w, err := Init(ws, repo)
+	if err != nil {
+		t.Fatalf("Init with GUMMI_DIR: %v", err)
+	}
+	if w.GummiDir() != custom {
+		t.Fatalf("GummiDir = %q, want %q", w.GummiDir(), custom)
+	}
+	for _, p := range []string{w.StateDir(), w.WorktreesDir(), w.SeqFile()} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".gummi")); !os.IsNotExist(err) {
+		t.Errorf("a .gummi was created under the workspace root despite GUMMI_DIR: %v", err)
+	}
+	if _, err := Open(ws, repo); err != nil {
+		t.Errorf("Open with GUMMI_DIR: %v", err)
+	}
+}

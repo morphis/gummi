@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 // NamedRepo names one selectable repository: its configured name and its
@@ -781,7 +782,7 @@ func (p *Pool) ProvenanceWarnings(ctx context.Context, f *domain.Feature) ([]str
 // the card forks from and lands on the freeform branch; its repository's
 // manager once the freeform card has landed and its worktree is gone.
 func (p *Pool) managerForDelegatedCard(ctx context.Context, f *domain.Feature) (*Manager, error) {
-	dir := filepath.Join(p.root, ".gummi", "worktrees", string(f.ParentID))
+	dir := gummidir.Path(p.root, "worktrees", string(f.ParentID))
 	if _, err := os.Stat(dir); err == nil {
 		return p.managerAt(ctx, dir)
 	}

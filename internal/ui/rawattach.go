@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 )
 
 // resolveAttach validates a raw-attach request and returns the command to
@@ -37,7 +37,7 @@ func (m *Shell) resolveAttach(f domain.Feature) (argv []string, dir string, prob
 	if _, err := exec.LookPath(argv[0]); err != nil {
 		return nil, "", "raw attach: " + argv[0] + " not found (set GUMMI_ATTACH_CMD)"
 	}
-	return argv, filepath.Join(m.wt.Root(), f.WorktreePath()), ""
+	return argv, gummidir.FromRel(m.wt.Root(), f.WorktreePath()), ""
 }
 
 func defaultAttachCommand() string {

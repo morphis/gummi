@@ -22,6 +22,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 	"github.com/morphis/gummi/internal/spec"
 )
 
@@ -271,7 +272,7 @@ func (e *Engine) StartSessionSpec(ctx context.Context, f domain.Feature, title, 
 	if err != nil {
 		return sp, 0, err
 	}
-	path := filepath.Join(e.pool.Root(), filepath.FromSlash(sp.Path))
+	path := gummidir.FromRel(e.pool.Root(), sp.Path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return sp, 0, err
 	}

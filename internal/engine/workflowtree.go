@@ -20,6 +20,7 @@ import (
 
 	"github.com/morphis/gummi/internal/atomicfile"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/gummidir"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/workflowrecipe"
@@ -30,7 +31,7 @@ import (
 // artifacts, the diff files and each step's output. It is in the
 // workspace, not the tree, so it is never in the session's diff.
 func (e *Engine) RunDir(session domain.FeatureID, n int) string {
-	return filepath.Join(e.pool.Root(), ".gummi", "runs", string(session), strconv.Itoa(n))
+	return gummidir.Path(e.pool.Root(), "runs", string(session), strconv.Itoa(n))
 }
 
 // writeRunFile writes rel under the run's directory, making what it needs.
