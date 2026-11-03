@@ -46,11 +46,9 @@ func isRunSession(f domain.Feature) bool { return hasSessionSpec(f) }
 // runInputs reads the session's runs for the thread's fold: each run and
 // its steps from the store, its spec's title, the files it has changed
 // (from its snapshots, never a fresh one), and the session of each live
-// step and of each ended one working again.
-//
-// A run that ended before start (threadfold.RunLeftBehind) is skipped
-// before any of its reads are made; a zero start skips none.
-func (d *WebDocs) runInputs(ctx context.Context, start time.Time) []threadfold.RunInput {
+// step and of each ended one working again. A run an earlier conversation
+// left behind is read too: it is drawn folded (threadfold.FoldSince).
+func (d *WebDocs) runInputs(ctx context.Context) []threadfold.RunInput {
 	if !isRunSession(d.f) {
 		return nil
 	}
@@ -67,9 +65,6 @@ func (d *WebDocs) runInputs(ctx context.Context, start time.Time) []threadfold.R
 	out := make([]threadfold.RunInput, 0, len(runs))
 	always := d.eng != nil && d.eng.WorkflowAlwaysAllows(ctx, d.f.ID)
 	for i, r := range runs {
-		if threadfold.RunLeftBehind(r.State, r.EndedAt, start) {
-			continue
-		}
 		steps, _ := d.store.RunStepsLite(ctx, d.f.ID, r.N)
 		in := threadfold.RunInput{Run: r, Steps: steps, SpecTitle: titles[r.Spec], Live: map[string]threadfold.StepLive{}, Envelope: float64(d.f.Budget.Envelope)}
 		in.AlwaysAllowed = always && i == len(runs)-1
@@ -95,16 +90,15 @@ func (d *WebDocs) runInputs(ctx context.Context, start time.Time) []threadfold.R
 	return out
 }
 
-// runFold reads what the fold of the session's runs needs: the runs the
-// conversation as it stands still draws (runInputs, threadfold.CurrentRuns),
-// and when a person last said something to the session, which folds the
-// run that ended last (threadfold.FoldRuns).
+// runFold reads what the fold of the session's runs needs: every run of
+// the session (runInputs), and the moment after which an ended run is no
+// longer the latest news, which folds the run that ended last
+// (threadfold.FoldSince, threadfold.FoldRuns).
 func (d *WebDocs) runFold(ctx context.Context) ([]threadfold.RunInput, time.Time) {
 	if d.eng == nil {
-		return d.runInputs(ctx, time.Time{}), time.Time{}
+		return d.runInputs(ctx), time.Time{}
 	}
-	tr := sessionTranscript(d.eng, d.f.ID)
-	return d.runInputs(ctx, threadfold.ConversationStart(tr)), threadfold.PersonSaid(tr)
+	return d.runInputs(ctx), threadfold.FoldSince(sessionTranscript(d.eng, d.f.ID))
 }
 
 // sessionTranscript is the session's conversation as the engine holds it,

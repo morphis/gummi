@@ -150,7 +150,7 @@ export async function loadThread (id = state.sel, full = false) {
 
 // withoutGone drops the held run and dispatch items a paged read did not
 // bring: those come on every page (threadfold.Since), so one missing is
-// gone — a run a /clear or /handoff left behind with its conversation.
+// gone. A run a /clear or /handoff left behind is still sent, folded.
 function withoutGone (items, fresh) {
   const keys = new Set(fresh.map(it => it.key))
   return items.filter(it => (it.t !== 'run' && it.t !== 'dispatch') || keys.has(it.key))

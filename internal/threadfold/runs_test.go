@@ -432,33 +432,49 @@ func TestARunProposedInTheSettledHistorySitsThere(t *testing.T) {
 	}
 }
 
-// TestARunEndedBeforeTheConversationIsNotDrawn: once /clear or /handoff
-// starts the conversation over, a run that ended before it is left out;
-// an open run, and one that ended since, stay.
-func TestARunEndedBeforeTheConversationIsNotDrawn(t *testing.T) {
+// TestARunEndedBeforeTheConversationIsFolded: once /clear or /handoff
+// starts the conversation over, a run that ended before it is still drawn,
+// folded to its line, even the one that ended last; an open run, and one
+// that ended since, stay whole.
+func TestARunEndedBeforeTheConversationIsFolded(t *testing.T) {
 	t0 := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	cleared := t0.Add(time.Hour)
 	tr := []engine.Message{
 		{Author: engine.AuthorSystem, Content: "Cleared the conversation.", At: cleared},
 	}
-	start := ConversationStart(tr)
-	if !start.Equal(cleared) {
-		t.Fatalf("start = %v, want the cleared note's %v", start, cleared)
+	if got := FoldSince(tr); !got.Equal(cleared) {
+		t.Fatalf("FoldSince = %v, want the cleared note's %v", got, cleared)
+	}
+	left := []RunInput{
+		{Run: domain.Run{N: 1, State: domain.RunDone, CreatedAt: t0, EndedAt: t0.Add(time.Minute)}},
+		{Run: domain.Run{N: 2, State: domain.RunDone, CreatedAt: t0, EndedAt: t0.Add(2 * time.Minute)}},
+	}
+	for _, r := range FoldRuns(left, FoldSince(tr)) {
+		if !r.Folded {
+			t.Errorf("run %d ended before the conversation and is drawn whole", r.N)
+		}
+	}
+	if !RunLeftBehind(domain.RunDone, t0.Add(time.Minute), cleared) || RunLeftBehind(domain.RunRunning, time.Time{}, cleared) {
+		t.Error("RunLeftBehind misjudges an ended run before the conversation, or an open one")
 	}
 	ins := []RunInput{
 		{Run: domain.Run{N: 1, State: domain.RunDone, CreatedAt: t0, EndedAt: t0.Add(time.Minute)}},
 		{Run: domain.Run{N: 2, State: domain.RunRunning, CreatedAt: t0}},
-		{Run: domain.Run{N: 3, State: domain.RunDone, CreatedAt: t0, EndedAt: cleared.Add(time.Minute)}},
+		{Run: domain.Run{N: 3, State: domain.RunDone, CreatedAt: cleared, EndedAt: cleared.Add(time.Minute)}},
 	}
-	var got []int
-	for _, in := range CurrentRuns(ins, start) {
-		got = append(got, in.Run.N)
+	said := cleared.Add(30 * time.Second)
+	tr = append(tr, engine.Message{Author: engine.AuthorUser, Content: "go on", At: said})
+	var whole []int
+	for _, r := range FoldRuns(ins, FoldSince(tr)) {
+		if !r.Folded {
+			whole = append(whole, r.N)
+		}
 	}
-	if fmt.Sprint(got) != "[2 3]" {
-		t.Errorf("runs drawn = %v, want [2 3]", got)
+	if fmt.Sprint(whole) != "[2 3]" {
+		t.Errorf("runs drawn whole = %v, want [2 3]", whole)
 	}
-	if n := len(CurrentRuns(ins, ConversationStart(nil))); n != 3 {
-		t.Errorf("with no conversation, %d runs drawn, want all 3", n)
+	if got := FoldSince(tr); !got.Equal(said) {
+		t.Errorf("FoldSince = %v, want the person's later line, %v", got, said)
 	}
 }
 

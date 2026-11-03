@@ -7331,7 +7331,11 @@ met of those checked, its spend and the files it left changed. The run
 that ended most recently stays whole until the person says something to
 the session after it ended (a line of theirs, never a run's report or an
 objective's turn: `PersonSaid`) or another run is proposed; every older
-ended run is one line. `threadfold.FoldRuns` decides it (`Run.Folded`,
+ended run is one line. A `/clear` or `/handoff` folds every run that
+ended before the conversation began over, and never drops one: a run's
+steps, their transcripts and diffs, and its artifacts stay one unfold
+away from the thread for as long as the session lasts
+(`threadfold.FoldSince`). `threadfold.FoldRuns` decides it (`Run.Folded`,
 `Mark`, `Line`; folding moves the block's `Rev`), so both faces fold the
 same runs. An open run (proposed, queued, running, paused) is always
 whole. Activating the line unfolds the whole block as above; activating
