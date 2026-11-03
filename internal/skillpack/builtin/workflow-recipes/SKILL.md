@@ -116,9 +116,9 @@ A step sees only its filled prompt: name every output and artifact.
 `abort` ends the run partial. A loop gummi cannot judge (no verdict
 artifact, a check ran no tests) always asks.
 
-Give a verdict step an artifact and the exact JSON to write; a missing
-one is captured from the output's last JSON object, if any. From round
-2 each step is briefed with the last round's verdict inline.
+Give a verdict step an artifact and its exact JSON. A missing
+one is taken from the output's last JSON object, else the step is sent
+back once to write it. Round 2 on, each step gets the last verdict.
 
 ## Joins: `parallel`
 

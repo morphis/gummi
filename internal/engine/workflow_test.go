@@ -1838,6 +1838,9 @@ func TestALoopThatCannotJudgeAsksThePerson(t *testing.T) {
 	if u := r.Until["build/1"]; u.Met || !u.Unjudged {
 		t.Fatalf("until %+v", u)
 	}
+	if wf.count("verdict#") != 1 {
+		t.Fatalf("the verdict step was sent back %d times before the person was asked, want once", wf.count("verdict#"))
+	}
 	// it waits: ticking starts nothing
 	for range 5 {
 		if _, err := e.WorkflowTick(ctx); err != nil {
@@ -1853,6 +1856,42 @@ func TestALoopThatCannotJudgeAsksThePerson(t *testing.T) {
 	r = tickRuns(t, e, f.ID, run.N, "ended", ended)
 	if wf.count("implement") != 1 || wf.count("after") != 1 {
 		t.Fatalf("ended %s: implement ran %d, after %d", r.State, wf.count("implement"), wf.count("after"))
+	}
+}
+
+// TestAStepThatEndsWithoutItsVerdictIsSentBackOnce: a reviewer whose reply
+// stopped short of writing the artifact its loop reads the verdict from is
+// sent back once, in its own conversation, to write it; the loop then ends
+// on it with no person's answer, and the run's notes say so. A second miss
+// is the person's, as before (TestALoopThatCannotJudgeAsksThePerson).
+func TestAStepThatEndsWithoutItsVerdictIsSentBackOnce(t *testing.T) {
+	wf := newWFFake()
+	wf.on("implement", writesOut)
+	wf.on("verdict", func(string, string, int) wfReply { return wfReply{text: "Still waiting on DW-2.", credits: 1} })
+	file := regexp.MustCompile(`the review artifact \(([^)]+review\.json)\)`)
+	wf.on("verdict#", func(_, msg string, _ int) wfReply {
+		if m := file.FindStringSubmatch(msg); m != nil {
+			_ = os.WriteFile(m[1], []byte(`{"verdict":"APPROVED"}`), 0o600)
+		}
+		return wfReply{text: "wrote it", credits: 1}
+	})
+	e, _, f, ff := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: verdictLoop})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || !r.Until["build/1"].Met || wf.count("implement") != 1 ||
+		wf.count("verdict") != 1 || wf.count("verdict#") != 1 {
+		t.Fatalf("ended %s (%s): implement %d, verdict %d, sent back %d, until %+v", r.State, r.Reason,
+			wf.count("implement"), wf.count("verdict"), wf.count("verdict#"), r.Until)
+	}
+	if steps := stepPaths(t, e, f.ID, run.N); steps["build/1/verdict"].Output != "wrote it" {
+		t.Errorf("the verdict step's output is %q, want its reply after it was sent back", steps["build/1/verdict"].Output)
+	}
+	var said bool
+	for _, l := range ff.Snapshot().Activity {
+		said = said || strings.Contains(l, "build/1/verdict ended without writing the review artifact")
+	}
+	if !said {
+		t.Errorf("the run's notes do not say the step was sent back: %q", ff.Snapshot().Activity)
 	}
 }
 

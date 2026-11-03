@@ -589,7 +589,74 @@ func (e *Engine) afterStepTurn(ctx context.Context, card domain.Feature, reply s
 			why = "it said it failed"
 		}
 	}
+	if state == domain.StepDone && e.askForVerdict(ctx, run, inst, reply) {
+		return
+	}
 	e.endStep(ctx, inst, state, why, reply, endTree)
+}
+
+// verdictTriesCap is how many times a step that ended without writing the
+// artifact its loop's verdict is read from goes back to write it before it
+// ends as it is.
+const verdictTriesCap = 1
+
+// askForVerdict sends a step that ended done without writing an artifact a
+// repeat's verdict is read from — nor holding one in its output to capture
+// — back to write it, once, in its own conversation: a reply cut short (a
+// context limit, a classifier's stop, a turn that just stopped) would
+// otherwise leave its loop unable to judge and the run waiting on the
+// person. The run's notes say so. It reports whether it sent the turn.
+func (e *Engine) askForVerdict(ctx context.Context, run *domain.Run, inst *domain.RunStep, reply string) bool {
+	if inst.Card == "" {
+		return false
+	}
+	entries := e.entriesFor(ctx, run, inst.Path)
+	def, ok := workflowrecipe.Find(domain.Recipe{Steps: entries}, inst.StepID)
+	if !ok || len(def.Artifacts) == 0 {
+		return false
+	}
+	stamps := e.peekStamps(inst.Session, inst.Run, inst.Path)
+	var missing []string
+	for _, name := range verdictArtifacts(entries) {
+		file, declared := def.Artifacts[name]
+		if !declared || e.wroteArtifact(inst, file, stamps) {
+			continue
+		}
+		if _, ok := workflowrecipe.CaptureArtifact(reply, file); ok {
+			continue
+		}
+		missing = append(missing, fmt.Sprintf("the %s artifact (%s)", name, filepath.Join(e.RunDir(inst.Session, inst.Run), file)))
+	}
+	if len(missing) == 0 || e.wfRT().planTry("verdict/"+stepKey(inst.Session, inst.Run, inst.Path)) > verdictTriesCap {
+		return false
+	}
+	what := strings.Join(missing, " and ")
+	e.runNote(inst.Session, fmt.Sprintf("run %d: %s ended without writing %s, which its loop reads its verdict from; gummi sent it back once to write it",
+		inst.Run, inst.Path, what))
+	e.sendStepTurn(inst.Card, "You ended without writing "+what+", which the loop reads its verdict from: without it the loop "+
+		"cannot judge. Finish your task and write it now. Your reply to this message becomes your output.")
+	return true
+}
+
+// verdictArtifacts names, sorted, the artifacts the repeats among es read
+// a verdict from.
+func verdictArtifacts(es []domain.Entry) []string {
+	var out []string
+	var walk func([]domain.Entry)
+	walk = func(es []domain.Entry) {
+		for _, en := range es {
+			if en.Repeat == nil {
+				continue
+			}
+			if en.Repeat.Until.Kind() == domain.UntilVerdict {
+				out = append(out, en.Repeat.Until.In)
+			}
+			walk(en.Repeat.Steps)
+		}
+	}
+	walk(es)
+	sort.Strings(out)
+	return out
 }
 
 // plannerEnded handles a planner's gummi-workflow block: one that passes
@@ -724,24 +791,11 @@ func (e *Engine) captureArtifacts(ctx context.Context, inst *domain.RunStep, out
 	stamps := e.takeStamps(inst.Session, inst.Run, inst.Path)
 	for _, name := range names {
 		file := def.Artifacts[name]
-		fi, err := os.Stat(filepath.Join(e.RunDir(inst.Session, inst.Run), file))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(e.RunDir(inst.Session, inst.Run), file)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		// written by this step: its own. One an earlier iteration left,
-		// untouched since this step started, is no answer of this step's —
-		// a verdict step that only printed its verdict would otherwise
-		// leave the last iteration's to be judged
-		if err == nil {
-			if stamps == nil {
-				// a restart lost the stamps: the file is the step's own only
-				// if written since the step started
-				if fi.ModTime().After(inst.StartedAt) {
-					continue
-				}
-			} else if was, stamped := stamps[file]; !stamped || !fi.ModTime().Equal(was) {
-				continue
-			}
+		if e.wroteArtifact(inst, file, stamps) {
+			continue
 		}
 		body, ok := workflowrecipe.CaptureArtifact(output, file)
 		if !ok {
@@ -774,6 +828,32 @@ func (e *Engine) stampArtifacts(session domain.FeatureID, n int, path string, st
 	rt.mu.Lock()
 	rt.stamps[stepKey(session, n, path)] = at
 	rt.mu.Unlock()
+}
+
+// wroteArtifact reports whether the step wrote its artifact file since it
+// started. One an earlier iteration left, untouched since this step
+// started, is no answer of this step's — a verdict step that only printed
+// its verdict would otherwise leave the last iteration's to be judged.
+// With no stamps (a restart lost them) the file is the step's own only if
+// written since the step started.
+func (e *Engine) wroteArtifact(inst *domain.RunStep, file string, stamps map[string]time.Time) bool {
+	fi, err := os.Stat(filepath.Join(e.RunDir(inst.Session, inst.Run), file))
+	if err != nil {
+		return false
+	}
+	if stamps == nil {
+		return fi.ModTime().After(inst.StartedAt)
+	}
+	was, stamped := stamps[file]
+	return !stamped || !fi.ModTime().Equal(was)
+}
+
+// peekStamps reads a step's artifact stamps, keeping them.
+func (e *Engine) peekStamps(session domain.FeatureID, n int, path string) map[string]time.Time {
+	rt := e.wfRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.stamps[stepKey(session, n, path)]
 }
 
 // takeStamps hands over (and forgets) a step's artifact stamps.

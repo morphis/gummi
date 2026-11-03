@@ -262,8 +262,9 @@ not repeat it, and every round's prompt may read the same.
 
 When `max` is reached without the condition, `onMax` decides: `pause`
 asks you, `continue` moves on, `abort` ends the run partial. A loop
-gummi cannot judge — the verdict file was never written, a check ran no
-tests — always asks you, whatever `onMax` says.
+gummi cannot judge — the verdict file was never written, even after
+gummi sent its step back once to write it, or a check ran no tests —
+always asks you, whatever `onMax` says.
 
 ### Side by side
 
@@ -654,8 +655,13 @@ gummi keeps its own files there too — the run's report is
 `run-report.md` — and refuses an artifact that names one of them.
 If a step ends without writing an artifact it declared, gummi captures
 it from the step's output — the last non-empty JSON object for a `.json` file,
-otherwise the last fenced block — and notes that it did. Artifacts are
-shown on the run's block once written.
+otherwise the last fenced block — and notes that it did. When the
+missing artifact is one a loop reads its verdict from and the output
+holds none to capture, gummi first sends the step back once, in its own
+conversation, to write it: a reply cut short no longer leaves the loop
+unable to judge. Its reply then is its output, and the run's notes say
+it was sent back. Missing it a second time, the loop cannot judge and
+asks you. Artifacts are shown on the run's block once written.
 
 ### What a recipe is checked for
 
