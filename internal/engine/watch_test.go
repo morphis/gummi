@@ -288,8 +288,10 @@ func TestADispatchMintsASessionInItsRepo(t *testing.T) {
 	if s := steps["bump"]; s.State != domain.StepDone || s.Output != "dispatched "+string(child.ID) || s.Card != "" {
 		t.Errorf("bump = %+v", s)
 	}
+	// The child's run may already have ended and written its report below
+	// the spec the dispatch wrote; only what the dispatch wrote is checked.
 	text, ok := e.SessionSpec(child, 1)
-	if !ok || text != "Bump to v2.\n" {
+	if written, _, _ := strings.Cut(text, "\n## Report\n"); !ok || written != "Bump to v2.\n" {
 		t.Errorf("the child's spec 1 = %q %v", text, ok)
 	}
 	cr := tickRuns(t, e, child.ID, 1, "the child's run ended", ended)

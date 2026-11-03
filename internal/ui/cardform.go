@@ -152,7 +152,7 @@ func newCardForm(profiles, repos []string, hasDefault bool, lastRepo string, def
 		profiles = defaultProfilePresets
 	}
 	text := textarea.New()
-	text.CharLimit = 4096
+	text.CharLimit = threadInputCharLimit
 	text.ShowLineNumbers = false
 	text.SetWidth(descWidthMin)
 	text.SetHeight(descHeightMin)

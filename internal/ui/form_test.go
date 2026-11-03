@@ -111,13 +111,17 @@ func TestWrapHintBreaksOnSeparators(t *testing.T) {
 	}
 }
 
-// TestCardFormCharLimit: the text accepts up to 4096 characters.
+// TestCardFormCharLimit: the text takes as much as the thread composer
+// does, and no more.
 func TestCardFormCharLimit(t *testing.T) {
 	form := door(nil)
-	long := strings.Repeat("a", 4096)
-	form.text.SetValue(long)
-	if got := len(form.Text()); got != 4096 {
-		t.Fatalf("text length = %d, want 4096 (not truncated)", got)
+	form.text.SetValue(strings.Repeat("a", threadInputCharLimit))
+	if got := len(form.Text()); got != threadInputCharLimit {
+		t.Fatalf("text length = %d, want %d (not truncated)", got, threadInputCharLimit)
+	}
+	form.text.SetValue(strings.Repeat("a", threadInputCharLimit+1))
+	if got := len(form.Text()); got != threadInputCharLimit {
+		t.Fatalf("text length = %d, want %d (cut at the limit)", got, threadInputCharLimit)
 	}
 }
 

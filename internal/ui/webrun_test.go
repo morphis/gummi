@@ -85,7 +85,9 @@ func TestARunOnTheWebFace(t *testing.T) {
 		_, _ = eng.WorkflowTick(ctx)
 		var r *domain.Run
 		_ = b.Do(ctx, func(m *Shell) tea.Cmd { r, _ = m.store.Run(ctx, f.ID, run.N); return nil })
-		return r != nil && r.State.Ended()
+		// the store marks a run ended before gummi lets go of its end
+		// phase, and nothing is offered a revert while it is ending
+		return r != nil && r.State.Ended() && eng.RunPhase(f.ID, run.N) == ""
 	})
 	reloadRows(t, b)
 
