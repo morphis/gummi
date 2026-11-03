@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,6 +31,8 @@ var wfStepRe = regexp.MustCompile(`You are step (\S+) of workflow run`)
 type wfReply struct {
 	text    string
 	credits float64
+	// err ends the turn on a backend error instead of a reply.
+	err error
 }
 
 // wfFake answers a workflow's steps by their id: each step's handler is
@@ -79,6 +82,12 @@ func newWFFake() *wfFake {
 		r := wfReply{text: "done", credits: 2}
 		if fn != nil {
 			r = fn(opts.WorkDir, msg, n)
+		}
+		if r.err != nil {
+			return []agent.Event{
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: r.credits, Model: "m"}},
+				{Kind: agent.EventError, Err: r.err},
+			}
 		}
 		return []agent.Event{
 			{Kind: agent.EventUsage, Usage: agent.Usage{Credits: r.credits, Model: "m"}},
@@ -1838,6 +1847,9 @@ func TestALoopThatCannotJudgeAsksThePerson(t *testing.T) {
 	if u := r.Until["build/1"]; u.Met || !u.Unjudged {
 		t.Fatalf("until %+v", u)
 	}
+	if wf.count("verdict#") != 1 {
+		t.Fatalf("the verdict step was sent back %d times before the person was asked, want once", wf.count("verdict#"))
+	}
 	// it waits: ticking starts nothing
 	for range 5 {
 		if _, err := e.WorkflowTick(ctx); err != nil {
@@ -1854,6 +1866,111 @@ func TestALoopThatCannotJudgeAsksThePerson(t *testing.T) {
 	if wf.count("implement") != 1 || wf.count("after") != 1 {
 		t.Fatalf("ended %s: implement ran %d, after %d", r.State, wf.count("implement"), wf.count("after"))
 	}
+}
+
+// TestAStepThatEndsWithoutItsVerdictIsSentBackOnce: a reviewer whose reply
+// stopped short of writing the artifact its loop reads the verdict from is
+// sent back once, in its own conversation, to write it; the loop then ends
+// on it with no person's answer, and the run's notes say so. A second miss
+// is the person's, as before (TestALoopThatCannotJudgeAsksThePerson).
+func TestAStepThatEndsWithoutItsVerdictIsSentBackOnce(t *testing.T) {
+	wf := newWFFake()
+	wf.on("implement", writesOut)
+	wf.on("verdict", func(string, string, int) wfReply { return wfReply{text: "Still waiting on DW-2.", credits: 1} })
+	file := regexp.MustCompile(`the review artifact \(([^)]+review\.json)\)`)
+	wf.on("verdict#", func(_, msg string, _ int) wfReply {
+		if m := file.FindStringSubmatch(msg); m != nil {
+			_ = os.WriteFile(m[1], []byte(`{"verdict":"APPROVED"}`), 0o600)
+		}
+		return wfReply{text: "wrote it", credits: 1}
+	})
+	e, _, f, ff := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: verdictLoop})
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || !r.Until["build/1"].Met || wf.count("implement") != 1 ||
+		wf.count("verdict") != 1 || wf.count("verdict#") != 1 {
+		t.Fatalf("ended %s (%s): implement %d, verdict %d, sent back %d, until %+v", r.State, r.Reason,
+			wf.count("implement"), wf.count("verdict"), wf.count("verdict#"), r.Until)
+	}
+	if steps := stepPaths(t, e, f.ID, run.N); steps["build/1/verdict"].Output != "wrote it" {
+		t.Errorf("the verdict step's output is %q, want its reply after it was sent back", steps["build/1/verdict"].Output)
+	}
+	var said bool
+	for _, l := range ff.Snapshot().Activity {
+		said = said || strings.Contains(l, "build/1/verdict ended without writing the review artifact")
+	}
+	if !said {
+		t.Errorf("the run's notes do not say the step was sent back: %q", ff.Snapshot().Activity)
+	}
+}
+
+// TestAVerdictOfAnotherShapeIsAReject: a loop whose until declares its
+// verdict's schema counts an APPROVED artifact of another shape as a
+// reject: the loop goes round, its next round told why, and ends on the
+// round whose artifact fits.
+func TestAVerdictOfAnotherShapeIsAReject(t *testing.T) {
+	recipe := strings.Replace(verdictLoop, "until: { verdict: APPROVED, in: review }",
+		"until: { verdict: APPROVED, in: review, schema: { findings: array } }", 1)
+	wf := newWFFake()
+	wf.on("implement", writesOut)
+	var dir string
+	wf.on("verdict", func(_, _ string, n int) wfReply {
+		body := `{"verdict":"APPROVED"}`
+		if n == 2 {
+			body = `{"verdict":"APPROVED","findings":[]}`
+		}
+		_ = os.WriteFile(filepath.Join(dir, "review.json"), []byte(body), 0o600)
+		return wfReply{text: "approved", credits: 1}
+	})
+	e, _, f, _ := wfEngine(t, wf)
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+	dir = e.RunDir(f.ID, run.N)
+	r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+	if r.State != domain.RunDone || wf.count("implement") != 2 || !r.Until["build/2"].Met ||
+		r.Until["build/1"].Detail != "rejected: review (review.json) does not match its schema: findings is missing" {
+		t.Fatalf("ended %s after %d rounds, until %+v", r.State, wf.count("implement"), r.Until)
+	}
+}
+
+// TestAStepThatStopsShortIsSentBackOnce: a step whose turn stops on a
+// backend error or a safety stop is sent back once, in its own
+// conversation, to finish; the run goes on when it does. Stopping twice
+// fails it with a reason naming the outcome.
+func TestAStepThatStopsShortIsSentBackOnce(t *testing.T) {
+	recipe := "name: two\nsteps:\n  - { id: one, role: implementer, prompt: build }\n  - { id: two, role: scribe, prompt: wrap up }\n"
+	t.Run("finishes", func(t *testing.T) {
+		wf := newWFFake()
+		wf.on("one", func(string, string, int) wfReply { return wfReply{err: errors.New("overloaded"), credits: 1} })
+		wf.on("one#", func(string, string, int) wfReply { return wfReply{text: "finished", credits: 1} })
+		e, _, f, ff := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+		tickRuns(t, e, f.ID, run.N, "ended", ended)
+		steps := stepPaths(t, e, f.ID, run.N)
+		if steps["one"].State != domain.StepDone || steps["one"].Output != "finished" || wf.count("one#") != 1 || wf.count("two") != 1 {
+			t.Fatalf("one %s (%q), sent back %d, two ran %d", steps["one"].State, steps["one"].Output, wf.count("one#"), wf.count("two"))
+		}
+		var said bool
+		for _, l := range ff.Snapshot().Activity {
+			said = said || strings.Contains(l, "one stopped on a backend error (overloaded); gummi sent it back once")
+		}
+		if !said {
+			t.Errorf("the run's notes do not say the step was sent back: %q", ff.Snapshot().Activity)
+		}
+	})
+	t.Run("stops twice", func(t *testing.T) {
+		wf := newWFFake()
+		refused := errors.New("API Error: this request appears to violate our Usage Policy")
+		wf.on("one", func(string, string, int) wfReply { return wfReply{err: refused, credits: 1} })
+		wf.on("one#", func(string, string, int) wfReply { return wfReply{err: refused, credits: 1} })
+		e, _, f, _ := wfEngine(t, wf)
+		run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: recipe})
+		r := tickRuns(t, e, f.ID, run.N, "ended", ended)
+		one := stepPaths(t, e, f.ID, run.N)["one"]
+		if r.State != domain.RunPartial || one.State != domain.StepFailed || wf.count("one#") != 1 ||
+			!strings.HasPrefix(one.Reason, "not completed: safety stop: ") {
+			t.Fatalf("run %s, one %s (%q), sent back %d", r.State, one.State, one.Reason, wf.count("one#"))
+		}
+	})
 }
 
 // emptyCheckSpec is the test spec with a done-when check that passes and

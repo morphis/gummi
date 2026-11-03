@@ -249,6 +249,13 @@ times:
   both hold: the reviewer approved *and* every done-when check passes.
   Use it for a fix loop that must not end green over a reviewer's
   blocker, nor approved over a failing check.
+- `until: { verdict: APPROVED, in: review, schema: { findings: array } }`
+  — a verdict with its artifact's shape declared: each field the JSON
+  object must hold, by type (`string`, `number`, `boolean`, `array`,
+  `object`; `verdict` is always required, a string). An artifact that
+  is missing, not JSON or of another shape is then a reject: the loop
+  goes round, its next round told what was wrong, rather than asking
+  you. Use it when a malformed review must never end the loop.
 
 From the second round on, gummi tells each step of the loop why the
 round before did not end it, after its own prompt: the condition as
@@ -262,8 +269,9 @@ not repeat it, and every round's prompt may read the same.
 
 When `max` is reached without the condition, `onMax` decides: `pause`
 asks you, `continue` moves on, `abort` ends the run partial. A loop
-gummi cannot judge — the verdict file was never written, a check ran no
-tests — always asks you, whatever `onMax` says.
+gummi cannot judge — the verdict file was never written, even after
+gummi sent its step back once to write it, or a check ran no tests —
+always asks you, whatever `onMax` says.
 
 ### Side by side
 
@@ -462,6 +470,7 @@ More than one writing role in one `parallel` is a warning.
 | `{ verdict: <word>, in: <artifact> }` | the artifact's JSON field `verdict` equals the word; a step inside the loop must declare the artifact |
 | `{ contains: <text> }` | the loop's last step's output contains the text |
 | either of the two above with `checks: true` | that condition holds and every done-when check passes |
+| a verdict with `schema: { <field>: <type> }` | the verdict holds in an artifact of that shape; one missing, not JSON or of another shape is a reject |
 
 | `onMax` | at `max` without the condition |
 |---|---|
@@ -470,7 +479,7 @@ More than one writing role in one `parallel` is a warning.
 | `abort` | ends the run partial |
 
 A condition that cannot be judged (no checks, a check that ran no tests
-or timed out, a verdict artifact never written) asks you, whatever
+or timed out, a verdict artifact never written and no `schema`) asks you, whatever
 `onMax` says. One more iteration given there does not count against
 `max`.
 
@@ -644,7 +653,12 @@ gummi reads these lines in a step's final message:
 | a fenced `gummi-done-when` block | adds its checks to the run, after the spec's items; a step that maps a bug's reach uses it to make the run prove each place it found |
 | a fenced `gummi-workflow` block | from a `planner`, replaces the remaining steps once you allow it |
 
-A step also fails when its agent errors.
+When a step's turn stops short on a backend error or a safety stop (the
+model or its provider refusing on a usage policy), gummi sends it back
+once, in its own conversation, to pick up where it left off, and the
+run's notes say so. Stopping a second time fails the step, its reason
+naming the outcome: `not completed: safety stop: …` or `not completed:
+backend error: …`.
 
 ### Artifacts
 
@@ -654,8 +668,13 @@ gummi keeps its own files there too — the run's report is
 `run-report.md` — and refuses an artifact that names one of them.
 If a step ends without writing an artifact it declared, gummi captures
 it from the step's output — the last non-empty JSON object for a `.json` file,
-otherwise the last fenced block — and notes that it did. Artifacts are
-shown on the run's block once written.
+otherwise the last fenced block — and notes that it did. When the
+missing artifact is one a loop reads its verdict from and the output
+holds none to capture, gummi first sends the step back once, in its own
+conversation, to write it: a reply cut short no longer leaves the loop
+unable to judge. Its reply then is its output, and the run's notes say
+it was sent back. Missing it a second time, the loop cannot judge and
+asks you. Artifacts are shown on the run's block once written.
 
 ### What a recipe is checked for
 
@@ -681,8 +700,10 @@ A recipe is refused, with every problem listed, when it has:
 - a template naming no input, no declared artifact or no earlier step;
 - a `repeat` without `max` or without exactly one `until` (a verdict or
   `contains` with `checks: true` beside it counts as one), an unknown
-  `onMax`, or a verdict `until` whose artifact no step in the loop
-  declares;
+  `onMax`, a verdict `until` whose artifact no step in the loop
+  declares, or a `schema` beside no verdict, naming a type other than
+  `string`, `number`, `boolean`, `array` or `object`, or making
+  `verdict` anything but a string;
 - a `parallel` without a valid `join`, or holding anything but plain
   steps;
 - a `run:` with `quietExit` that is not the first step, a template

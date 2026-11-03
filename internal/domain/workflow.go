@@ -280,7 +280,15 @@ type Until struct {
 	In      string
 	// Contains: the iteration's last step's output contains the text.
 	Contains string
+	// Schema is a verdict's artifact shape: each top-level field the JSON
+	// object must hold, by its JSON type (string, number, boolean, array,
+	// object). With one, an artifact missing, not JSON or of another shape
+	// is a reject rather than a loop that cannot judge.
+	Schema map[string]string `json:",omitempty"`
 }
+
+// SchemaTypes are the JSON types a verdict's Schema may name.
+var SchemaTypes = []string{"string", "number", "boolean", "array", "object"}
 
 // Until kinds, as Kind names them.
 const (
