@@ -7684,10 +7684,15 @@ The build follows §25, with these differences.
 - **The person's Pause stops the steps' backends**, as a quit does.
   Resume starts them again, each with a turn saying the run carries on.
 - **The envelope is a ceiling across a run's steps.** A step's own cap is
-  what the pool had left when its backend spawned, so every step's spend
-  re-checks the session's pool: once it is spent the run pauses at once
-  and every live step's backend stops, as a Pause does. On a spent pool a
-  step's cap is nothing, and no step backend spawns.
+  what the pool had left when its backend spawned — never a share of it
+  among the steps at work — so every step's spend re-checks the
+  session's pool: once it is spent the run pauses at once and every live
+  step's backend stops, as a Pause does. The pool alone stops a step:
+  neither gummi nor the backend ends one on its own cap, which would end
+  it on a cut-off reply as if done. On a spent pool a step's cap is
+  nothing, and no step backend spawns. A step is told no figure, only
+  that money is not its to manage (`budgetHintStep`): a figure shown is
+  one a model rations against instead of working.
 - **A step is briefed only into a running run.** Its brief goes under the
   run lock, once its backend is up, and only while the step is live and
   the run running and not stopping; a stop, pause, drop or join that came

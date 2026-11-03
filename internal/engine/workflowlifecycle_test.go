@@ -2,13 +2,15 @@ package engine
 
 import (
 	"context"
-	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 )
 
@@ -138,10 +140,11 @@ func TestEndedRunReportRedeliveredAfterRestart(t *testing.T) {
 	}
 }
 
-// TestParallelBranchesShareRemainingPool: the steps of a parallel block each
-// get a share of what the session's pool has left, so their caps together
-// are not past it.
-func TestParallelBranchesShareRemainingPool(t *testing.T) {
+// TestParallelStepsAreNotGivenAShareOfThePool: the steps of a parallel block
+// are each capped at what the session's pool has left, not a share of it —
+// the pool is held across them by checkRunPool, so a step that needs more
+// than its siblings is not stopped while the pool still has money.
+func TestParallelStepsAreNotGivenAShareOfThePool(t *testing.T) {
 	wf := newWFFake()
 	g := newGate(t)
 	for _, id := range []string{"a", "b", "c", "d"} {
@@ -171,20 +174,59 @@ func TestParallelBranchesShareRemainingPool(t *testing.T) {
 	if !bounded || left <= 0 {
 		t.Fatalf("pool left %v %v", left, bounded)
 	}
-	total := 0.0
 	for _, s := range stepPaths(t, e, f.ID, run.N) {
 		card, err := store.GetFeature(ctx, s.Card)
 		if err != nil {
 			t.Fatal(err)
 		}
-		b := e.stepBudget(ctx, card)
-		if b <= 0 {
-			t.Errorf("step %s has no cap", s.Path)
+		if b := e.stepBudget(ctx, card); math.Abs(b-left) > 0.001 {
+			t.Errorf("step %s is capped at %.1f, not the pool's remainder %.1f", s.Path, b, left)
 		}
-		total += b
 	}
-	if total > left+0.001 {
-		t.Fatalf("the four caps total %.1f, past the pool's remainder %.1f", total, left)
+}
+
+// TestAStepIsToldNoBudgetFigure: a step's backend is told money is not its to
+// manage, never a figure it would ration against, and enforces no cap of its
+// own — the session's pool, held across the run, is what pauses it.
+func TestAStepIsToldNoBudgetFigure(t *testing.T) {
+	wf := newWFFake()
+	var (
+		mu   sync.Mutex
+		seen []agent.SessionOpts
+	)
+	wf.Responder = func(base func(agent.SessionOpts, string) []agent.Event) func(agent.SessionOpts, string) []agent.Event {
+		return func(opts agent.SessionOpts, msg string) []agent.Event {
+			if wfStepRe.MatchString(msg) {
+				mu.Lock()
+				seen = append(seen, opts)
+				mu.Unlock()
+			}
+			return base(opts, msg)
+		}
+	}(wf.Responder)
+	e, _, f, _ := wfEngine(t, wf)
+	ctx := context.Background()
+	if err := e.RaiseEnvelope(ctx, f.ID, 5000); err != nil {
+		t.Fatal(err)
+	}
+	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: one\nsteps:\n  - { id: one, role: scout, prompt: look }\n"})
+	tickRuns(t, e, f.ID, run.N, "ended", ended)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) == 0 {
+		t.Fatal("no step turn seen")
+	}
+	for _, opts := range seen {
+		hints := strings.Join(opts.SystemHints, "\n")
+		if !strings.Contains(hints, budgetHintStep) {
+			t.Errorf("the step's hints miss the step's budget line:\n%s", hints)
+		}
+		if strings.Contains(hints, "of budget left") {
+			t.Errorf("the step was told a budget figure:\n%s", hints)
+		}
+		if opts.MaxCredits != 0 {
+			t.Errorf("the step's backend enforces a cap of its own: %v", opts.MaxCredits)
+		}
 	}
 }
 
@@ -269,39 +311,5 @@ func TestPauseLetsACommandStepFinish(t *testing.T) {
 	tickRuns(t, e, f.ID, run.N, "ended", ended)
 	if b, _ := os.ReadFile(filepath.Join(tree, "n.txt")); string(b) != "x\n" {
 		t.Fatalf("the command ran %q, want once", b)
-	}
-}
-
-// TestWatchAndCommandStepsDoNotShrinkAStepsCap: a live watch and a card-less
-// command step spend nothing from the pool, so they are not siblings that a
-// working step shares it with.
-func TestWatchAndCommandStepsDoNotShrinkAStepsCap(t *testing.T) {
-	wf := newWFFake()
-	g := newGate(t)
-	wf.on("a", func(string, string, int) wfReply {
-		<-g.ch
-		return wfReply{text: "done"}
-	})
-	e, store, f, _ := wfEngine(t, wf)
-	e.cfg.TurnReserve = 1
-	ctx := context.Background()
-	if err := e.RaiseEnvelope(ctx, f.ID, 100); err != nil {
-		t.Fatal(err)
-	}
-	run := proposeAndAllow(t, e, f.ID, WorkflowRequest{RecipeYAML: "name: one\nsteps:\n  - { id: a, role: scout, prompt: look }\n"})
-	tickRuns(t, e, f.ID, run.N, "a at work", func(*domain.Run) bool { return wf.count("a") == 1 })
-	sess, _ := store.GetFeature(ctx, f.ID)
-	left, _ := e.sessionPoolLeft(ctx, sess)
-	var card domain.Feature
-	for _, s := range stepPaths(t, e, f.ID, run.N) {
-		card, _ = store.GetFeature(ctx, s.Card)
-	}
-	for i, st := range []domain.StepState{domain.StepWatching, domain.StepRunning} {
-		if err := store.CreateRunStep(ctx, &domain.RunStep{Session: f.ID, Run: run.N, Path: fmt.Sprintf("x%d", i), StepID: "x", State: st}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if b := e.stepBudget(ctx, card); b < left-0.001 {
-		t.Fatalf("cap %.1f of %.1f: a watch or a command step took a share", b, left)
 	}
 }

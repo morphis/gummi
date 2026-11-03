@@ -417,7 +417,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		Model:          rc.Model,
 		SystemHints:    hints,
 		Permission:     e.cfg.Permission,
-		MaxCredits:     budget * capHeadroom,
+		MaxCredits:     backendCap(f, budget),
 		Tools:          tools,
 		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
@@ -528,7 +528,10 @@ func (e *Engine) freeformHints(ctx context.Context, f domain.Feature, workDir st
 		}
 	}
 	hints = append(hints, repoInstructionsPrecedenceFreeform, freeformContractHint(f, workDir))
-	if budget > 0 {
+	switch {
+	case e.stepOf(ctx, f) != nil:
+		hints = append(hints, budgetHintStep)
+	case budget > 0:
 		hints = append(hints, budgetHintFreeform(budget))
 	}
 	// Any diff comments still open — the reader's, from before this
@@ -1415,13 +1418,15 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 	case agent.EventUsage:
 		sess.addSpend(ev.Usage)
 		e.recordUsage(sess, ff.id, domain.StageOpen, agent.RoleImplementer, ev.Usage)
-		if sess.overBudget() || e.sessionPoolSpentUnder(sess) {
-			e.exhaustFreeform(ff, sess)
-		}
 		if sess.Feature.IsChild() {
 			// a step spends from its session's pool, which its siblings
-			// share: the pool is held across them all
+			// share: the pool is held across them all, and a spent one
+			// pauses the run, which carries the step on once topped up.
+			// Its own cap, read at spawn, never stops it: exhausting it
+			// would end the step on a cut-off reply.
 			e.checkRunPool(ff.id, domain.Spend{Credits: ev.Usage.Credits, InputTokens: ev.Usage.InputTokens, OutputTokens: ev.Usage.OutputTokens}.CreditEquivalent())
+		} else if sess.overBudget() || e.sessionPoolSpentUnder(sess) {
+			e.exhaustFreeform(ff, sess)
 		}
 	case agent.EventIdle:
 		// No commit here: a turn ending is not a reason to commit. The agent

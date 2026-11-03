@@ -2730,16 +2730,14 @@ func (e *Engine) sessionRunsSpent(ctx context.Context, session domain.FeatureID)
 	return t
 }
 
-// stepBudget is a step card's cap: its share of what its session's pool
-// has left among the run's steps at work (a share is at least one turn's
-// reserve, never more than the pool has left), 0 once it is spent, or the
-// board's stage budget for a session with no envelope. It is read when the
-// step's backend spawns; the pool is held across all the session's steps
-// as they spend (checkRunPool). A cap is a ceiling read at spawn: a step
-// spawned later, once siblings have ended or spent, may be given a larger
-// share while the earlier ones keep theirs, so the caps need not sum to the
-// pool — what holds the pool is checkRunPool, which pauses the run at once
-// when the session's spend reaches it.
+// stepBudget is a step card's cap: what its session's pool has left when
+// the step's backend spawns, 0 once it is spent, or the board's stage
+// budget for a session with no envelope. It is not split among the run's
+// steps: a share would stop a step that needs more than its siblings while
+// the pool still has money, and tell it a figure it then argues about. The
+// pool is held across the steps by checkRunPool, which pauses the run at
+// once when the session's spend reaches it; a step's own cap never stops
+// it (handleFreeform).
 func (e *Engine) stepBudget(ctx context.Context, f domain.Feature) float64 {
 	sess, err := e.cfg.Store.GetFeature(ctx, f.Step().Session)
 	if err != nil {
@@ -2752,24 +2750,7 @@ func (e *Engine) stepBudget(ctx context.Context, f domain.Feature) float64 {
 	case left <= 0:
 		return 0
 	}
-	// the steps at work together share what is left: each one's cap is its
-	// share, so the caps together are not past the pool. A turn's reserve
-	// floors a share, never the pool's remainder.
-	live := 1
-	if inst := e.stepOf(ctx, f); inst != nil {
-		if steps, err := e.cfg.Store.RunSteps(ctx, inst.Session, inst.Run); err == nil {
-			live = 0
-			for _, s := range steps {
-				// a watch waits on its pull request and a command step has
-				// no card: neither spends from the pool
-				if s.State.Live() && s.State != domain.StepWatching && s.Card != "" {
-					live++
-				}
-			}
-			live = max(live, 1)
-		}
-	}
-	return math.Min(left, math.Max(left/float64(live), e.turnReserve()))
+	return left
 }
 
 // errStepPoolSpent refuses a step's backend while its session's pool is
