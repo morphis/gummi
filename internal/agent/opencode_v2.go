@@ -88,7 +88,73 @@ type ocExec struct {
 	started bool   // under the session's mutex
 	ended   bool   // under the session's mutex
 	err     string // the failure the loop reported, if any
+	// admitted: the server took the prompt or compaction, so its loop
+	// is running or has run (under the session's mutex)
+	admitted bool
 }
+
+// admit records that the server took ex's prompt or compaction.
+func (s *opencodeSession) admit(ex *ocExec) {
+	s.mu.Lock()
+	ex.admitted = true
+	s.mu.Unlock()
+}
+
+// ocLostEnd is the failure of an execution whose end fell in the gap a
+// dropped event stream left: what the turn did last was not relayed.
+const ocLostEnd = "the opencode server's event stream dropped as the turn ended, so its last events were lost (the server is still running)"
+
+// settleExecV2 runs once a 2.x stream dropped under an execution is open
+// again: the execution's end may have fallen in the gap, and would then
+// be waited on for good. The server lists the sessions whose loop is
+// running; when this one's is not — asked twice, a moment apart, so a loop
+// that had only just been admitted has started — the execution ends as
+// the session's history records it ended (lastOutcomeV2), or as failed
+// (ocLostEnd) when it records no end. One whose end the new stream
+// carries ends as it says; whichever comes first wins.
+func (s *opencodeSession) settleExecV2() {
+	s.mu.Lock()
+	ex, id := s.exec, s.sessionID
+	s.mu.Unlock()
+	for range 2 {
+		s.mu.Lock()
+		open := ex != nil && s.exec == ex && ex.admitted && !ex.ended
+		s.mu.Unlock()
+		if !open || id == "" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(s.sctx, 10*time.Second)
+		running, err := s.srv.activeV2(ctx, id)
+		cancel()
+		if err != nil || running {
+			return
+		}
+		select {
+		case <-ex.done:
+			return
+		case <-s.stop:
+			return
+		case <-time.After(ocSettleRecheck):
+		}
+	}
+	ctx, cancel := context.WithTimeout(s.sctx, 10*time.Second)
+	detail, ended, err := s.srv.lastOutcomeV2(ctx, id)
+	cancel()
+	if err != nil || !ended {
+		detail = ocLostEnd
+	}
+	s.mu.Lock()
+	open := s.exec == ex
+	ex.started = true // its started event may have been lost too
+	s.mu.Unlock()
+	if open {
+		s.endExecution(detail)
+	}
+}
+
+// ocSettleRecheck is how long settleExecV2 waits before asking again
+// whether a session's loop is running. A variable, so tests run quick.
+var ocSettleRecheck = time.Second
 
 // beginExec opens the execution the next prompt or compaction starts.
 func (s *opencodeSession) beginExec() *ocExec {
@@ -145,7 +211,17 @@ func (s *opencodeSession) postTurnV2(t *ocTurn, msg string, imgs []Image) error 
 	if err := srv.promptV2(t.ctx, id, promptBodyV2(msg, imgs)); err != nil {
 		return err
 	}
-	return awaitExec(t.ctx, ex)
+	s.admit(ex)
+	if err := awaitExec(t.ctx, ex); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	dropped := t.dropped
+	s.mu.Unlock()
+	if dropped {
+		s.reconcileTextV2(t, id)
+	}
+	return nil
 }
 
 // promptBodyV2 is a 2.x prompt: the text, and each image as an attached
@@ -185,6 +261,7 @@ func (s *opencodeSession) runCompactV2(ctx context.Context, srv opencodeServer, 
 	if err := srv.compactV2(ctx, id); err != nil {
 		return err
 	}
+	s.admit(ex)
 	if err := awaitExec(ctx, ex); err != nil {
 		return err
 	}
@@ -329,6 +406,7 @@ func (s *opencodeSession) dispatchV2(data []byte) {
 		open := t != nil && !t.finishing
 		if open {
 			s.partLen[key] += len(d.Delta)
+			t.noteText(key, s.partLen[key])
 		}
 		s.mu.Unlock()
 		if open {
@@ -348,6 +426,9 @@ func (s *opencodeSession) dispatchV2(data []byte) {
 		var rest string
 		if n := s.partLen[key]; open && n < len(d.Text) {
 			rest = d.Text[n:]
+		}
+		if open {
+			t.noteText(key, len(d.Text))
 		}
 		delete(s.partLen, key)
 		s.mu.Unlock()
@@ -588,6 +669,147 @@ func (o opencodeServer) promptV2(ctx context.Context, id string, body any) error
 	}
 	_, err = readV2(resp, "sending the message", id, http.StatusOK)
 	return err
+}
+
+// activeV2 reports whether session id's loop is running: the server
+// lists every session whose loop is, and none other.
+func (o opencodeServer) activeV2(ctx context.Context, id string) (bool, error) {
+	resp, err := o.do(ctx, http.MethodGet, "/api/session/active", nil)
+	if err != nil {
+		return false, err
+	}
+	body, err := readV2(resp, "listing the running sessions", "", http.StatusOK)
+	if err != nil {
+		return false, err
+	}
+	var out struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return false, fmt.Errorf("listing the running sessions: %w", err)
+	}
+	_, running := out.Data[id]
+	return running, nil
+}
+
+// ocV2Item is one item of a 2.x session's history, as far as the adapter
+// reads it: the prompt ("user"), an assistant message and its content, or
+// the idle item 2.x writes as each execution ends.
+type ocV2Item struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Outcome string `json:"outcome"`
+	Error   *struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+// sinceLastPromptV2 is session id's history since its last prompt, oldest
+// first. The server keeps it newest first; a long turn may hold more than
+// the page read, and then it is the page's.
+func (o opencodeServer) sinceLastPromptV2(ctx context.Context, id string) ([]ocV2Item, error) {
+	resp, err := o.do(ctx, http.MethodGet, v2Session(id)+"/message?limit=100", nil)
+	if err != nil {
+		return nil, err
+	}
+	body, err := readV2(resp, "reading the session's messages", id, http.StatusOK)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Data []ocV2Item `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("reading the session's messages: %w", err)
+	}
+	items := out.Data
+	if i := slices.IndexFunc(items, func(m ocV2Item) bool { return m.Type == "user" }); i >= 0 {
+		items = items[:i]
+	}
+	slices.Reverse(items)
+	return items, nil
+}
+
+// lastOutcomeV2 reads how session id's last execution ended off its
+// history: the failure it reported ("" for a clean end), and whether an
+// end is recorded at all since the last prompt. A turn interrupted other
+// than by the user reads as dispatchV2 reads its event.
+func (o opencodeServer) lastOutcomeV2(ctx context.Context, id string) (string, bool, error) {
+	items, err := o.sinceLastPromptV2(ctx, id)
+	if err != nil {
+		return "", false, err
+	}
+	for _, m := range slices.Backward(items) {
+		if m.Type != "idle" {
+			continue
+		}
+		switch m.Outcome {
+		case "succeeded":
+			return "", true, nil
+		case "failed":
+			detail := "opencode reported an error"
+			if m.Error != nil && m.Error.Message != "" {
+				detail = m.Error.Message
+			} else if m.Error != nil && m.Error.Type != "" {
+				detail = m.Error.Type
+			}
+			return detail, true, nil
+		default:
+			return "opencode stopped the turn", true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// noteText records that the turn relayed n bytes of the 2.x part key.
+// The caller holds the session's mutex.
+func (t *ocTurn) noteText(key string, n int) {
+	if t.v2Text == nil {
+		t.v2Text = map[string]int{}
+	}
+	t.v2Text[key] = max(t.v2Text[key], n)
+}
+
+// reconcileTextV2 relays the text and reasoning a dropped event stream
+// lost from turn t, once its execution has ended: the session's history
+// holds every part of the turn's assistant messages whole, and each
+// relays whatever of it the turn did not. What it holds is keyed as the
+// bus keys a part (partKey): the message, then the part's ordinal among
+// the message's parts of its kind. A history that cannot be read leaves
+// the turn as it is.
+func (s *opencodeSession) reconcileTextV2(t *ocTurn, id string) {
+	ctx, cancel := context.WithTimeout(t.ctx, 10*time.Second)
+	items, err := s.srv.sinceLastPromptV2(ctx, id)
+	cancel()
+	if err != nil {
+		return
+	}
+	for _, m := range items {
+		if m.Type != "assistant" {
+			continue
+		}
+		ordinal := map[string]int{}
+		for _, c := range m.Content {
+			if c.Type != "text" && c.Type != "reasoning" {
+				continue
+			}
+			key := c.Type + ":" + m.ID + ":" + strconv.Itoa(ordinal[c.Type])
+			ordinal[c.Type]++
+			s.mu.Lock()
+			var rest string
+			if n := t.v2Text[key]; n < len(c.Text) {
+				rest = c.Text[n:]
+			}
+			t.noteText(key, len(c.Text))
+			s.mu.Unlock()
+			s.relayEvents(t, textEvents(c.Type, rest, &t.msg))
+		}
+	}
 }
 
 // compactV2 admits a compaction to a 2.x session.
