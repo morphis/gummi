@@ -114,6 +114,11 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}
+	if o.v2 {
+		if cfg, err = withoutCodeMode(cfg); err != nil {
+			return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
+		}
+	}
 	// 2.x takes no system field on a prompt: the stage hints ride the
 	// session config as an instruction file instead.
 	var hintsPath string

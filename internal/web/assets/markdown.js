@@ -7,7 +7,8 @@
 // are two lists) with `- [ ]` / `- [x]` task items, block quotes, rules, pipe
 // tables and links (http and https only, opened with rel=noopener).
 // With opts.files (a card's webapi.Files) a path under the card's worktree,
-// as an agent names a file it wrote, links to the server's copy of it.
+// as an agent names a file it wrote, links to the server's copy of it — by
+// its absolute path anywhere, or relative to the worktree in a code span.
 // Lines starting with `%%` are review notes and prompts; the spec view shows
 // notes on their own, so they are dropped here.
 
@@ -219,7 +220,7 @@ export function inline (text) {
     if (start > last) out.push(...paths(text.slice(last, start)))
     // a code span keeps its spaces (app.css) but not its line breaks,
     // which CommonMark reads as spaces
-    if (m[1]) out.push(fileLink(m[2].trim(), h('code', null, m[2].replace(/\n/g, ' '))))
+    if (m[1]) out.push(fileLink(codePath(m[2].trim()), h('code', null, m[2].replace(/\n/g, ' '))))
     else if (m[3] !== undefined) out.push(h('strong', null, inline(m[3])))
     else if (m[4] !== undefined) out.push(h('strong', null, inline(m[4])))
     else if (m[5] !== undefined) out.push(h('em', null, inline(m[5])))
@@ -249,6 +250,22 @@ function paths (s) {
   }
   if (last < s.length) out.push(...breaks(s.slice(last)))
   return out
+}
+
+// REL_PATH is a code span that reads as a path relative to the worktree, as
+// most agents name the files they touched: `notes/out.txt`, `README.md:12`.
+// It must hold a slash or end in a file extension with a letter in it, so a
+// word or a version in code (`ls`, `true`, `1.2.3`) is not one.
+const REL_PATH = /^(?:\.\/)?\.?[\w@+-][\w.@+-]*(?:\/[\w.@+-]+)*(?::\d+){0,2}$/
+const FILE_EXT = /\.(?=[A-Za-z0-9]{0,7}[A-Za-z])[A-Za-z0-9]{1,8}$/
+
+// codePath is a code span's text as the path fileLink reads: a relative
+// path is taken under the worktree, anything else is left as it is.
+function codePath (p) {
+  if (!files || !REL_PATH.test(p) || /(^|\/)\.\.(\/|$)/.test(p)) return p
+  const bare = p.replace(/(?::\d+){1,2}$/, '')
+  if (!bare.includes('/') && !FILE_EXT.test(bare)) return p
+  return files.dir + '/' + p.replace(/^\.\//, '')
 }
 
 // fileLink is kids linked to the served copy of p when p is a file under

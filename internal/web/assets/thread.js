@@ -967,10 +967,10 @@ function conversation (kind, c, role, stage, inserts = null) {
     }
     // back moves with every line sent after this one and with the busy
     // flag: it is set on the bubble's button rather than drawing it again
-    const sig = `${t.author}|${(t.text || '').length}|${state.card?.files?.url || ''}|${c.model || ''}`
+    const sig = `${t.author}|${(t.text || '').length}|${(t.attachments || []).length}|${state.card?.files?.url || ''}|${c.model || ''}`
     const mkey = `${kind}:${first + i}`
     const el = cached(mkey, sig, () => t.author === 'you'
-      ? you({ text: t.text, by: t.by, time: t.time, key: mkey, rewind: kind === 'freeform' ? (e) => rewind(state.sel, Number(e.currentTarget.dataset.back)) : null })
+      ? you({ text: t.text, by: t.by, time: t.time, attachments: t.attachments, key: mkey, rewind: kind === 'freeform' ? (e) => rewind(state.sel, Number(e.currentTarget.dataset.back)) : null })
       : message({ author: t.author === role ? null : t.author, role: t.author === 'gummi' ? null : t.author, stage, text: t.text, key: mkey, time: t.time, ms, model: t.author === 'gummi' ? null : c.model }))
     const rw = t.author === 'you' ? el.querySelector('.rewind') : null
     if (rw) { rw.hidden = !back; rw.dataset.back = String(back) }

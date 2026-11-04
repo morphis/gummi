@@ -39,6 +39,24 @@ func TestWebTranscriptOnlyTheCallInFlightRuns(t *testing.T) {
 	}
 }
 
+// A line the person sent with images shows them in its bubble while the
+// session is open, as its settled item does.
+func TestWebTranscriptCarriesTheImagesAYouTurnSent(t *testing.T) {
+	ref := engine.AttachmentRef{ID: "abc", Name: "shot.png", MediaType: "image/png", Size: 141}
+	tr := []engine.Message{
+		{Author: engine.AuthorUser, Content: "what colour is this?", Images: []engine.AttachmentRef{ref}},
+		{Author: engine.AuthorAssistant, Content: "green"},
+	}
+	turns, _, _, _ := webTranscript(engine.Snapshot{Transcript: tr})
+	want := webapi.AttachmentRef{ID: "abc", Name: "shot.png", MediaType: "image/png", Size: 141}
+	if len(turns) != 2 || len(turns[0].Attachments) != 1 || turns[0].Attachments[0] != want {
+		t.Fatalf("you turn attachments = %+v, want [%+v]", turns, want)
+	}
+	if turns[1].Attachments != nil {
+		t.Errorf("the reply carries attachments: %+v", turns[1].Attachments)
+	}
+}
+
 // A long conversation's live block carries its newest LiveTurns and says
 // how many came before; the rest is served on request, a window at a time,
 // numbered the same way.

@@ -78,6 +78,27 @@ func withInstructions(cfg []byte, path string) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// withoutCodeMode serves gummi's MCP tools to a 2.x model as tools of their
+// own. 2.x puts every MCP server behind Code Mode unless told otherwise: the
+// model sees no gummi_ask_user, only an `execute` tool it must write
+// JavaScript into to reach tools["gummi"].ask_user. A model told to use
+// ask_user that finds no tool by that name reports it unreachable, and the
+// call it does make shows on the card as `execute` and a script. A config
+// with no gummi server is returned unchanged.
+func withoutCodeMode(cfg []byte) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(cfg, &m); err != nil {
+		return nil, err
+	}
+	servers, _ := m["mcp"].(map[string]any)
+	gummi, _ := servers["gummi"].(map[string]any)
+	if gummi == nil {
+		return cfg, nil
+	}
+	gummi["codemode"] = false
+	return json.Marshal(m)
+}
+
 // ocExec is one execution of a 2.x session's agent loop that the adapter
 // waits on — a turn's, or a compaction's. A prompt is admitted, not
 // awaited, so its end is read off the bus: the loop's started event, then
