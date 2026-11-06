@@ -974,3 +974,61 @@ func TestSessionMessageLegacyRowHasNoImages(t *testing.T) {
 		t.Errorf("legacy row Images = %+v, want none", msgs[0].Images)
 	}
 }
+
+func TestSessionWorkflowsOverride(t *testing.T) {
+	w, err := Init(gitRoot(t), gitRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(w.DBFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := s.CreateFeature(ctx, feat(1, "Switch")); err != nil {
+		t.Fatal(err)
+	}
+	id := feat(1, "Switch").ID
+	get := func(st *Store) string {
+		p, err := st.SessionWorkflows(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case p == nil:
+			return "unset"
+		case *p:
+			return "on"
+		}
+		return "off"
+	}
+	if g := get(s); g != "unset" {
+		t.Fatalf("fresh card = %s", g)
+	}
+	on, off := true, false
+	for _, c := range []struct {
+		set  *bool
+		want string
+	}{{&on, "on"}, {&off, "off"}, {nil, "unset"}, {&off, "off"}} {
+		if err := s.SetSessionWorkflows(ctx, id, c.set); err != nil {
+			t.Fatal(err)
+		}
+		if g := get(s); g != c.want {
+			t.Fatalf("got %s want %s", g, c.want)
+		}
+		s.Close()
+		if s, err = OpenStore(w.DBFile()); err != nil {
+			t.Fatal(err)
+		}
+		if g := get(s); g != c.want {
+			t.Fatalf("after reopen got %s want %s", g, c.want)
+		}
+	}
+	defer s.Close()
+	if m, err := s.SessionWorkflowOverrides(ctx); err != nil || len(m) != 1 || m[id] {
+		t.Fatalf("overrides = %v, %v", m, err)
+	}
+	if err := s.SetSessionWorkflows(ctx, "FF-999", &on); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing card: %v", err)
+	}
+}

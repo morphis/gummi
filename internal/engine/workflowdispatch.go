@@ -128,6 +128,12 @@ func (e *Engine) dispatchStep(ctx context.Context, run *domain.Run, agent domain
 	}
 
 	if strings.TrimSpace(d.RecipeYAML) != "" {
+		// the session exists to run this recipe: it is offered workflows
+		// whatever the workspace setting says
+		on := true
+		if err := st.SetSessionWorkflows(ctx, child.ID, &on); err != nil {
+			return err
+		}
 		if err := e.startDispatchedRun(ctx, agent, child, d, specText); err != nil {
 			return err
 		}

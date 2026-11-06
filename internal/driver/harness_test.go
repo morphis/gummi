@@ -23,17 +23,25 @@ import (
 // harness is one throwaway repository with a gummi workspace, and the
 // engine a `gummi run` process would build over it.
 type harness struct {
-	t     *testing.T
-	root  string
-	ws    state.Workspace
-	store *state.Store
-	wt    *worktree.Manager
-	fake  *sessionFake
-	eng   *engine.Engine
-	buf   *bytes.Buffer
+	workflows bool // the workspace setting the engine is built with
+	t         *testing.T
+	root      string
+	ws        state.Workspace
+	store     *state.Store
+	wt        *worktree.Manager
+	fake      *sessionFake
+	eng       *engine.Engine
+	buf       *bytes.Buffer
 }
 
 func newHarness(t *testing.T, fake *sessionFake) *harness {
+	t.Helper()
+	return newHarnessWorkflows(t, fake, true)
+}
+
+// newHarnessWorkflows is newHarness with the workspace's workflows setting
+// as asked.
+func newHarnessWorkflows(t *testing.T, fake *sessionFake, workflows bool) *harness {
 	t.Helper()
 	root := gitRepo(t)
 	ws, err := state.Init(root, root)
@@ -49,7 +57,7 @@ func newHarness(t *testing.T, fake *sessionFake) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, root: root, ws: ws, store: store, wt: wt, fake: fake, buf: &bytes.Buffer{}}
+	h := &harness{workflows: workflows, t: t, root: root, ws: ws, store: store, wt: wt, fake: fake, buf: &bytes.Buffer{}}
 	fake.h = h
 	h.newEngine()
 	t.Cleanup(func() { fake.Close() })
@@ -61,7 +69,7 @@ func (h *harness) newEngine() {
 	h.eng = engine.New(engine.Config{
 		Agents: map[string]agent.Agent{"": h.fake, h.fake.Name(): h.fake},
 		Store:  h.store, Worktrees: h.wt, Workspace: h.ws,
-		Persist: true, Model: "test-model",
+		Persist: true, Model: "test-model", Workflows: h.workflows,
 	})
 	eng := h.eng
 	h.t.Cleanup(func() { eng.Close() })

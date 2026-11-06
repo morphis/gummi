@@ -64,6 +64,7 @@ cat > "$repo/.gummi/config.yaml" <<'YAML'
 # gummi configuration -- demo workspace.
 permissions: allow-all
 sandbox: off
+workflows: on
 YAML
 
 cat > "$repo/.gummi/profiles.yaml" <<'YAML'

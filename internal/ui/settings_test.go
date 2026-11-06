@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"context"
 	"errors"
+	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,6 +18,7 @@ type settingsHarness struct {
 	name      string
 	coAuthors [][]string
 	refuse    error
+	workflows []bool
 }
 
 func newSettingsHarness(name string, coAuthors []string) *settingsHarness {
@@ -27,7 +31,9 @@ func newSettingsHarness(name string, coAuthors []string) *settingsHarness {
 			}
 			h.coAuthors = append(h.coAuthors, list)
 			return nil
-		})
+		},
+		false,
+		func(on bool) error { h.workflows = append(h.workflows, on); return nil })
 	return h
 }
 
@@ -89,5 +95,57 @@ func TestSettingsDialogClearsCoAuthors(t *testing.T) {
 	}
 	if len(h.coAuthors) != 1 || !slices.Equal(h.coAuthors[0], []string{""}) {
 		t.Fatalf("co-author writes %q, want one clearing write", h.coAuthors)
+	}
+}
+
+func TestSettingsDialogTogglesWorkflows(t *testing.T) {
+	h := newSettingsHarness("", nil)
+	h.d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	h.d.HandleKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if h.d.focus != settingsFieldWorkflows {
+		t.Fatalf("focus %d", h.d.focus)
+	}
+	if closed, _ := h.d.HandleKey(tea.KeyPressMsg{Code: ' ', Text: " "}); closed {
+		t.Fatal("space closed the dialog")
+	}
+	if !h.d.workflows {
+		t.Fatal("space did not flip the toggle")
+	}
+	if closed, _ := h.d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}); !closed {
+		t.Fatalf("not saved: %q", h.d.problem)
+	}
+	if len(h.workflows) != 1 || !h.workflows[0] {
+		t.Fatalf("workflows writes = %v", h.workflows)
+	}
+	// an untouched toggle is not written
+	h2 := newSettingsHarness("x", nil)
+	h2.d.HandleKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if h2.workflows != nil {
+		t.Fatalf("untouched toggle written: %v", h2.workflows)
+	}
+}
+
+// TestShellSetWorkflowsWritesConfigAndEngine: the one write both faces make.
+func TestShellSetWorkflowsWritesConfigAndEngine(t *testing.T) {
+	b, eng, _ := sessionSpecBoard(t, "open")
+	var cfgPath string
+	if err := b.Do(context.Background(), func(m *Shell) tea.Cmd {
+		cfgPath = m.ws.ConfigFile()
+		if err := m.setWorkflows(false); err != nil {
+			t.Error(err)
+		}
+		if eng.WorkflowsDefault() {
+			t.Error("off did not reach the engine")
+		}
+		if err := m.setWorkflows(true); err != nil {
+			t.Error(err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(raw), "workflows: on") || !eng.WorkflowsDefault() {
+		t.Fatalf("config %q, engine %v", raw, eng.WorkflowsDefault())
 	}
 }

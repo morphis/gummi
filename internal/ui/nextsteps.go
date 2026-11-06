@@ -63,9 +63,12 @@ type nextInput struct {
 	// agentPublish is whether a person allowed the session to publish its
 	// own branch (DESIGN §22.14)
 	agentPublish bool
-	stage        domain.Stage
-	kind         domain.Kind
-	landed       bool
+	// workflows is whether the session is offered workflows; workflowsSet
+	// whether that is its own switch
+	workflows, workflowsSet bool
+	stage                   domain.Stage
+	kind                    domain.Kind
+	landed                  bool
 	// mergeChoice: the card may land as a merge commit keeping its commits
 	// as well as a squash (domain.Feature.Offers), so the landing's wording
 	// says both are on offer
@@ -270,6 +273,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	// no engine has none to start (cardactions.go's model row).
 	in.agentWired = m.engine != nil
 	in.agentPublish = m.engine != nil && r.AgentPublish
+	in.workflows, in.workflowsSet = r.Workflows, r.WorkflowsSet
 	in.otherRepos = m.engine != nil && len(m.repoNames) > 0
 	if r.Drift != nil {
 		in.drifted, in.driftForkedFrom, in.driftMissingBase = true, r.Drift.ForkedFrom, r.Drift.MissingBase

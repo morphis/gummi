@@ -31,6 +31,10 @@ func (e *Engine) SkillPack() *skillpack.Pack {
 	return e.pack
 }
 
+// workflowSkills are gummi's own skills a session with workflows off is not
+// given.
+var workflowSkills = map[string]bool{"workflows": true, "workflow-recipes": true}
+
 // skillDirsFor returns the pack's skill directories that reach f's
 // session on ag. key names the conversation and continuing says it is one
 // going on (a resume, a reopen, a switch of backend): a conversation keeps
@@ -51,10 +55,18 @@ func (e *Engine) skillDirsFor(ctx context.Context, ag agent.Agent, f *domain.Fea
 	}
 	// gummi's own skills come first, and whatever the pack holds: a pack
 	// that cannot be read still leaves them.
+	// a run's step cards are not sessions: they keep both skills whatever
+	// the setting
+	wfOn := f.IsChild() || e.WorkflowsOn(ctx, f.ID)
 	var dirs []string
 	if dir, err := skillpack.Builtin(e.SkillPack().BuiltinDir); err == nil {
 		if dir, err = prefixed(dir); err == nil {
-			dirs = skillpack.DirsFor(dir, f.Repo)
+			for _, d := range skillpack.DirsFor(dir, f.Repo) {
+				if !wfOn && workflowSkills[strings.TrimPrefix(filepath.Base(d), skillpack.Prefix)] {
+					continue
+				}
+				dirs = append(dirs, d)
+			}
 		}
 	}
 	dir, _, err := e.SkillPack().SessionDir(ctx, key, string(f.ID), continuing)

@@ -44,6 +44,9 @@ type Config struct {
 	// (the default, empty) or "off". The read is one cheap call on the
 	// profile's triage, scout or scribe model, charged to the card.
 	Triage string `yaml:"triage"`
+	// Workflows is whether sessions are offered specs and workflow runs:
+	// "on" or "off" (the default, empty). A session's own switch wins.
+	Workflows string `yaml:"workflows"`
 	// Repo is the git repository root gummi manages, when it is not the
 	// workspace root. Empty = the workspace root (the sibling layout, where
 	// .gummi and .git share a directory). A nested repo is named relative
@@ -271,6 +274,11 @@ func Load(path string) (Config, error) {
 	default:
 		return Config{}, fmt.Errorf("%s: triage must be \"on\" or \"off\", got %q", path, c.Triage)
 	}
+	switch c.Workflows {
+	case "", "on", "off":
+	default:
+		return Config{}, fmt.Errorf("%s: workflows must be \"on\" or \"off\", got %q", path, c.Workflows)
+	}
 	for name, p := range c.Env {
 		if err := validateEnvName(path, "env", name); err != nil {
 			return Config{}, err
@@ -342,6 +350,11 @@ func (c Config) Guarded() bool { return c.Permissions == "guarded" }
 // TriageOn reports whether a session's first request is triaged: unless
 // the config says "off".
 func (c Config) TriageOn() bool { return c.Triage != "off" }
+
+// WorkflowsOn reports whether sessions are offered workflows and specs when
+// they have no switch of their own: only when the config says "on" (the
+// opposite default to triage).
+func (c Config) WorkflowsOn() bool { return c.Workflows == "on" }
 
 // UserConfigPath returns the path to the user-level gummi config file:
 // $XDG_CONFIG_HOME/gummi/config.yaml when XDG_CONFIG_HOME is set and
@@ -441,6 +454,16 @@ func merge(user, ws Config, userPath, workspacePath string) (Config, map[string]
 		sources["triage"] = userPath
 	} else {
 		sources["triage"] = "default"
+	}
+
+	if ws.Workflows != "" {
+		merged.Workflows = ws.Workflows
+		sources["workflows"] = workspacePath
+	} else if user.Workflows != "" {
+		merged.Workflows = user.Workflows
+		sources["workflows"] = userPath
+	} else {
+		sources["workflows"] = "default"
 	}
 
 	if ws.Repo != "" {

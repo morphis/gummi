@@ -13,6 +13,8 @@ package engine
 // words, before anyone outside this repository knows the old name
 // (sessionname.go). Best effort — a triage that fails or runs out of
 // time sends the request as it was, under the name it was minted with.
+// A session with workflows off (workflowsoptin.go) is shown no recipes and
+// only named.
 
 import (
 	"context"
@@ -44,7 +46,8 @@ const (
 // wantsTriage reports whether msg, about to go to the session as a turn,
 // is read by triage first: the engine has it on, a person sent it, it is
 // the conversation's first turn, it is a request of some length and not
-// a command, and the card is a session that may run workflows. Asked
+// a command, and the card is a session that may run workflows or still carries its
+// minted title (which triage may name). Asked
 // before the turn is appended to the transcript.
 func (ff *FreeformSession) wantsTriage(ctx context.Context, sess *Session, cmds []ProjectCommand, msg string) bool {
 	if !ff.engine.cfg.Triage {
@@ -68,7 +71,16 @@ func (ff *FreeformSession) wantsTriage(ctx context.Context, sess *Session, cmds 
 		}
 	}
 	f, err := ff.engine.feature(ctx, ff.id)
-	return err == nil && !f.IsChild() && !f.Home
+	if err != nil || f.IsChild() || f.Home {
+		return false
+	}
+	if !ff.engine.WorkflowsOn(ctx, ff.id) {
+		// with workflows off triage only names the session: nothing to
+		// do once the title is no longer the one the mint derived
+		derived, _, _ := domain.SplitFreeform(msg)
+		return derived == f.Title
+	}
+	return true
 }
 
 // triage reads msg against the workspace's recipes and returns the note
@@ -78,18 +90,20 @@ func (ff *FreeformSession) wantsTriage(ctx context.Context, sess *Session, cmds 
 // saying so. Its cost goes on the card.
 func (ff *FreeformSession) triage(ctx context.Context, sess *Session, msg string) string {
 	e := ff.engine
-	all, err := e.WorkflowRecipes()
-	if err != nil {
-		return ""
-	}
 	var recipes []WorkflowRecipe
-	for _, r := range all {
-		if r.Err == "" {
-			recipes = append(recipes, r)
+	if e.WorkflowsOn(ctx, ff.id) {
+		all, err := e.WorkflowRecipes()
+		if err != nil {
+			return ""
 		}
-	}
-	if len(recipes) == 0 {
-		return ""
+		for _, r := range all {
+			if r.Err == "" {
+				recipes = append(recipes, r)
+			}
+		}
+		if len(recipes) == 0 {
+			return ""
+		}
 	}
 	f, err := e.feature(ctx, ff.id)
 	if err != nil {
@@ -131,6 +145,9 @@ func (ff *FreeformSession) triage(ctx context.Context, sess *Session, msg string
 	if note := ff.nameFromTriage(ctx, sess, f, msg, reply); note != "" {
 		notes = append(notes, note)
 	}
+	if len(recipes) == 0 {
+		return strings.Join(notes, "\n\n")
+	}
 	name, why, ok := parseTriage(reply, recipes)
 	if ok && name != triageHere {
 		sess.appendToolDone("gummi triage: work for the "+name+" workflow", true, fmt.Sprintf(
@@ -171,6 +188,15 @@ func (ff *FreeformSession) nameFromTriage(ctx context.Context, sess *Session, f 
 
 func triagePrompt(msg string, recipes []WorkflowRecipe) string {
 	var b strings.Builder
+	if len(recipes) == 0 {
+		b.WriteString("A person has just sent a coding agent the first message of a session, below. " +
+			"Name the session the way a person titles a pull request: two to six words naming the work itself, " +
+			"not the sentence that asked for it, with no ticket numbers, quotes or trailing punctuation. " +
+			"Answer with exactly one line:\n" +
+			"NAME: <the name>\n\n")
+		b.WriteString("The request:\n<<<\n" + tailRunes(strings.TrimSpace(msg), triageRequestMax) + "\n>>>")
+		return b.String()
+	}
 	b.WriteString("A person has just sent a coding agent the first message of a session, below. The agent works " +
 		"in a checkout of the person's repository. It can do the work itself, in the conversation, or propose a " +
 		"workflow run: a recipe of fresh-context agents that do the work in its checkout and are judged against " +

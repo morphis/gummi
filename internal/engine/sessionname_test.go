@@ -11,7 +11,7 @@ import (
 // session, moves its branch and keeps the words it was opened with.
 func TestRenameCommandRetitlesTheSessionAndMovesItsBranch(t *testing.T) {
 	ctx := context.Background()
-	ff, e, _, _ := triageSessionTitled(t, false, "", "add spec states")
+	ff, e, _, _ := triageSessionTitled(t, false, true, "", "add spec states")
 	say(t, ff, "/rename")
 	if out := lastToolOutput(ff); out != `Titled "add spec states", on branch ff/add-spec-states.` {
 		t.Fatalf("/rename alone says %q", out)
@@ -37,7 +37,7 @@ func TestRenameCommandRetitlesTheSessionAndMovesItsBranch(t *testing.T) {
 // says why.
 func TestRenameKeepsAPushedBranch(t *testing.T) {
 	ctx := context.Background()
-	ff, e, _, _ := triageSessionTitled(t, false, "", "add spec states")
+	ff, e, _, _ := triageSessionTitled(t, false, true, "", "add spec states")
 	say(t, ff, "/rename")
 	f, _ := e.feature(ctx, ff.id)
 	wt, _ := e.mgr(ctx, &f)

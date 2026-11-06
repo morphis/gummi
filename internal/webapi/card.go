@@ -38,6 +38,9 @@ type Card struct {
 	// resolved the way its next turn will resolve them; nil on a card in
 	// the workflow, whose stages take theirs from its profile.
 	Session *SessionModel `json:"session,omitempty"`
+	// Workflows is whether a session is offered specs and workflow runs
+	// and where that comes from; nil on a card that has no such switch.
+	Workflows *SessionWorkflows `json:"workflows,omitempty"`
 	// Repos are the repositories a session spans (DESIGN §27), its own
 	// first; absent for a card with nothing attached.
 	Repos []CardRepo `json:"repos,omitempty"`
@@ -450,4 +453,26 @@ type CardRepo struct {
 	Ahead  bool `json:"ahead,omitempty"`
 	Dirty  bool `json:"dirty,omitempty"`
 	Landed bool `json:"landed,omitempty"`
+}
+
+// SessionWorkflows is a session's workflows answer: On is the effective
+// one, Override the session's own switch ("on", "off", or empty when it
+// follows the workspace setting).
+type SessionWorkflows struct {
+	On       bool   `json:"on"`
+	Override string `json:"override,omitempty"`
+}
+
+// SessionWorkflowsRequest is PUT /api/cards/{id}/workflows' body: On true
+// or false sets the session's own switch, null clears it.
+type SessionWorkflowsRequest struct {
+	On *bool `json:"on"`
+}
+
+// SessionWorkflowsResult is the switch as it stands after the request;
+// Error says why it was not changed.
+type SessionWorkflowsResult struct {
+	On       bool   `json:"on"`
+	Override string `json:"override,omitempty"`
+	Error    string `json:"error,omitempty"`
 }

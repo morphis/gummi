@@ -192,7 +192,7 @@ func attach(t *testing.T, e *Engine, f domain.Feature) *Session {
 func newEngine(t *testing.T, ag agent.Agent) *Engine {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model"})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "fake-model", Workflows: true})
 	t.Cleanup(func() { e.Close() })
 	return e
 }

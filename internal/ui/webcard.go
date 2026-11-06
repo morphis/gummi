@@ -255,6 +255,7 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	st.card.LandHeld, st.card.LandHeldBy = m.webLandHeld(r, st.card.Actions)
 	st.card.Composer = m.webComposer(r, "")
 	st.card.Session = m.webSessionOf(r.F)
+	st.card.Workflows = m.webWorkflowsOf(r.F)
 	st.card.Repos = webRepos(r.Repos)
 	return st, true
 }

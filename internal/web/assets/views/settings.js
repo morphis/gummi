@@ -120,6 +120,28 @@ registerView('settings', {
             h('button', { type: 'submit', class: 'btn primary', testid: 'settings-coauthors-save', disabled: v.saving }, 'Save'))))
     }
 
+    async function saveWorkflows (on) {
+      v.saving = true
+      v.err = null
+      draw()
+      try {
+        v.cur = await ctx.api.put('/api/settings/workflows', { on })
+        ctx.toast?.(v.cur.workflows ? 'Sessions are offered workflows' : 'Sessions are no longer offered workflows')
+      } catch (err) { v.err = err }
+      v.saving = false
+      if (v.alive) draw()
+    }
+
+    function drawWorkflows () {
+      return h('section', { class: 'vcreds' },
+        h('div', { class: 'vhead' }, h('b', null, 'Workflows'),
+          tip('Sessions are offered specs and workflow runs. Off by default; a session’s own switch, in its card menu, wins. A session already running picks a change up when it next starts.', 'settings-workflows-tip')),
+        h('div', { class: 'vrow' },
+          h('label', null,
+            h('input', { type: 'checkbox', testid: 'settings-workflows', checked: !!v.cur.workflows, disabled: v.saving, onchange: (e) => saveWorkflows(e.target.checked) }),
+            ' Offer workflows and specs to sessions')))
+    }
+
     // secret is one stored credential: what names the one held, a control
     // to replace it, and a button to forget it.
     function secret ({ id, label, held, control, hint, key, saved, forgotten, extra }) {
@@ -195,7 +217,7 @@ registerView('settings', {
         tipField('Instance name', 'Shown in this header, the browser tab and the terminal’s status bar. Leave empty for none.', input, 'settings-name-tip'),
         h('div', { class: 'vrow' },
           h('button', { type: 'submit', class: 'btn primary', testid: 'settings-save', disabled: v.saving }, 'Save')))
-      body.append(form, drawIdentity(), drawCoAuthors(), drawCredentials(), drawRestart())
+      body.append(form, drawIdentity(), drawCoAuthors(), drawWorkflows(), drawCredentials(), drawRestart())
     }
 
     load()

@@ -18,5 +18,6 @@
   "coAuthors": [
     "Grace Hopper \u003cgrace@example.com\u003e"
   ],
-  "maxCoAuthors": 10
+  "maxCoAuthors": 10,
+  "workflows": true
 }

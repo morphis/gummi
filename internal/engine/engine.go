@@ -140,12 +140,18 @@ type Config struct {
 	// zero Config; cmd/gummi switches it on unless config.yaml says
 	// `triage: off`.
 	Triage bool
+	// Workflows is whether sessions are offered specs and workflow runs
+	// when they have no switch of their own; off unless the workspace
+	// says on (config.yaml `workflows: on`).
+	Workflows bool
 }
 
 // Engine orchestrates all live sessions and the autonomous runs.
 type Engine struct {
 	cfg Config
-	now func() time.Time // injectable clock (spec-capture timestamps)
+	// workflowsOn is Config.Workflows, changed live by the settings dialog.
+	workflowsOn atomic.Bool
+	now         func() time.Time // injectable clock (spec-capture timestamps)
 
 	// raw carries events from pump goroutines to the forwarder; events
 	// is the UI-facing stream, owned solely by the forwarder.
@@ -350,6 +356,7 @@ func New(cfg Config) *Engine {
 		freeformClosed: map[domain.FeatureID]*Session{},
 		pool:           pool,
 	}
+	e.workflowsOn.Store(cfg.Workflows)
 	e.initProfiles()
 	e.consultIdleTimeout = consultIdleTimeout
 	e.freeformIdleTimeout = freeformIdleTimeout

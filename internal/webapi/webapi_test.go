@@ -225,12 +225,33 @@ func TestSettingsShape(t *testing.T) {
 			TokenSet: true, TokenHint: "9f2c",
 			KeySet: true, KeyType: "ssh-ed25519", KeyFingerprint: "SHA256:u1Yx0kq3", KeyPublic: "ssh-ed25519 AAAAC3Nz gummi", Signing: true,
 		}, Identity: Identity{Name: "Ada Lovelace", Email: "ada@example.com"},
-		CoAuthors: []string{"Grace Hopper <grace@example.com>"}, MaxCoAuthors: 10,
+		CoAuthors: []string{"Grace Hopper <grace@example.com>"}, MaxCoAuthors: 10, Workflows: true,
 	}))
 }
 
 func TestCoAuthorsRequestShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, CoAuthorsRequest{CoAuthors: []string{"Grace Hopper <grace@example.com>"}}))
+}
+
+func TestWorkflowsRequestShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, WorkflowsRequest{On: true}))
+}
+
+func TestSessionWorkflowsShape(t *testing.T) {
+	off := false
+	golden.RequireEqual(t, marshal(t, struct {
+		Card    SessionWorkflows        `json:"card"`
+		Follows SessionWorkflows        `json:"follows"`
+		Request SessionWorkflowsRequest `json:"request"`
+		Result  SessionWorkflowsResult  `json:"result"`
+		Refused SessionWorkflowsResult  `json:"refused"`
+	}{
+		Card:    SessionWorkflows{On: true, Override: "on"},
+		Follows: SessionWorkflows{},
+		Request: SessionWorkflowsRequest{On: &off},
+		Result:  SessionWorkflowsResult{Override: "off"},
+		Refused: SessionWorkflowsResult{On: true, Error: "the session is mid-turn; turn workflows on when the turn ends"},
+	}))
 }
 
 func TestCredentialsRequestShape(t *testing.T) {

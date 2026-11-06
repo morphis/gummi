@@ -386,6 +386,14 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		if r, ok := m.selected(); ok {
 			return m.toggleAgentPublish(r.F)
 		}
+	case sessionWorkflowsID:
+		if r, ok := m.selected(); ok {
+			return m.toggleSessionWorkflows(r.F)
+		}
+	case sessionWorkflowsResetID:
+		if r, ok := m.selected(); ok {
+			return m.resetSessionWorkflows(r.F)
+		}
 	case publishSpanID:
 		if r, ok := m.selected(); ok {
 			return m.openPublishSpan(r)

@@ -35,11 +35,14 @@ import (
 // (mdsource.go): headings, code and emphasis read as themselves without
 // a character moving, so one view is both readable and addressable.
 type specView struct {
-	f       domain.Feature
-	path    string
-	content string
-	doc     spec.Doc
-	cursor  int // 1-based source line
+	// workflowsOff is set when the session is not offered workflow runs: the
+	// view leaves out the key that asks for one
+	workflowsOff bool
+	f            domain.Feature
+	path         string
+	content      string
+	doc          spec.Doc
+	cursor       int // 1-based source line
 	// n is which of a session's specs is open, and specs the list of them
 	// to switch between (DESIGN §25.3), each with its state, revision,
 	// runs and done-when count; both zero on any other card's document.
@@ -184,6 +187,10 @@ func (m *Shell) askForRun() tea.Cmd {
 		return nil
 	}
 	f, n, eng := sv.f, sv.n, m.engine
+	if !eng.WorkflowsOn(context.Background(), f.ID) {
+		m.notice = noticeMsg{text: "workflows are off for this session — turn them on from its card menu"}
+		return nil
+	}
 	who := engine.WithActor(context.Background(), m.lineActor())
 	return func() tea.Msg {
 		ff, err := eng.OpenFreeform(context.Background(), f)
@@ -614,7 +621,7 @@ func (sv *specView) bindings() []binding {
 	}
 	if hasSessionSpec(sv.f) {
 		bs = append(bs, binding{key: "+", label: "new spec", help: "start a new spec on this session", bar: true})
-		if sv.n > 0 && sv.f.Stage != domain.StageDone {
+		if sv.n > 0 && sv.f.Stage != domain.StageDone && !sv.workflowsOff {
 			bs = append(bs, binding{key: "w", label: "propose a run", help: "ask the session to propose a workflow run on this spec: it brings the spec up to date and proposes, and you allow it", bar: true})
 		}
 	}

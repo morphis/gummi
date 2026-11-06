@@ -263,6 +263,7 @@ func (m *Shell) WebSettings() webapi.Settings {
 	return webapi.Settings{
 		Name: m.name, Repo: filepath.Base(m.ws.Root), MaxName: config.MaxNameLen,
 		CoAuthors: append([]string{}, worktree.CoAuthors()...), MaxCoAuthors: config.MaxCoAuthors,
+		Workflows: m.workflowsDefault(),
 		Credentials: webapi.Credentials{
 			TokenSet: st.TokenSet, TokenHint: st.TokenHint,
 			KeySet: st.KeySet, KeyType: st.KeyType, KeyFingerprint: st.KeyFingerprint, KeyPublic: st.KeyPublic, Signing: st.Signing,
@@ -338,6 +339,24 @@ func (b *Bridge) SetCoAuthors(ctx context.Context, req webapi.CoAuthorsRequest) 
 	var refused error
 	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 		if err := m.setCoAuthors(req.CoAuthors); err != nil {
+			refused = webErr(WebBadRequest, "%s", err.Error())
+		}
+		return nil
+	}); err != nil {
+		return webapi.Settings{}, err
+	}
+	if refused != nil {
+		return webapi.Settings{}, refused
+	}
+	return b.Settings(ctx)
+}
+
+// SetWorkflows is PUT /api/settings/workflows: the same write the settings
+// dialog's toggle makes.
+func (b *Bridge) SetWorkflows(ctx context.Context, req webapi.WorkflowsRequest) (webapi.Settings, error) {
+	var refused error
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if err := m.setWorkflows(req.On); err != nil {
 			refused = webErr(WebBadRequest, "%s", err.Error())
 		}
 		return nil

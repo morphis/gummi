@@ -508,3 +508,53 @@ func httptestServer(t *testing.T, srv *Server) *httptest.Server {
 	})
 	return s
 }
+
+// The workflows setting and a session's own switch go through the board:
+// the workspace's lands in its config and the live engine, the session's
+// wins over it and reads back on the card.
+func TestWorkflowsSettingRoutes(t *testing.T) {
+	b := newBoardHarness(t)
+	var got webapi.Settings
+	b.must(http.StatusOK, http.MethodGet, "/api/settings", nil, &got)
+	if got.Workflows {
+		t.Fatal("workflows are on in a fresh workspace")
+	}
+	b.must(http.StatusOK, http.MethodPut, "/api/settings/workflows", webapi.WorkflowsRequest{On: true}, &got)
+	if !got.Workflows || !b.eng.WorkflowsDefault() {
+		t.Fatalf("settings after on = %+v, engine %v", got, b.eng.WorkflowsDefault())
+	}
+	raw, err := os.ReadFile(filepath.Join(b.root, ".gummi", "config.yaml"))
+	if err != nil || !strings.Contains(string(raw), "workflows: on") {
+		t.Fatalf("config = %q, %v", raw, err)
+	}
+
+	f := domain.Feature{
+		ID: "FF-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Kind: domain.KindFreeform,
+		Stage: domain.StageOpen, BranchScheme: domain.BranchSchemeKind, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := b.store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.eng.OpenFreeform(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	b.eventually("the board to load the session", func() bool {
+		return b.call(http.MethodGet, "/api/cards/FF-001", nil, nil) == http.StatusOK
+	})
+	off := false
+	var res webapi.SessionWorkflowsResult
+	b.must(http.StatusOK, http.MethodPut, "/api/cards/FF-001/workflows", webapi.SessionWorkflowsRequest{On: &off}, &res)
+	if res.Error != "" || res.On || res.Override != "off" {
+		t.Fatalf("result = %+v", res)
+	}
+	var card webapi.Card
+	b.must(http.StatusOK, http.MethodGet, "/api/cards/FF-001", nil, &card)
+	if card.Workflows == nil || card.Workflows.On || card.Workflows.Override != "off" {
+		t.Fatalf("card workflows = %+v", card.Workflows)
+	}
+	res = webapi.SessionWorkflowsResult{}
+	b.must(http.StatusOK, http.MethodPut, "/api/cards/FF-001/workflows", webapi.SessionWorkflowsRequest{}, &res)
+	if res.Error != "" || !res.On || res.Override != "" {
+		t.Fatalf("cleared result = %+v", res)
+	}
+}

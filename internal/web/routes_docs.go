@@ -45,6 +45,7 @@ func (s *Server) docsRoutes() {
 	s.api("POST /api/cards/{id}/pr/pull", func(w http.ResponseWriter, r *http.Request) { s.handlePRPull(w, r, prs) })
 	s.api("GET /api/cards/{id}/publish", s.handlePublishFacts)
 	s.api("POST /api/cards/{id}/publish", func(w http.ResponseWriter, r *http.Request) { s.handlePublish(w, r, prs) })
+	s.api("PUT /api/cards/{id}/workflows", s.handleSessionWorkflows)
 	s.api("PUT /api/cards/{id}/publish/allowance", func(w http.ResponseWriter, r *http.Request) { s.handlePublishAllowance(w, r, prs) })
 	s.api("GET /api/cards/{id}/publish/span", s.handlePublishSpanFacts)
 	s.api("POST /api/cards/{id}/publish/span", func(w http.ResponseWriter, r *http.Request) { s.handlePublishSpan(w, r, prs) })
@@ -687,6 +688,24 @@ func (s *Server) handlePublishAllowance(w http.ResponseWriter, r *http.Request, 
 	res := d.SetAgentPublish(r.Context(), req.Allow, person(r))
 	cache.drop(id)
 	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleSessionWorkflows is PUT /api/cards/{id}/workflows: a person turning
+// workflows on or off for one session, or (null) back to the workspace's
+// setting. A refusal is the answer's Error.
+func (s *Server) handleSessionWorkflows(w http.ResponseWriter, r *http.Request) {
+	var req webapi.SessionWorkflowsRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	res := d.SetSessionWorkflows(r.Context(), req.On, person(r))
+	s.Publish(webapi.Change{Kind: webapi.ChangeCard, ID: r.PathValue("id")})
 	writeJSON(w, http.StatusOK, res)
 }
 

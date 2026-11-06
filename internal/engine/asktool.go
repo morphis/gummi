@@ -339,6 +339,10 @@ func (e *Engine) handleClientTool(s *Session, tc *agent.ToolCall) {
 	if tc == nil {
 		return
 	}
+	if workflowOrSpecTool(tc.Name) && isSession(s.Feature) && !e.WorkflowsOn(context.Background(), s.Feature.ID) {
+		e.resolveNow(s, tc.ID, workflowsOffRefusal)
+		return
+	}
 	switch tc.Name {
 	case askToolName:
 		e.handleAsk(s, tc)

@@ -30,7 +30,9 @@ something does a model start work in a repository you named.
 
 ## Dynamic workflows
 
-When the work deserves more than one agent, a session writes a spec and
+Once workflows are turned on (they are off by default; see
+[docs/workflows.md](docs/workflows.md#turning-workflows-on)), a session
+whose work deserves more than one agent writes a spec and
 proposes a **workflow**: design, build, review and validate, each step a
 fresh agent in the session's own tree, in sequence, in parallel or in a
 loop until the checks pass. You allow the run, follow every step live,

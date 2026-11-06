@@ -273,7 +273,7 @@ function sessionBar (s, ctx) {
       ? `${plural(items.length, 'done-when item')}${checked < items.length ? `, ${items.length - checked} without a check` : ''}`
       : 'no done-when item yet: a workflow run is judged against them'),
     h('span', { class: 'sp' }),
-    ctx.closed || !ctx.specN ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-propose-run', title: 'Ask the session to propose a workflow run on this spec: it brings the spec up to date and proposes, and you allow it', onclick: (e) => askForRun(e.currentTarget, ctx) }, 'Propose a run'),
+    ctx.closed || !ctx.specN || (ctx.card?.workflows && !ctx.card.workflows.on) ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-propose-run', title: 'Ask the session to propose a workflow run on this spec: it brings the spec up to date and proposes, and you allow it', onclick: (e) => askForRun(e.currentTarget, ctx) }, 'Propose a run'),
     ctx.closed ? null : h('button', { class: 'btn', type: 'button', testid: 'spec-edit', onclick: () => { editing.set(keyOf(ctx), { text: s.markdown || '', rev: s.rev }); ctx.rerender() } }, 'Edit'))
 }
 
