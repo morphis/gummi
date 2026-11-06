@@ -43,6 +43,7 @@ test('a worktree path in a message opens the file, sandboxed', async ({ pairedPa
       `See ${files.dir}/notes.md:12.`,
       `Open \`${full}\` directly in a browser, or [the mockup](${files.dir}/mock%20up/cards.html).`,
       'Not mine: /etc/passwd, and `/etc/hosts`.',
+      'Touched `mock up/cards.css`? No: `notes/out.txt:3`, `README.md`, `../x.go`, `ls` and `1.2.3`.',
     ].join('\n\n'), { files });
     el.id = 'files-probe';
     document.getElementById('files-probe')?.remove();
@@ -52,10 +53,14 @@ test('a worktree path in a message opens the file, sandboxed', async ({ pairedPa
   // plain text, a code span and a link each link; the line number and the
   // sentence's full stop are not part of the path; a path outside is text.
   // Plain text ends a path at a space, so only the other two may hold one.
+  // A code span names a file relative to the worktree, as most agents do;
+  // one with a space, one that climbs out, a word and a version do not.
   expect(hrefs).toEqual([
     `${files.url}notes.md`,
     `${files.url}mock%20up/cards.html`,
     `${files.url}mock%20up/cards.html`,
+    `${files.url}notes/out.txt`,
+    `${files.url}README.md`,
   ]);
 
   const link = page.locator('#files-probe a', { hasText: full });

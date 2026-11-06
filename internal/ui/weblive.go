@@ -269,12 +269,16 @@ func webTurns(snap engine.Snapshot, tr []engine.Message, idx []int, inflight int
 			turns = append(turns, webapi.Turn{Author: "tool", Tool: &c, Time: msg.At})
 			continue
 		}
-		turns = append(turns, webapi.Turn{
+		turn := webapi.Turn{
 			Author: threadfold.AuthorLabel(string(msg.Author), string(snap.Role)),
 			By:     threadfold.TurnBy(msg.By),
 			Text:   boundTail(threadfold.Sanitize(msg.Content), webapi.LiveText),
 			Time:   msg.At,
-		})
+		}
+		for _, r := range msg.Images {
+			turn.Attachments = append(turn.Attachments, webapi.AttachmentRef{ID: r.ID, Name: r.Name, MediaType: r.MediaType, Size: r.Size})
+		}
+		turns = append(turns, turn)
 	}
 	return turns
 }

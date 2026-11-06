@@ -271,6 +271,44 @@ func TestParseOpencodeMajor(t *testing.T) {
 // through the 1.x grammar, and ends when the execution it started ends.
 // The stage hints ride the session config as an instruction file, not
 // the prompt.
+// gummi's MCP tools reach a 2.x model as tools of their own: left behind
+// Code Mode, ask_user is no tool the model can name, only a script it
+// would have to write into `execute`. 1.x knows no such switch and is
+// not told one.
+func TestOpencodeV2ServesGummiToolsOutsideCodeMode(t *testing.T) {
+	codemode := func(sess *opencodeSession) (any, bool) {
+		t.Helper()
+		raw, err := os.ReadFile(sess.configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg struct {
+			MCP map[string]map[string]any `json:"mcp"`
+		}
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.MCP["gummi"] == nil {
+			t.Fatalf("config has no gummi server: %s", raw)
+		}
+		v, ok := cfg.MCP["gummi"]["codemode"]
+		return v, ok
+	}
+	opts := func() SessionOpts {
+		return SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x", MCPSockPath: "/tmp/gummi-test.sock", FeatureID: "FF-1"}
+	}
+
+	stubServeOpencodeV2(t)
+	if v, ok := codemode(ocSessionV2(t, opts())); !ok || v != false {
+		t.Errorf("2.x mcp.gummi.codemode = %v (set %v), want false", v, ok)
+	}
+
+	stubServeOpencode(t)
+	if v, ok := codemode(ocSession(t, opts())); ok {
+		t.Errorf("1.x mcp.gummi.codemode = %v, want unset", v)
+	}
+}
+
 func TestOpencodeV2TurnRoundTrip(t *testing.T) {
 	f, spawns := stubServeOpencodeV2(t)
 	sess := ocSessionV2(t, SessionOpts{WorkDir: t.TempDir(), Model: "opencode/x", SystemHints: []string{"STAGE-HINTS"}})

@@ -231,6 +231,9 @@ type Turn struct {
 	Time time.Time `json:"time,omitzero"`
 	// Tool is set on a tool call's turn.
 	Tool *ToolCall `json:"tool,omitempty"`
+	// Attachments are the images a "you" turn carried, in order, as on an
+	// Item.
+	Attachments []AttachmentRef `json:"attachments,omitempty"`
 }
 
 // Conversation is a session that is not a stage run: the card's consult
