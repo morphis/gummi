@@ -74,9 +74,16 @@ func (e *Engine) cardSkillToolsFor(ag agent.Agent) []agent.ToolDef {
 }
 
 // skillStageHint tells a session it may improve the pack, and how.
-const skillStageHint = `The workspace skill pack is the skills named gummi-skills:<name> or
-gummi-<name> in your session, beside gummi's own workflows, publishing-prs and
-workflow-recipes, which ship with gummi and cannot be changed here. You
+func skillStageHintFor(workflows bool) string {
+	own := "gummi's own workflows, publishing-prs and\nworkflow-recipes, which ship"
+	if !workflows {
+		own = "gummi's own publishing-prs, which ships"
+	}
+	return fmt.Sprintf(skillStageHintFmt, own)
+}
+
+const skillStageHintFmt = `The workspace skill pack is the skills named gummi-skills:<name> or
+gummi-<name> in your session, beside %s with gummi and cannot be changed here. You
 may improve the pack with skill_manage: write
 a new skill, rewrite one that is wrong or stale, or archive one that
 misleads. Read a skill whole with skill_read before you rewrite it.

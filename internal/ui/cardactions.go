@@ -398,6 +398,16 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			agentPublishOffered(in, r),
 		},
 		{
+			// a person's switch for specs and workflow runs, this session
+			// only; it wins over the workspace setting
+			sessionWorkflowsID, "", sessionWorkflowsLabel(in.workflows), sessionWorkflowsDetail(in.workflows), false,
+			sessionWorkflowsOffered(in, r),
+		},
+		{
+			sessionWorkflowsResetID, "", "follow the workspace setting for workflows", "drop this session's own switch; the workspace setting decides again", false,
+			sessionWorkflowsOffered(in, r) && in.workflowsSet,
+		},
+		{
 			"push", "", "push to GitHub…", "push the branch's new commits to its remote", false,
 			publishable(in, r),
 		},

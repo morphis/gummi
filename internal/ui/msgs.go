@@ -26,6 +26,10 @@ type featureRow struct {
 	// AgentPublish is whether a person allowed the session to publish its
 	// own branch (DESIGN §22.14), read at load for every card at once.
 	AgentPublish bool
+	// Workflows is whether the session is offered specs and workflow runs
+	// (its own switch, else the workspace's), and WorkflowsSet whether the
+	// switch is its own; read at load for every card at once.
+	Workflows, WorkflowsSet bool
 	// OpenRun is the session's open workflow run (running or paused), read
 	// at load; it holds the session's landing (Engine.RunHolds). Nil when
 	// none is open.
@@ -273,6 +277,11 @@ func (m *Shell) loadRows() tea.Msg {
 	if err != nil {
 		publishers = nil // the menu's label is all it feeds; a failed read says off
 	}
+	switches, err := m.store.SessionWorkflowOverrides(ctx)
+	if err != nil {
+		switches = nil
+	}
+	workflowsDefault := m.engine != nil && m.engine.WorkflowsDefault()
 	rows := make([]featureRow, 0, len(feats))
 	children := map[domain.FeatureID]domain.Feature{}
 	for _, f := range feats {
@@ -287,6 +296,10 @@ func (m *Shell) loadRows() tea.Msg {
 			continue
 		}
 		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f), Dispatched: openChildren[f.ID], AgentPublish: publishers[f.ID]}
+		row.Workflows = workflowsDefault
+		if on, set := switches[f.ID]; set {
+			row.Workflows, row.WorkflowsSet = on, true
+		}
 		if d, ok := dispatches[f.ID]; ok {
 			row.DispatchedBy = d.Agent
 		}

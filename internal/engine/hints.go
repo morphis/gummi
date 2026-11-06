@@ -53,7 +53,7 @@ func roleForStage(f domain.Feature) (agent.Role, bool) {
 // about this card that the agent has no other way to learn — most of all
 // the last one, because an agent that does not know its turns are
 // committed cannot reason about what it leaves behind.
-func freeformContractHint(f domain.Feature, workDir string) string {
+func freeformContractHint(f domain.Feature, workDir string, workflows bool) string {
 	brief := f.Title
 	if f.OneLiner != "" {
 		brief += "\n\n" + f.OneLiner
@@ -78,6 +78,10 @@ as a file inside your working directory and put ![description](relative/path.png
 in your reply on its own line. The web page draws it in the thread; a path
 outside the working directory is shown as a plain link.`
 	if f.Home {
+		dispatch := "the person starts one as a card, or you dispatch one — a workflow run of yours\nwith a dispatch step, which the person allows like any run (the watch\nhint below says how, and repo_list names the repositories you may name)."
+		if !workflows {
+			dispatch = "the person starts one as a card (repo_list names the repositories there are)."
+		}
 		return fmt.Sprintf(`You are %s, an agent: a long-lived session with a home of its own
 and no workflow around it. There is no design document, no plan to
 write, no review gate, no verdict to emit, and nothing of yours is ever
@@ -103,10 +107,8 @@ you.
 
 The person's repositories are not your working directory and not yours
 to change: read them where your work needs it, and never write into one.
-Work that belongs in a repository goes to a session of its own there: the
-person starts one as a card, or you dispatch one — a workflow run of yours
-with a dispatch step, which the person allows like any run (the watch
-hint below says how, and repo_list names the repositories you may name).
+Work that belongs in a repository goes to a session of its own there:
+%s
 
 The person is in this conversation with you, and may not be watching:
 some of your turns arrive on a clock. Say plainly what you did and what
@@ -114,7 +116,7 @@ you found, and when you need a decision, ask for it.
 
 To show the person an image, write it as a file inside your home and put
 ![description](relative/path.png) in your reply on its own line.`,
-			f.ID, indentBlock(brief, "  "), workDir)
+			f.ID, indentBlock(brief, "  "), workDir, dispatch)
 	}
 	if f.MainCheckout {
 		return fmt.Sprintf(`You are working on %s, a freeform card: a coding task with no workflow

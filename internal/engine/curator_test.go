@@ -47,7 +47,7 @@ func newCuratorFake(script []agent.Event) *curatorFake {
 func curatorEngine(t *testing.T, ag agent.Agent, c *config.Curator) *Engine {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Curator: c})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Curator: c, Workflows: true})
 	t.Cleanup(func() { e.Close() })
 	return e
 }

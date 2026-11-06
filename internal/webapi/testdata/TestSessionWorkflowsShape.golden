@@ -1,0 +1,20 @@
+{
+  "card": {
+    "on": true,
+    "override": "on"
+  },
+  "follows": {
+    "on": false
+  },
+  "request": {
+    "on": false
+  },
+  "result": {
+    "on": false,
+    "override": "off"
+  },
+  "refused": {
+    "on": true,
+    "error": "the session is mid-turn; turn workflows on when the turn ends"
+  }
+}

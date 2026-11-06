@@ -1092,6 +1092,9 @@ var migrations = []string{
 	// Where a person last reverted a run's tree to, so a run reverted to
 	// its start stops offering a revert. Empty on every row from before.
 	`ALTER TABLE workflow_runs ADD COLUMN reverted_to TEXT NOT NULL DEFAULT ''`,
+	// A person's per-session switch for workflows and specs: '' follows the
+	// workspace setting, 'on' or 'off' overrides it. '' on every row from before.
+	`ALTER TABLE features ADD COLUMN session_workflows TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

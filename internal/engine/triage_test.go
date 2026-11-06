@@ -15,13 +15,13 @@ import (
 // agent was sent and every prompt triage got.
 func triageSession(t *testing.T, on bool, verdict string) (ff *FreeformSession, worked, triaged func() []string) {
 	t.Helper()
-	ff, _, worked, triaged = triageSessionTitled(t, on, verdict, "add spec states")
+	ff, _, worked, triaged = triageSessionTitled(t, on, true, verdict, "add spec states")
 	return ff, worked, triaged
 }
 
 // triageSessionTitled is triageSession on a card titled title, handing
 // back its engine too.
-func triageSessionTitled(t *testing.T, on bool, verdict, title string) (ff *FreeformSession, e *Engine, worked, triaged func() []string) {
+func triageSessionTitled(t *testing.T, on, workflows bool, verdict, title string) (ff *FreeformSession, e *Engine, worked, triaged func() []string) {
 	t.Helper()
 	var mu sync.Mutex
 	var work, asks []string
@@ -36,7 +36,7 @@ func triageSessionTitled(t *testing.T, on bool, verdict, title string) (ff *Free
 		return []agent.Event{{Kind: agent.EventMessage, Text: "on it"}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e = New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Triage: on})
+	e = New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Triage: on, Workflows: workflows})
 	t.Cleanup(func() { e.Close() })
 	f := freeformCard(1, title)
 	createFeature(t, store, f)
@@ -149,7 +149,7 @@ func TestTheWorkflowCommandAsksForAProposal(t *testing.T) {
 // branch and the thread says so. A title anyone chose stays.
 func TestTriageNamesTheSession(t *testing.T) {
 	ctx := context.Background()
-	ff, e, worked, _ := triageSessionTitled(t, true, "TRIAGE: here — small\nNAME: Session spec states", domain.DeriveTitle(bigAsk))
+	ff, e, worked, _ := triageSessionTitled(t, true, true, "TRIAGE: here — small\nNAME: Session spec states", domain.DeriveTitle(bigAsk))
 	say(t, ff, bigAsk)
 	f, err := e.feature(ctx, ff.id)
 	if err != nil {
@@ -170,7 +170,7 @@ func TestTriageNamesTheSession(t *testing.T) {
 		t.Fatalf("the thread reads %s", tr)
 	}
 
-	ff2, e2, worked2, _ := triageSessionTitled(t, true, "TRIAGE: here — small\nNAME: Session spec states", "add spec states")
+	ff2, e2, worked2, _ := triageSessionTitled(t, true, true, "TRIAGE: here — small\nNAME: Session spec states", "add spec states")
 	say(t, ff2, bigAsk)
 	if f, _ := e2.feature(ctx, ff2.id); f.Title != "add spec states" {
 		t.Fatalf("a chosen title was replaced by %q", f.Title)

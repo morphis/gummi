@@ -237,6 +237,7 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 	var instructions []string
 	var curator *config.Curator
 	triage := true
+	workflows := false
 	userPath, err := config.UserConfigPath()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
@@ -256,6 +257,7 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		instructions = cfg.Instructions
 		curator = cfg.Curator
 		triage = cfg.TriageOn()
+		workflows = cfg.WorkflowsOn()
 	}
 	// Adapter selection: GUMMI_AGENT picks the default backend, and any
 	// distinct `backend:` referenced across the loaded profiles is
@@ -292,7 +294,7 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		Model: model, Persist: true,
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
-		Curator: curator, Triage: triage,
+		Curator: curator, Triage: triage, Workflows: workflows,
 		// A session may run on any installed agent, not only the ones the
 		// profiles name (DESIGN §19.8); this is how the board starts one it
 		// did not launch.

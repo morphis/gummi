@@ -178,6 +178,15 @@ type Settings struct {
 	CoAuthors []string `json:"coAuthors"`
 	// MaxCoAuthors is how many the workspace accepts.
 	MaxCoAuthors int `json:"maxCoAuthors"`
+	// Workflows is whether sessions are offered workflows and specs when
+	// they have no switch of their own; off by default.
+	Workflows bool `json:"workflows"`
+}
+
+// WorkflowsRequest is PUT /api/settings/workflows' body: the workspace's
+// setting.
+type WorkflowsRequest struct {
+	On bool `json:"on"`
 }
 
 // CoAuthorsRequest is PUT /api/settings/coauthors' body: the whole list,

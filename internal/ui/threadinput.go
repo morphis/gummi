@@ -1037,7 +1037,7 @@ func (m *Shell) isProjectCommand(r featureRow, text string) bool {
 	}
 	// a session not open yet still answers its own commands (/workflow
 	// from a spec's "Propose a run", say): sending opens it
-	cmds := engine.SessionCommands()
+	cmds := m.engine.SessionCommandsFor(context.Background(), r.F.ID)
 	if ff := m.engine.Freeform(r.F.ID); ff != nil {
 		cmds = ff.Commands()
 	}

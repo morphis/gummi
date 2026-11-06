@@ -140,7 +140,7 @@ func wfEngine(t *testing.T, wf *wfFake) (*Engine, *state.Store, domain.Feature, 
 func wfEngineWith(t *testing.T, wf *wfFake, agents map[string]agent.Agent) (*Engine, *state.Store, domain.Feature, *FreeformSession) {
 	t.Helper()
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: agents, Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	e := New(Config{Agents: agents, Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true, Workflows: true})
 	t.Cleanup(func() { e.Close() })
 	f := freeformCard(1, "make the file")
 	f.Budget.Envelope = 2000

@@ -62,7 +62,7 @@ func TestEverySessionGetsGummisOwnSkills(t *testing.T) {
 		t.Errorf("the hint names the skills wrongly:\n%s", sessionWorkflowHintFor(cf))
 	}
 	for _, n := range skillpack.BuiltinNames() {
-		if !strings.Contains(skillStageHint, n) {
+		if !strings.Contains(skillStageHintFor(true), n) {
 			t.Errorf("the staging hint does not say %s is gummi's own", n)
 		}
 	}

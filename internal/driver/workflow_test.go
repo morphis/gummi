@@ -163,3 +163,20 @@ func TestAWorkflowDriveIsRefusedBeforeAnyCard(t *testing.T) {
 		})
 	}
 }
+
+// TestRunWorkflowWithWorkflowsOff: a --workflow drive runs its recipe even
+// when the workspace has workflows off.
+func TestRunWorkflowWithWorkflowsOff(t *testing.T) {
+	sf := newSessionFake("reply")
+	h := newHarnessWorkflows(t, sf, false)
+	out, f := h.run(Options{
+		Envelope: 2000, WorkflowYAML: triageRecipe, NoSession: true,
+		Inputs: map[string]string{"report": "The parser crashes on an empty file."},
+	}, "")
+	if out.Status != StatusDone {
+		t.Fatalf("outcome %+v; stream %s", out, h.buf.String())
+	}
+	if on := h.eng.SessionWorkflows(context.Background(), f.ID); on == nil || !*on {
+		t.Errorf("the session's switch = %v, want on", on)
+	}
+}

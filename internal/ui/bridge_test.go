@@ -113,7 +113,7 @@ func headlessBoardWith(t *testing.T, ag agent.Agent, feats []domain.Feature, tun
 		t.Fatal(err)
 	}
 	pool := worktree.WrapSingle(wt)
-	cfg := engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model", Persist: true}
+	cfg := engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model", Persist: true, Workflows: true}
 	if tune != nil {
 		tune(&cfg)
 	}

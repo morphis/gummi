@@ -12,12 +12,36 @@ This page is for people who run workflows and write their own recipes.
 The first half is a guide; the second half is a reference of every
 element a recipe may hold.
 
+- [Turning workflows on](#turning-workflows-on)
 - [How a run works](#how-a-run-works)
 - [Running a workflow](#running-a-workflow)
 - [The bundled recipes](#the-bundled-recipes)
 - [Writing your own recipe](#writing-your-own-recipe)
 - [Reference](#reference)
 - [Common mistakes](#common-mistakes)
+
+## Turning workflows on
+
+Workflows are **off by default**. A session with workflows off is not
+told they exist: it has no spec or workflow tools, no `/workflow`
+command, none of gummi's `workflows` and `workflow-recipes` skills, and
+triage only names it. Specs go with workflows, so they are off too.
+Sessions made before this setting existed follow it as well: a
+workspace that already used workflows sets `workflows: on` to keep
+them.
+
+- **For every session:** turn on Workflows in the settings (the settings
+  dialog in the terminal, Settings → Workflows on the web page), or put
+  `workflows: on` in `.gummi/config.yaml`.
+- **For one session:** use "turn workflows on for this session" (or
+  "off") in its card menu. It wins over the workspace setting in either
+  direction; "follow the workspace setting for workflows" drops it.
+
+A change takes effect when the session next starts. One made from a
+card menu restarts an idle session for you, and is refused while the
+session is mid-turn if it turns workflows on. A run already open keeps
+running. `gummi run --workflow` needs neither: it turns workflows on for
+its own session.
 
 ## How a run works
 
@@ -66,6 +90,8 @@ session ──writes──▶ spec ──proposes──▶ run ──you allow�
   never run again itself.
 
 ## Running a workflow
+
+Workflows must be on for the session first ([Turning workflows on](#turning-workflows-on)).
 
 **From a session.** Type `/workflow` in the composer, optionally with a
 recipe, a spec and a reason:

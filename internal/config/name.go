@@ -48,6 +48,17 @@ func SetName(path, name string) error {
 	return setKey(path, "name", value, true)
 }
 
+// SetWorkflows writes workflows: on or off into the workspace config at
+// path, leaving the rest of the file as it was. Off is written as "off",
+// not removed, so a workspace off still beats a user-level on.
+func SetWorkflows(path string, on bool) error {
+	v := "off"
+	if on {
+		v = "on"
+	}
+	return setKey(path, "workflows", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v}, false)
+}
+
 // setKey writes one top-level key of the workspace config at path, leaving
 // every other key, and its comments, where they were. A nil value removes
 // the key; a new key goes first or last. A missing file is created.

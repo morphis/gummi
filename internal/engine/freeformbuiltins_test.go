@@ -25,7 +25,7 @@ func recordingSession(t *testing.T) (ff *FreeformSession, sent func() []string, 
 		return []agent.Event{{Kind: agent.EventMessage, Text: "did " + msg}, {Kind: agent.EventIdle}}
 	}}
 	ws, store, wt := newRepo(t)
-	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Workflows: true})
 	t.Cleanup(func() { e.Close() })
 	f := freeformCard(1, "tidy the parser")
 	createFeature(t, store, f)

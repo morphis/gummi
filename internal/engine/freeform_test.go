@@ -185,7 +185,7 @@ func TestAFreeformSessionGetsNoArtifact(t *testing.T) {
 // do without.
 func TestTheFreeformContractPromisesNoCeremony(t *testing.T) {
 	f := freeformCard(11, "no ceremony")
-	hint := freeformContractHint(f, "/tmp/wt")
+	hint := freeformContractHint(f, "/tmp/wt", true)
 	// The ceremony is named only to be denied — an agent that has run
 	// gummi's stages before will assume a document and a verdict unless it
 	// is told otherwise, so silence is not the same as absence here.

@@ -99,6 +99,21 @@ var sessionCommands = []ProjectCommand{compactCommand, handoffCommand, workflowC
 // answers before its backend has found any project file.
 func SessionCommands() []ProjectCommand { return append([]ProjectCommand(nil), sessionCommands...) }
 
+// SessionCommandsFor is the session's commands: SessionCommands less
+// /workflow while the session has workflows off.
+func (e *Engine) SessionCommandsFor(ctx context.Context, id domain.FeatureID) []ProjectCommand {
+	if e.WorkflowsOn(ctx, id) {
+		return SessionCommands()
+	}
+	var out []ProjectCommand
+	for _, c := range sessionCommands {
+		if c.Name != workflowCommand.Name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // builtinFor is the built-in msg names, when cmds resolve it to one rather
 // than to a project file, and the arguments after it.
 func builtinFor(cmds []ProjectCommand, msg string) (ProjectCommand, string, bool) {

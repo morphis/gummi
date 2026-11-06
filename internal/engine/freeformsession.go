@@ -312,6 +312,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	sess.setBudget(budget)
 	e.seedCardSpend(sess)
 
+	// a run's step cards keep the skills and their hint whatever the setting
+	wfOn := f.IsChild() || e.WorkflowsOn(ctx, f.ID)
 	hints := e.freeformHints(ctx, f, workDir, budget, ag)
 	if h := coAuthorHint(); h != "" {
 		hints = append(hints, h)
@@ -366,12 +368,15 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		if skill := e.cardSkillToolsFor(ag); len(skill) > 0 {
 			extra = append(extra, skill...)
 			tools = append(tools, skill...)
-			hints = append(hints, skillStageHint)
+			hints = append(hints, skillStageHintFor(wfOn))
 		}
 		// A session's spec and workflow tools (DESIGN §25): every
 		// session has them; a run's own steps do not.
 		if !f.IsChild() {
-			own := append(sessionSpecTools(), workflowTools()...)
+			var own []agent.ToolDef
+			if wfOn {
+				own = append(sessionSpecTools(), workflowTools()...)
+			}
 			if !f.Home && !f.MainCheckout && e.pool != nil {
 				own = append(own, repoTools()...)
 				hints = append(hints, sessionRepoHint)
@@ -388,7 +393,9 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 			}
 			extra = append(extra, own...)
 			tools = append(tools, own...)
-			hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
+			if wfOn {
+				hints = append(hints, sessionSpecHint, sessionWorkflowHintFor(ag))
+			}
 			// an agent's watch (DESIGN §26): the schedule it proposes and
 			// the sessions it dispatched
 			if f.Home {
@@ -398,7 +405,11 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 				}
 				extra = append(extra, watch...)
 				tools = append(tools, watch...)
-				hints = append(hints, agentWatchHint)
+				if wfOn {
+					hints = append(hints, agentWatchHint)
+				} else {
+					hints = append(hints, agentWatchHintOff)
+				}
 			}
 		}
 		path, teardown, merr := e.startMCPEndpoint(ctx, f, extra...)
@@ -527,7 +538,7 @@ func (e *Engine) freeformHints(ctx context.Context, f domain.Feature, workDir st
 			hints = append(hints, card)
 		}
 	}
-	hints = append(hints, repoInstructionsPrecedenceFreeform, freeformContractHint(f, workDir))
+	hints = append(hints, repoInstructionsPrecedenceFreeform, freeformContractHint(f, workDir, f.IsChild() || e.WorkflowsOn(ctx, f.ID)))
 	switch {
 	case e.stepOf(ctx, f) != nil:
 		hints = append(hints, budgetHintStep)
@@ -847,7 +858,7 @@ func (ff *FreeformSession) enqueue(ctx context.Context, msg string, images []Att
 func (ff *FreeformSession) Commands() []ProjectCommand {
 	cmds := LoadProjectCommands(ff.WorkDir())
 	files := len(cmds)
-	for _, b := range sessionCommands {
+	for _, b := range ff.engine.SessionCommandsFor(context.Background(), ff.id) {
 		if _, _, clash := FindProjectCommand(cmds[:files], "/"+b.Name); !clash {
 			cmds = append(cmds, b)
 		}

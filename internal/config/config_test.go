@@ -685,3 +685,68 @@ func TestTriageIsOnUnlessOff(t *testing.T) {
 		t.Errorf("Load(triage: sometimes) = %v", err)
 	}
 }
+
+// TestWorkflowsSettingDefaultsOff: workflows are off unless a config says
+// on, the workspace's word wins over the user's, and anything else is refused.
+func TestWorkflowsSettingDefaultsOff(t *testing.T) {
+	dir := t.TempDir()
+	userPath := filepath.Join(dir, "user.yaml")
+	wsPath := filepath.Join(dir, "ws.yaml")
+	if (Config{}).WorkflowsOn() {
+		t.Error("workflows are on by default")
+	}
+	if err := os.WriteFile(userPath, []byte("workflows: on\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, sources, err := LoadLayered(userPath, filepath.Join(dir, "absent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.WorkflowsOn() || sources["workflows"] != userPath {
+		t.Errorf("workflows on %v from %q", merged.WorkflowsOn(), sources["workflows"])
+	}
+	if err := os.WriteFile(wsPath, []byte("workflows: off\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if merged, _, _ = LoadLayered(userPath, wsPath); merged.WorkflowsOn() {
+		t.Error("the workspace's workflows: off did not win over the user's on")
+	}
+	if err := os.WriteFile(wsPath, []byte("workflows: sometimes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(wsPath); err == nil {
+		t.Error("workflows: sometimes was accepted")
+	}
+}
+
+func TestSetWorkflowsKeepsTheRest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".gummi", "config.yaml")
+	if err := SetWorkflows(path, true); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	raw = append([]byte("# keep me\n"), raw...)
+	raw = append(raw, []byte("permissions: guarded # and me\n")...)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetWorkflows(path, false); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	for _, want := range []string{"# keep me", "permissions: guarded # and me", "workflows: \"off\""} {
+		if !strings.Contains(string(got), want) && !strings.Contains(string(got), strings.ReplaceAll(want, "\"", "")) {
+			t.Errorf("config lost %q:\n%s", want, got)
+		}
+	}
+	c, err := Load(path)
+	if err != nil || c.WorkflowsOn() || c.Workflows != "off" {
+		t.Fatalf("Load = %+v, %v", c, err)
+	}
+	if err := SetWorkflows(path, true); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ = Load(path); !c.WorkflowsOn() {
+		t.Error("on not written")
+	}
+}

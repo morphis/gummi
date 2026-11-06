@@ -65,7 +65,7 @@ func watchEngine(t *testing.T, wf *wfFake, envelope int) (*Engine, *state.Store,
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := New(Config{Agents: singleAgent(wf), Store: store, Pool: pool, Workspace: ws, Model: "m", Persist: true})
+	e := New(Config{Agents: singleAgent(wf), Store: store, Pool: pool, Workspace: ws, Model: "m", Persist: true, Workflows: true})
 	t.Cleanup(func() { e.Close() })
 	dir := filepath.Join(wsRoot, ".gummi", "workflows")
 	if err := os.MkdirAll(dir, 0o750); err != nil {

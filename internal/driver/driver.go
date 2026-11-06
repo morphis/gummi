@@ -96,7 +96,8 @@ type Options struct {
 	NoSession bool
 }
 
-// RunsWorkflow reports whether the drive starts a workflow run itself.
+// RunsWorkflow reports whether the drive starts a workflow run itself. Such
+// a drive turns workflows on for its session, whatever the workspace says.
 func (o Options) RunsWorkflow() bool {
 	return strings.TrimSpace(o.Workflow) != "" || strings.TrimSpace(o.WorkflowYAML) != ""
 }
@@ -229,6 +230,13 @@ func (d *Driver) Run(ctx context.Context, prompt string) (Outcome, error) {
 	})
 	if err := d.store.SetWorkflowAlwaysAllow(ctx, f.ID, true); err != nil {
 		return d.fail(ctx, f.ID, err)
+	}
+	if d.opts.RunsWorkflow() {
+		// a --workflow drive runs workflows whatever the workspace says
+		on := true
+		if err := d.eng.SetSessionWorkflows(ctx, f.ID, &on, state.ActorAutopilot); err != nil {
+			return d.fail(ctx, f.ID, err)
+		}
 	}
 	ff, err := d.eng.OpenFreeform(ctx, f)
 	if err != nil {
