@@ -586,15 +586,19 @@ type ToolResult struct {
 
 // Event is one item in a session's activity stream.
 type Event struct {
-	Kind     EventKind
-	Text     string      // text for deltas/messages
-	Tool     string      // tool name for tool-call/permission events
-	Detail   string      // tool-call salient argument (command, path, …); may be empty
-	CallID   string      // backend tool-call id, pairing tool-result to tool-call
-	Parent   string      // tool-call/result: the CallID of the subagent spawn that made this call; empty for the agent's own
-	ToolCall *ToolCall   // populated for EventClientToolCall
-	Result   *ToolResult // populated for EventToolResult
-	Usage    Usage       // populated for EventUsage
-	Context  Context     // populated for EventContext
-	Err      error       // populated for EventError
+	Kind   EventKind
+	Text   string // text for deltas/messages
+	Tool   string // tool name for tool-call/permission events
+	Detail string // tool-call salient argument (command, path, …); may be empty
+	CallID string // backend tool-call id, pairing tool-result to tool-call
+	// Background marks a tool call that runs on past its result, outside the
+	// turn (Claude Code's Bash with run_in_background): the backend must stay
+	// up for its end to be heard.
+	Background bool
+	Parent     string      // tool-call/result: the CallID of the subagent spawn that made this call; empty for the agent's own
+	ToolCall   *ToolCall   // populated for EventClientToolCall
+	Result     *ToolResult // populated for EventToolResult
+	Usage      Usage       // populated for EventUsage
+	Context    Context     // populated for EventContext
+	Err        error       // populated for EventError
 }

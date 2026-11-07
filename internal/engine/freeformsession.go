@@ -1404,6 +1404,9 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		e.persist(sess)
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, ev.Parent, toolLine(ev), ev.Tool, ev.Detail)
+		if ev.Background {
+			sess.markBackground(ev.CallID)
+		}
 		e.noteSkillUse(ff.id, ev.Tool, ev.Detail, time.Now())
 	case agent.EventToolResult:
 		if ev.Result != nil {

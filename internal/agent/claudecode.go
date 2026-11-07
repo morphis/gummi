@@ -474,6 +474,7 @@ type claudeSession struct {
 	ctxTokens   int64              // main model's last request: input+cache tokens
 	turnTokens  map[string]int64   // per-model tokens this turn's requests reported (message_delta)
 	toolNames   map[string]string  // tool_use id → tool name, until its tool_result arrives
+	background  map[string]bool    // tool_use ids of Bash calls started with run_in_background
 	watching    map[string]string  // a started watch's tool_use id → its tool name, until its task_notification
 	// resumeBase is set on a process started with --resume until its
 	// first result: the CLI reports modelUsage cumulative over the whole
@@ -990,7 +991,15 @@ func (s *claudeSession) mapAssistant(raw json.RawMessage, parent string) []Event
 					}
 					s.toolNames[b.ID] = b.Name
 				}
-				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input), CallID: b.ID, Parent: parent})
+				bg, _ := b.Input["run_in_background"].(bool)
+				bg = bg && b.Name == "Bash" && b.ID != ""
+				if bg {
+					if s.background == nil {
+						s.background = map[string]bool{}
+					}
+					s.background[b.ID] = true
+				}
+				out = append(out, Event{Kind: EventToolCall, Tool: b.Name, Detail: toolDetail(s.workdir, b.Input), CallID: b.ID, Parent: parent, Background: bg})
 			}
 		}
 	}
@@ -1029,6 +1038,19 @@ func (s *claudeSession) mapToolResults(raw json.RawMessage, parent string) []Eve
 			continue
 		}
 		delete(s.toolNames, b.ToolUseID)
+		// A Bash started in the background answers at once with its id;
+		// the command runs on and the CLI reports its end later as a
+		// task_notification, so it is settled there, like a Monitor.
+		if s.background[b.ToolUseID] {
+			delete(s.background, b.ToolUseID)
+			if !b.IsError {
+				if s.watching == nil {
+					s.watching = map[string]string{}
+				}
+				s.watching[b.ToolUseID] = name
+				continue
+			}
+		}
 		// Monitor's result only says the watch started; the watch itself
 		// runs on past the turn. Settling the call on that ack would turn
 		// "watching" into "ok", so only a watch that failed to start

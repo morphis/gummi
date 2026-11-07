@@ -169,6 +169,9 @@ type Message struct {
 	// answering the second by erasing the first is what made the id
 	// unavailable to everything downstream.
 	pending bool
+	// background marks a call that runs on past its result (a backgrounded
+	// Bash): while it is pending the backend must not idle out.
+	background bool
 	// At and DoneAt are when the entry was appended and, for a tool call,
 	// when its outcome arrived. They are the real times, as against the
 	// time a mirror happened to run — the difference between a duration
@@ -656,6 +659,18 @@ func (s *Session) appendToolCall(callID, parent, line, tool, detail string) {
 	})
 }
 
+// markBackground flags the pending call callID as one that outlives its turn.
+func (s *Session) markBackground(callID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.transcript) - 1; i >= 0; i-- {
+		if s.transcript[i].CallID == callID && s.transcript[i].pending {
+			s.transcript[i].background = true
+			return
+		}
+	}
+}
+
 // appendToolDone records a tool line whose outcome is already known —
 // gummi-run checks, whose pass/fail and output exist before the entry.
 func (s *Session) appendToolDone(line string, ok bool, output string) {
@@ -699,7 +714,7 @@ func (s *Session) openWatches(since time.Time) []string {
 	defer s.mu.Unlock()
 	var out []string
 	for _, m := range s.transcript {
-		if m.Author == AuthorTool && m.pending && agent.WatchTool(m.Tool) && m.At.After(since) {
+		if m.Author == AuthorTool && m.pending && (m.background || agent.WatchTool(m.Tool)) && m.At.After(since) {
 			out = append(out, m.Content)
 		}
 	}

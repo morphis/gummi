@@ -169,3 +169,22 @@ func TestUnwatchStopsAWatch(t *testing.T) {
 		t.Errorf("watches = %v after close", ff.Watches())
 	}
 }
+
+// TestABackgroundCallKeepsTheSessionWatching: a call flagged Background is an
+// open watch while it is pending, so the idle timer leaves the backend up.
+func TestABackgroundCallKeepsTheSessionWatching(t *testing.T) {
+	s := &Session{}
+	s.appendToolCall("c1", "", "Bash  make test", "Bash", "make test")
+	since := time.Now().Add(-time.Hour)
+	if s.openWatch(since) {
+		t.Fatal("a plain Bash call counts as a watch")
+	}
+	s.markBackground("c1")
+	if !s.openWatch(since) {
+		t.Fatal("a pending background call is not an open watch")
+	}
+	s.resolveToolResult("c1", true, "")
+	if s.openWatch(since) {
+		t.Fatal("a settled background call is still an open watch")
+	}
+}
