@@ -257,6 +257,12 @@ func (e *Engine) pollWatchAsync(run *domain.Run, row domain.RunStep) {
 		if err != nil || cur == nil || cur.State != domain.StepWatching || cur.Watch == nil {
 			return
 		}
+		// a person's answer landed while this read was out: it read the
+		// world as the answer found it, so its result would undo the answer
+		// (the next poll reads again)
+		if cur.Watch.Asked != prev.Asked || len(cur.Watch.Answers) != len(prev.Answers) {
+			return
+		}
 		changed = e.applyRead(cur.Watch, facts, transient)
 		_ = e.cfg.Store.UpdateRunStepWatch(ctx, cur)
 	}) {
@@ -968,6 +974,10 @@ func (e *Engine) answerWatchLocked(ctx context.Context, run *domain.Run, d domai
 			w.ReadFails, w.NextPoll = 0, e.now()
 			if w.Observed != nil {
 				w.Observed.ReadError, w.Observed.Unreadable = "", ""
+				// the feedback is read afresh on the next poll: with the
+				// PR unchanged, clearing Unreadable alone would reuse what
+				// the failed read left
+				w.Observed.FetchedAt = time.Time{}
 			}
 		}
 	case WorkflowStopRun:

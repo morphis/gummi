@@ -30,8 +30,9 @@ export const specTab = {
   empty: (d) => !d || (!d.list?.specs?.length && (!d.spec || d.spec.none)),
   count: (d) => d?.list?.specs?.length || 0,
   // an agent in a home of its own keeps memory, not a spec; a session may
-  // keep several (DESIGN §25.3)
-  hidden: (c) => !!c?.home,
+  // keep several (DESIGN §25.3); a session with workflows off is not
+  // offered specs at all
+  hidden: (c) => !!c?.home || (!!c?.workflows && !c.workflows.on),
   render
 }
 
