@@ -1298,3 +1298,22 @@ func TestClaudeCodeOpensTheWriteDirs(t *testing.T) {
 		t.Errorf("a ReadOnly session opens a directory to writes: %s", msg)
 	}
 }
+
+// TestClaudeBackgroundBashStaysOpenUntilItsNotification: a Bash started with
+// run_in_background answers at once, so its call stays open (and the call is
+// flagged Background) until the CLI's task_notification ends it.
+func TestClaudeBackgroundBashStaysOpenUntilItsNotification(t *testing.T) {
+	s := &claudeSession{}
+	evs := s.mapAssistant([]byte(`{"content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"make test","run_in_background":true}},{"type":"tool_use","id":"toolu_f","name":"Bash","input":{"command":"ls"}}]}`), "")
+	if len(evs) != 2 || !evs[0].Background || evs[1].Background {
+		t.Fatalf("tool calls = %+v, want only the first flagged Background", evs)
+	}
+	res := s.mapToolResults([]byte(`{"content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"Command running in background with ID: b1"},{"type":"tool_result","tool_use_id":"toolu_f","content":"x"}]}`), "")
+	if len(res) != 1 || res[0].CallID != "toolu_f" {
+		t.Fatalf("results = %+v, want only the foreground call settled", res)
+	}
+	evs = s.mapLine([]byte(`{"type":"system","subtype":"task_notification","tool_use_id":"toolu_b","status":"completed"}`))
+	if len(evs) != 1 || evs[0].CallID != "toolu_b" || evs[0].Result == nil || !evs[0].Result.OK {
+		t.Fatalf("task_notification = %+v, want the background call settled ok", evs)
+	}
+}
